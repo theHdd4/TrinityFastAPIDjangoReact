@@ -234,20 +234,73 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     selection.addRange(selectionRangeRef.current);
   }, []);
 
+  const hasEditableSelection = useCallback(() => {
+    const range = selectionRangeRef.current;
+    return Boolean(range && !range.collapsed);
+  }, []);
+
   const runCommand = useCallback(
-    (command: string) => {
+    (command: string, value?: string) => {
       if (!canEdit || typeof document === 'undefined') {
-        return;
+        return false;
       }
 
-      if (document.queryCommandSupported?.(command)) {
-        textRef.current?.focus();
-        restoreSelection();
-        document.execCommand(command, false);
+      textRef.current?.focus();
+      restoreSelection();
+
+      let executed = false;
+
+      try {
+        executed = document.execCommand(command, false, value ?? undefined);
+      } catch {
+        executed = false;
+      }
+
+      if (executed) {
         handleInput();
       }
+
+      return executed;
     },
     [canEdit, handleInput, restoreSelection],
+  );
+
+  const applyFontSizeToSelection = useCallback(
+    (nextSize: number) => {
+      if (!isEditing || typeof document === 'undefined' || !hasEditableSelection()) {
+        return false;
+      }
+
+      textRef.current?.focus();
+      restoreSelection();
+
+      try {
+        document.execCommand('fontSize', false, '7');
+      } catch {
+        return false;
+      }
+
+      const container = textRef.current;
+      if (!container) {
+        return false;
+      }
+
+      const targets = Array.from(container.querySelectorAll('font[size="7"]'));
+      if (targets.length === 0) {
+        return false;
+      }
+
+      targets.forEach(node => {
+        const span = document.createElement('span');
+        span.style.fontSize = `${nextSize}px`;
+        span.innerHTML = node.innerHTML;
+        node.replaceWith(span);
+      });
+
+      handleInput();
+      return true;
+    },
+    [handleInput, hasEditableSelection, isEditing, restoreSelection],
   );
 
   const updateFormatting = useCallback(
@@ -261,9 +314,26 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
 
   const handleToggle = useCallback(
     (key: keyof Pick<TextBoxFormatting, 'bold' | 'italic' | 'underline' | 'strikethrough'>) => {
+      if (isEditing && hasEditableSelection()) {
+        const commandMap: Record<'bold' | 'italic' | 'underline' | 'strikethrough', string> = {
+          bold: 'bold',
+          italic: 'italic',
+          underline: 'underline',
+          strikethrough: 'strikeThrough',
+        };
+
+        const command = commandMap[key];
+        const executed = runCommand(command);
+
+        if (executed) {
+          onInteract();
+          return;
+        }
+      }
+
       updateFormatting({ [key]: !localFormatting[key] } as Partial<TextBoxFormatting>);
     },
-    [localFormatting, updateFormatting],
+    [hasEditableSelection, isEditing, localFormatting, onInteract, runCommand, updateFormatting],
   );
 
   const handleAlign = useCallback(
@@ -350,25 +420,53 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
 
   const handleFontFamily = useCallback(
     (fontFamily: string) => {
+      if (isEditing && hasEditableSelection()) {
+        const executed = runCommand('fontName', fontFamily);
+        if (executed) {
+          onInteract();
+          return;
+        }
+      }
+
       updateFormatting({ fontFamily });
     },
-    [updateFormatting],
+    [hasEditableSelection, isEditing, onInteract, runCommand, updateFormatting],
   );
 
   const handleColor = useCallback(
     (color: string) => {
+      if (isEditing && hasEditableSelection()) {
+        const executed = runCommand('foreColor', color);
+        if (executed) {
+          onInteract();
+          return;
+        }
+      }
+
       updateFormatting({ color });
     },
-    [updateFormatting],
+    [hasEditableSelection, isEditing, onInteract, runCommand, updateFormatting],
   );
 
   const handleIncreaseFontSize = useCallback(() => {
-    updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize + 2) });
-  }, [localFormatting.fontSize, updateFormatting]);
+    const next = clampFontSize(localFormatting.fontSize + 2);
+    if (applyFontSizeToSelection(next)) {
+      onInteract();
+      return;
+    }
+
+    updateFormatting({ fontSize: next });
+  }, [applyFontSizeToSelection, localFormatting.fontSize, onInteract, updateFormatting]);
 
   const handleDecreaseFontSize = useCallback(() => {
-    updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize - 2) });
-  }, [localFormatting.fontSize, updateFormatting]);
+    const next = clampFontSize(localFormatting.fontSize - 2);
+    if (applyFontSizeToSelection(next)) {
+      onInteract();
+      return;
+    }
+
+    updateFormatting({ fontSize: next });
+  }, [applyFontSizeToSelection, localFormatting.fontSize, onInteract, updateFormatting]);
 
   const handleApplyTextStyle = useCallback(
     (preset: TextStylePreset) => {
@@ -398,8 +496,17 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     if (!canEdit) {
       return;
     }
+
     onInteract();
-    onBeginEditing();
+
+    if (!isEditing) {
+      onBeginEditing();
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      textRef.current?.focus();
+    });
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {

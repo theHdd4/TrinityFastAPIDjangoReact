@@ -10,6 +10,7 @@ import {
   type LayoutCard,
   type SlideObject,
   type SlideshowTransition,
+  type SlideNotesPosition,
   createSlideObjectFromAtom,
   DEFAULT_CANVAS_OBJECT_WIDTH,
   DEFAULT_CANVAS_OBJECT_HEIGHT,
@@ -22,6 +23,7 @@ import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
 import { GridView } from './components/GridView';
 import { ExportDialog } from './components/ExportDialog';
+import { ShareDialog } from './components/ShareDialog';
 import { ImagePanel, type ImageSelectionRequest } from './components/Images';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -34,20 +36,14 @@ import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
 import { createTableSlideObject } from './components/operationsPalette/tables/constants';
 import { ShapesPanel, createShapeSlideObject, type ShapeDefinition } from './components/operationsPalette/shapes';
+import { ChartPanel, createChartSlideObject } from './components/operationsPalette/charts';
+import type { ChartConfig, ChartDataRow } from './components/operationsPalette/charts';
 import {
   createImageSlideObject,
   generateImageObjectId,
 } from './components/operationsPalette/images/constants';
-import {
-  ChartPanel,
-  createChartSlideObject,
-  DEFAULT_CHART_CONFIG,
-  DEFAULT_CHART_DATA,
-  type ChartConfig,
-  type ChartDataRow,
-  type ChartPanelResult,
-} from './components/operationsPalette/charts';
 import { ThemesPanel } from './components/operationsPalette/themes';
+import { SettingsPanel } from './components/operationsPalette/tools/settings';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -55,7 +51,7 @@ import {
 } from '@/components/AtomList/atoms/feature-overview/utils/exhibitionManifest';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
-const SLIDESHOW_ANIMATION_MS = 450;
+const DEFAULT_TRANSITION_DURATION = 450;
 const EXHIBITION_STORAGE_KEY = 'exhibition-layout-cache';
 const LAB_STORAGE_KEY = 'laboratory-layout-cards';
 
@@ -67,6 +63,8 @@ type PresentationTransitionState = {
   direction: 'forward' | 'backward';
   transition: SlideshowTransition;
   phase: TransitionPhase;
+  durationMs: number;
+  effect: NonNullable<PresentationSettings['transitionEffect']>;
 };
 
 type TransitionFrames = {
@@ -79,15 +77,15 @@ type ExhibitionSnapshot = {
   slideObjects: Record<string, SlideObject[]>;
 };
 
-const TRANSITION_LAYER_BASE_STYLE: React.CSSProperties = {
+const getTransitionLayerStyle = (durationMs: number): React.CSSProperties => ({
   position: 'absolute',
   inset: 0,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  transition: `opacity ${SLIDESHOW_ANIMATION_MS}ms ease, transform ${SLIDESHOW_ANIMATION_MS}ms ease`,
+  transition: `opacity ${durationMs}ms ease, transform ${durationMs}ms ease`,
   willChange: 'opacity, transform',
-};
+});
 
 const getTransitionFrames = (
   transition: SlideshowTransition,
@@ -203,10 +201,9 @@ const ExhibitionMode = () => {
     | { type: 'images' }
     | { type: 'charts' }
     | { type: 'themes' }
+    | { type: 'settings' }
     | null
   >(null);
-  const [chartPanelData, setChartPanelData] = useState<ChartDataRow[]>(DEFAULT_CHART_DATA);
-  const [chartPanelConfig, setChartPanelConfig] = useState<ChartConfig>(DEFAULT_CHART_CONFIG);
   const [notes, setNotes] = useState<Record<number, string>>(() => {
     if (typeof window === 'undefined') {
       return {};
@@ -309,7 +306,7 @@ const ExhibitionMode = () => {
 
     const timeout = window.setTimeout(() => {
       setPresentationTransition(null);
-    }, SLIDESHOW_ANIMATION_MS);
+    }, presentationTransition.durationMs ?? DEFAULT_TRANSITION_DURATION);
 
     return () => window.clearTimeout(timeout);
   }, [presentationTransition]);
@@ -331,9 +328,31 @@ const ExhibitionMode = () => {
         return;
       }
 
-      const transitionType =
-        exhibitedCards[targetIndex]?.presentationSettings?.slideshowTransition ??
-        DEFAULT_PRESENTATION_SETTINGS.slideshowTransition;
+      const targetCard = exhibitedCards[targetIndex];
+      const targetSettings: PresentationSettings = {
+        ...DEFAULT_PRESENTATION_SETTINGS,
+        ...targetCard?.presentationSettings,
+      };
+
+      const effect = (targetSettings.transitionEffect ?? targetSettings.slideshowTransition ?? 'fade') as NonNullable<
+        PresentationSettings['transitionEffect']
+      >;
+
+      if (effect === 'none') {
+        clearSlideshowTimers();
+        setPresentationTransition(null);
+        setCurrentSlide(targetIndex);
+        return;
+      }
+
+      let transitionType: SlideshowTransition = 'fade';
+      if (effect === 'slide' || effect === 'zoom') {
+        transitionType = effect;
+      } else if (effect === 'cube') {
+        transitionType = 'slide';
+      }
+
+      const durationMs = Math.max(100, targetSettings.transitionDuration ?? DEFAULT_TRANSITION_DURATION);
 
       clearSlideshowTimers();
 
@@ -343,15 +362,13 @@ const ExhibitionMode = () => {
         direction,
         transition: transitionType,
         phase: 'prepare',
+        durationMs,
+        effect,
       });
 
       setCurrentSlide(targetIndex);
     },
-    [
-      clearSlideshowTimers,
-      currentSlide,
-      exhibitedCards,
-    ],
+    [clearSlideshowTimers, currentSlide, exhibitedCards],
   );
 
   const handleStopSlideshow = useCallback(() => {
@@ -429,12 +446,21 @@ const ExhibitionMode = () => {
     }
 
     const activeSlide = exhibitedCards[currentSlide];
-    const durationSeconds =
-      activeSlide?.presentationSettings?.slideshowDuration ??
-      DEFAULT_PRESENTATION_SETTINGS.slideshowDuration;
-    const normalizedSeconds = Number(durationSeconds);
-    const safeSeconds = Number.isFinite(normalizedSeconds)
-      ? normalizedSeconds
+    const activeSettings: PresentationSettings = {
+      ...DEFAULT_PRESENTATION_SETTINGS,
+      ...activeSlide?.presentationSettings,
+    };
+
+    if (!activeSettings.autoAdvance) {
+      clearAutoAdvanceTimer();
+      return;
+    }
+
+    const durationSeconds = Number(
+      activeSettings.autoAdvanceDuration ?? activeSettings.slideshowDuration ?? DEFAULT_PRESENTATION_SETTINGS.slideshowDuration,
+    );
+    const safeSeconds = Number.isFinite(durationSeconds)
+      ? durationSeconds
       : DEFAULT_PRESENTATION_SETTINGS.slideshowDuration;
     const delay = Math.max(1, safeSeconds) * 1000;
 
@@ -471,6 +497,65 @@ const ExhibitionMode = () => {
     [currentSlide, exhibitedCards, updateCard]
   );
 
+  const currentCard = exhibitedCards[currentSlide] ?? null;
+
+  const currentPresentationSettings: PresentationSettings = {
+    ...DEFAULT_PRESENTATION_SETTINGS,
+    ...currentCard?.presentationSettings,
+  };
+
+  const updateCurrentPresentationSettings = useCallback(
+    (partial: Partial<PresentationSettings>) => {
+      const targetCard = exhibitedCards[currentSlide];
+      if (!targetCard) {
+        return;
+      }
+
+      const merged: PresentationSettings = {
+        ...DEFAULT_PRESENTATION_SETTINGS,
+        ...targetCard.presentationSettings,
+        ...partial,
+      };
+
+      if (partial.autoAdvanceDuration !== undefined || partial.slideshowDuration !== undefined) {
+        const durationCandidate =
+          partial.autoAdvanceDuration ??
+          partial.slideshowDuration ??
+          merged.autoAdvanceDuration ??
+          merged.slideshowDuration;
+        const safeDuration = Math.max(1, Math.round(durationCandidate ?? DEFAULT_PRESENTATION_SETTINGS.slideshowDuration));
+        merged.autoAdvanceDuration = safeDuration;
+        merged.slideshowDuration = safeDuration;
+      }
+
+      if (partial.autoAdvance !== undefined && partial.autoAdvance === false) {
+        merged.autoAdvance = false;
+      }
+
+      if (partial.transitionDuration !== undefined) {
+        merged.transitionDuration = Math.max(100, Math.round(partial.transitionDuration));
+      }
+
+      if (partial.transitionEffect) {
+        merged.transitionEffect = partial.transitionEffect;
+        if (partial.transitionEffect === 'slide' || partial.transitionEffect === 'zoom') {
+          merged.slideshowTransition = partial.transitionEffect;
+        } else if (partial.transitionEffect === 'none') {
+          merged.slideshowTransition = merged.slideshowTransition ?? 'fade';
+        } else {
+          merged.slideshowTransition = 'fade';
+        }
+      }
+
+      if (typeof partial.backgroundImageUrl === 'string' && partial.backgroundImageUrl.trim().length === 0) {
+        merged.backgroundImageUrl = null;
+      }
+
+      handlePresentationChange(merged, targetCard.id);
+    },
+    [currentSlide, exhibitedCards, handlePresentationChange],
+  );
+
   const handleTitleChange = useCallback(
     (title: string, cardId: string) => {
       updateCard(cardId, { title });
@@ -480,25 +565,21 @@ const ExhibitionMode = () => {
 
   const handleSlideshowSettingsChange = useCallback(
     (partial: { slideshowDuration?: number; slideshowTransition?: SlideshowTransition }) => {
-      const targetCard = exhibitedCards[currentSlide];
-      if (!targetCard) {
-        return;
-      }
-
-      const merged: PresentationSettings = {
-        ...DEFAULT_PRESENTATION_SETTINGS,
-        ...targetCard.presentationSettings,
-      };
+      const updates: Partial<PresentationSettings> = {};
 
       if (partial.slideshowDuration !== undefined) {
-        merged.slideshowDuration = Math.max(1, partial.slideshowDuration);
+        const safe = Math.max(1, partial.slideshowDuration);
+        updates.slideshowDuration = safe;
+        updates.autoAdvanceDuration = safe;
+        updates.autoAdvance = true;
       }
 
       if (partial.slideshowTransition) {
-        merged.slideshowTransition = partial.slideshowTransition;
+        updates.slideshowTransition = partial.slideshowTransition;
+        updates.transitionEffect = partial.slideshowTransition;
       }
 
-      handlePresentationChange(merged, targetCard.id);
+      updateCurrentPresentationSettings(updates);
 
       if (isSlideshowActive) {
         clearAutoAdvanceTimer();
@@ -506,9 +587,7 @@ const ExhibitionMode = () => {
     },
     [
       clearAutoAdvanceTimer,
-      currentSlide,
-      exhibitedCards,
-      handlePresentationChange,
+      updateCurrentPresentationSettings,
       isSlideshowActive,
     ],
   );
@@ -652,6 +731,31 @@ const ExhibitionMode = () => {
 
       if (isEditableTarget(event.target)) {
         return true;
+      }
+
+      if (typeof document !== 'undefined') {
+        const activeElement = document.activeElement;
+        if (isEditableTarget(activeElement)) {
+          return true;
+        }
+
+        const selection = document.getSelection();
+        if (selection) {
+          const anchorNode = selection.anchorNode;
+          let selectionElement: EventTarget | null = null;
+
+          if (anchorNode) {
+            if (typeof Element !== 'undefined' && anchorNode instanceof Element) {
+              selectionElement = anchorNode;
+            } else {
+              selectionElement = anchorNode.parentElement;
+            }
+          }
+
+          if (isEditableTarget(selectionElement)) {
+            return true;
+          }
+        }
       }
 
       if (typeof event.composedPath === 'function') {
@@ -841,40 +945,11 @@ const ExhibitionMode = () => {
     }
   }, [canEdit, cards, isSaving, persistCardsLocally, slideObjectsByCardId, toast]);
 
-  const handleShare = useCallback(async () => {
-    if (typeof window === 'undefined' || typeof navigator === 'undefined') {
-      return;
-    }
+  const [isShareOpen, setIsShareOpen] = useState(false);
 
-    const shareUrl = window.location.href;
-    const nav = navigator as Navigator & {
-      share?: (data: { title?: string; url?: string; text?: string }) => Promise<void>;
-      clipboard?: Clipboard;
-    };
-
-    try {
-      if (typeof nav.share === 'function') {
-        await nav.share({ title: 'Exhibition Mode', url: shareUrl });
-        toast({ title: 'Share', description: 'Opened the share dialog for your exhibition.' });
-        return;
-      }
-
-      if (nav.clipboard && typeof nav.clipboard.writeText === 'function') {
-        await nav.clipboard.writeText(shareUrl);
-        toast({ title: 'Link copied', description: 'Copied the exhibition link to your clipboard.' });
-        return;
-      }
-
-      throw new Error('Sharing not supported');
-    } catch (error) {
-      console.warn('Share action unavailable', error);
-      toast({
-        title: 'Share unavailable',
-        description: 'Your browser does not support sharing from this page.',
-        variant: 'destructive',
-      });
-    }
-  }, [toast]);
+  const handleShare = useCallback(() => {
+    setIsShareOpen(true);
+  }, []);
 
   const handleDragStart = (atom: DroppedAtom, cardId: string, origin: 'catalogue' | 'slide' = 'catalogue') => {
     if (!canEdit) return;
@@ -1274,7 +1349,8 @@ const ExhibitionMode = () => {
         prev?.type === 'notes' ||
         prev?.type === 'shapes' ||
         prev?.type === 'images' ||
-        prev?.type === 'themes'
+        prev?.type === 'themes' ||
+        prev?.type === 'settings'
       ) {
         return prev;
       }
@@ -1284,17 +1360,27 @@ const ExhibitionMode = () => {
 
   const handleShowNotesPanel = useCallback(() => {
     setOperationsPanelState({ type: 'notes' });
-  }, []);
+    updateCurrentPresentationSettings({ slideNotesVisible: true });
+  }, [updateCurrentPresentationSettings]);
 
   const handleCloseNotesPanel = useCallback(() => {
     setOperationsPanelState(null);
-  }, []);
+    updateCurrentPresentationSettings({ slideNotesVisible: false });
+  }, [updateCurrentPresentationSettings]);
 
   const handleOpenShapesPanel = useCallback(() => {
     setOperationsPanelState(prev => (prev?.type === 'shapes' ? null : { type: 'shapes' }));
   }, []);
 
   const handleCloseShapesPanel = useCallback(() => {
+    setOperationsPanelState(null);
+  }, []);
+
+  const handleOpenSettingsPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'settings' ? null : { type: 'settings' }));
+  }, []);
+
+  const handleCloseSettingsPanel = useCallback(() => {
     setOperationsPanelState(null);
   }, []);
 
@@ -1437,7 +1523,9 @@ const ExhibitionMode = () => {
       return;
     }
 
-    setOperationsPanelState(prev => (prev?.type === 'shapes' || prev?.type === 'images' ? null : prev));
+    setOperationsPanelState(prev =>
+      prev?.type === 'shapes' || prev?.type === 'images' || prev?.type === 'settings' ? null : prev,
+    );
   }, [canEdit]);
 
   const hasSlides = exhibitedCards.length > 0;
@@ -1497,12 +1585,6 @@ const ExhibitionMode = () => {
       </div>
     </div>
   );
-
-  const currentCard = exhibitedCards[currentSlide] ?? null;
-  const currentPresentationSettings: PresentationSettings = {
-    ...DEFAULT_PRESENTATION_SETTINGS,
-    ...currentCard?.presentationSettings,
-  };
 
   const transitionFrames = presentationTransition
     ? getTransitionFrames(presentationTransition.transition, presentationTransition.direction)
@@ -1574,7 +1656,11 @@ const ExhibitionMode = () => {
   }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
 
   const handleCreateChart = useCallback(
-    (result: ChartPanelResult) => {
+    (data: ChartDataRow[], chartConfig: ChartConfig) => {
+      if (!canEdit) {
+        return;
+      }
+
       const targetCard = exhibitedCards[currentSlide];
       if (!targetCard) {
         return;
@@ -1583,23 +1669,29 @@ const ExhibitionMode = () => {
       const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
       const existingCharts = existingObjects.filter(object => object.type === 'chart').length;
       const offset = existingCharts * 32;
+      const nextZIndex = existingObjects.reduce((max, object) => {
+        const value = typeof object.zIndex === 'number' ? object.zIndex : 1;
+        return value > max ? value : max;
+      }, 1) + 1;
 
-      addSlideObject(
-        targetCard.id,
-        createChartSlideObject(
-          generateChartId(),
-          {
-            x: 160 + offset,
-            y: 160 + offset,
-          },
-          {
-            data: result.data,
-            config: result.config,
-          },
-        ),
-      );
+      const chartObject = createChartSlideObject(generateChartId(), data, chartConfig, {
+        x: 184 + offset,
+        y: 184 + offset,
+        zIndex: nextZIndex,
+      });
+
+      addSlideObject(targetCard.id, chartObject);
+      setOperationsPanelState(prev => (prev?.type === 'charts' ? null : prev));
     },
-    [addSlideObject, currentSlide, exhibitedCards, generateChartId, slideObjectsByCardId],
+    [
+      addSlideObject,
+      canEdit,
+      currentSlide,
+      exhibitedCards,
+      generateChartId,
+      setOperationsPanelState,
+      slideObjectsByCardId,
+    ],
   );
 
   const handleShapeSelect = useCallback(
@@ -1635,91 +1727,127 @@ const ExhibitionMode = () => {
     ],
   );
 
+  const notesPanelVisible = operationsPanelState?.type === 'notes';
+
+  useEffect(() => {
+    if (currentPresentationSettings.slideNotesVisible && !notesPanelVisible) {
+      setOperationsPanelState({ type: 'notes' });
+    }
+  }, [currentPresentationSettings.slideNotesVisible, notesPanelVisible]);
+
+  const handleSettingsNotesToggle = useCallback(
+    (visible: boolean) => {
+      if (visible) {
+        setOperationsPanelState({ type: 'notes' });
+      } else if (notesPanelVisible) {
+        setOperationsPanelState(null);
+      }
+      updateCurrentPresentationSettings({ slideNotesVisible: visible });
+    },
+    [notesPanelVisible, updateCurrentPresentationSettings],
+  );
+
+  const handleSettingsNotesPosition = useCallback(
+    (position: SlideNotesPosition) => {
+      updateCurrentPresentationSettings({ slideNotesPosition: position });
+    },
+    [updateCurrentPresentationSettings],
+  );
+
   const operationsPalettePanel = useMemo(() => {
     if (!operationsPanelState) {
       return null;
     }
 
-    if (operationsPanelState.type === 'notes') {
-      return (
-        <SlideNotes
-          currentSlide={currentSlide}
-          notes={notes}
-          onNotesChange={handleNotesChange}
-          onClose={handleCloseNotesPanel}
-        />
-      );
-    }
-
-    if (operationsPanelState.type === 'shapes') {
-      return (
-        <ShapesPanel
-          onSelectShape={handleShapeSelect}
-          onClose={handleCloseShapesPanel}
-          canEdit={canEdit}
-        />
-      );
-    }
-
-    if (operationsPanelState.type === 'images') {
-      return (
-        <ImagePanel
-          currentImage={currentPresentationSettings.accentImage ?? null}
-          currentImageName={currentPresentationSettings.accentImageName ?? null}
-          onClose={handleCloseImagesPanel}
-          onImageSelect={handleImagePanelSelect}
-          onRemoveImage={
-            currentPresentationSettings.accentImage ? handleRemoveAccentImage : undefined
+    switch (operationsPanelState.type) {
+      case 'notes':
+        return (
+          <SlideNotes
+            currentSlide={currentSlide}
+            notes={notes}
+            onNotesChange={handleNotesChange}
+            onClose={handleCloseNotesPanel}
+          />
+        );
+      case 'shapes':
+        return (
+          <ShapesPanel
+            onSelectShape={handleShapeSelect}
+            onClose={handleCloseShapesPanel}
+            canEdit={canEdit}
+          />
+        );
+      case 'images':
+        return (
+          <ImagePanel
+            currentImage={currentPresentationSettings.accentImage ?? null}
+            currentImageName={currentPresentationSettings.accentImageName ?? null}
+            onClose={handleCloseImagesPanel}
+            onImageSelect={handleImagePanelSelect}
+            onRemoveImage={
+              currentPresentationSettings.accentImage ? handleRemoveAccentImage : undefined
+            }
+            canEdit={canEdit}
+          />
+        );
+      case 'themes':
+        return <ThemesPanel onClose={handleCloseThemesPanel} />;
+      case 'charts':
+        return (
+          <ChartPanel
+            onInsertChart={handleCreateChart}
+            onClose={handleCloseChartsPanel}
+            canEdit={canEdit}
+          />
+        );
+      case 'settings': {
+        const targetCard = exhibitedCards[currentSlide];
+        const handleReset = () => {
+          if (!targetCard) {
+            return;
           }
-          canEdit={canEdit}
-        />
-      );
-    }
+          handlePresentationChange({ ...DEFAULT_PRESENTATION_SETTINGS }, targetCard.id);
+        };
 
-    if (operationsPanelState.type === 'themes') {
-      return <ThemesPanel onClose={handleCloseThemesPanel} />;
+        return (
+          <SettingsPanel
+            settings={currentPresentationSettings}
+            onChange={updateCurrentPresentationSettings}
+            onReset={handleReset}
+            onClose={handleCloseSettingsPanel}
+            notesVisible={notesPanelVisible}
+            onToggleNotes={handleSettingsNotesToggle}
+            onNotesPositionChange={handleSettingsNotesPosition}
+          />
+        );
+      }
+      case 'custom':
+      default:
+        return operationsPanelState.node;
     }
-
-    if (operationsPanelState.type === 'charts') {
-      return (
-        <ChartPanel
-          onClose={handleCloseChartsPanel}
-          onInsert={result => {
-            setChartPanelData(result.data);
-            setChartPanelConfig(result.config);
-            handleCreateChart(result);
-            setOperationsPanelState(null);
-          }}
-          initialData={chartPanelData}
-          initialConfig={chartPanelConfig}
-          onStateChange={({ data, config }) => {
-            setChartPanelData(data);
-            setChartPanelConfig(config);
-          }}
-        />
-      );
-    }
-
-    return operationsPanelState.node;
   }, [
     canEdit,
+    currentPresentationSettings,
     currentSlide,
-    handleCloseNotesPanel,
-    handleCloseShapesPanel,
-    handleCloseChartsPanel,
+    exhibitedCards,
     handleCloseImagesPanel,
+    handleCloseNotesPanel,
+    handleCloseSettingsPanel,
+    handleCloseShapesPanel,
     handleCloseThemesPanel,
+    handleCloseChartsPanel,
     handleImagePanelSelect,
     handleNotesChange,
-    handleShapeSelect,
-    handleRemoveAccentImage,
+    handlePresentationChange,
     handleCreateChart,
-    currentPresentationSettings.accentImage,
-    currentPresentationSettings.accentImageName,
+    handleRemoveAccentImage,
+    handleSettingsNotesPosition,
+    handleSettingsNotesToggle,
+    handleShapeSelect,
     notes,
-    chartPanelData,
-    chartPanelConfig,
+    notesPanelVisible,
     operationsPanelState,
+    updateCurrentPresentationSettings,
   ]);
   const emptyCanvas = (
     <div className="flex-1 flex items-center justify-center bg-muted/10">
@@ -1830,7 +1958,9 @@ const ExhibitionMode = () => {
                       <>
                         <div
                           style={{
-                            ...TRANSITION_LAYER_BASE_STYLE,
+                            ...getTransitionLayerStyle(
+                              presentationTransition.durationMs ?? DEFAULT_TRANSITION_DURATION,
+                            ),
                             ...(presentationTransition.phase === 'prepare'
                               ? transitionFrames.outgoing.initial
                               : transitionFrames.outgoing.final),
@@ -1845,7 +1975,9 @@ const ExhibitionMode = () => {
                         </div>
                         <div
                           style={{
-                            ...TRANSITION_LAYER_BASE_STYLE,
+                            ...getTransitionLayerStyle(
+                              presentationTransition.durationMs ?? DEFAULT_TRANSITION_DURATION,
+                            ),
                             ...(presentationTransition.phase === 'prepare'
                               ? transitionFrames.incoming.initial
                               : transitionFrames.incoming.final),
@@ -1862,7 +1994,9 @@ const ExhibitionMode = () => {
                     ) : (
                       <div
                         style={{
-                          ...TRANSITION_LAYER_BASE_STYLE,
+                          ...getTransitionLayerStyle(
+                            presentationTransition?.durationMs ?? DEFAULT_TRANSITION_DURATION,
+                          ),
                           transition: 'none',
                           zIndex: 1,
                         }}
@@ -1939,6 +2073,7 @@ const ExhibitionMode = () => {
             onOpenImagesPanel={handleOpenImagesPanel}
             onOpenChartPanel={handleOpenChartsPanel}
             onOpenThemesPanel={handleOpenThemesPanel}
+            onOpenSettingsPanel={handleOpenSettingsPanel}
             canEdit={canEdit}
             positionPanel={operationsPalettePanel}
           />
@@ -1993,6 +2128,12 @@ const ExhibitionMode = () => {
         open={isExportOpen}
         onOpenChange={setIsExportOpen}
         totalSlides={exhibitedCards.length}
+      />
+
+      <ShareDialog
+        open={isShareOpen}
+        onOpenChange={setIsShareOpen}
+        projectName={projectContext?.project_name ?? 'Exhibition Project'}
       />
     </div>
   );

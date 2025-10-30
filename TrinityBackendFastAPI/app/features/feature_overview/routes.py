@@ -389,7 +389,7 @@ async def dimension_mapping(req: DimensionMappingRequest):
             else:
                 dims = env.get("dimensions")
             if isinstance(dims, dict):
-                return {"mapping": dims, "source": "env"}
+                return {"mapping": dims, "config": env, "source": "env"}
         except Exception as exc:  # pragma: no cover
             print(f"⚠️ dimension_mapping env parse error: {exc}")
     else:

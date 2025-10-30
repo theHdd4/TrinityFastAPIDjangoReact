@@ -2826,13 +2826,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       }
       
       // Use GROUPBY_API cardinality endpoint instead of FEATURE_OVERVIEW_API
-      const formData = new FormData();
-      formData.append('validator_atom_id', atomId); // Use atomId as validator_atom_id
-      formData.append('file_key', objectName);
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', objectName);
-      
-      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(objectName)}`;
+      const res = await fetch(url);
       const data_result = await res.json();
       
       if (data_result.status === 'SUCCESS' && data_result.cardinality) {

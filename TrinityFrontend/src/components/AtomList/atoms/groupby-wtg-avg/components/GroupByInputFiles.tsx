@@ -44,13 +44,6 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
   }, []);
 
   useEffect(() => {
-    if (settings.dataSource && (!settings.allColumns || settings.allColumns.length === 0)) {
-      handleFrameChange(settings.dataSource);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.dataSource]);
-
-  useEffect(() => {
     if (Array.isArray(settings.allColumns) && settings.allColumns.length > 0) {
       setColumns(settings.allColumns.filter(Boolean));
     }
@@ -58,8 +51,16 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
 
   // --- Auto-fetch identifiers/measures when a file is already selected (e.g. after reload) ---
   const initFetchedRef = React.useRef<string>('');
+  
+  // Initialize ref if data already exists (prevents re-fetch on properties panel open)
   React.useEffect(() => {
-    if (settings.dataSource && settings.dataSource !== initFetchedRef.current) {
+    if (settings.dataSource && settings.allColumns && settings.allColumns.length > 0 && !initFetchedRef.current) {
+      initFetchedRef.current = settings.dataSource;
+    }
+  }, []);
+  
+  React.useEffect(() => {
+    if (settings.dataSource && settings.dataSource !== initFetchedRef.current && (!settings.allColumns || settings.allColumns.length === 0)) {
       console.log('[GroupBy] calling /groupby/init for', settings.dataSource);
       initFetchedRef.current = settings.dataSource;
       handleFrameChange(settings.dataSource);

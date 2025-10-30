@@ -399,8 +399,54 @@ async def save_groupby_dataframe(
     import pyarrow as pa
     import pyarrow.ipc as ipc
     try:
-        # Parse CSV to DataFrame
-        df = pd.read_csv(io.StringIO(csv_data))
+        # ============================================================
+        # 🔧 DTYPE PRESERVATION FIX
+        # ============================================================
+        # STEP 1: Preview CSV to detect dtypes intelligently
+        df_preview = pd.read_csv(io.StringIO(csv_data), nrows=10000)
+        
+        # STEP 2: Content-based date detection
+        # Analyze column values to intelligently detect date columns
+        date_columns = []
+        for col in df_preview.columns:
+            # Skip numeric columns
+            if pd.api.types.is_numeric_dtype(df_preview[col]):
+                continue
+            
+            # Get non-null sample
+            non_null_values = df_preview[col].dropna()
+            if len(non_null_values) == 0:
+                continue
+            
+            # Sample up to 100 values for testing
+            sample_size = min(100, len(non_null_values))
+            sample = non_null_values.head(sample_size)
+            
+            # Try parsing as datetime
+            try:
+                parsed = pd.to_datetime(sample, errors='coerce')
+                success_rate = parsed.notna().sum() / len(parsed)
+                
+                # If 80%+ of samples parse as dates, it's a date column
+                if success_rate >= 0.8:
+                    date_columns.append(col)
+            except Exception as e:
+                continue
+        
+        # STEP 3: Parse full CSV with enhanced dtype inference
+        df = pd.read_csv(
+            io.StringIO(csv_data),
+            parse_dates=date_columns,      # Explicit date columns
+            infer_datetime_format=True,    # Speed up date parsing
+            low_memory=False,              # Scan entire file before inferring dtypes
+            na_values=['', 'None', 'null', 'NULL', 'nan', 'NaN', 'NA', 'N/A']
+        )
+        
+        # STEP 4: Fallback - Manual date conversion for any missed columns
+        for col in date_columns:
+            if col in df.columns and df[col].dtype == 'object':
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+        # ============================================================
         
         # Generate unique file key if not provided
         if not filename:
@@ -461,32 +507,15 @@ async def get_latest_groupby_result_from_minio(
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Unable to fetch merged data: {str(e)}")
 
-@router.post("/cardinality")
+@router.get("/cardinality")
 async def get_cardinality_data(
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
-    bucket_name: str = Form(...),
-    object_names: str = Form(...),
+    object_name: str = Query(..., description="Object name/path of the dataframe"),
 ):
     """Return cardinality data for columns in the dataset."""
     try:
-        # Get the current object prefix
-        from app.features.data_upload_validate.app.routes import get_object_prefix
-        prefix = await get_object_prefix()
-        
-        # Construct the full object path
-        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
-        
-        print(f"🔍 GroupBy Cardinality file path resolution:")
-        print(f"  Original object_names: {object_names}")
-        print(f"  Current prefix: {prefix}")
-        print(f"  Full object path: {full_object_path}")
-        
-        # Load the dataframe
-        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
+        # Load the dataframe using object_name as-is (it already contains the full path)
+        df = get_minio_df(bucket="trinity", file_key=object_name)
         df = clean_columns(df)
-        
-        print(f"✅ Successfully loaded dataframe for cardinality with shape: {df.shape}")
         
         # Generate cardinality data
         cardinality_data = []

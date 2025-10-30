@@ -42,11 +42,21 @@ export interface DataUploadSettings {
   fileValidation: boolean;
   /** When true, allow uploads without selecting a master file */
   bypassMasterUpload?: boolean;
+  /** When true, enable column classifier functionality */
+  enableColumnClassifier?: boolean;
   columnConfig: Record<string, Record<string, string>>;
   frequency: string;
   dimensions: Record<string, unknown>;
   measures: Record<string, unknown>;
   uploadedFiles: string[];
+  /** Column classifier data - same structure as Column Classifier Atom */
+  classifierData?: ColumnClassifierData;
+  /** Selected dataframe for classification */
+  classifierSelectedFile?: string;
+  /** Classifier dimensions array */
+  classifierDimensions?: string[];
+  /** Enable dimension mapping in classifier */
+  classifierEnableDimensionMapping?: boolean;
   validatorId?: string;
   requiredFiles?: string[];
   validations?: Record<string, any>;
@@ -57,12 +67,31 @@ export interface DataUploadSettings {
   filePathMap?: Record<string, string>;
   /** Map of uploaded file display names to their file size in bytes */
   fileSizeMap?: Record<string, number>;
+  /** Map of file names to their dtype changes (column name -> new dtype or {dtype, format}) */
+  dtypeChanges?: Record<string, Record<string, string | { dtype: string; format: string }>>;
+  /** Map of file names to their missing value strategies (column name -> strategy config) */
+  missingValueStrategies?: Record<string, Record<string, { strategy: string; value?: string }>>;
+  /** Set of file names that have had changes applied */
+  filesWithAppliedChanges?: string[];
+  /** Map of file names to their metadata (columns info, row/column counts) */
+  filesMetadata?: Record<string, {
+    columns: Array<{
+      name: string;
+      dtype: string;
+      missing_count: number;
+      missing_percentage: number;
+      sample_values: any[];
+    }>;
+    total_rows: number;
+    total_columns: number;
+  }>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   masterFile: "",
   fileValidation: true,
   bypassMasterUpload: false,
+  enableColumnClassifier: false,
   columnConfig: {},
   frequency: "monthly",
   dimensions: {},
@@ -75,12 +104,24 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   fileKeyMap: {},
   filePathMap: {},
   fileSizeMap: {},
+  dtypeChanges: {},
+  missingValueStrategies: {},
+  filesWithAppliedChanges: [],
+  filesMetadata: {},
+  classifierData: {
+    files: [],
+    activeFileIndex: 0,
+  },
+  classifierSelectedFile: "",
+  classifierDimensions: [],
+  classifierEnableDimensionMapping: false,
 };
 
 export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   masterFile: "",
   fileValidation: true,
   bypassMasterUpload: false,
+  enableColumnClassifier: false,
   columnConfig: {},
   frequency: "monthly",
   dimensions: {},
@@ -93,6 +134,17 @@ export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   fileKeyMap: {},
   filePathMap: {},
   fileSizeMap: {},
+  dtypeChanges: {},
+  missingValueStrategies: {},
+  filesWithAppliedChanges: [],
+  filesMetadata: {},
+  classifierData: {
+    files: [],
+    activeFileIndex: 0,
+  },
+  classifierSelectedFile: "",
+  classifierDimensions: [],
+  classifierEnableDimensionMapping: false,
 });
 
 export interface FeatureOverviewExhibitionSelectionDimension {
@@ -391,6 +443,7 @@ export interface ColumnClassifierColumn {
 
 export interface ColumnClassifierFile {
   fileName: string;
+  filePath?: string; // MinIO path for saving configuration
   columns: ColumnClassifierColumn[];
   customDimensions: { [key: string]: string[] };
 }

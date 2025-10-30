@@ -207,10 +207,11 @@ services:
     labels:
       - "environment=dev"
       - "traefik.enable=true"
-      - "traefik.http.routers.trinity-ai.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/trinityai`)"
-      - "traefik.http.routers.trinity-ai.entrypoints=web"
-      - "traefik.http.routers.trinity-ai.priority=100"
-      - "traefik.http.services.trinity-ai.loadbalancer.server.port=8002"
+      - "traefik.http.routers.trinity-ai-dev.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/trinityai`)"
+      - "traefik.http.routers.trinity-ai-dev.entrypoints=web"
+      - "traefik.http.routers.trinity-ai-dev.priority=100"
+      - "traefik.http.services.trinity-ai-dev.loadbalancer.server.port=8002"
+      - "traefik.http.services.trinity-ai-dev.loadbalancer.passhostheader=true"
     restart: always
 
   frontend:

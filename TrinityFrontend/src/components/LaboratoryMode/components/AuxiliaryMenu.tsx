@@ -72,12 +72,13 @@ const AuxiliaryMenu: React.FC<Props> = ({
         />
       )}
 
-      {active === 'superagent' && (
+      {/* SuperAgent Panel - Always mounted to preserve state */}
+      <div className={active === 'superagent' ? '' : 'hidden'}>
         <SuperagentAIPanel
-          isCollapsed={false}
-          onToggle={() => setActive(null)}
+          isCollapsed={active !== 'superagent'}
+          onToggle={() => setActive(active === 'superagent' ? null : 'superagent')}
         />
-      )}
+      </div>
 
       {active === 'exhibition' && <ExhibitionPanel onToggle={() => setActive(null)} />}
 

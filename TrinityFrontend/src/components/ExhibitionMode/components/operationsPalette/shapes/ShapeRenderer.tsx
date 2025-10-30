@@ -95,14 +95,28 @@ export const ShapeRenderer: React.FC<ShapeRendererProps> = ({
 
     const safeWidth = Math.max(paddedWidth, 1);
     const safeHeight = Math.max(paddedHeight, 1);
-    const scaleX = 100 / safeWidth;
-    const scaleY = 100 / safeHeight;
-    const translateX = -paddedX * scaleX;
-    const translateY = -paddedY * scaleY;
-    const nextTransform = `translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})`;
+
+    const shouldUniformScale = geometry.kind !== 'line' && geometry.kind !== 'polyline';
+
+    let nextTransform: string;
+
+    if (shouldUniformScale) {
+      const scale = Math.min(100 / safeWidth, 100 / safeHeight);
+      const centerX = paddedX + safeWidth / 2;
+      const centerY = paddedY + safeHeight / 2;
+      const translateX = 50 - centerX * scale;
+      const translateY = 50 - centerY * scale;
+      nextTransform = `translate(${translateX}, ${translateY}) scale(${scale})`;
+    } else {
+      const scaleX = 100 / safeWidth;
+      const scaleY = 100 / safeHeight;
+      const translateX = -paddedX * scaleX;
+      const translateY = -paddedY * scaleY;
+      nextTransform = `translate(${translateX}, ${translateY}) scale(${scaleX}, ${scaleY})`;
+    }
 
     setTransform(prev => (prev === nextTransform ? prev : nextTransform));
-  }, [definition, resolvedStroke, resolvedStrokeWidth]);
+  }, [definition, geometry, resolvedStroke, resolvedStrokeWidth]);
 
   const renderGeometry = () => {
     switch (geometry.kind) {

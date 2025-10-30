@@ -168,8 +168,15 @@ class ChartMakerService:
         
         for column, values in filters.items():
             if column in filtered_df.columns and values:
-                # Convert values to appropriate types
-                filtered_df = filtered_df[filtered_df[column].astype(str).isin(values)]
+                # For datetime columns, ensure consistent string formatting
+                if pd.api.types.is_datetime64_any_dtype(filtered_df[column]):
+                    # Convert datetime to string in a consistent format that matches unique values
+                    column_as_str = filtered_df[column].apply(lambda x: str(x) if pd.notna(x) else '')
+                else:
+                    # For non-datetime columns, use astype(str)
+                    column_as_str = filtered_df[column].astype(str)
+                
+                filtered_df = filtered_df[column_as_str.isin(values)]
         
         return filtered_df
 
@@ -263,9 +270,8 @@ class ChartMakerService:
             # Legacy mode: Apply chart-level filters
             print("🚀 Processing single-trace data...")
             if request.filters:
-                print(f"🔍 Applying chart-level filters: {request.filters}")
                 df = self.apply_filters(df, request.filters)
-                print(f"✅ Filters applied: {len(df)} rows remaining")
+                # print(f"✅ Filters applied: {len(df)} rows remaining")
             chart_data = self._convert_numpy_types(df.to_dict('records'))
             processed_data = self._process_chart_data(chart_data, traces_copy)
         
@@ -297,7 +303,7 @@ class ChartMakerService:
                 fillOpacity=trace.style.fillOpacity if trace.style else (0.6 if request.chart_type == "area" else None)
             )
             recharts_traces.append(recharts_trace)
-            print(f"📊 Recharts trace {i+1}: dataKey='{dataKey}', name='{recharts_trace.name}', color='{color}'")
+            # print(f"📊 Recharts trace {i+1}: dataKey='{dataKey}', name='{recharts_trace.name}', color='{color}'")
         
         # Set up axis configurations
         x_axis_config = request.x_axis or RechartsAxisConfig(
@@ -318,8 +324,8 @@ class ChartMakerService:
                 type="number"
             )
         
-        print(f"📊 X-axis config: dataKey='{x_axis_config.dataKey}', type='{x_axis_config.type}'")
-        print(f"📊 Y-axis config: dataKey='{y_axis_config.dataKey}', type='{y_axis_config.type}'")
+        # print(f"📊 X-axis config: dataKey='{x_axis_config.dataKey}', type='{x_axis_config.type}'")
+        # print(f"📊 Y-axis config: dataKey='{y_axis_config.dataKey}', type='{y_axis_config.type}'")
         
         # Create final recharts configuration
         chart_config = RechartsConfig(
@@ -351,10 +357,10 @@ class ChartMakerService:
         # Get file metadata for response
         file_metadata = self.get_file_metadata(request.file_id)
         
-        print(f"✅ Chart config generated successfully")
-        print(f"📊 Chart ID: {chart_id}")
-        print(f"📈 Data summary: {data_summary}")
-        print(f"🔍 ===== END SERVICE LOG =====")
+        # print(f"✅ Chart config generated successfully")
+        # print(f"📊 Chart ID: {chart_id}")
+        # print(f"📈 Data summary: {data_summary}")
+        # print(f"🔍 ===== END SERVICE LOG =====")
         
         return ChartResponse(
             chart_id=chart_id,
@@ -440,8 +446,8 @@ class ChartMakerService:
         y_column = primary_trace.y_column
         aggregation = primary_trace.aggregation or 'sum'
         
-        print(f"🎨 Processing with legend field: {legend_field}")
-        print(f"📊 X-column: {x_column}, Y-column: {y_column}, Aggregation: {aggregation}")
+        # print(f"🎨 Processing with legend field: {legend_field}")
+        # print(f"📊 X-column: {x_column}, Y-column: {y_column}, Aggregation: {aggregation}")
         
         # Group by both x_column and legend_field, then aggregate the y_column
         # This creates a "long format" dataset suitable for RechartsChartRenderer with legendField

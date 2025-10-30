@@ -14,12 +14,6 @@ import {
   StickyNote,
   Settings,
   Trash2,
-  Edit3,
-  Palette as PaletteIcon,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
-  BarChart3,
   Copy,
   Clipboard,
   ClipboardPaste,
@@ -28,6 +22,7 @@ import {
   Lock,
   Unlock,
   MessageSquarePlus,
+  Edit3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -65,16 +60,8 @@ import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
 import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from './operationsPalette/shapes';
 import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
-import {
-  SlideChartObject,
-  DEFAULT_CHART_CONFIG,
-  DEFAULT_CHART_DATA,
-  type ChartConfig,
-  type ChartDataRow,
-  type SlideChartObjectHandle,
-  CHART_TYPES,
-  COLOR_SCHEMES,
-} from './operationsPalette/charts';
+import { SlideChart, ChartDataEditor, parseChartObjectProps, isEditableChartType } from './operationsPalette/charts';
+import type { ChartConfig, ChartDataRow } from './operationsPalette/charts';
 import {
   DEFAULT_TABLE_COLS,
   DEFAULT_TABLE_ROWS,
@@ -109,7 +96,7 @@ interface CanvasDropPlacement {
   height: number;
 }
 
-const snapToGrid = (value: number) => Math.round(value / CANVAS_SNAP_GRID) * CANVAS_SNAP_GRID;
+const snapToGrid = (value: number, gridSize: number) => Math.round(value / gridSize) * gridSize;
 
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
 
@@ -139,16 +126,6 @@ const COLOR_PROP_KEYS = [
   'borderColor',
   'accentColor',
 ] as const;
-
-const CHART_ALIGNMENT_OPTIONS: {
-  value: ChartConfig['horizontalAlignment'];
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}[] = [
-  { value: 'left', label: 'Align left', icon: AlignLeft },
-  { value: 'center', label: 'Align center', icon: AlignCenter },
-  { value: 'right', label: 'Align right', icon: AlignRight },
-];
 
 const cloneValue = <T,>(value: T): T => {
   const structured = (globalThis as any)?.structuredClone;
@@ -232,6 +209,34 @@ const parseBooleanish = (value: unknown): boolean | null => {
   return null;
 };
 
+const normaliseHexColor = (value: string): string => {
+  const trimmed = value.trim();
+  if (/^#([0-9a-fA-F]{6})$/.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  if (/^#([0-9a-fA-F]{3})$/.test(trimmed)) {
+    const [, short] = /^#([0-9a-fA-F]{3})$/.exec(trimmed) ?? [];
+    if (short) {
+      return `#${short
+        .split('')
+        .map(char => char + char)
+        .join('')}`.toLowerCase();
+    }
+  }
+  return '#ffffff';
+};
+
+const applyOpacityToHex = (value: string, opacity: number): string => {
+  const safeOpacity = Math.min(100, Math.max(0, opacity));
+  const normalised = normaliseHexColor(value);
+  const hex = normalised.replace('#', '');
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const alpha = Math.round((safeOpacity / 100) * 100) / 100;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 const slideBackgroundClassNames: Record<SlideBackgroundPreset, string> = {
   default: 'bg-card',
   ivory: 'bg-amber-100',
@@ -243,12 +248,57 @@ const slideBackgroundClassNames: Record<SlideBackgroundPreset, string> = {
 };
 
 const resolveSlideBackground = (
-  background: SlideBackgroundColor,
+  settings: PresentationSettings,
 ): { className: string; style: React.CSSProperties | undefined } => {
-  if (isSolidToken(background)) {
+  const mode = settings.backgroundMode ?? 'preset';
+  const opacity = Number.isFinite(settings.backgroundOpacity) ? Number(settings.backgroundOpacity) : 100;
+
+  if (mode === 'image' && settings.backgroundImageUrl) {
     return {
       className: '',
-      style: { backgroundColor: solidTokenToHex(background) },
+      style: {
+        backgroundImage: `url(${settings.backgroundImageUrl})`,
+        backgroundSize: 'cover',
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'center',
+      },
+    };
+  }
+
+  if (mode === 'gradient') {
+    const start = settings.backgroundGradientStart ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart;
+    const end = settings.backgroundGradientEnd ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd;
+    const direction = settings.backgroundGradientDirection ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientDirection;
+    const startColor = applyOpacityToHex(start, opacity);
+    const endColor = applyOpacityToHex(end, opacity);
+    return {
+      className: '',
+      style: {
+        backgroundImage: `linear-gradient(${direction}, ${startColor}, ${endColor})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      },
+    };
+  }
+
+  if (mode === 'solid') {
+    const color = settings.backgroundSolidColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+    return {
+      className: '',
+      style: {
+        backgroundColor: applyOpacityToHex(color, opacity),
+      },
+    };
+  }
+
+  const background = settings.backgroundColor;
+  if (isSolidToken(background)) {
+    const color = solidTokenToHex(background);
+    return {
+      className: '',
+      style: {
+        backgroundColor: opacity >= 100 ? color : applyOpacityToHex(color, opacity),
+      },
     };
   }
 
@@ -425,6 +475,41 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     height: number;
   } | null>(null);
   const [presentationScale, setPresentationScale] = useState(1);
+  const effectiveGridSize = useMemo(() => {
+    const candidate = Number.isFinite(settings.gridSize) ? Number(settings.gridSize) : DEFAULT_PRESENTATION_SETTINGS.gridSize;
+    return Math.min(200, Math.max(4, Math.round(candidate)));
+  }, [settings.gridSize]);
+  const snapToGridEnabled = settings.snapToGrid !== false;
+  const showGridOverlay = settings.showGrid ?? false;
+  const showGuidesOverlay = settings.showGuides ?? false;
+  const showSlideNumber = settings.showSlideNumber ?? true;
+  const slideNumberPosition = settings.slideNumberPosition ?? DEFAULT_PRESENTATION_SETTINGS.slideNumberPosition;
+  const slideNumberClass = useMemo(() => {
+    switch (slideNumberPosition) {
+      case 'top-left':
+        return 'left-5 top-5';
+      case 'top-right':
+        return 'right-5 top-5';
+      case 'bottom-left':
+        return 'left-5 bottom-5';
+      case 'bottom-right':
+      default:
+        return 'right-5 bottom-5';
+    }
+  }, [slideNumberPosition]);
+  const accessibilityStyle = useMemo<React.CSSProperties>(() => {
+    const style: React.CSSProperties = {};
+    if (settings.highContrast) {
+      style.filter = 'contrast(1.2)';
+    }
+    if (settings.largeText) {
+      style.fontSize = '1.05em';
+    }
+    if (settings.reducedMotion) {
+      style.transitionDuration = '0ms';
+    }
+    return style;
+  }, [settings.highContrast, settings.largeText, settings.reducedMotion]);
 
   const slideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
@@ -730,6 +815,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             'backgroundColor',
             'fullBleed',
             'cardLayout',
+            'backgroundMode',
+            'backgroundSolidColor',
+            'backgroundGradientStart',
+            'backgroundGradientEnd',
+            'backgroundGradientDirection',
+            'backgroundImageUrl',
+            'backgroundOpacity',
           ];
           const attemptingBackgroundChange = restrictedKeys.some(key => key in partial);
           if (attemptingBackgroundChange) {
@@ -1092,12 +1184,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     updateTextBoxGeometry,
   ]);
 
-  const handleAtomRemove = (atomId: string) => {
-    if (!canEdit) {
-      return;
-    }
-    onRemoveAtom?.(atomId);
-  };
+  const handleAtomRemove = useCallback(
+    (atomId: string) => {
+      if (!canEdit) {
+        return;
+      }
+      onRemoveAtom?.(atomId);
+    },
+    [canEdit, onRemoveAtom],
+  );
 
   const handleDragOver = (e: React.DragEvent) => {
     if (!canEdit || !draggedAtom) {
@@ -1138,11 +1233,15 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       const maxY = Math.max(0, canvas.clientHeight - height);
       dropX = Math.min(Math.max(0, dropX), maxX);
       dropY = Math.min(Math.max(0, dropY), maxY);
-      dropX = Math.min(Math.max(0, snapToGrid(dropX)), maxX);
-      dropY = Math.min(Math.max(0, snapToGrid(dropY)), maxY);
+      if (snapToGridEnabled) {
+        dropX = Math.min(Math.max(0, snapToGrid(dropX, effectiveGridSize)), maxX);
+        dropY = Math.min(Math.max(0, snapToGrid(dropY, effectiveGridSize)), maxY);
+      }
     } else {
-      dropX = snapToGrid(dropX);
-      dropY = snapToGrid(dropY);
+      if (snapToGridEnabled) {
+        dropX = snapToGrid(dropX, effectiveGridSize);
+        dropY = snapToGrid(dropY, effectiveGridSize);
+      }
     }
 
     onDrop(draggedAtom.atom, draggedAtom.cardId, card.id, draggedAtom.origin, {
@@ -1272,8 +1371,20 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }, [onPositionPanelChange]);
 
   const { className: slideBackgroundClass, style: slideBackgroundStyle } = useMemo(
-    () => resolveSlideBackground(settings.backgroundColor),
-    [settings.backgroundColor],
+    () =>
+      resolveSlideBackground({
+        ...settings,
+      }),
+    [
+      settings.backgroundColor,
+      settings.backgroundMode,
+      settings.backgroundGradientDirection,
+      settings.backgroundGradientEnd,
+      settings.backgroundGradientStart,
+      settings.backgroundImageUrl,
+      settings.backgroundOpacity,
+      settings.backgroundSolidColor,
+    ],
   );
 
   const containerClasses = presentationMode
@@ -1287,8 +1398,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             : 'border-border hover:border-primary/40'
         );
 
+  const containerClassName = cn(
+    containerClasses,
+    settings.reducedMotion && 'transition-none motion-reduce:transition-none',
+  );
+
   return (
-    <div className={containerClasses} style={themeContext.containerStyle}>
+    <div className={containerClassName} style={{ ...themeContext.containerStyle, ...accessibilityStyle }}>
       <div
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
@@ -1311,40 +1427,38 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         )}
 
         <div className="space-y-4">
-          {!presentationMode && canEdit && activeTextToolbar && (
-            <div className="relative mb-4 flex w-full justify-center">
-              <div className="z-30 drop-shadow-xl">{activeTextToolbar}</div>
-            </div>
-          )}
-
-          {!presentationMode && (
-            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-2 text-foreground">
-                <User className="h-4 w-4" />
-                <span className="font-semibold">Exhibition presenter:</span>
-                <span>{presenterLabel}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-foreground" />
-                <span className="font-semibold text-foreground">Last edited:</span>
-                <span>{formattedLastEdited}</span>
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+          <div className="relative">
+            {!presentationMode && canEdit && (
               <div
                 className={cn(
-                  'relative overflow-hidden shadow-2xl transition-all duration-300',
-                  presentationMode ? 'w-auto' : 'w-full',
-                  slideBackgroundClass,
-                  settings.fullBleed
-                    ? 'rounded-none border-0'
-                    : 'rounded-[28px] border border-border/60',
-                  isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                  !canEdit && !presentationMode && 'opacity-90'
+                  'pointer-events-none absolute inset-x-0 top-0 flex justify-center transition-all duration-200',
+                  activeTextToolbar ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2',
                 )}
+              >
+                {activeTextToolbar && (
+                  <div className="pointer-events-auto z-30 drop-shadow-xl">{activeTextToolbar}</div>
+                )}
+              </div>
+            )}
+
+            <div
+              className={cn(
+                'flex flex-col gap-4',
+                !presentationMode && canEdit ? 'pt-16' : undefined,
+              )}
+            >
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+                <div
+                  className={cn(
+                    'relative overflow-hidden shadow-2xl transition-all duration-300',
+                    presentationMode ? 'w-auto' : 'w-full',
+                    slideBackgroundClass,
+                    settings.fullBleed
+                      ? 'rounded-none border-0'
+                      : 'rounded-[28px] border border-border/60',
+                    isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
+                    !canEdit && !presentationMode && 'opacity-90'
+                  )}
                 style={
                   presentationMode
                     ? {
@@ -1417,7 +1531,21 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   backgroundLocked={Boolean(settings.backgroundLocked)}
                   onToggleBackgroundLock={handleToggleBackgroundLock}
                   onRequestFormatPanel={handleShowFormatPanel}
+                  snapToGridEnabled={snapToGridEnabled}
+                  gridSize={effectiveGridSize}
+                  showGrid={showGridOverlay}
+                  showGuides={showGuidesOverlay}
                 />
+                {showSlideNumber && (
+                  <div
+                    className={cn(
+                      'pointer-events-none absolute z-40 rounded-full bg-neutral-900/85 px-3 py-1 text-xs font-semibold text-white shadow-lg backdrop-blur-sm',
+                      slideNumberClass,
+                    )}
+                  >
+                    Slide {slideNumber}
+                  </div>
+                )}
 
                 {!presentationMode && (
                   <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
@@ -1469,55 +1597,29 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           </div>
 
-          {showOverview && (
-            <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', layoutConfig.overviewOuterClass)}>
-              <div
-                className={cn(
-                  'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
-                  layoutConfig.overviewContainerClass
-                )}
-              >
-                <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
-
-                <div className={cn('grid gap-4', layoutConfig.gridClass)}>
-                  {atomObjects.map(object => {
-                    const atom = object.props.atom;
-                    return (
-                      <div
-                        key={object.id}
-                        className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
-                      >
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
-                          <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
-                            {atom.title}
-                          </h3>
-                        </div>
-                        <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
-                          {atom.category}
-                        </div>
-                        <div className="text-sm text-muted-foreground space-y-3">
-                          <ExhibitedAtomRenderer atom={atom} variant="compact" />
-                        </div>
-
-                        {canEdit && (
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
-                            onClick={() => handleAtomRemove(atom.id)}
-                            type="button"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+          {!presentationMode && (
+            <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 text-foreground">
+                <User className="h-4 w-4" />
+                <span className="font-semibold">Exhibition presenter:</span>
+                <span>{presenterLabel}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-foreground" />
+                <span className="font-semibold text-foreground">Last edited:</span>
+                <span>{formattedLastEdited}</span>
               </div>
             </div>
           )}
+          <OverviewSection
+            visible={showOverview}
+            outerClassName={layoutConfig.overviewOuterClass}
+            containerClassName={layoutConfig.overviewContainerClass}
+            gridClassName={layoutConfig.gridClass}
+            atomObjects={atomObjects}
+            canEdit={canEdit}
+            onRemoveAtom={handleAtomRemove}
+          />
 
           {viewMode === 'horizontal' && !presentationMode && (
             <div className="mt-6 text-center">
@@ -1529,6 +1631,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         </div>
       </div>
     </div>
+  </div>
   );
 };
 
@@ -1654,6 +1757,81 @@ const LayoutOverlay: React.FC<{
   }
 };
 
+interface OverviewSectionProps {
+  visible: boolean;
+  outerClassName: string;
+  containerClassName: string;
+  gridClassName: string;
+  atomObjects: (SlideObject & { props: { atom: DroppedAtom } })[];
+  canEdit: boolean;
+  onRemoveAtom: (atomId: string) => void;
+}
+
+const OverviewSection: React.FC<OverviewSectionProps> = ({
+  visible,
+  outerClassName,
+  containerClassName,
+  gridClassName,
+  atomObjects,
+  canEdit,
+  onRemoveAtom,
+}) => {
+  if (!visible) {
+    return null;
+  }
+
+  return (
+    <div className={cn('px-8 pb-8 flex flex-col flex-1 min-h-0 overflow-hidden', outerClassName)}>
+      <div
+        className={cn(
+          'bg-muted/30 rounded-xl border border-border p-6 flex-1 overflow-y-auto',
+          containerClassName,
+        )}
+      >
+        <h2 className="text-2xl font-bold text-foreground mb-6">Components Overview</h2>
+
+        <div className={cn('grid gap-4', gridClassName)}>
+          {atomObjects.map(object => {
+            const atom = object.props.atom;
+
+            return (
+              <div
+                key={object.id}
+                className="relative group p-6 border-2 border-border bg-card rounded-xl hover:shadow-lg hover:border-primary/50 transition-all duration-300"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
+                  <h3 className="font-semibold text-foreground text-lg group-hover:text-primary transition-colors">
+                    {atom.title}
+                  </h3>
+                </div>
+                <div className="inline-block px-3 py-1 bg-primary/10 text-primary text-xs font-medium rounded-full mb-3">
+                  {atom.category}
+                </div>
+                <div className="text-sm text-muted-foreground space-y-3">
+                  <ExhibitedAtomRenderer atom={atom} variant="compact" />
+                </div>
+
+                {canEdit && (
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="absolute top-3 right-3 h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={() => onRemoveAtom(atom.id)}
+                    type="button"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 type CanvasStageProps = {
   canEdit: boolean;
   objects: SlideObject[];
@@ -1686,6 +1864,10 @@ type CanvasStageProps = {
   backgroundLocked: boolean;
   onToggleBackgroundLock: () => void;
   onRequestFormatPanel?: () => void;
+  snapToGridEnabled: boolean;
+  gridSize: number;
+  showGrid: boolean;
+  showGuides: boolean;
 };
 
 const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
@@ -1722,6 +1904,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       backgroundLocked,
       onToggleBackgroundLock,
       onRequestFormatPanel,
+      snapToGridEnabled,
+      gridSize,
+      showGrid,
+      showGuides,
     },
     forwardedRef,
   ) => {
@@ -1744,8 +1930,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
     const [clipboard, setClipboard] = useState<SlideObject[]>([]);
     const [styleClipboard, setStyleClipboard] = useState<Record<string, string> | null>(null);
-    const chartHandlesRef = useRef<Map<string, SlideChartObjectHandle>>(new Map());
-
+    const [chartEditorTarget, setChartEditorTarget] = useState<{
+      objectId: string;
+      data: ChartDataRow[];
+      config: ChartConfig;
+    } | null>(null);
     const focusCanvas = useCallback(() => {
       const node = internalRef.current;
       if (node && typeof node.focus === 'function') {
@@ -1754,6 +1943,41 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     }, []);
 
     const objectsMap = useMemo(() => new Map(objects.map(object => [object.id, object])), [objects]);
+    useEffect(() => {
+      if (!chartEditorTarget) {
+        return;
+      }
+      if (!objectsMap.has(chartEditorTarget.objectId)) {
+        setChartEditorTarget(null);
+      }
+    }, [chartEditorTarget, objectsMap]);
+
+    const handleChartEditorSave = useCallback(
+      (data: ChartDataRow[], updatedConfig: ChartConfig) => {
+        if (!chartEditorTarget) {
+          return;
+        }
+        const target = objectsMap.get(chartEditorTarget.objectId);
+        if (!target) {
+          setChartEditorTarget(null);
+          return;
+        }
+
+        const nextProps = {
+          ...(target.props ?? {}),
+          chartData: data.map(row => ({ ...row })),
+          chartConfig: { ...updatedConfig },
+        } as Record<string, unknown>;
+
+        onBulkUpdate({
+          [chartEditorTarget.objectId]: {
+            props: nextProps,
+          },
+        });
+        setChartEditorTarget(null);
+      },
+      [chartEditorTarget, objectsMap, onBulkUpdate],
+    );
     const selectedObjects = useMemo(
       () =>
         selectedIds
@@ -1807,18 +2031,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
       return Object.keys(palette).length > 0 ? palette : null;
     }, []);
-
-    const assignChartHandle = useCallback(
-      (objectId: string, handle: SlideChartObjectHandle | null) => {
-        const map = chartHandlesRef.current;
-        if (handle) {
-          map.set(objectId, handle);
-        } else {
-          map.delete(objectId);
-        }
-      },
-      [],
-    );
 
     const handleCopySelection = useCallback(
       (explicitIds?: string[] | null) => {
@@ -1897,10 +2109,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           if (object.type === 'accent-image') {
-            return;
-          }
-
-          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
             return;
           }
 
@@ -1990,10 +2198,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           if (object.type === 'accent-image') {
-            return;
-          }
-
-          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
             return;
           }
 
@@ -2429,35 +2633,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [objectsMap, onBulkUpdate],
     );
 
-    const updateChartProps = useCallback(
-      (objectId: string, updates: { data?: ChartDataRow[]; config?: ChartConfig }) => {
-        const object = objectsMap.get(objectId);
-        if (!object || object.type !== 'chart') {
-          return;
-        }
-
-        const currentProps = (object.props ?? {}) as { data?: ChartDataRow[]; config?: ChartConfig };
-        const currentData = Array.isArray(currentProps.data) ? (currentProps.data as ChartDataRow[]) : DEFAULT_CHART_DATA;
-        const currentConfig = currentProps.config
-          ? { ...DEFAULT_CHART_CONFIG, ...(currentProps.config as ChartConfig) }
-          : DEFAULT_CHART_CONFIG;
-
-        const nextData = Array.isArray(updates.data) ? updates.data : currentData;
-        const nextConfig = updates.config ? { ...DEFAULT_CHART_CONFIG, ...updates.config } : currentConfig;
-
-        onBulkUpdate({
-          [objectId]: {
-            props: {
-              ...currentProps,
-              data: nextData.map(entry => ({ ...entry })),
-              config: nextConfig,
-            },
-          },
-        });
-      },
-      [objectsMap, onBulkUpdate],
-    );
-
     const mutateTableState = useCallback(
       (objectId: string, mutator: (state: TableState) => TableState | null) => {
         const object = objectsMap.get(objectId);
@@ -2828,10 +3003,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (!canEdit) {
           return;
         }
+
+        if (editingTextState?.type === 'text-box' && editingTextState.id === objectId) {
+          return;
+        }
+
         const object = objectsMap.get(objectId);
         if (!object || object.type !== 'text-box') {
           return;
         }
+
         const formatting = extractTextBoxFormatting(object.props as Record<string, unknown> | undefined);
         onInteract();
         focusCanvas();
@@ -2843,7 +3024,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           original: formatting.text,
         });
       },
-      [canEdit, focusCanvas, objectsMap, onInteract],
+      [canEdit, editingTextState, focusCanvas, objectsMap, onInteract],
     );
 
     const handleEditingValueChange = useCallback(
@@ -2913,11 +3094,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         const { x: clampedX, y: clampedY } = clampPosition(x, y, width, height);
         const maxX = canvas ? Math.max(0, canvas.clientWidth - width) : clampedX;
         const maxY = canvas ? Math.max(0, canvas.clientHeight - height) : clampedY;
-        const snappedX = Math.min(Math.max(0, snapToGrid(clampedX)), maxX);
-        const snappedY = Math.min(Math.max(0, snapToGrid(clampedY)), maxY);
+        if (!snapToGridEnabled) {
+          return { x: clampedX, y: clampedY };
+        }
+        const snappedX = Math.min(Math.max(0, snapToGrid(clampedX, gridSize)), maxX);
+        const snappedY = Math.min(Math.max(0, snapToGrid(clampedY, gridSize)), maxY);
         return { x: snappedX, y: snappedY };
       },
-      [clampPosition],
+      [clampPosition, gridSize, snapToGridEnabled],
     );
 
     const handlePasteClipboard = useCallback(() => {
@@ -2938,7 +3122,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         const baseProps = cloneValue(snapshot.props ?? {}) as Record<string, unknown>;
         delete baseProps.locked;
 
-        const offset = CANVAS_SNAP_GRID * 4 * (index + 1);
+        const offset = gridSize * 2 * (index + 1);
         const nextX = snapshot.x + offset;
         const nextY = snapshot.y + offset;
         const { x, y } = clampAndSnapPosition(nextX, nextY, snapshot.width, snapshot.height);
@@ -3011,8 +3195,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         targets.forEach((object, index) => {
           const baseProps = cloneValue(object.props ?? {}) as Record<string, unknown>;
           delete baseProps.locked;
-
-          const offset = CANVAS_SNAP_GRID * 4 * (index + 1);
+          const offset = gridSize * 2 * (index + 1);
           const { x, y } = clampAndSnapPosition(
             object.x + offset,
             object.y + offset,
@@ -3104,7 +3287,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               targetX = width - object.width;
             }
             const maxX = Math.max(0, width - object.width);
-            const snappedX = Math.min(Math.max(0, snapToGrid(targetX)), maxX);
+            const clampedX = Math.min(Math.max(0, targetX), maxX);
+            const snappedX = snapToGridEnabled
+              ? Math.min(Math.max(0, snapToGrid(targetX, gridSize)), maxX)
+              : clampedX;
             if (Math.abs(snappedX - object.x) > 0.5) {
               updates[object.id] = { ...(updates[object.id] ?? {}), x: snappedX };
             }
@@ -3118,7 +3304,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               targetY = height - object.height;
             }
             const maxY = Math.max(0, height - object.height);
-            const snappedY = Math.min(Math.max(0, snapToGrid(targetY)), maxY);
+            const clampedY = Math.min(Math.max(0, targetY), maxY);
+            const snappedY = snapToGridEnabled
+              ? Math.min(Math.max(0, snapToGrid(targetY, gridSize)), maxY)
+              : clampedY;
             if (Math.abs(snappedY - object.y) > 0.5) {
               updates[object.id] = { ...(updates[object.id] ?? {}), y: snappedY };
             }
@@ -3447,7 +3636,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         const activeIds = activeTargets.map(object => object.id);
 
-        const step = event.shiftKey ? CANVAS_SNAP_GRID * 2 : CANVAS_SNAP_GRID;
+        const baseStep = snapToGridEnabled ? gridSize : 4;
+        const step = event.shiftKey ? baseStep * 2 : baseStep;
         if (
           event.key === 'ArrowLeft' ||
           event.key === 'ArrowRight' ||
@@ -3614,8 +3804,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           const { x, y } = clampAndSnapPosition(nextX, nextY, nextWidth, nextHeight);
-          const snappedWidth = Math.max(minWidth, snapToGrid(nextWidth));
-          const snappedHeight = Math.max(minHeight, snapToGrid(nextHeight));
+          const snappedWidth = snapToGridEnabled
+            ? Math.max(minWidth, snapToGrid(nextWidth, gridSize))
+            : Math.max(minWidth, nextWidth);
+          const snappedHeight = snapToGridEnabled
+            ? Math.max(minHeight, snapToGrid(nextHeight, gridSize))
+            : Math.max(minHeight, nextHeight);
           const widthLimit = canvas ? Math.max(minWidth, Math.min(snappedWidth, canvas.clientWidth)) : snappedWidth;
           const heightLimit = canvas ? Math.max(minHeight, Math.min(snappedHeight, canvas.clientHeight)) : snappedHeight;
 
@@ -3756,10 +3950,29 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           />
         </div>
 
+        {showGrid && (
+          <div
+            className="pointer-events-none absolute inset-0"
+            style={{
+              zIndex: 6,
+              backgroundImage:
+                'linear-gradient(to right, rgba(148, 163, 184, 0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(148, 163, 184, 0.14) 1px, transparent 1px)',
+              backgroundSize: `${gridSize}px ${gridSize}px`,
+            }}
+          />
+        )}
+
+        {showGuides && (
+          <div className="pointer-events-none absolute inset-0" style={{ zIndex: 7 }}>
+            <div className="absolute inset-y-0 left-1/2 w-px bg-primary/40" style={{ transform: 'translateX(-0.5px)' }} />
+            <div className="absolute inset-x-0 top-1/2 h-px bg-primary/40" style={{ transform: 'translateY(-0.5px)' }} />
+          </div>
+        )}
+
         {showEmptyState && (
           <div
             className={cn(
-              'pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground',
+              'pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground',
               canvasCornerClass,
             )}
           >
@@ -3787,14 +4000,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               : null;
             const tableState = isTableObject ? readTableState(object) : null;
             const chartProps = isChartObject
-              ? (object.props as { data?: ChartDataRow[]; config?: ChartConfig } | undefined)
+              ? parseChartObjectProps(object.props as Record<string, unknown> | undefined)
               : null;
-            const chartData = Array.isArray(chartProps?.data)
-              ? (chartProps?.data as ChartDataRow[])
-              : [];
-            const chartConfig: ChartConfig = chartProps?.config
-              ? { ...DEFAULT_CHART_CONFIG, ...chartProps.config }
-              : DEFAULT_CHART_CONFIG;
             const atomId =
               isAtomObject(object) && typeof object.props.atom.atomId === 'string'
                 ? object.props.atom.atomId
@@ -3816,26 +4023,33 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
             const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
-          const renderObject = () => (
-            <div
-              className="absolute group"
-              style={{
-                left: object.x,
-                top: object.y,
-                width: object.width,
-                height: object.height,
-                zIndex: isSelected ? zIndex + 100 : zIndex,
-              }}
-              onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
-              onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
-            >
+          const renderObject = () => {
+            return (
+              <div
+                className="absolute group"
+                style={{
+                  left: object.x,
+                  top: object.y,
+                  width: object.width,
+                  height: object.height,
+                  zIndex: isSelected ? zIndex + 100 : zIndex,
+                }}
+                onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
+                onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
+              >
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
-                    'pointer-events-none absolute inset-0 z-40 border border-dotted border-yellow-400 transition-all duration-200',
-                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
-                      ? 'rounded-[22px]'
-                      : 'rounded-[32px]'
+                    'pointer-events-none absolute -inset-1 z-40 border-2 border-dotted border-yellow-400 transition-all duration-200',
+                    (() => {
+                      if (isShapeObject) {
+                        return 'rounded-[12px]';
+                      }
+                      if (suppressCardChrome || isTextBoxObject || isTableObject || isChartObject) {
+                        return 'rounded-[22px]';
+                      }
+                      return 'rounded-[32px]';
+                    })(),
                   )}
                   aria-hidden="true"
                 />
@@ -3975,15 +4189,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onSendToBack={() => onSendToBack([object.id])}
                       onInteract={onInteract}
                     />
-                  ) : isChartObject ? (
-                    <SlideChartObject
-                      ref={instance => assignChartHandle(object.id, instance)}
-                      data={chartData}
-                      config={chartConfig}
-                      canEdit={canEdit}
+                  ) : isChartObject && chartProps ? (
+                    <SlideChart
+                      data={chartProps.chartData}
+                      config={chartProps.chartConfig}
                       className="h-full w-full"
-                      onUpdate={updates => updateChartProps(object.id, updates)}
-                      onInteract={onInteract}
                     />
                   ) : (
                     <div
@@ -4041,139 +4251,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   />
                 ))}
             </div>
-          );
+            );
+          };
 
           if (isTableObject) {
             return React.cloneElement(renderObject(), { key: object.id });
           }
-
-          const chartHandle = chartHandlesRef.current.get(object.id);
-          const renderChartExtras = isChartObject
-            ? (closeMenu: () => void) => (
-                <>
-                  <ContextMenuItem
-                    disabled={!canEdit}
-                    onSelect={event => {
-                      event.preventDefault();
-                      if (!canEdit) {
-                        return;
-                      }
-                      closeMenu();
-                      requestAnimationFrame(() => {
-                        chartHandle?.openDataEditor();
-                      });
-                    }}
-                  >
-                    <Edit3 className="mr-2 h-4 w-4" />
-                    Edit chart data
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger disabled={!canEdit}>
-                      <PaletteIcon className="mr-2 h-4 w-4" />
-                      Color scheme
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="w-64">
-                      {COLOR_SCHEMES.map(scheme => (
-                        <ContextMenuItem
-                          key={scheme.id}
-                          disabled={!canEdit}
-                          className={cn(
-                            'gap-2',
-                            chartConfig.colorScheme === scheme.id && 'bg-accent/80 text-accent-foreground',
-                          )}
-                          onSelect={event => {
-                            event.preventDefault();
-                            if (!canEdit) {
-                              return;
-                            }
-                            closeMenu();
-                            chartHandle?.setColorScheme(scheme.id);
-                          }}
-                        >
-                          <span className="text-base">{scheme.icon}</span>
-                          <div className="flex gap-1.5">
-                            {scheme.colors.map(color => (
-                              <span
-                                key={color}
-                                className="h-3.5 w-3.5 rounded-full border border-border/50"
-                                style={{ backgroundColor: color }}
-                              />
-                            ))}
-                          </div>
-                          <span className="text-sm">{scheme.name}</span>
-                        </ContextMenuItem>
-                      ))}
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger disabled={!canEdit}>
-                      <AlignCenter className="mr-2 h-4 w-4" />
-                      Align
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="w-56">
-                      {CHART_ALIGNMENT_OPTIONS.map(option => {
-                        const Icon = option.icon;
-                        return (
-                          <ContextMenuItem
-                            key={option.value}
-                            disabled={!canEdit}
-                            className={cn(
-                              'gap-2',
-                              chartConfig.horizontalAlignment === option.value &&
-                                'bg-accent/80 text-accent-foreground',
-                            )}
-                            onSelect={event => {
-                              event.preventDefault();
-                              if (!canEdit) {
-                                return;
-                              }
-                              closeMenu();
-                              chartHandle?.setAlignment(option.value);
-                            }}
-                          >
-                            <Icon className="mr-2 h-4 w-4" />
-                            {option.label}
-                          </ContextMenuItem>
-                        );
-                      })}
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                  <ContextMenuSub>
-                    <ContextMenuSubTrigger disabled={!canEdit}>
-                      <BarChart3 className="mr-2 h-4 w-4" />
-                      Switch type
-                    </ContextMenuSubTrigger>
-                    <ContextMenuSubContent className="w-60">
-                      {CHART_TYPES.map(type => {
-                        const Icon = type.icon;
-                        return (
-                          <ContextMenuItem
-                            key={type.id}
-                            disabled={!canEdit}
-                            className={cn(
-                              'gap-2',
-                              chartConfig.type === type.id && 'bg-accent/80 text-accent-foreground',
-                            )}
-                            onSelect={event => {
-                              event.preventDefault();
-                              if (!canEdit) {
-                                return;
-                              }
-                              closeMenu();
-                              chartHandle?.setChartType(type.id);
-                            }}
-                          >
-                            <Icon className="mr-2 h-4 w-4" />
-                            {type.name}
-                          </ContextMenuItem>
-                        );
-                      })}
-                    </ContextMenuSubContent>
-                  </ContextMenuSub>
-                </>
-              )
-            : undefined;
 
           const contextTargetIds = isSelected ? selectedIds : [object.id];
           const contextHasSelection = contextTargetIds.length > 0;
@@ -4219,7 +4302,44 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               disableLink={selectionLocked}
               disableComment={selectionLocked}
               disableApplyColors={!canApplyColorsGlobally}
-              renderAdditionalContent={renderChartExtras}
+              renderAdditionalContent={
+                isChartObject
+                  ? closeMenu => (
+                      <ContextMenuItem
+                        disabled={
+                          !canEdit ||
+                          !chartProps ||
+                          !isEditableChartType(chartProps.chartConfig.type)
+                        }
+                        onSelect={event => {
+                          event.preventDefault();
+                          const isValidTarget =
+                            canEdit &&
+                            chartProps &&
+                            isEditableChartType(chartProps.chartConfig.type);
+                          const payload = isValidTarget
+                            ? {
+                                objectId: object.id,
+                                data: chartProps.chartData,
+                                config: chartProps.chartConfig,
+                              }
+                            : null;
+                          closeMenu();
+                          if (!payload) {
+                            return;
+                          }
+                          setTimeout(() => {
+                            setChartEditorTarget(payload);
+                          }, 0);
+                        }}
+                        className="gap-3"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                        Edit chart data
+                      </ContextMenuItem>
+                    )
+                  : undefined
+              }
             >
               {renderObject()}
             </SlideObjectContextMenu>
@@ -4349,6 +4469,13 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             <ContextMenuShortcut>Ctrl+Alt+N</ContextMenuShortcut>
           </ContextMenuItem>
         </ContextMenuContent>
+        <ChartDataEditor
+          open={Boolean(chartEditorTarget)}
+          onClose={() => setChartEditorTarget(null)}
+          onSave={handleChartEditorSave}
+          initialData={chartEditorTarget?.data}
+          initialConfig={chartEditorTarget?.config}
+        />
       </ContextMenu>
     );
   },
