@@ -208,3 +208,34 @@ export async function fetchExhibitionLayout(
 
   return response.json() as Promise<ExhibitionLayoutResponse>;
 }
+
+export async function fetchSharedExhibitionLayout(
+  token: string,
+): Promise<ExhibitionLayoutResponse | null> {
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const requestUrl = `${EXHIBITION_API}/shared/${encodeURIComponent(trimmed)}`;
+  const requestInit: RequestInit = {
+    method: 'GET',
+    credentials: 'omit',
+  };
+
+  logExhibitionRequest('Fetching shared exhibition layout', requestUrl, requestInit);
+
+  const response = await fetch(requestUrl, requestInit);
+
+  if (response.status === 404) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    logExhibitionFailure('Fetching shared exhibition layout', message);
+    throw new Error(message || 'Failed to fetch shared exhibition layout');
+  }
+
+  return response.json() as Promise<ExhibitionLayoutResponse>;
+}

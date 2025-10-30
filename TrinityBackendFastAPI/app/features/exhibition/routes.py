@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Dict
 
@@ -9,6 +10,7 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 
 from .deps import get_exhibition_layout_collection
 from .persistence import save_exhibition_list_configuration
+from .share_links import fetch_shared_link_context
 from .schemas import (
     ExhibitionConfigurationIn,
     ExhibitionConfigurationOut,
@@ -151,6 +153,50 @@ async def save_layout_configuration(
         "updated_at": updated_at,
         "documents_inserted": persistence_result.get("documents_written", 0),
     }
+
+
+@router.get("/shared/{token}", response_model=ExhibitionLayoutConfigurationOut)
+async def get_shared_layout(
+    token: str,
+    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+) -> ExhibitionLayoutConfigurationOut:
+    cleaned_token = token.strip()
+    if not cleaned_token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shared exhibition link not found")
+
+    try:
+        context = await fetch_shared_link_context(cleaned_token)
+    except Exception as exc:  # pragma: no cover - defensive logging in calling layer
+        logging.exception("Failed to resolve exhibition share link: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to validate share link",
+        ) from exc
+
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shared exhibition link not found")
+
+    if not context.is_valid:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shared exhibition link expired")
+
+    filter_query = {
+        "client_name": context.client_name.strip(),
+        "app_name": context.app_name.strip(),
+        "project_name": context.project_name.strip(),
+    }
+
+    record = await collection.find_one({**filter_query, "document_type": "layout_snapshot"})
+    if not record:
+        record = await collection.find_one(filter_query)
+
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exhibition layout not found")
+
+    record.pop("_id", None)
+    record.pop("document_type", None)
+    record.update(filter_query)
+
+    return ExhibitionLayoutConfigurationOut(**record)
 
 
 @router.post("/export/pptx")
