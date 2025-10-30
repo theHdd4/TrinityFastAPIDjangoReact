@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { TEMPLATE_DEFINITIONS, countSlides, matchTemplateQuery } from './constants';
+import { TEMPLATE_DEFINITIONS } from './constants';
 import type { TemplateDefinition } from './types';
 
 interface TemplatesPanelProps {
@@ -26,7 +26,20 @@ export const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
     if (trimmed.length === 0) {
       return TEMPLATE_DEFINITIONS;
     }
-    return TEMPLATE_DEFINITIONS.filter(template => matchTemplateQuery(template, trimmed));
+    const loweredQuery = trimmed.toLowerCase();
+
+    return TEMPLATE_DEFINITIONS.filter(template => {
+      const searchableFields = [
+        template.name,
+        template.description,
+        template.category,
+        ...template.tags,
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return searchableFields.includes(loweredQuery);
+    });
   }, [query]);
 
   return (
@@ -72,7 +85,7 @@ export const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
           {filteredTemplates.length > 0 ? (
             <div className="space-y-5">
               {filteredTemplates.map(template => {
-                const slides = countSlides(template);
+                const slides = template.slides.length;
                 const Icon = template.icon;
                 return (
                   <article
