@@ -26,6 +26,19 @@ const WAIT_FOR_RENDER_MS = 120;
 const DOWNLOAD_DELAY_MS = 80;
 const FALLBACK_BASE_WIDTH = 960;
 const FALLBACK_BASE_HEIGHT = 540;
+const MAX_CAPTURE_ATTEMPTS = 2;
+
+const isSecurityError = (error: unknown): boolean => {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  if (error.name === 'SecurityError') {
+    return true;
+  }
+
+  return /SecurityError/i.test(error.message);
+};
 
 const clonePlainObject = <T,>(value: T): T => {
   if (typeof window !== 'undefined' && typeof window.structuredClone === 'function') {
@@ -142,8 +155,10 @@ export const captureSlidesForExport = async (
   container.style.width = '1600px';
   container.style.height = '1200px';
   container.style.pointerEvents = 'none';
-  container.style.visibility = 'hidden';
+  container.style.opacity = '0';
   container.style.zIndex = '-1';
+  container.style.userSelect = 'none';
+  container.setAttribute('aria-hidden', 'true');
 
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -182,10 +197,36 @@ export const captureSlidesForExport = async (
       }
 
       try {
-        const dataUrl = await toPng(slideElement, {
-          pixelRatio,
-          cacheBust: true,
-        });
+        let dataUrl: string | null = null;
+        let attempt = 0;
+
+        while (attempt < MAX_CAPTURE_ATTEMPTS && !dataUrl) {
+          attempt += 1;
+
+          try {
+            const options = {
+              pixelRatio,
+              cacheBust: true,
+              ...(attempt > 1 ? { skipFonts: true } : {}),
+            } as Parameters<typeof toPng>[1];
+
+            dataUrl = await toPng(slideElement, options);
+          } catch (error) {
+            if (attempt >= MAX_CAPTURE_ATTEMPTS || !isSecurityError(error)) {
+              throw error;
+            }
+
+            console.warn(
+              '[Exhibition Export] Retrying slide capture without embedding fonts due to restricted stylesheet',
+              error,
+            );
+          }
+        }
+
+        if (!dataUrl) {
+          throw new Error('Unable to capture slide image.');
+        }
+
         const { width: imageWidth, height: imageHeight } = await loadImageDimensions(dataUrl);
 
         captures.push({
