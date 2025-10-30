@@ -26,8 +26,16 @@ const frontendPort = import.meta.env.VITE_FRONTEND_PORT || (
 );
 let backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN;
 
+// Detect if we're in Kubernetes nginx proxy mode (single-origin)
+// In Kubernetes, frontend and backend share the same origin via nginx reverse proxy
+const isKubernetesMode = typeof window !== 'undefined' && 
+  (window.location.port === '8082' || window.location.port === '8080' || window.location.port === '8081');
+
 if (!backendOrigin) {
-  if (hostIp) {
+  if (isKubernetesMode && typeof window !== 'undefined') {
+    // Kubernetes mode: Use same origin as frontend (nginx handles routing)
+    backendOrigin = window.location.origin;
+  } else if (hostIp) {
     backendOrigin = `http://${hostIp}:${djangoPort}`;
   } else if (typeof window !== 'undefined') {
     const regex = new RegExp(`:${frontendPort}$`);
@@ -42,8 +50,8 @@ if (!backendOrigin) {
   );
 }
 
-
-const usesProxy = !backendOrigin.includes(`:${djangoPort}`);
+// In Kubernetes mode, always use proxy
+const usesProxy = isKubernetesMode || !backendOrigin.includes(`:${djangoPort}`);
 const djangoPrefix = usesProxy ? '/admin/api' : '/api';
 
 // Set `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.

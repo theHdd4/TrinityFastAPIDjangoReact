@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  namespace: trinity-staging
+spec:
+  type: ClusterIP
+  selector:
+    app: minio-simple
+  ports:
+    - port: 9000
+      name: minio-api
+      targetPort: 9000
+    - port: 9001
+      name: minio-console
+      targetPort: 9001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-simple
+  namespace: trinity-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-simple
+  template:
+    metadata:
+      labels:
+        app: minio-simple
+        environment: staging
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+        command:
+        - minio
+        - server
+        - /data
+        - --console-address
+        - ":9001"
+        ports:
+        - containerPort: 9000
+          name: minio-api
+        - containerPort: 9001
+          name: minio-console
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: trinity-staging-secrets
+              key: minio-access-key
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-staging-secrets
+              key: minio-secret-key
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: 5
+          periodSeconds: 5

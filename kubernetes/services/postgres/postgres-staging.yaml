@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-staging-pvc
+  namespace: trinity-staging
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: hostpath  # Docker Desktop default storage class
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-staging
+  namespace: trinity-staging
+spec:
+  serviceName: postgres-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-staging
+  template:
+    metadata:
+      labels:
+        app: postgres-staging
+        environment: staging
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-staging-secrets
+              key: postgres-password
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "512Mi"      # Optimized: Buffer pool minimum
+            cpu: "500m"          # Baseline for query processing
+          limits:
+            memory: "2Gi"        # Increased for query cache
+            cpu: "2000m"         # 2 CPU for complex queries
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - trinity_user
+            - -d
+            - trinity_db
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - trinity_user
+            - -d
+            - trinity_db
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-staging-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: trinity-staging
+  labels:
+    app: postgres-staging
+spec:
+  selector:
+    app: postgres-staging
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgres
+  type: ClusterIP
+---

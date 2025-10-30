@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-staging-pvc
+  namespace: trinity-staging
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: hostpath
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-staging
+  namespace: trinity-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-staging
+  template:
+    metadata:
+      labels:
+        app: redis-staging
+        environment: staging
+    spec:
+      containers:
+      - name: redis
+        image: redis:7
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-storage
+          mountPath: /data
+        resources:
+          requests:
+            memory: "256Mi"      # Optimized: Cache + queue data
+            cpu: "100m"          # Redis is CPU-efficient (single-threaded)
+          limits:
+            memory: "1Gi"        # Headroom for large queues
+            cpu: "500m"          # Limited benefit from more CPU
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: redis-storage
+        persistentVolumeClaim:
+          claimName: redis-staging-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: trinity-staging
+  labels:
+    app: redis-staging
+spec:
+  selector:
+    app: redis-staging
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+  type: ClusterIP
+---

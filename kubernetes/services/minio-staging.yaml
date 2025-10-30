@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  namespace: trinity-staging
+spec:
+  type: ClusterIP
+  selector:
+    app: minio-staging
+  ports:
+  - port: 9000
+    name: minio-api
+    targetPort: 9000
+  - port: 9001
+    name: minio-console
+    targetPort: 9001
+---
+# Deploy MinIO within the cluster
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-staging-pvc
+  namespace: trinity-staging
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: hostpath
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-staging
+  namespace: trinity-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-staging
+  template:
+    metadata:
+      labels:
+        app: minio-staging
+        environment: staging
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:latest
+        args:
+        - server
+        - /data
+        - --console-address
+        - ":9001"
+        ports:
+        - containerPort: 9000
+          name: minio-api
+        - containerPort: 9001
+          name: minio-console
+        env:
+        - name: MINIO_ROOT_USER
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-access-key
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-secret-key
+        volumeMounts:
+        - name: minio-storage
+          mountPath: /data
+        resources:
+          requests:
+            memory: "1Gi"        # Optimized: Object metadata + cache
+            cpu: "500m"          # Baseline for I/O operations
+          limits:
+            memory: "2Gi"        # Large file operations
+            cpu: "2000m"         # 2 CPU for parallel uploads
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: minio-storage
+        persistentVolumeClaim:
+          claimName: minio-staging-pvc
+---

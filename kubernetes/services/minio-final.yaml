@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  namespace: trinity-staging
+spec:
+  type: ClusterIP
+  selector:
+    app: minio-final
+  ports:
+  - port: 9000
+    name: minio-api
+    targetPort: 9000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio-final
+  namespace: trinity-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio-final
+  template:
+    metadata:
+      labels:
+        app: minio-final
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:latest
+        command:
+        - server
+        - /data
+        env:
+        - name: MINIO_ROOT_USER
+          value: "trinity_access"
+        - name: MINIO_ROOT_PASSWORD
+          value: "trinity_secret"
+        ports:
+        - containerPort: 9000
+
+

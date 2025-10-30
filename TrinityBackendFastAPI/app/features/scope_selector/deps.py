@@ -56,20 +56,22 @@ minio_client: Minio = Minio(
     region=settings.minio_region
 )
 
-# Ensure MinIO bucket exists if API supports it
-try:
-    if hasattr(minio_client, "bucket_exists") and not minio_client.bucket_exists(
-        settings.minio_bucket
-    ):
-        minio_client.make_bucket(
-            bucket_name=settings.minio_bucket,
-            location=settings.minio_region,
-        )
-        logger.info(f"Created MinIO bucket: {settings.minio_bucket}")
-    logger.info(f"MinIO bucket '{settings.minio_bucket}' is ready")
-except Exception as e:
-    logger.error(f"Error initializing MinIO bucket: {e}")
-    raise
+# MinIO bucket initialization will be done lazily when needed
+def ensure_minio_bucket():
+    """Ensure MinIO bucket exists - called when needed, not at import time"""
+    try:
+        if hasattr(minio_client, "bucket_exists") and not minio_client.bucket_exists(
+            settings.minio_bucket
+        ):
+            minio_client.make_bucket(
+                bucket_name=settings.minio_bucket,
+                location=settings.minio_region,
+            )
+            logger.info(f"Created MinIO bucket: {settings.minio_bucket}")
+        logger.info(f"MinIO bucket '{settings.minio_bucket}' is ready")
+    except Exception as e:
+        logger.warning(f"MinIO bucket check failed: {e}")
+        # Continue without MinIO if it's not available
 
 
 def get_mongo_client() -> AsyncIOMotorClient:

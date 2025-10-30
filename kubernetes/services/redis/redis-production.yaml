@@ -1,0 +1,458 @@
+# Redis Production Configuration with Sentinel High Availability
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: trinity-production
+data:
+  redis.conf: |
+    bind 0.0.0.0
+    protected-mode yes
+    port 6379
+    tcp-backlog 511
+    timeout 0
+    tcp-keepalive 300
+    daemonize no
+    supervised no
+    pidfile /var/run/redis_6379.pid
+    loglevel notice
+    logfile ""
+    databases 16
+    always-show-logo yes
+    
+    # Persistence
+    save 900 1
+    save 300 10
+    save 60 10000
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir ./
+    
+    # Replication
+    replica-serve-stale-data yes
+    replica-read-only yes
+    repl-diskless-sync no
+    repl-diskless-sync-delay 5
+    repl-disable-tcp-nodelay no
+    replica-priority 100
+    
+    # Memory management
+    maxmemory 1gb
+    maxmemory-policy allkeys-lru
+    lazyfree-lazy-eviction no
+    lazyfree-lazy-expire no
+    lazyfree-lazy-server-del no
+    replica-lazy-flush no
+    
+    # Security
+    # requirepass will be set via environment variable
+    
+    # Slow log
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+  
+  sentinel.conf: |
+    bind 0.0.0.0
+    port 26379
+    sentinel announce-ip redis-sentinel
+    sentinel announce-port 26379
+    sentinel monitor trinity-master redis-master-0.redis-master-service.trinity-production.svc.cluster.local 6379 2
+    sentinel down-after-milliseconds trinity-master 5000
+    sentinel parallel-syncs trinity-master 1
+    sentinel failover-timeout trinity-master 10000
+    sentinel auth-pass trinity-master ${REDIS_PASSWORD}
+---
+# Redis Master
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-master
+  namespace: trinity-production
+  labels:
+    app: redis-master
+    role: master
+spec:
+  serviceName: redis-master-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-master
+      role: master
+  template:
+    metadata:
+      labels:
+        app: redis-master
+        role: master
+        environment: production
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: redis-password
+              optional: true
+        command:
+        - redis-server
+        - /etc/redis/redis.conf
+        - --requirepass
+        - $(REDIS_PASSWORD)
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        - name: redis-config
+          mountPath: /etc/redis/redis.conf
+          subPath: redis.conf
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - redis-cli
+              - -a
+              - $(REDIS_PASSWORD)
+              - shutdown
+              - save
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis-config
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+      storageClassName: trinity-fast-ssd
+---
+# Redis Replica
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-replica
+  namespace: trinity-production
+  labels:
+    app: redis-replica
+    role: replica
+spec:
+  serviceName: redis-replica-service
+  replicas: 2
+  selector:
+    matchLabels:
+      app: redis-replica
+      role: replica
+  template:
+    metadata:
+      labels:
+        app: redis-replica
+        role: replica
+        environment: production
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - redis-replica
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+      - name: wait-for-master
+        image: redis:7-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until redis-cli -h redis-master-0.redis-master-service.trinity-production.svc.cluster.local -a $REDIS_PASSWORD ping; do
+            echo "Waiting for Redis master..."
+            sleep 5
+          done
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: redis-password
+              optional: true
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+          name: redis
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: redis-password
+              optional: true
+        command:
+        - redis-server
+        - /etc/redis/redis.conf
+        - --requirepass
+        - $(REDIS_PASSWORD)
+        - --replicaof
+        - redis-master-0.redis-master-service.trinity-production.svc.cluster.local
+        - "6379"
+        - --masterauth
+        - $(REDIS_PASSWORD)
+        volumeMounts:
+        - name: redis-replica-data
+          mountPath: /data
+        - name: redis-config
+          mountPath: /etc/redis/redis.conf
+          subPath: redis.conf
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "250m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis-config
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-replica-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 20Gi
+      storageClassName: trinity-fast-ssd
+---
+# Redis Sentinel
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-sentinel
+  namespace: trinity-production
+  labels:
+    app: redis-sentinel
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis-sentinel
+  template:
+    metadata:
+      labels:
+        app: redis-sentinel
+        environment: production
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - redis-sentinel
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+      - name: wait-for-master
+        image: redis:7-alpine
+        command:
+        - sh
+        - -c
+        - |
+          until redis-cli -h redis-master-0.redis-master-service.trinity-production.svc.cluster.local -a $REDIS_PASSWORD ping; do
+            echo "Waiting for Redis master..."
+            sleep 5
+          done
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: redis-password
+              optional: true
+      containers:
+      - name: sentinel
+        image: redis:7-alpine
+        ports:
+        - containerPort: 26379
+          name: sentinel
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: redis-password
+              optional: true
+        command:
+        - redis-sentinel
+        - /etc/redis/sentinel.conf
+        volumeMounts:
+        - name: redis-config
+          mountPath: /etc/redis/sentinel.conf
+          subPath: sentinel.conf
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -p
+            - "26379"
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -p
+            - "26379"
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis-config
+---
+# Redis Master Service (Headless)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-master-service
+  namespace: trinity-production
+  labels:
+    app: redis-master
+    role: master
+spec:
+  clusterIP: None
+  selector:
+    app: redis-master
+    role: master
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+---
+# Redis Replica Service (Headless)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-replica-service
+  namespace: trinity-production
+  labels:
+    app: redis-replica
+    role: replica
+spec:
+  clusterIP: None
+  selector:
+    app: redis-replica
+    role: replica
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+---
+# Redis Main Service (Load Balanced)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: trinity-production
+  labels:
+    app: redis
+spec:
+  selector:
+    app: redis-master
+    role: master
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: redis
+  type: ClusterIP
+---
+# Redis Sentinel Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel-service
+  namespace: trinity-production
+  labels:
+    app: redis-sentinel
+spec:
+  selector:
+    app: redis-sentinel
+  ports:
+  - port: 26379
+    targetPort: 26379
+    name: sentinel
+  type: ClusterIP
+---

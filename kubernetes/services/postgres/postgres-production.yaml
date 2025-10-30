@@ -1,0 +1,316 @@
+# PostgreSQL Production Configuration with High Availability
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: trinity-production
+data:
+  postgresql.conf: |
+    # Connection Settings
+    max_connections = 200
+    superuser_reserved_connections = 3
+    
+    # Memory Settings
+    shared_buffers = 512MB
+    effective_cache_size = 2GB
+    maintenance_work_mem = 128MB
+    work_mem = 8MB
+    
+    # Write Ahead Logging
+    wal_level = replica
+    max_wal_senders = 3
+    max_replication_slots = 3
+    wal_keep_size = 1GB
+    
+    # Checkpoint Settings
+    checkpoint_completion_target = 0.7
+    wal_buffers = 16MB
+    
+    # Query Planning
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    
+    # Logging
+    log_destination = 'stderr'
+    logging_collector = on
+    log_filename = 'postgresql-%Y-%m-%d_%H%M%S.log'
+    log_statement = 'all'
+    log_min_duration_statement = 1000
+    
+    # Performance
+    min_wal_size = 1GB
+    max_wal_size = 4GB
+  
+  pg_hba.conf: |
+    # TYPE  DATABASE        USER            ADDRESS                 METHOD
+    local   all             postgres                                peer
+    local   all             all                                     md5
+    host    all             all             127.0.0.1/32            md5
+    host    all             all             ::1/128                 md5
+    host    all             all             10.0.0.0/8              md5
+    host    replication     all             10.0.0.0/8              md5
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-primary
+  namespace: trinity-production
+  labels:
+    app: postgres-primary
+    role: primary
+spec:
+  serviceName: postgres-primary-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-primary
+      role: primary
+  template:
+    metadata:
+      labels:
+        app: postgres-primary
+        role: primary
+        environment: production
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-production-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-production-config
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: postgres-password
+        - name: POSTGRES_REPLICATION_MODE
+          value: master
+        - name: POSTGRES_REPLICATION_USER
+          value: replica_user
+        - name: POSTGRES_REPLICATION_PASSWORD
+          value: replica_password_change_this
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: postgres-config
+          mountPath: /etc/postgresql/postgresql.conf
+          subPath: postgresql.conf
+        - name: postgres-config
+          mountPath: /etc/postgresql/pg_hba.conf
+          subPath: pg_hba.conf
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - trinity_user
+            - -d
+            - trinity_db
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - trinity_user
+            - -d
+            - trinity_db
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - "pg_ctl stop -D /var/lib/postgresql/data -w -t 60"
+      volumes:
+      - name: postgres-config
+        configMap:
+          name: postgres-config
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 100Gi
+      storageClassName: trinity-fast-ssd
+---
+# PostgreSQL Read Replica
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-replica
+  namespace: trinity-production
+  labels:
+    app: postgres-replica
+    role: replica
+spec:
+  serviceName: postgres-replica-service
+  replicas: 2
+  selector:
+    matchLabels:
+      app: postgres-replica
+      role: replica
+  template:
+    metadata:
+      labels:
+        app: postgres-replica
+        role: replica
+        environment: production
+    spec:
+      initContainers:
+      - name: wait-for-primary
+        image: postgres:15
+        command:
+        - sh
+        - -c
+        - |
+          until pg_isready -h postgres-primary-service -p 5432 -U trinity_user; do
+            echo "Waiting for PostgreSQL primary..."
+            sleep 5
+          done
+          echo "PostgreSQL primary is ready"
+      containers:
+      - name: postgres
+        image: postgres:15
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: PGUSER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: postgres-password
+        - name: POSTGRES_PRIMARY_SERVICE
+          value: postgres-primary-service
+        - name: POSTGRES_REPLICATION_MODE
+          value: slave
+        - name: POSTGRES_REPLICATION_USER
+          value: replica_user
+        - name: POSTGRES_REPLICATION_PASSWORD
+          value: replica_password_change_this
+        - name: POSTGRES_MASTER_SERVICE
+          value: postgres-primary-service
+        volumeMounts:
+        - name: postgres-replica-data
+          mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - postgres
+          initialDelaySeconds: 5
+          periodSeconds: 5
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-replica-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 100Gi
+      storageClassName: trinity-fast-ssd
+---
+# Primary Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: trinity-production
+  labels:
+    app: postgres-primary
+    role: primary
+spec:
+  selector:
+    app: postgres-primary
+    role: primary
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgres
+  type: ClusterIP
+---
+# Primary Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary-service
+  namespace: trinity-production
+  labels:
+    app: postgres-primary
+    role: primary
+spec:
+  clusterIP: None
+  selector:
+    app: postgres-primary
+    role: primary
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgres
+---
+# Replica Service (for read operations)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-replica-service
+  namespace: trinity-production
+  labels:
+    app: postgres-replica
+    role: replica
+spec:
+  selector:
+    app: postgres-replica
+    role: replica
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgres
+  type: ClusterIP
+---

@@ -1,0 +1,359 @@
+# Trinity Application Monitoring Configuration
+# Basic monitoring setup with ServiceMonitor for Prometheus
+
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: trinity-services
+  namespace: trinity-production
+  labels:
+    app: trinity
+    monitoring: enabled
+spec:
+  selector:
+    matchLabels:
+      monitoring: enabled
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+  - port: admin
+    path: /admin/prometheus/
+    interval: 60s
+    scrapeTimeout: 15s
+  namespaceSelector:
+    matchNames:
+    - trinity-production
+---
+# Prometheus Rule for Trinity-specific alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: trinity-alerts
+  namespace: trinity-production
+  labels:
+    app: trinity
+    monitoring: enabled
+spec:
+  groups:
+  - name: trinity.application.rules
+    interval: 30s
+    rules:
+    # Application availability alerts
+    - alert: TrinityServiceDown
+      expr: up{job=~"trinity-.*"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Trinity service {{ $labels.job }} is down"
+        description: "Trinity service {{ $labels.job }} has been down for more than 2 minutes."
+    
+    # High error rate alerts
+    - alert: TrinityHighErrorRate
+      expr: |
+        (
+          rate(http_requests_total{job=~"trinity-.*",status=~"5.."}[5m]) /
+          rate(http_requests_total{job=~"trinity-.*"}[5m])
+        ) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High error rate in Trinity service {{ $labels.job }}"
+        description: "Error rate is above 10% for Trinity service {{ $labels.job }} (current value: {{ $value }})"
+    
+    # Database connection alerts
+    - alert: TrinityDatabaseConnectionHigh
+      expr: pg_stat_activity_count > 80
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Trinity PostgreSQL connections are high"
+        description: "PostgreSQL has {{ $value }} active connections, which is above the warning threshold."
+    
+    - alert: TrinityDatabaseConnectionCritical
+      expr: pg_stat_activity_count > 150
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Trinity PostgreSQL connections are critically high"
+        description: "PostgreSQL has {{ $value }} active connections, approaching the limit."
+    
+    # Memory usage alerts
+    - alert: TrinityHighMemoryUsage
+      expr: |
+        (
+          container_memory_working_set_bytes{pod=~"trinity-.*"} /
+          container_spec_memory_limit_bytes{pod=~"trinity-.*"}
+        ) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage in Trinity pod {{ $labels.pod }}"
+        description: "Memory usage is above 80% in pod {{ $labels.pod }}"
+    
+    # CPU usage alerts
+    - alert: TrinityHighCPUUsage
+      expr: |
+        (
+          rate(container_cpu_usage_seconds_total{pod=~"trinity-.*"}[5m]) /
+          container_spec_cpu_quota{pod=~"trinity-.*"} * container_spec_cpu_period{pod=~"trinity-.*"}
+        ) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage in Trinity pod {{ $labels.pod }}"
+        description: "CPU usage is above 80% in pod {{ $labels.pod }}"
+    
+    # Pod restart alerts
+    - alert: TrinityPodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total{pod=~"trinity-.*"}[15m]) > 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Trinity pod {{ $labels.pod }} is crash looping"
+        description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last 15 minutes."
+    
+    # Storage alerts
+    - alert: TrinityDiskSpaceHigh
+      expr: |
+        (
+          kubelet_volume_stats_used_bytes{persistentvolumeclaim=~".*trinity.*"} /
+          kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~".*trinity.*"}
+        ) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High disk usage in Trinity PVC {{ $labels.persistentvolumeclaim }}"
+        description: "Disk usage is above 80% for PVC {{ $labels.persistentvolumeclaim }}"
+    
+    - alert: TrinityDiskSpaceCritical
+      expr: |
+        (
+          kubelet_volume_stats_used_bytes{persistentvolumeclaim=~".*trinity.*"} /
+          kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~".*trinity.*"}
+        ) > 0.9
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Critical disk usage in Trinity PVC {{ $labels.persistentvolumeclaim }}"
+        description: "Disk usage is above 90% for PVC {{ $labels.persistentvolumeclaim }}"
+  
+  - name: trinity.database.rules
+    interval: 30s
+    rules:
+    # PostgreSQL specific alerts
+    - alert: TrinityPostgreSQLDown
+      expr: pg_up == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Trinity PostgreSQL is down"
+        description: "PostgreSQL database is not responding."
+    
+    # MongoDB specific alerts  
+    - alert: TrinityMongoDBDown
+      expr: mongodb_up == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Trinity MongoDB is down"
+        description: "MongoDB database is not responding."
+    
+    # Redis specific alerts
+    - alert: TrinityRedisDown
+      expr: redis_up == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Trinity Redis is down"
+        description: "Redis cache is not responding."
+    
+    - alert: TrinityRedisHighMemoryUsage
+      expr: |
+        (redis_memory_used_bytes / redis_config_maxmemory) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Trinity Redis memory usage is high"
+        description: "Redis memory usage is above 80% ({{ $value }})"
+
+---
+# PodMonitor for application-specific metrics
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: trinity-pods
+  namespace: trinity-production
+  labels:
+    app: trinity
+    monitoring: enabled
+spec:
+  selector:
+    matchLabels:
+      environment: production
+  podMetricsEndpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+  - port: admin
+    path: /health
+    interval: 60s
+  namespaceSelector:
+    matchNames:
+    - trinity-production
+
+---
+# Grafana Dashboard ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trinity-grafana-dashboard
+  namespace: trinity-production
+  labels:
+    grafana_dashboard: "1"
+    app: trinity
+data:
+  trinity-overview.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "Trinity Application Overview",
+        "tags": ["trinity", "production"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Application Status",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "up{job=~\"trinity-.*\"}",
+                "legendFormat": "{{ job }}"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "color": {
+                  "mode": "thresholds"
+                },
+                "thresholds": {
+                  "steps": [
+                    {"color": "red", "value": 0},
+                    {"color": "green", "value": 1}
+                  ]
+                }
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "HTTP Request Rate",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "rate(http_requests_total{job=~\"trinity-.*\"}[5m])",
+                "legendFormat": "{{ job }} - {{ method }} {{ status }}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Database Connections",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "pg_stat_activity_count",
+                "legendFormat": "PostgreSQL Connections"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Pod Memory Usage",
+            "type": "graph",
+            "targets": [
+              {
+                "expr": "container_memory_working_set_bytes{pod=~\"trinity-.*\"} / 1024 / 1024",
+                "legendFormat": "{{ pod }}"
+              }
+            ],
+            "yAxes": [
+              {
+                "label": "Memory (MB)"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }
+
+---
+# Network Policy for monitoring traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: trinity-monitoring-netpol
+  namespace: trinity-production
+spec:
+  podSelector:
+    matchLabels:
+      environment: production
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow monitoring traffic from Prometheus
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - namespaceSelector:
+        matchLabels:
+          name: prometheus
+    ports:
+    - protocol: TCP
+      port: 8080  # metrics port
+    - protocol: TCP
+      port: 9090  # health check port
+  # Allow regular application traffic
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: trinity-production
+    - namespaceSelector: {}  # Allow from same namespace
+  # Allow ingress traffic
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 8000  # Django
+    - protocol: TCP
+      port: 8001  # FastAPI
+    - protocol: TCP
+      port: 8002  # TrinityAI
+    - protocol: TCP
+      port: 80    # Frontend

@@ -1,0 +1,104 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-staging
+  namespace: trinity-staging
+spec:
+  replicas: 1  # Reduced for Docker Desktop memory constraints
+  selector:
+    matchLabels:
+      app: celery-staging
+  template:
+    metadata:
+      labels:
+        app: celery-staging
+        environment: staging
+    spec:
+      containers:
+      - name: celery
+        image: trinity-staging-web:latest
+        imagePullPolicy: Never
+        command: ["celery", "-A", "config.celery", "worker", "--loglevel=info"]
+        env:
+        # Database configuration
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: POSTGRES_USER
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: POSTGRES_HOST
+        - name: POSTGRES_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: POSTGRES_PORT
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-staging-secrets
+              key: postgres-password
+        # MongoDB configuration
+        - name: MONGO_URI
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: MONGO_URI
+        # Redis configuration
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: REDIS_URL
+        # MinIO configuration
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: MINIO_ENDPOINT
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-access-key
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-secret-key
+        resources:
+          requests:
+            memory: "512Mi"      # Optimized: Task processing memory
+            cpu: "250m"          # Low baseline for workers
+          limits:
+            memory: "1Gi"        # Headroom for heavy tasks
+            cpu: "1000m"         # 1 CPU for compute tasks
+        livenessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - config.celery
+            - inspect
+            - ping
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          exec:
+            command:
+            - celery
+            - -A
+            - config.celery
+            - inspect
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: trinity-staging
+spec:
+  selector:
+    app: django-staging
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: web
+  type: ClusterIP
+

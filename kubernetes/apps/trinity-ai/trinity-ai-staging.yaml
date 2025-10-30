@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trinity-ai-staging
+  namespace: trinity-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: trinity-ai-staging
+  template:
+    metadata:
+      labels:
+        app: trinity-ai-staging
+        environment: staging
+    spec:
+      containers:
+      - name: trinity-ai
+        image: trinity-staging-trinity-ai:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8002
+        env:
+        - name: OLLAMA_IP
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: OLLAMA_IP
+        - name: MONGO_URI
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: MONGO_URI
+        - name: CLASSIFY_MONGO_URI
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: CLASSIFY_MONGO_URI
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: trinity-staging-config
+              key: MINIO_ENDPOINT
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-access-key
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: minio-secret-key
+        resources:
+          requests:
+            memory: "2Gi"        # Optimized: ML models need more memory
+            cpu: "1000m"         # 1 CPU baseline for AI workloads
+          limits:
+            memory: "6Gi"        # Increased for model inference
+            cpu: "4000m"         # 4 CPU for AI processing
+        livenessProbe:
+          httpGet:
+            path: /trinityai/
+            port: 8002
+          initialDelaySeconds: 60
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /trinityai/
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trinity-ai-service
+  namespace: trinity-staging
+spec:
+  selector:
+    app: trinity-ai-staging
+  ports:
+  - port: 8002
+    targetPort: 8002
+    name: trinity-ai
+  type: ClusterIP
+---

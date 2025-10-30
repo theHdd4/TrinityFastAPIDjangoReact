@@ -1,0 +1,284 @@
+# MongoDB Production Configuration with Replica Set
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongo-config
+  namespace: trinity-production
+data:
+  mongod.conf: |
+    systemLog:
+      destination: file
+      logAppend: true
+      path: /var/log/mongodb/mongod.log
+    
+    storage:
+      dbPath: /data/db
+      journal:
+        enabled: true
+      wiredTiger:
+        engineConfig:
+          cacheSizeGB: 1
+        collectionConfig:
+          blockCompressor: snappy
+        indexConfig:
+          prefixCompression: true
+    
+    processManagement:
+      fork: false
+      pidFilePath: /var/run/mongodb/mongod.pid
+    
+    net:
+      port: 27017
+      bindIpAll: true
+    
+    replication:
+      replSetName: "trinity-rs"
+    
+    security:
+      authorization: enabled
+  
+  init-replica.js: |
+    rs.initiate({
+      _id: "trinity-rs",
+      members: [
+        { _id: 0, host: "mongo-0.mongo-service.trinity-production.svc.cluster.local:27017" },
+        { _id: 1, host: "mongo-1.mongo-service.trinity-production.svc.cluster.local:27017" },
+        { _id: 2, host: "mongo-2.mongo-service.trinity-production.svc.cluster.local:27017" }
+      ]
+    });
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+  namespace: trinity-production
+  labels:
+    app: mongo
+spec:
+  serviceName: mongo-service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+        environment: production
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - mongo
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+      - name: setup-logs
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /var/log/mongodb /var/run/mongodb
+          chown -R 999:999 /var/log/mongodb /var/run/mongodb
+        volumeMounts:
+        - name: mongo-logs
+          mountPath: /var/log/mongodb
+        - name: mongo-run
+          mountPath: /var/run/mongodb
+      containers:
+      - name: mongo
+        image: mongo:6
+        ports:
+        - containerPort: 27017
+          name: mongo
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: "root"
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: mongo-password
+        command:
+        - mongod
+        - --config
+        - /etc/mongod.conf
+        volumeMounts:
+        - name: mongo-data
+          mountPath: /data/db
+        - name: mongo-config
+          mountPath: /etc/mongod.conf
+          subPath: mongod.conf
+        - name: mongo-logs
+          mountPath: /var/log/mongodb
+        - name: mongo-run
+          mountPath: /var/run/mongodb
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          exec:
+            command:
+            - mongosh
+            - --eval
+            - "db.adminCommand('ping')"
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - mongosh
+            - --eval
+            - "db.adminCommand('ping')"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                mongosh --eval "db.adminCommand({shutdown: 1})"
+      volumes:
+      - name: mongo-config
+        configMap:
+          name: mongo-config
+      - name: mongo-logs
+        emptyDir: {}
+      - name: mongo-run
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: mongo-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 50Gi
+      storageClassName: trinity-fast-ssd
+---
+# Headless Service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-service
+  namespace: trinity-production
+  labels:
+    app: mongo
+spec:
+  clusterIP: None
+  selector:
+    app: mongo
+  ports:
+  - port: 27017
+    targetPort: 27017
+    name: mongo
+---
+# Load Balancer Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-lb-service
+  namespace: trinity-production
+  labels:
+    app: mongo
+spec:
+  selector:
+    app: mongo
+  ports:
+  - port: 27017
+    targetPort: 27017
+    name: mongo
+  type: ClusterIP
+---
+# MongoDB Replica Set Initialization Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mongo-init-replica
+  namespace: trinity-production
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: mongo-init
+        image: mongo:6
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Wait for all MongoDB instances to be ready
+          until mongosh --host mongo-0.mongo-service.trinity-production.svc.cluster.local:27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
+            echo "Waiting for mongo-0..."
+            sleep 5
+          done
+          
+          until mongosh --host mongo-1.mongo-service.trinity-production.svc.cluster.local:27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
+            echo "Waiting for mongo-1..."
+            sleep 5
+          done
+          
+          until mongosh --host mongo-2.mongo-service.trinity-production.svc.cluster.local:27017 --eval "db.adminCommand('ping')" > /dev/null 2>&1; do
+            echo "Waiting for mongo-2..."
+            sleep 5
+          done
+          
+          echo "All MongoDB instances are ready. Initializing replica set..."
+          
+          # Initialize replica set
+          mongosh --host mongo-0.mongo-service.trinity-production.svc.cluster.local:27017 --eval '
+            rs.initiate({
+              _id: "trinity-rs",
+              members: [
+                { _id: 0, host: "mongo-0.mongo-service.trinity-production.svc.cluster.local:27017" },
+                { _id: 1, host: "mongo-1.mongo-service.trinity-production.svc.cluster.local:27017" },
+                { _id: 2, host: "mongo-2.mongo-service.trinity-production.svc.cluster.local:27017" }
+              ]
+            })
+          '
+          
+          echo "Waiting for replica set to be ready..."
+          sleep 30
+          
+          # Create application database and user
+          mongosh --host mongo-0.mongo-service.trinity-production.svc.cluster.local:27017 -u root -p $MONGO_ROOT_PASSWORD --authenticationDatabase admin --eval '
+            use trinity_prod;
+            db.createUser({
+              user: "trinity_user",
+              pwd: "'$MONGO_USER_PASSWORD'",
+              roles: [
+                { role: "readWrite", db: "trinity_prod" }
+              ]
+            });
+          '
+          
+          echo "MongoDB replica set initialization completed successfully"
+        env:
+        - name: MONGO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: mongo-password
+        - name: MONGO_USER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: trinity-production-secrets
+              key: mongo-user-password
+---

@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trinity-production-config
+  namespace: trinity-production
+data:
+  # Django Configuration - PRODUCTION
+  HOST_IP: "10.2.4.48"  # Update with your actual on-premises server IP
+  FRONTEND_PORT: "8080"
+  POSTGRES_DB: "trinity_db"
+  POSTGRES_USER: "trinity_user"
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  
+  # MongoDB Configuration - PRODUCTION
+  MONGO_INITDB_ROOT_USERNAME: "root"
+  MONGO_URI: "mongodb://root:rootpass@mongo-service:27017/trinity_prod?authSource=admin"
+  
+  # Redis Configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_URL: "redis://redis-service:6379/0"
+  
+  # MinIO Configuration - PRODUCTION
+  MINIO_ENDPOINT: "minio-service:9000"
+  MINIO_BUCKET: "trinity"
+  MINIO_REGION: "us-east-1"
+  
+  # Application Specific - PRODUCTION
+  ENVIRONMENT: "production"
+  DEBUG: "false"
+  
+  # CORS Configuration - PRODUCTION (Restrictive)
+  CORS_ALLOWED_ORIGINS: "https://trinity.quantmatrixai.com,http://10.2.4.48:8080"
+  CSRF_TRUSTED_ORIGINS: "https://trinity.quantmatrixai.com,http://10.2.4.48:8080"
+  FASTAPI_CORS_ORIGINS: "https://trinity.quantmatrixai.com,http://10.2.4.48:8080"
+  
+  # Flight Server Configuration - PRODUCTION
+  FLIGHT_HOST: "flight-service"
+  FLIGHT_PORT: "8815"
+  
+  # TrinityAI Configuration - PRODUCTION
+  OLLAMA_IP: "10.2.4.48"
+  CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo-service:27017/?authSource=admin"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: database-config-production
+  namespace: trinity-production
+data:
+  # PostgreSQL Configuration
+  POSTGRES_MAX_CONNECTIONS: "200"
+  POSTGRES_SHARED_BUFFERS: "256MB"
+  POSTGRES_EFFECTIVE_CACHE_SIZE: "1GB"
+  POSTGRES_MAINTENANCE_WORK_MEM: "64MB"
+  POSTGRES_CHECKPOINT_COMPLETION_TARGET: "0.7"
+  POSTGRES_WAL_BUFFERS: "16MB"
+  POSTGRES_DEFAULT_STATISTICS_TARGET: "100"
+  POSTGRES_RANDOM_PAGE_COST: "1.1"
+  POSTGRES_EFFECTIVE_IO_CONCURRENCY: "200"
+  POSTGRES_WORK_MEM: "4MB"
+  POSTGRES_MIN_WAL_SIZE: "1GB"
+  POSTGRES_MAX_WAL_SIZE: "4GB"
+  
+  # MongoDB Configuration
+  MONGO_CACHE_SIZE_GB: "0.5"
+  MONGO_MAX_CONNS: "200"
+  
+  # Redis Configuration  
+  REDIS_MAXMEMORY: "512mb"
+  REDIS_MAXMEMORY_POLICY: "allkeys-lru"
+  REDIS_SAVE: "900 1 300 10 60 10000"
+---

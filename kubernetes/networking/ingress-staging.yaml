@@ -1,0 +1,61 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trinity-staging-ingress
+  namespace: trinity-staging
+  annotations:
+    kubernetes.io/ingress.class: "traefik"
+    traefik.ingress.kubernetes.io/router.priority: "1"
+spec:
+  rules:
+  - host: trinity-staging.quantmatrixai.com
+    http:
+      paths:
+      # Frontend (React app) - highest priority
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 80
+      # Django Admin and API
+      - path: /admin
+        pathType: Prefix
+        backend:
+          service:
+            name: django-service
+            port:
+              number: 8000
+      # FastAPI endpoints
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: fastapi-service
+            port:
+              number: 8001
+      # TrinityAI endpoints
+      - path: /trinityai
+        pathType: Prefix
+        backend:
+          service:
+            name: trinity-ai-service
+            port:
+              number: 8002
+---
+# Alternative: If you want to use NodePort for direct access during testing
+apiVersion: v1
+kind: Service
+metadata:
+  name: trinity-staging-nodeport
+  namespace: trinity-staging
+spec:
+  type: NodePort
+  selector:
+    app: frontend-staging
+  ports:
+  - port: 8085
+    targetPort: 80
+    nodePort: 30085  # Access via <node-ip>:30085 or localhost:8085
+---
