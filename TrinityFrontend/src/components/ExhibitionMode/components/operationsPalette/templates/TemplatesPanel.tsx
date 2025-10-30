@@ -4,7 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion';
 import { cn } from '@/lib/utils';
 import { TEMPLATE_DEFINITIONS } from './constants';
 import type { TemplateDefinition } from './types';
@@ -31,7 +36,7 @@ export const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
   currentApp = null,
 }) => {
   const [query, setQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<TemplateTab>(() => (currentApp ? 'current' : 'others'));
+  const [activeTab, setActiveTab] = useState<TemplateTab | null>(() => (currentApp ? 'current' : 'others'));
 
   const filteredTemplates = useMemo(() => {
     const trimmed = query.trim();
@@ -84,7 +89,10 @@ export const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
     if (currentTemplates.length === 0 && activeTab === 'current') {
       setActiveTab('others');
     }
-  }, [activeTab, currentTemplates.length]);
+    if (otherTemplates.length === 0 && activeTab === 'others') {
+      setActiveTab(currentTemplates.length > 0 ? 'current' : null);
+    }
+  }, [activeTab, currentTemplates.length, otherTemplates.length]);
 
   const renderTemplates = useCallback(
     (templatesToRender: TemplateDefinition[], emptyMessage: { title: string; description: string }) => {
@@ -99,7 +107,7 @@ export const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
       }
 
       return (
-        <div className="grid grid-cols-1 gap-4 pb-4 md:grid-cols-2">
+        <div className="flex flex-col gap-2.5 pb-4">
           {templatesToRender.map(template => {
             const slides = template.slides.length;
             const Icon = template.icon;
@@ -107,37 +115,41 @@ export const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
             return (
               <article
                 key={template.id}
-                className="group flex h-full flex-col justify-between rounded-xl border border-border/50 bg-card/60 p-4 transition-all duration-200 hover:border-primary/40 hover:bg-primary/5"
+                className="group flex h-full flex-col justify-between rounded-xl border border-border/40 bg-card/70 px-4 py-3 transition-all duration-200 hover:border-primary/40 hover:bg-primary/5"
               >
                 <div className="flex flex-col gap-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors duration-200 group-hover:bg-primary group-hover:text-primary-foreground">
-                        <Icon className="h-4 w-4" />
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors duration-200 group-hover:bg-primary group-hover:text-primary-foreground">
+                        <Icon className="h-3.5 w-3.5" />
                       </div>
                       <div className="space-y-1">
                         <h4 className="text-sm font-semibold text-foreground transition-colors duration-200 group-hover:text-primary">
                           {template.name}
                         </h4>
-                        <p className="text-xs font-medium text-muted-foreground/80">{template.category}</p>
+                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                          {template.category}
+                        </p>
                       </div>
                     </div>
                     <Badge
                       variant="secondary"
-                      className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-primary shadow-none"
+                      className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary shadow-none"
                     >
                       {slides} {slides === 1 ? 'slide' : 'slides'}
                     </Badge>
                   </div>
-                  <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">{template.description}</p>
+                  <p className="line-clamp-3 text-[13px] leading-relaxed text-muted-foreground/90">
+                    {template.description}
+                  </p>
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-2">
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1">
                     {template.tags.map(tag => (
                       <Badge
                         key={tag}
                         variant="outline"
-                        className="rounded-full border-border/50 px-2 py-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                        className="rounded-full border-border/40 px-2 py-[2px] text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80"
                       >
                         {tag}
                       </Badge>
@@ -207,51 +219,52 @@ export const TemplatesPanel: React.FC<TemplatesPanelProps> = ({
           </div>
         </div>
 
-        <Tabs
-          value={activeTab}
-          onValueChange={value => setActiveTab(value as TemplateTab)}
+        <Accordion
+          type="single"
+          collapsible
+          value={activeTab ?? undefined}
+          onValueChange={value =>
+            setActiveTab(value ? (value as TemplateTab) : null)
+          }
           className="flex flex-1 flex-col overflow-hidden"
         >
-          <div className="px-5 pt-4">
-            <TabsList className="grid w-full grid-cols-2 gap-2 rounded-xl border border-border/50 bg-muted/40 p-1">
-              <TabsTrigger
-                value="current"
-                className="flex h-9 flex-col items-start justify-center rounded-lg px-3 text-[11px] font-semibold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:text-foreground"
-              >
+          <AccordionItem value="current" className="border-b border-border/50">
+            <AccordionTrigger className="px-5 py-4 text-left">
+              <div className="flex w-full flex-col items-start gap-1 text-sm font-semibold uppercase tracking-wider text-foreground">
                 <span>Current app</span>
                 {currentApp && (
-                  <span className="text-[10px] font-medium capitalize text-muted-foreground/80">{currentApp}</span>
+                  <span className="text-[11px] font-medium capitalize text-muted-foreground">{currentApp}</span>
                 )}
-              </TabsTrigger>
-              <TabsTrigger
-                value="others"
-                className="flex h-9 items-center justify-center rounded-lg px-3 text-[11px] font-semibold uppercase tracking-wider data-[state=active]:bg-background data-[state=active]:text-foreground"
-              >
-                Other templates
-              </TabsTrigger>
-            </TabsList>
-          </div>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="border-t border-border/40">
+              <ScrollArea className="h-full max-h-[480px] px-5 py-5 pr-3">
+                {renderTemplates(currentTemplates, {
+                  title: currentApp ? `No templates for ${currentApp}` : 'No current app template',
+                  description: query
+                    ? 'Try adjusting your search to find templates for this app.'
+                    : 'Templates for this app will appear here when available.',
+                })}
+              </ScrollArea>
+            </AccordionContent>
+          </AccordionItem>
 
-          <TabsContent value="current" className="flex-1 overflow-hidden data-[state=inactive]:hidden">
-            <ScrollArea className="h-full px-5 py-6 pr-3">
-              {renderTemplates(currentTemplates, {
-                title: currentApp ? `No templates for ${currentApp}` : 'No current app template',
-                description: query
-                  ? 'Try adjusting your search to find templates for this app.'
-                  : 'Templates for this app will appear here when available.',
-              })}
-            </ScrollArea>
-          </TabsContent>
-
-          <TabsContent value="others" className="flex-1 overflow-hidden data-[state=inactive]:hidden">
-            <ScrollArea className="h-full px-5 py-6 pr-3">
-              {renderTemplates(otherTemplates, {
-                title: 'No templates found',
-                description: 'Try a different search term to discover more use cases.',
-              })}
-            </ScrollArea>
-          </TabsContent>
-        </Tabs>
+          <AccordionItem value="others" className="border-b border-border/50">
+            <AccordionTrigger className="px-5 py-4 text-left">
+              <div className="flex w-full items-start text-sm font-semibold uppercase tracking-wider text-foreground">
+                <span>Other templates</span>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="border-t border-border/40">
+              <ScrollArea className="h-full max-h-[480px] px-5 py-5 pr-3">
+                {renderTemplates(otherTemplates, {
+                  title: 'No templates found',
+                  description: 'Try a different search term to discover more use cases.',
+                })}
+              </ScrollArea>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </div>
     </div>
   );
