@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, Bot, User, Sparkles, RotateCcw, Clock, Settings, Paperclip, Mic, Plus, Trash2, MessageCircle, Minimize2, Maximize2, Minus } from 'lucide-react';
+import { Send, X, Bot, User, Sparkles, RotateCcw, Clock, Settings, Paperclip, Mic, Plus, Trash2, MessageCircle, Minimize2, Maximize2, Minus, Square } from 'lucide-react';
 import { TRINITY_AI_API } from '@/lib/api';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import WorkflowProgress from './WorkflowProgress';
@@ -900,6 +900,36 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
     }
   };
 
+  // Handle stop/cancel request
+  const handleStopRequest = () => {
+    console.log('🛑 User requested to stop the ongoing request');
+    
+    // Close WebSocket connection if active
+    if (wsConnection && wsConnected) {
+      console.log('🔌 Closing WebSocket connection');
+      wsConnection.close();
+      setWsConnected(false);
+      setWsConnection(null);
+    }
+    
+    // Reset loading state
+    setIsLoading(false);
+    setWorkflowProgress(null);
+    
+    // Add a cancellation message to the chat
+    const cancelMessage: Message = {
+      id: `cancel_${Date.now()}`,
+      content: '⚠️ Request cancelled by user.',
+      sender: 'ai',
+      timestamp: new Date()
+    };
+    
+    const updatedMessages = [...messages, cancelMessage];
+    updateCurrentChat(updatedMessages);
+    
+    console.log('✅ Request stopped successfully');
+  };
+
   // Calculate responsive font sizes based on panel width
   const baseFontSize = Math.max(12, Math.min(14, panelWidth * 0.035)); // Scales between 12px and 14px
   const smallFontSize = Math.max(10, Math.min(12, panelWidth * 0.03)); // Scales between 10px and 12px
@@ -1148,6 +1178,16 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
               disabled={isLoading}
             />
           </div>
+          {isLoading && (
+            <Button
+              onClick={handleStopRequest}
+              className="h-12 w-12 bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/30 hover:shadow-xl hover:shadow-red-500/40 transition-all duration-300 hover:scale-110 rounded-2xl animate-fade-in"
+              size="icon"
+              title="Stop Request"
+            >
+              <Square className="w-5 h-5 fill-current" />
+            </Button>
+          )}
           <Button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isLoading}

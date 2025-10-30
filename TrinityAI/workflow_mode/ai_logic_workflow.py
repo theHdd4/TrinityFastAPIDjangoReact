@@ -328,7 +328,7 @@ Molecule 3: Visualization & Reporting
 Purpose: "Create interactive charts to visualize trends. Add insights to provide context for stakeholders."
 
 **MOLECULE DESCRIPTION FORMULA (STRICT):**
-Each molecule "purpose" must be EXACTLY 2 lines and MAXIMUM 50 words total:
+Each molecule "purpose" must be EXACTLY 2 lines and MAXIMUM 35 words total:
 - Line 1: Start with action verbs (e.g., "Start with...", "Use...", "Create...") and briefly explain WHAT operations happen (20-25 words)
 - Line 2: Briefly explain WHY it matters - the business outcome or next step (20-25 words)
 - Keep it concise and actionable - NOT verbose or lengthy
@@ -356,7 +356,7 @@ Each molecule "purpose" must be EXACTLY 2 lines and MAXIMUM 50 words total:
 12. **INTELLIGENT GROUPING**: Group 2-5 atoms per molecule based on their purpose and data dependencies
 13. **LOGICAL SEQUENCING**: Ensure each molecule flows into the next with proper data transformations
 14. **BUSINESS VALUE**: Think about what business outcome this workflow achieves
-15. **CONCISE MOLECULE DESCRIPTIONS**: Write EXACTLY 2-line purpose descriptions (MAX 50 words total) that briefly explain operations and value. Use action verbs like "Start with...", "Use...", "Create..." but keep it short. The detailed richness goes in the "smart_response" chat message above, NOT in molecule descriptions.
+15. **CONCISE MOLECULE DESCRIPTIONS**: Write EXACTLY 2-line purpose descriptions (MAX 40 words total) that briefly explain operations and value. Use action verbs like "Start with...", "Use...", "Create..." but keep it short. The detailed richness goes in the "smart_response" chat message above, NOT in molecule descriptions.
 
 **WORKFLOW DESIGN PHILOSOPHY**:
 - Simple tasks (basic dashboards): 3-4 molecules

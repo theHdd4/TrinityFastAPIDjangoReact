@@ -116,7 +116,7 @@
           "purpose": "Create calculated columns for recency, frequency, and monetary metrics. Aggregate customer behavior to identify high-value patterns.",
           "atoms": [
             {
-              "id": "create-column",
+              "id": "dataframe-operations",
               "order": 1,
               "purpose": "Calculate recency, frequency, monetary metrics",
               "required": true
@@ -277,7 +277,7 @@
           "purpose": "Create calculated columns for price and volume changes. Use regression to estimate elasticity coefficients by segment.",
           "atoms": [
             {
-              "id": "create-column",
+              "id": "dataframe-operations",
               "order": 1,
               "purpose": "Calculate % price change and % volume change",
               "required": true
@@ -349,7 +349,7 @@
               "required": true
             },
             {
-              "id": "create-column",
+              "id": "dataframe-operations",
               "order": 3,
               "purpose": "Create churn indicators (days since last login, usage decline, etc.)",
               "required": true
@@ -443,7 +443,7 @@
               "required": true
             },
             {
-              "id": "create-column",
+              "id": "dataframe-operations",
               "order": 2,
               "purpose": "Calculate growth rates, targets vs actuals",
               "required": true

@@ -3,7 +3,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, Bot, User, Sparkles, Plus, Trash2, MessageCircle, RotateCcw, Clock, Settings, Paperclip, Mic, Minus } from 'lucide-react';
+import { Send, X, Bot, User, Sparkles, Plus, Trash2, MessageCircle, RotateCcw, Clock, Settings, Paperclip, Mic, Minus, Square } from 'lucide-react';
 
 // Workflow Mode AI Panel - Completely separate from SuperAgent
 // Does NOT execute - only suggests molecule compositions
@@ -595,6 +595,41 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     }
   };
 
+  // Handle stop/cancel request
+  const handleStopRequest = () => {
+    console.log('🛑 User requested to stop the ongoing workflow request');
+    
+    // Close WebSocket connection if active
+    if (wsConnection && wsConnected) {
+      console.log('🔌 Closing Workflow WebSocket connection');
+      wsConnection.close();
+      setWsConnected(false);
+      setWsConnection(null);
+    }
+    
+    // Reset loading state
+    setIsLoading(false);
+    
+    // Add a cancellation message to the chat
+    const cancelMessage: Message = {
+      id: `cancel_${Date.now()}`,
+      content: '⚠️ Request cancelled by user.',
+      sender: 'ai',
+      timestamp: new Date()
+    };
+    
+    setChats(prevChats => {
+      return prevChats.map(chat => {
+        if (chat.id === currentChatId) {
+          return { ...chat, messages: [...chat.messages, cancelMessage] };
+        }
+        return chat;
+      });
+    });
+    
+    console.log('✅ Workflow request stopped successfully');
+  };
+
   // Handle creating workflow molecules on canvas
   const handleCreateWorkflowMolecules = (molecules: any[]) => {
     if (!molecules || molecules.length === 0 || !onMoleculeAdd) return;
@@ -1047,6 +1082,16 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
               disabled={isLoading}
             />
           </div>
+          {isLoading && (
+            <Button
+              onClick={handleStopRequest}
+              className="h-12 w-12 bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/30 hover:shadow-xl hover:shadow-red-500/40 transition-all duration-300 hover:scale-110 rounded-2xl animate-fade-in"
+              size="icon"
+              title="Stop Request"
+            >
+              <Square className="w-5 h-5 fill-current" />
+            </Button>
+          )}
           <Button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isLoading}
