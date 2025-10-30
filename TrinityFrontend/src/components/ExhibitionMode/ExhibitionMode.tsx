@@ -14,6 +14,7 @@ import {
   createSlideObjectFromAtom,
   DEFAULT_CANVAS_OBJECT_WIDTH,
   DEFAULT_CANVAS_OBJECT_HEIGHT,
+  buildSlideTitleObjectId,
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
@@ -166,6 +167,7 @@ const ExhibitionMode = () => {
     setCards,
     lastLoadedContext,
     addSlideObject,
+    bulkUpdateSlideObjects,
     removeSlideObject,
     removeSlide,
     slideObjectsByCardId,
@@ -1759,8 +1761,9 @@ const ExhibitionMode = () => {
 
       const baseSlideCount = exhibitedCards.length;
       const createdCardIds: string[] = [];
+      const normalise = (value: string): string => value.replace(/\s+/g, ' ').trim().toLowerCase();
 
-      template.slides.forEach((slide, index) => {
+      template.slides.forEach(slide => {
         const afterIndex =
           baseSlideCount === 0 && createdCardIds.length === 0
             ? undefined
@@ -1776,49 +1779,98 @@ const ExhibitionMode = () => {
 
         createdCardIds.push(newCard.id);
 
+        const textBoxes = slide.content?.textBoxes ?? [];
+        const normalisedTitle = normalise(slide.title);
+        const titleTextBox =
+          normalisedTitle.length > 0
+            ? textBoxes.find(textBox => normalise(textBox.text) === normalisedTitle)
+            : undefined;
+
+        if (titleTextBox) {
+          const titleProps: Record<string, unknown> = {};
+          if (typeof titleTextBox.fontSize === 'number') {
+            titleProps.fontSize = titleTextBox.fontSize;
+          }
+          if (titleTextBox.align) {
+            titleProps.align = titleTextBox.align;
+          }
+          if (typeof titleTextBox.color === 'string') {
+            titleProps.color = titleTextBox.color;
+          }
+          if (typeof titleTextBox.fontFamily === 'string') {
+            titleProps.fontFamily = titleTextBox.fontFamily;
+          }
+          if (typeof titleTextBox.bold === 'boolean') {
+            titleProps.bold = titleTextBox.bold;
+          }
+          if (typeof titleTextBox.italic === 'boolean') {
+            titleProps.italic = titleTextBox.italic;
+          }
+          if (typeof titleTextBox.underline === 'boolean') {
+            titleProps.underline = titleTextBox.underline;
+          }
+
+          bulkUpdateSlideObjects(newCard.id, {
+            [buildSlideTitleObjectId(newCard.id)]: {
+              x: titleTextBox.position.x,
+              y: titleTextBox.position.y,
+              width: titleTextBox.size.width,
+              height: titleTextBox.size.height,
+              ...(Object.keys(titleProps).length > 0 ? { props: titleProps } : {}),
+            },
+          });
+        }
+
         updateCard(newCard.id, { title: slide.title });
 
-        slide.content?.textBoxes?.forEach(textBox => {
-          const formatting: Partial<TextBoxFormatting> = {
-            text: textBox.text,
-          };
+        const supportingTextBoxes =
+          titleTextBox && textBoxes.length > 0
+            ? textBoxes.filter(textBox => textBox !== titleTextBox)
+            : textBoxes;
 
-          if (typeof textBox.fontSize === 'number') {
-            formatting.fontSize = textBox.fontSize;
-          }
-          if (textBox.align) {
-            formatting.align = textBox.align;
-          }
-          if (typeof textBox.color === 'string') {
-            formatting.color = textBox.color;
-          }
-          if (typeof textBox.fontFamily === 'string') {
-            formatting.fontFamily = textBox.fontFamily;
-          }
-          if (typeof textBox.bold === 'boolean') {
-            formatting.bold = textBox.bold;
-          }
-          if (typeof textBox.italic === 'boolean') {
-            formatting.italic = textBox.italic;
-          }
-          if (typeof textBox.underline === 'boolean') {
-            formatting.underline = textBox.underline;
-          }
+        supportingTextBoxes
+          .filter(textBox => textBox.text.trim().length > 0)
+          .forEach(textBox => {
+            const formatting: Partial<TextBoxFormatting> = {
+              text: textBox.text,
+            };
 
-          addSlideObject(
-            newCard.id,
-            createTextBoxSlideObject(
-              generateTextBoxId(),
-              {
-                x: textBox.position.x,
-                y: textBox.position.y,
-                width: textBox.size.width,
-                height: textBox.size.height,
-              },
-              formatting,
-            ),
-          );
-        });
+            if (typeof textBox.fontSize === 'number') {
+              formatting.fontSize = textBox.fontSize;
+            }
+            if (textBox.align) {
+              formatting.align = textBox.align;
+            }
+            if (typeof textBox.color === 'string') {
+              formatting.color = textBox.color;
+            }
+            if (typeof textBox.fontFamily === 'string') {
+              formatting.fontFamily = textBox.fontFamily;
+            }
+            if (typeof textBox.bold === 'boolean') {
+              formatting.bold = textBox.bold;
+            }
+            if (typeof textBox.italic === 'boolean') {
+              formatting.italic = textBox.italic;
+            }
+            if (typeof textBox.underline === 'boolean') {
+              formatting.underline = textBox.underline;
+            }
+
+            addSlideObject(
+              newCard.id,
+              createTextBoxSlideObject(
+                generateTextBoxId(),
+                {
+                  x: textBox.position.x,
+                  y: textBox.position.y,
+                  width: textBox.size.width,
+                  height: textBox.size.height,
+                },
+                formatting,
+              ),
+            );
+          });
 
         slide.content?.shapes?.forEach(shape => {
           const definition = findShapeDefinition(shape.shapeId);
@@ -1879,6 +1931,7 @@ const ExhibitionMode = () => {
     [
       addBlankSlide,
       addSlideObject,
+      bulkUpdateSlideObjects,
       canEdit,
       exhibitedCards.length,
       generateShapeId,
@@ -1946,6 +1999,7 @@ const ExhibitionMode = () => {
             onApplyTemplate={handleApplyTemplate}
             onClose={handleCloseTemplatesPanel}
             canEdit={canEdit}
+            currentApp={projectContext?.app_name}
           />
         );
       case 'images':
@@ -2020,6 +2074,7 @@ const ExhibitionMode = () => {
     notes,
     notesPanelVisible,
     operationsPanelState,
+    projectContext,
     updateCurrentPresentationSettings,
   ]);
   const emptyCanvas = (
