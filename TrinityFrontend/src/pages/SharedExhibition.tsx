@@ -6,6 +6,7 @@ import { fetchSharedExhibitionLayout, type ExhibitionLayoutResponse } from '@/li
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { SlideCanvas } from '@/components/ExhibitionMode/components/SlideCanvas';
 import { Button } from '@/components/ui/button';
+import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -148,9 +149,6 @@ const SharedExhibition = () => {
   }, [metadata?.updated_at]);
 
   const headerTitle = metadata?.project_name ?? 'Shared Exhibition';
-  const subheading = metadata
-    ? `${metadata.client_name} · ${metadata.app_name}`
-    : 'Trinity Exhibition Mode';
 
   const totalSlides = exhibitedCards.length;
   const activeSlide = totalSlides > 0 ? exhibitedCards[Math.min(activeSlideIndex, totalSlides - 1)] : null;
@@ -298,13 +296,18 @@ const SharedExhibition = () => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white">
       <div className="max-w-6xl mx-auto px-6 py-12 space-y-12">
-        <header className="space-y-4 text-center">
-          <div className="flex items-center justify-center gap-3 text-sm text-white/60">
-            <span className="tracking-[0.4em] uppercase text-xs">Trinity Exhibition</span>
+        <header className="space-y-6 text-center">
+          <div className="flex flex-col items-center justify-center gap-2 text-sm text-white/60">
+            <AnimatedLogo className="h-16 w-16 drop-shadow-[0_0_12px_rgba(255,255,255,0.5)]" />
+            <span className="text-3xl font-mono font-semibold text-white">Trinity</span>
+            <span className="tracking-[0.4em] uppercase text-xs text-white/70">Enter The Matrix</span>
+            <div className="h-1 w-40 max-w-full bg-[#fec107] rounded-full" />
+            <span className="text-xs text-white/60">A Quant Matrix AI Experience</span>
           </div>
-          <h1 className="text-3xl md:text-4xl font-semibold text-white">{headerTitle}</h1>
-          <p className="text-sm text-white/60">{subheading}</p>
-          {updatedLabel && <p className="text-xs text-white/50">Last updated {updatedLabel}</p>}
+          <div className="space-y-2">
+            <h1 className="text-3xl md:text-4xl font-semibold text-white">{headerTitle}</h1>
+            {updatedLabel && <p className="text-xs text-white/50">Last updated {updatedLabel}</p>}
+          </div>
         </header>
 
         {renderContent()}

@@ -52,6 +52,26 @@ const resolveShareLink = (link: string): string => {
 };
 
 const copyToClipboard = async (text: string) => {
+  const attemptClipboardData = () => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    type LegacyClipboard = { setData?: (format: string, data: string) => boolean | void };
+    const clipboardData = (window as typeof window & { clipboardData?: LegacyClipboard }).clipboardData;
+    if (!clipboardData?.setData) {
+      return false;
+    }
+
+    try {
+      const result = clipboardData.setData('Text', text);
+      return result !== false;
+    } catch (error) {
+      console.warn('window.clipboardData.setData failed', error);
+      return false;
+    }
+  };
+
   const attemptNativeClipboard = async () => {
     if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
       return false;
@@ -76,8 +96,12 @@ const copyToClipboard = async (text: string) => {
     textarea.setAttribute('readonly', '');
     textarea.style.position = 'absolute';
     textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    textarea.style.opacity = '0';
     document.body.appendChild(textarea);
+    textarea.focus({ preventScroll: true });
     textarea.select();
+    textarea.setSelectionRange(0, textarea.value.length);
 
     let successful = false;
     try {
@@ -96,6 +120,10 @@ const copyToClipboard = async (text: string) => {
   }
 
   if (attemptExecCommand()) {
+    return;
+  }
+
+  if (attemptClipboardData()) {
     return;
   }
 
@@ -221,7 +249,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       console.error('Failed to copy share link', error);
       toast.error('Unable to copy the link. Please copy it manually.');
     }
-  }, [shareLink, isGenerating]);
+  }, [shareLink, isGenerating, toast]);
 
   const handleCopyEmbed = useCallback(async () => {
     if (!embedCode || isGenerating) {
@@ -237,7 +265,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       console.error('Failed to copy embed code', error);
       toast.error('Unable to copy the embed code. Please copy it manually.');
     }
-  }, [embedCode, isGenerating]);
+  }, [embedCode, isGenerating, toast]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
