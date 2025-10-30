@@ -39,6 +39,7 @@ export interface TemplateDefinition {
   description: string;
   category: string;
   tags: string[];
+  aliases?: string[];
   icon: LucideIcon;
   slides: TemplateSlideDefinition[];
 }
