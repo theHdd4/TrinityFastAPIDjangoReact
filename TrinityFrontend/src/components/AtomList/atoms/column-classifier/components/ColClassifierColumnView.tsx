@@ -71,13 +71,8 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
     if (!objectName) return;
     const fetchSummary = async () => {
       try {
-        const formData = new FormData();
-        formData.append('validator_atom_id', '');
-        formData.append('file_key', objectName);
-        formData.append('bucket_name', 'trinity');
-        formData.append('object_names', objectName);
-        
-        const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+        const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(objectName)}`;
+        const res = await fetch(url);
         const data = await res.json();
         
         if (data.status === 'SUCCESS' && data.cardinality) {

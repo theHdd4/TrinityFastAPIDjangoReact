@@ -2112,10 +2112,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             return;
           }
 
-          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
-            return;
-          }
-
           onRemoveObject(object.id);
         });
 
@@ -2202,10 +2198,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           if (object.type === 'accent-image') {
-            return;
-          }
-
-          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
             return;
           }
 
@@ -4025,26 +4017,33 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
             const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
-          const renderObject = () => (
-            <div
-              className="absolute group"
-              style={{
-                left: object.x,
-                top: object.y,
-                width: object.width,
-                height: object.height,
-                zIndex: isSelected ? zIndex + 100 : zIndex,
-              }}
-              onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
-              onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
-            >
+          const renderObject = () => {
+            return (
+              <div
+                className="absolute group"
+                style={{
+                  left: object.x,
+                  top: object.y,
+                  width: object.width,
+                  height: object.height,
+                  zIndex: isSelected ? zIndex + 100 : zIndex,
+                }}
+                onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
+                onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
+              >
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
-                    'pointer-events-none absolute inset-0 z-40 border border-dotted border-yellow-400 transition-all duration-200',
-                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
-                      ? 'rounded-[22px]'
-                      : 'rounded-[32px]'
+                    'pointer-events-none absolute -inset-1 z-40 border-2 border-dotted border-yellow-400 transition-all duration-200',
+                    (() => {
+                      if (isShapeObject) {
+                        return 'rounded-[12px]';
+                      }
+                      if (suppressCardChrome || isTextBoxObject || isTableObject || isChartObject) {
+                        return 'rounded-[22px]';
+                      }
+                      return 'rounded-[32px]';
+                    })(),
                   )}
                   aria-hidden="true"
                 />
@@ -4246,7 +4245,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   />
                 ))}
             </div>
-          );
+            );
+          };
 
           if (isTableObject) {
             return React.cloneElement(renderObject(), { key: object.id });

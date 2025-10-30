@@ -45,14 +45,12 @@ export const ThemesPanel: React.FC<ThemesPanelProps> = ({ onClose }) => {
 
   return (
     <div className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl flex flex-col max-h-full overflow-hidden">
-      <div className="relative flex items-center justify-between overflow-hidden border-b border-border/60 px-5 py-4">
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 via-pink-500/20 to-orange-400/20" aria-hidden />
-        <div className="absolute -top-12 -right-6 h-24 w-24 rounded-full bg-primary/10 blur-3xl" aria-hidden />
-        <div className="relative flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/30 bg-white/20 text-white backdrop-blur">
+      <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary/10 text-primary">
             <Palette className="h-4 w-4" />
           </span>
-          <div className="space-y-0.5">
+          <div>
             <h3 className="text-lg font-semibold text-foreground">Themes</h3>
             <p className="text-xs text-muted-foreground">Refresh your slides with curated palettes.</p>
           </div>
@@ -61,7 +59,7 @@ export const ThemesPanel: React.FC<ThemesPanelProps> = ({ onClose }) => {
           variant="ghost"
           size="icon"
           type="button"
-          className="relative h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
           onClick={onClose}
         >
           <X className="h-4 w-4" />

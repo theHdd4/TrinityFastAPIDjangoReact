@@ -122,16 +122,22 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       setLoading({ fetchingColumns: true, uploading: false });
       
       // Call all required endpoints as specified by user
-      const [allColumnsResponse, columnsResponse, categoricalColumns] = await Promise.all([
+      const [allColumnsResponse, columnsResponse] = await Promise.all([
         chartMakerApi.getAllColumns(fileId),
-        chartMakerApi.getColumns(fileId),
-        chartMakerApi.getColumns(fileId).then(response => response.categorical_columns)
+        chartMakerApi.getColumns(fileId)
       ]);
 
-      // When preserving charts, ensure we fetch unique values for columns already used in filters
-      let columnsToFetch = categoricalColumns;
+      // Fetch unique values for ALL columns (both categorical and numeric)
+      // This ensures that any column can be used as a filter with full unique values
+      const allColumns = allColumnsResponse.columns || [];
+      let columnsToFetch = allColumns;
+      
+      console.log('[ChartMakerProperties] All columns from backend:', allColumns);
+      console.log('[ChartMakerProperties] Fetching unique values for columns:', columnsToFetch);
+      
+      // When preserving charts, still collect filter columns to ensure they're included
       if (preserveCharts) {
-        const filterColumns = new Set<string>();
+        const filterColumns = new Set<string>(allColumns);
         updatedCharts.forEach(chart => {
           // Collect filter columns from simple mode
           Object.keys(chart.filters || {}).forEach(col => filterColumns.add(col));
@@ -140,14 +146,16 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
             Object.keys(trace.filters || {}).forEach(col => filterColumns.add(col));
           });
         });
-        // Merge with categorical columns to ensure all needed columns are fetched
-        columnsToFetch = Array.from(new Set([...categoricalColumns, ...Array.from(filterColumns)]));
+        columnsToFetch = Array.from(filterColumns);
+        console.log('[ChartMakerProperties] (preserveCharts mode) Fetching unique values for:', columnsToFetch);
       }
 
-      // Get unique values for categorical columns (and filter columns if preserving charts)
+      // Get unique values for ALL columns (both categorical and numeric)
       if (columnsToFetch.length > 0) {
         setLoading({ fetchingUniqueValues: true, fetchingColumns: false });
+        console.log('[ChartMakerProperties] Calling getUniqueValues API with columns:', columnsToFetch);
         const uniqueValuesResponse = await chartMakerApi.getUniqueValues(fileId, columnsToFetch);
+        console.log('[ChartMakerProperties] Received unique values for columns:', Object.keys(uniqueValuesResponse.values || {}));
         
         // Update uploaded data with comprehensive information
         handleSettingsChange({
@@ -163,6 +171,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
           charts: updatedCharts
         });
       } else {
+        console.warn('[ChartMakerProperties] No columns to fetch unique values for!');
         // Update uploaded data with column information
         handleSettingsChange({
           uploadedData: {
@@ -205,49 +214,39 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   const hasExistingUpdates = hasRenderedCharts || hasUploadedData;
 
   // Ensure the backend has a valid file for the selected datasource when the
-  // project is reloaded. The saved `fileId` may point to a temporary file that
-  // no longer exists on the server, which would cause chart generation to fail
-  // with a 500 error. When a datasource is present, verify the stored `fileId`
-  // and reload the dataframe if necessary to obtain a fresh identifier.
+  // project is reloaded. ALWAYS reload the file to fetch fresh column information
+  // and unique values, as the same filename may have different column structures
+  // across different projects/uploads.
   useEffect(() => {
     const ensureFileReady = async () => {
       if (!settings.dataSource) return;
 
-      let fileValid = false;
-
-      if (settings.fileId) {
-        try {
-          await chartMakerApi.getAllColumns(settings.fileId);
-          fileValid = true;
-        } catch {
-          console.warn('[ChartMakerProperties] Stored file_id is invalid, reloading');
+      // ALWAYS reload the file to get fresh column data and unique values
+      // This ensures that even if the same filename is used across different projects,
+      // we get the correct column structure and values for the current file
+      try {
+        setLoading({ uploading: true });
+        let objectName = settings.dataSource;
+        if (!objectName.endsWith('.arrow')) {
+          objectName += '.arrow';
         }
-      }
-
-      if (!fileValid) {
-        try {
-          setLoading({ uploading: true });
-          let objectName = settings.dataSource;
-          if (!objectName.endsWith('.arrow')) {
-            objectName += '.arrow';
-          }
-          const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
-          const chartData: ChartData = {
-            columns: uploadResponse.columns,
-            rows: uploadResponse.sample_data,
-            numeric_columns: uploadResponse.numeric_columns,
-            categorical_columns: uploadResponse.categorical_columns,
-            unique_values: uploadResponse.unique_values,
-            file_id: uploadResponse.file_id,
-            row_count: uploadResponse.row_count,
-          };
-          // Pass preserveCharts=true to keep existing chart configurations when reloading file
-          await handleDataUpload(chartData, uploadResponse.file_id, settings.dataSource, true);
-        } catch (err) {
-          console.error('[ChartMakerProperties] Failed to reload dataframe:', err);
-          setError(err instanceof Error ? err.message : 'Failed to reload dataframe');
-          setLoading({ uploading: false });
-        }
+        console.log('[ChartMakerProperties] Reloading file to fetch fresh column data:', objectName);
+        const uploadResponse = await chartMakerApi.loadSavedDataframe(objectName);
+        const chartData: ChartData = {
+          columns: uploadResponse.columns,
+          rows: uploadResponse.sample_data,
+          numeric_columns: uploadResponse.numeric_columns,
+          categorical_columns: uploadResponse.categorical_columns,
+          unique_values: uploadResponse.unique_values,
+          file_id: uploadResponse.file_id,
+          row_count: uploadResponse.row_count,
+        };
+        // Pass preserveCharts=true to keep existing chart configurations when reloading file
+        await handleDataUpload(chartData, uploadResponse.file_id, settings.dataSource, true);
+      } catch (err) {
+        console.error('[ChartMakerProperties] Failed to reload dataframe:', err);
+        setError(err instanceof Error ? err.message : 'Failed to reload dataframe');
+        setLoading({ uploading: false });
       }
     };
 
