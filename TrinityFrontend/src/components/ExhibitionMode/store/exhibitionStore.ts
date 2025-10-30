@@ -955,11 +955,37 @@ const synchroniseSlideObjects = (
     const existingObject = preservedLayoutTextBoxes.get(objectId);
 
     if (existingObject) {
-      next.push({
+      const existingProps = { ...(existingObject.props ?? {}) } as Record<string, unknown>;
+      const currentText = typeof existingProps.text === 'string' ? existingProps.text : '';
+      const trimmedCurrentText = currentText.trim();
+      const trimmedPlaceholder = definition.placeholder.trim();
+      const hasCustomText = trimmedCurrentText.length > 0 && trimmedCurrentText !== trimmedPlaceholder;
+
+      if (!hasCustomText) {
+        existingProps.text = definition.placeholder;
+      }
+
+      if (definition.formatting && !hasCustomText) {
+        Object.entries(definition.formatting).forEach(([key, value]) => {
+          if (!(key in existingProps)) {
+            existingProps[key] = value as unknown;
+          }
+        });
+      }
+
+      const repositioned: SlideObject = {
         ...existingObject,
+        x: definition.x,
+        y: definition.y,
+        width: definition.width,
+        height: definition.height,
+        rotation: typeof existingObject.rotation === 'number' ? existingObject.rotation : 0,
         zIndex:
           typeof existingObject.zIndex === 'number' ? existingObject.zIndex : next.length + 1,
-      });
+        props: existingProps,
+      };
+
+      next.push(repositioned);
       return;
     }
 

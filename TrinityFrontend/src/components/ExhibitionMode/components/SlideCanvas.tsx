@@ -1479,6 +1479,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       }
                     : {
                         height: CANVAS_STAGE_HEIGHT,
+                        width: DEFAULT_PRESENTATION_WIDTH,
                         ...slideBackgroundStyle,
                         ...(themeContext.backgroundStyle ?? {}),
                         ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
