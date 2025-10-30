@@ -5,11 +5,9 @@ import html
 import io
 import logging
 import math
-import os
 import re
 from typing import Iterable, Optional, Sequence
 
-import httpx
 from pptx import Presentation
 from pptx.chart.data import ChartData
 from pptx.dml.color import RGBColor
@@ -21,6 +19,7 @@ from pptx.util import Emu, Pt
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
+from .renderer import ExhibitionRendererError, build_inputs, render_slide_batch
 from .schemas import (
     DocumentStylesPayload,
     ExhibitionExportRequest,
@@ -36,7 +35,6 @@ logger = logging.getLogger(__name__)
 PX_PER_INCH = 96.0
 EMU_PER_INCH = 914400
 PT_PER_INCH = 72.0
-DEFAULT_RENDER_SERVICE_URL = "http://localhost:4100"
 
 CANVAS_STAGE_HEIGHT = 520.0
 TOP_LAYOUT_MIN_HEIGHT = 210.0
@@ -89,17 +87,8 @@ SHAPE_ID_TO_MSO: dict[str, MSO_SHAPE] = {
 }
 
 LINE_SHAPES = {"line-horizontal", "line-vertical", "line-diagonal"}
-
-
 class ExportGenerationError(Exception):
     """Raised when an export file cannot be generated."""
-
-
-def _get_render_service_url() -> str:
-    configured = (os.environ.get("EXHIBITION_RENDER_SERVICE_URL") or "").strip()
-    if configured:
-        return configured.rstrip("/")
-    return DEFAULT_RENDER_SERVICE_URL
 
 
 def _px_to_inches(value: float) -> float:
@@ -795,57 +784,21 @@ def _request_slide_screenshots(
             pixel_ratios.append(ratio)
         render_slides.append(render_payload)
 
-    request_payload: dict[str, object] = {
-        "slides": render_slides,
-        "styles": styles.model_dump(by_alias=True),
-    }
-
-    if pixel_ratios:
-        request_payload["pixelRatio"] = max(pixel_ratios)
-
-    base_url = _get_render_service_url()
-
     try:
-        with httpx.Client(base_url=base_url, timeout=60.0) as client:
-            response = client.post("/render/batch", json=request_payload)
-        response.raise_for_status()
-    except httpx.HTTPStatusError as exc:  # pragma: no cover - upstream failure
-        detail = exc.response.text if exc.response is not None else ""
-        logger.error(
-            "Rendering service responded with %s: %s", exc.response.status_code, detail
+        inputs = build_inputs(render_slides)
+        rendered = render_slide_batch(
+            inputs,
+            styles,
+            pixel_ratio=max(pixel_ratios) if pixel_ratios else None,
         )
-        message = "Rendering service returned an error while capturing slides."
-        if detail:
-            message = f"{message} ({detail.strip()})"
-        raise ExportGenerationError(message) from exc
-    except httpx.RequestError as exc:  # pragma: no cover - network failure
-        logger.error("Unable to reach rendering service at %s: %s", base_url, exc)
-        raise ExportGenerationError('Unable to connect to the rendering service.') from exc
+    except ExhibitionRendererError as exc:
+        message = f"Server-side renderer failed to capture slides: {exc}"
+        if strict:
+            raise ExportGenerationError(message) from exc
+        logger.warning(message)
+        return {}
 
-    try:
-        payload = response.json()
-    except ValueError as exc:  # pragma: no cover - unexpected payload
-        raise ExportGenerationError('Rendering service returned an invalid response.') from exc
-
-    screenshots = payload.get("screenshots")
-    if not isinstance(screenshots, list):
-        raise ExportGenerationError('Rendering service response did not include screenshots.')
-
-    results: dict[str, dict] = {}
-    for entry in screenshots:
-        if not isinstance(entry, dict):
-            continue
-        slide_id = entry.get("id")
-        if entry.get("error"):
-            message = f"Rendering service failed to capture slide {slide_id or '?'}"
-            if strict:
-                raise ExportGenerationError(message)
-            logger.warning(message)
-            continue
-        if isinstance(slide_id, str):
-            results[slide_id] = entry
-
-    return results
+    return {entry.id: entry.as_payload() for entry in rendered}
 
 
 def _attempt_server_screenshots(

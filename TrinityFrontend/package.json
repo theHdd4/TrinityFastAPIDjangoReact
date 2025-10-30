@@ -8,8 +8,7 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "renderer:start": "npm --prefix exhibition-renderer start"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.0.7",

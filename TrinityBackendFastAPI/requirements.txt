@@ -22,3 +22,4 @@ python-dotenv
 python-pptx==0.6.23
 reportlab==4.2.5
 httpx==0.27.2
+playwright==1.48.0
