@@ -55,8 +55,12 @@ export interface DataUploadSettings {
   classifierSelectedFile?: string;
   /** Classifier dimensions array */
   classifierDimensions?: string[];
+  /** List of all custom dimensions created (stays even when unchecked) */
+  classifierCustomDimensionsList?: string[];
   /** Enable dimension mapping in classifier */
   classifierEnableDimensionMapping?: boolean;
+  /** Array of file names that have saved classifier configurations */
+  classifierSavedFiles?: string[];
   validatorId?: string;
   requiredFiles?: string[];
   validations?: Record<string, any>;
@@ -114,7 +118,9 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   },
   classifierSelectedFile: "",
   classifierDimensions: [],
+  classifierCustomDimensionsList: [],
   classifierEnableDimensionMapping: false,
+  classifierSavedFiles: [],
 };
 
 export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
@@ -144,7 +150,9 @@ export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   },
   classifierSelectedFile: "",
   classifierDimensions: [],
+  classifierCustomDimensionsList: [],
   classifierEnableDimensionMapping: false,
+  classifierSavedFiles: [],
 });
 
 export interface FeatureOverviewExhibitionSelectionDimension {
