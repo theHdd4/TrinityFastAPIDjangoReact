@@ -78,7 +78,7 @@ services:
 
   exhibition-renderer:
     build:
-      context: ./ExhibitionRendererService
+      context: ./TrinityFrontend/exhibition-renderer
       dockerfile: Dockerfile
     environment:
       PORT: 4100
