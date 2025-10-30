@@ -20,6 +20,7 @@ from .atom_config import (
     load_atom_list_configuration,
     _get_env_ids,
 )
+from .template_config import store_template_configuration
 from common.minio_utils import copy_prefix, remove_prefix
 from pymongo import MongoClient
 from django.conf import settings
@@ -583,6 +584,14 @@ class ProjectViewSet(viewsets.ModelViewSet):
             state=state,
             base_project=serialized,
         )
+        try:
+            store_template_configuration(project=project, template=template, state=state)
+        except Exception as exc:  # pragma: no cover - Mongo failures are non-fatal
+            logger.error(
+                "Failed to persist template configuration for template %s: %s",
+                template.pk,
+                exc,
+            )
         return Response(TemplateSerializer(template).data, status=status.HTTP_201_CREATED)
 
 

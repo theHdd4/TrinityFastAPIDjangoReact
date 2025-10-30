@@ -58,7 +58,32 @@ interface Template {
   createdAt: Date;
   usageCount: number;
   baseProject: any;
+  configurationSummary?: {
+    exhibitionSlides: number;
+    atomCards: {
+      laboratory: number;
+      workflow: number;
+      exhibition: number;
+    };
+    atomEntryCount: number;
+    moleculeCount: number;
+  };
 }
+
+const parseTemplateSummary = (raw: any): Template['configurationSummary'] => {
+  if (!raw) return undefined;
+  const atomCards = raw.atomCards || raw.atom_cards || {};
+  return {
+    exhibitionSlides: raw.exhibitionSlides ?? raw.exhibition_slides ?? 0,
+    atomCards: {
+      laboratory: atomCards.laboratory ?? 0,
+      workflow: atomCards.workflow ?? 0,
+      exhibition: atomCards.exhibition ?? 0
+    },
+    atomEntryCount: raw.atomEntryCount ?? raw.atom_entry_count ?? 0,
+    moleculeCount: raw.moleculeCount ?? raw.molecule_count ?? 0
+  };
+};
 
 const Projects = () => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -226,7 +251,8 @@ const Projects = () => {
             description: t.description,
             createdAt: new Date(t.created_at),
             usageCount: t.usage_count || 0,
-            baseProject: t.base_project
+            baseProject: t.base_project,
+            configurationSummary: parseTemplateSummary(t.configuration_summary)
           }));
           setTemplates(parsed);
         }
@@ -367,7 +393,8 @@ const Projects = () => {
           description: t.description,
           createdAt: new Date(t.created_at),
           usageCount: t.usage_count || 0,
-          baseProject: t.base_project
+          baseProject: t.base_project,
+          configurationSummary: parseTemplateSummary(t.configuration_summary)
         };
         setTemplates([...templates, template]);
       }
@@ -1153,6 +1180,25 @@ const Projects = () => {
                         <h3 className={`${viewMode === 'grid' ? 'text-xl' : 'text-lg'} font-semibold text-gray-900 mb-2 group-hover:text-gray-700 transition-colors duration-300 line-clamp-2`}>{template.name}</h3>
                       )}
                       <p className="text-sm text-gray-600 mb-4 line-clamp-2 leading-relaxed">{template.description}</p>
+                      {template.configurationSummary && (
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          <Badge variant="secondary" className="bg-slate-100 text-slate-600 border border-slate-200">
+                            Slides: {template.configurationSummary.exhibitionSlides}
+                          </Badge>
+                          <Badge variant="secondary" className="bg-emerald-100 text-emerald-600 border border-emerald-200">
+                            Lab cards: {template.configurationSummary.atomCards.laboratory}
+                          </Badge>
+                          <Badge variant="secondary" className="bg-blue-100 text-blue-600 border border-blue-200">
+                            Workflow cards: {template.configurationSummary.atomCards.workflow}
+                          </Badge>
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-600 border border-violet-200">
+                            Exhibition cards: {template.configurationSummary.atomCards.exhibition}
+                          </Badge>
+                          <Badge variant="secondary" className="bg-amber-100 text-amber-600 border border-amber-200">
+                            Molecules: {template.configurationSummary.moleculeCount}
+                          </Badge>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-500">{template.usageCount} uses</span>
                         {viewMode === 'list' && hoveredTemplate === template.id && (
