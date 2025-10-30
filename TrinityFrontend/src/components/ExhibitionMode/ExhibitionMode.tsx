@@ -1908,6 +1908,41 @@ const ExhibitionMode = () => {
             ),
           );
         });
+
+        slide.content?.charts?.forEach(chart => {
+          const chartObject = createChartSlideObject(
+            generateChartId(),
+            chart.data,
+            chart.config,
+            {
+              x: chart.position.x,
+              y: chart.position.y,
+              width: chart.size.width,
+              height: chart.size.height,
+            },
+          );
+
+          addSlideObject(newCard.id, chartObject);
+        });
+
+        slide.content?.images?.forEach(image => {
+          const imageObject = createImageSlideObject(
+            generateImageObjectId(),
+            image.src,
+            {
+              name: image.name ?? image.description ?? null,
+              source: image.source ?? 'Template placeholder image',
+            },
+            {
+              x: image.position.x,
+              y: image.position.y,
+              width: image.size.width,
+              height: image.size.height,
+            },
+          );
+
+          addSlideObject(newCard.id, imageObject);
+        });
       });
 
       if (createdCardIds.length > 0) {
