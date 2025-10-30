@@ -496,8 +496,17 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     if (!canEdit) {
       return;
     }
+
     onInteract();
-    onBeginEditing();
+
+    if (!isEditing) {
+      onBeginEditing();
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      textRef.current?.focus();
+    });
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
