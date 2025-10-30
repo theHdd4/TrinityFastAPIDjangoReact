@@ -402,6 +402,17 @@ export interface PreparedSlidesForExport {
   documentStyles: ExportDocumentStyles | null;
 }
 
+export interface RenderedSlideScreenshot {
+  id: string;
+  index: number;
+  dataUrl: string;
+  width: number;
+  height: number;
+  cssWidth?: number | null;
+  cssHeight?: number | null;
+  pixelRatio?: number | null;
+}
+
 const renderSlideForCapture = (
   root: ReturnType<typeof createRoot>,
   card: LayoutCard,
@@ -872,6 +883,107 @@ export const downloadSlidesAsImages = async (
   for (let index = 0; index < captures.length; index += 1) {
     const capture = captures[index];
     const response = await fetch(capture.dataUrl);
+    const blob = await response.blob();
+    const paddedIndex = String(index + 1).padStart(2, '0');
+    downloadBlob(blob, `${safeBase}-slide-${paddedIndex}.png`);
+    await new Promise(resolve => setTimeout(resolve, DOWNLOAD_DELAY_MS));
+  }
+};
+
+const normaliseRenderedScreenshot = (entry: any): RenderedSlideScreenshot | null => {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const id = typeof entry.id === 'string' ? entry.id : '';
+  const dataUrl = typeof entry.dataUrl === 'string' ? entry.dataUrl : '';
+
+  if (!id || !dataUrl) {
+    return null;
+  }
+
+  const toNumber = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number.parseFloat(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+    return null;
+  };
+
+  const width = toNumber(entry.width) ?? 0;
+  const height = toNumber(entry.height) ?? 0;
+  const index = toNumber(entry.index) ?? 0;
+
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return {
+    id,
+    index,
+    dataUrl,
+    width,
+    height,
+    cssWidth: toNumber(entry.cssWidth),
+    cssHeight: toNumber(entry.cssHeight),
+    pixelRatio: toNumber(entry.pixelRatio),
+  };
+};
+
+export const requestRenderedSlideScreenshots = async (
+  payload: ExhibitionExportPayload,
+): Promise<RenderedSlideScreenshot[]> => {
+  ensureBrowserEnvironment('Rendered slide capture');
+
+  const endpoint = `${EXHIBITION_API}/export/screenshots`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify(payload as JsonCompatible),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || 'Failed to render slides for download.');
+  }
+
+  const body = (await response.json()) as { slides?: unknown };
+  const slides = Array.isArray(body?.slides) ? body.slides : [];
+  const rendered = slides
+    .map(normaliseRenderedScreenshot)
+    .filter((value): value is RenderedSlideScreenshot => Boolean(value));
+
+  if (rendered.length === 0) {
+    throw new Error('The rendering service did not return any slides.');
+  }
+
+  return rendered;
+};
+
+export const downloadRenderedSlideScreenshots = async (
+  screenshots: RenderedSlideScreenshot[],
+  baseTitle: string,
+): Promise<void> => {
+  ensureBrowserEnvironment('Rendered slide download');
+
+  if (screenshots.length === 0) {
+    return;
+  }
+
+  const safeBase = sanitizeFileName(baseTitle);
+  const ordered = [...screenshots].sort((a, b) => a.index - b.index);
+
+  for (let index = 0; index < ordered.length; index += 1) {
+    const screenshot = ordered[index];
+    const response = await fetch(screenshot.dataUrl);
     const blob = await response.blob();
     const paddedIndex = String(index + 1).padStart(2, '0');
     downloadBlob(blob, `${safeBase}-slide-${paddedIndex}.png`);

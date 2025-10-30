@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import {
+import { 
   Users,
   Share2,
   Download,
@@ -21,15 +21,12 @@ import {
   ChevronDown,
   BarChart3,
   Check,
+  Loader2,
+  RefreshCcw,
 } from 'lucide-react';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { toast } from 'sonner';
+import { createExhibitionShareLink } from '@/lib/shareLinks';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 
 interface ShareDialogProps {
   open: boolean;
@@ -37,36 +34,175 @@ interface ShareDialogProps {
   projectName?: string;
 }
 
-const SHARE_PATH = '/exhibition/shared/';
-
-const generateShareLink = () => {
-  if (typeof window === 'undefined') {
+const resolveShareLink = (link: string): string => {
+  if (!link) {
     return '';
   }
 
-  return `${window.location.origin}${SHARE_PATH}${Date.now()}`;
-};
-
-const copyToClipboard = async (text: string) => {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+  if (/^https?:\/\//i.test(link)) {
+    return link;
   }
 
-  if (typeof document !== 'undefined') {
+  if (typeof window !== 'undefined') {
+    const prefix = link.startsWith('/') ? '' : '/';
+    return `${window.location.origin}${prefix}${link}`;
+  }
+
+  return link;
+};
+
+type CopyToClipboardOptions = {
+  fallbackTarget?: HTMLInputElement | HTMLTextAreaElement | null;
+};
+
+const copyToClipboard = async (text: string, options?: CopyToClipboardOptions) => {
+  const fallbackTarget = options?.fallbackTarget ?? null;
+
+  const attemptClipboardData = () => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+
+    type LegacyClipboard = { setData?: (format: string, data: string) => boolean | void };
+    const clipboardData = (window as typeof window & { clipboardData?: LegacyClipboard }).clipboardData;
+    if (!clipboardData?.setData) {
+      return false;
+    }
+
+    try {
+      const result = clipboardData.setData('Text', text);
+      return result !== false;
+    } catch (error) {
+      console.warn('window.clipboardData.setData failed', error);
+      return false;
+    }
+  };
+
+  const attemptNativeClipboard = async () => {
+    if (
+      typeof navigator === 'undefined' ||
+      typeof window === 'undefined' ||
+      !window.isSecureContext ||
+      !navigator.clipboard?.writeText
+    ) {
+      return false;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      console.warn('navigator.clipboard.writeText failed, falling back to execCommand', error);
+      return false;
+    }
+  };
+
+  const attemptWithTarget = () => {
+    if (!fallbackTarget) {
+      return false;
+    }
+
+    const element = fallbackTarget;
+    const wasReadOnly = 'readOnly' in element ? element.readOnly : false;
+    const wasDisabled = 'disabled' in element ? element.disabled : false;
+    const previouslyFocused = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+
+    if ('readOnly' in element) {
+      element.readOnly = false;
+    }
+
+    if ('disabled' in element) {
+      element.disabled = false;
+    }
+
+    try {
+      element.focus();
+    } catch (error) {
+      console.warn('focus on fallback target failed', error);
+    }
+
+    element.select();
+
+    let successful = false;
+
+    try {
+      successful = document.execCommand('copy');
+    } catch (error) {
+      console.warn('document.execCommand copy via fallback target failed', error);
+      successful = false;
+    }
+
+    const caretPosition = element.value.length;
+    try {
+      element.setSelectionRange(caretPosition, caretPosition);
+    } catch (error) {
+      console.warn('setSelectionRange on fallback target failed', error);
+    }
+
+    if ('readOnly' in element) {
+      element.readOnly = wasReadOnly;
+    }
+
+    if ('disabled' in element) {
+      element.disabled = wasDisabled;
+    }
+
+    if (previouslyFocused && previouslyFocused !== element) {
+      try {
+        previouslyFocused.focus();
+      } catch (error) {
+        console.warn('unable to restore focus after clipboard copy', error);
+      }
+    } else {
+      element.blur();
+    }
+
+    return successful;
+  };
+
+  const attemptExecCommand = () => {
+    if (typeof document === 'undefined') {
+      return false;
+    }
+
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('readonly', '');
     textarea.style.position = 'absolute';
     textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    textarea.style.opacity = '0';
     document.body.appendChild(textarea);
+    textarea.focus({ preventScroll: true });
     textarea.select();
-    const successful = document.execCommand('copy');
-    document.body.removeChild(textarea);
+    textarea.setSelectionRange(0, textarea.value.length);
 
-    if (successful) {
-      return;
+    let successful = false;
+    try {
+      successful = document.execCommand('copy');
+    } catch (error) {
+      console.warn('document.execCommand copy failed', error);
+      successful = false;
     }
+
+    document.body.removeChild(textarea);
+    return successful;
+  };
+
+  if (await attemptNativeClipboard()) {
+    return;
+  }
+
+  if (attemptWithTarget()) {
+    return;
+  }
+
+  if (attemptExecCommand()) {
+    return;
+  }
+
+  if (attemptClipboardData()) {
+    return;
   }
 
   throw new Error('Copy not supported');
@@ -79,20 +215,96 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 }) => {
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
-  const [permission, setPermission] = useState('view');
   const [hideBadge, setHideBadge] = useState(false);
   const [discoverable, setDiscoverable] = useState(false);
   const [requirePassword, setRequirePassword] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [embedCopied, setEmbedCopied] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareExpiresAt, setShareExpiresAt] = useState<string | null>(null);
+  const generationIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+  const shareLinkInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const runShareLinkGeneration = useCallback(async () => {
+    const context = getActiveProjectContext();
+    const generationId = (generationIdRef.current += 1);
+
+    setIsGenerating(true);
+    setShareError(null);
+    setShareExpiresAt(null);
+    setCopied(false);
+    setEmbedCopied(false);
+
+    if (!context) {
+      if (isMountedRef.current && generationId === generationIdRef.current) {
+        setShareLink('');
+        setIsGenerating(false);
+        setShareError('Connect to a project to generate a share link.');
+      }
+      return;
+    }
+
+    try {
+      const response = await createExhibitionShareLink(context);
+      if (!isMountedRef.current || generationId !== generationIdRef.current) {
+        return;
+      }
+
+      const resolvedLink = resolveShareLink(response.share_url);
+      setShareLink(resolvedLink);
+      setShareExpiresAt(response.expires_at);
+    } catch (error) {
+      if (!isMountedRef.current || generationId !== generationIdRef.current) {
+        return;
+      }
+      console.error('Failed to generate share link', error);
+      const message = error instanceof Error ? error.message : 'Failed to generate share link';
+      setShareLink('');
+      setShareExpiresAt(null);
+      setShareError(message);
+      toast.error('Unable to generate share link');
+    } finally {
+      if (isMountedRef.current && generationId === generationIdRef.current) {
+        setIsGenerating(false);
+      }
+    }
+  }, [toast]);
 
   useEffect(() => {
     if (open) {
-      setShareLink(generateShareLink());
+      void runShareLinkGeneration();
+    } else {
+      setShareLink('');
+      setShareExpiresAt(null);
+      setShareError(null);
       setCopied(false);
       setEmbedCopied(false);
     }
-  }, [open]);
+  }, [open, runShareLinkGeneration]);
+
+  const handleGenerateNewLink = useCallback(() => {
+    void runShareLinkGeneration();
+  }, [runShareLinkGeneration]);
+
+  const expiresLabel = useMemo(() => {
+    if (!shareExpiresAt) {
+      return null;
+    }
+    try {
+      return new Date(shareExpiresAt).toLocaleString();
+    } catch {
+      return shareExpiresAt;
+    }
+  }, [shareExpiresAt]);
 
   const embedCode = useMemo(() => {
     if (!shareLink) {
@@ -103,23 +315,29 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   }, [shareLink]);
 
   const handleCopyLink = useCallback(async () => {
-    if (!shareLink) {
+    if (!shareLink || isGenerating) {
       return;
     }
 
     try {
-      await copyToClipboard(shareLink);
+      await copyToClipboard(shareLink, { fallbackTarget: shareLinkInputRef.current });
       setCopied(true);
       toast.success('Link copied to clipboard');
-      setTimeout(() => setCopied(false), 2000);
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => {
+          if (isMountedRef.current) {
+            setCopied(false);
+          }
+        }, 2000);
+      }
     } catch (error) {
       console.error('Failed to copy share link', error);
       toast.error('Unable to copy the link. Please copy it manually.');
     }
-  }, [shareLink]);
+  }, [shareLink, isGenerating, toast]);
 
   const handleCopyEmbed = useCallback(async () => {
-    if (!embedCode) {
+    if (!embedCode || isGenerating) {
       return;
     }
 
@@ -127,12 +345,18 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       await copyToClipboard(embedCode);
       setEmbedCopied(true);
       toast.success('Embed code copied');
-      setTimeout(() => setEmbedCopied(false), 2000);
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => {
+          if (isMountedRef.current) {
+            setEmbedCopied(false);
+          }
+        }, 2000);
+      }
     } catch (error) {
       console.error('Failed to copy embed code', error);
       toast.error('Unable to copy the embed code. Please copy it manually.');
     }
-  }, [embedCode]);
+  }, [embedCode, isGenerating, toast]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -193,26 +417,44 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
               <div className="flex items-start gap-3 p-4 rounded-lg border bg-muted/50">
                 <Link2 className="h-5 w-5 text-muted-foreground mt-0.5" />
                 <div className="flex-1 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-medium text-sm">Anyone with the link</p>
-                      <p className="text-xs text-muted-foreground">Can {permission}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {shareError ? 'Link unavailable' : 'Can view'}
+                      </p>
                     </div>
-                    <Select value={permission} onValueChange={setPermission}>
-                      <SelectTrigger className="w-32 h-8">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="view">View</SelectItem>
-                        <SelectItem value="comment">Comment</SelectItem>
-                        <SelectItem value="edit">Edit</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={handleGenerateNewLink}
+                      disabled={isGenerating}
+                      title="Generate a new share link"
+                    >
+                      {isGenerating ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
 
                   <div className="flex gap-2">
-                    <Input value={shareLink} readOnly className="flex-1 h-9 text-sm bg-background" />
-                    <Button onClick={handleCopyLink} variant="secondary" className="h-9 px-4" disabled={!shareLink}>
+                    <Input
+                      value={shareLink}
+                      readOnly
+                      placeholder={isGenerating ? 'Generating link…' : 'No share link available'}
+                      className="flex-1 h-9 text-sm bg-background"
+                      ref={shareLinkInputRef}
+                    />
+                    <Button
+                      onClick={handleCopyLink}
+                      variant="secondary"
+                      className="h-9 px-4"
+                      disabled={!shareLink || isGenerating}
+                    >
                       {copied ? (
                         <>
                           <Check className="h-4 w-4 mr-2" />
@@ -226,6 +468,27 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       )}
                     </Button>
                   </div>
+
+                  {isGenerating && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Generating secure link…
+                    </p>
+                  )}
+
+                  {shareError && !isGenerating && (
+                    <p className="text-xs text-destructive">{shareError}</p>
+                  )}
+
+                  {!shareError && !isGenerating && shareLink && (
+                    <p className="text-xs text-muted-foreground">
+                      Share this read-only exhibition experience with anyone who has the link.
+                    </p>
+                  )}
+
+                  {expiresLabel && !shareError && (
+                    <p className="text-xs text-muted-foreground">Expires on {expiresLabel}</p>
+                  )}
                 </div>
               </div>
 
@@ -310,9 +573,16 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Embed this exhibition on your website.</p>
               <div className="bg-muted p-3 rounded-lg font-mono text-xs">
-                {embedCode || 'Generating embed code...'}
+                {shareError
+                  ? 'Embed code unavailable until a share link is generated.'
+                  : embedCode || (isGenerating ? 'Generating embed code...' : 'Generate a share link to view the embed code.')}
               </div>
-              <Button variant="secondary" className="w-full" onClick={handleCopyEmbed} disabled={!embedCode}>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={handleCopyEmbed}
+                disabled={!embedCode || isGenerating}
+              >
                 {embedCopied ? (
                   <>
                     <Check className="h-4 w-4 mr-2" />
