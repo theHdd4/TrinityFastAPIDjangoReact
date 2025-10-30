@@ -1,29 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime
+import logging
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import Response
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from .deps import get_exhibition_layout_collection
 from .persistence import save_exhibition_list_configuration
+from .share_links import fetch_shared_link_context
 from .schemas import (
     ExhibitionConfigurationIn,
     ExhibitionConfigurationOut,
-    ExhibitionExportRequest,
     ExhibitionLayoutConfigurationIn,
     ExhibitionLayoutConfigurationOut,
     ExhibitionManifestOut,
 )
 from .service import ExhibitionStorage
-from .export import (
-    ExportGenerationError,
-    build_export_filename,
-    build_pdf_bytes,
-    build_pptx_bytes,
-)
 
 router = APIRouter(prefix="/exhibition", tags=["Exhibition"])
 storage = ExhibitionStorage()
@@ -153,41 +146,43 @@ async def save_layout_configuration(
     }
 
 
-@router.post("/export/pptx")
-async def export_presentation_pptx(payload: ExhibitionExportRequest) -> Response:
-    if not payload.slides:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No slides provided for export.",
-        )
+@router.get("/shared/{token}", response_model=ExhibitionLayoutConfigurationOut)
+async def get_shared_layout(
+    token: str,
+    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+) -> ExhibitionLayoutConfigurationOut:
+    cleaned_token = token.strip()
+    if not cleaned_token:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shared exhibition link not found")
 
     try:
-        pptx_bytes = build_pptx_bytes(payload)
-    except ExportGenerationError as exc:  # pragma: no cover - defensive path
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    filename = build_export_filename(payload.title, "pptx")
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-    return Response(
-        content=pptx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        headers=headers,
-    )
-
-
-@router.post("/export/pdf")
-async def export_presentation_pdf(payload: ExhibitionExportRequest) -> Response:
-    if not payload.slides:
+        context = await fetch_shared_link_context(cleaned_token)
+    except Exception as exc:  # pragma: no cover - defensive logging in calling layer
+        logging.exception("Failed to resolve exhibition share link: %%s", exc)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No slides provided for export.",
-        )
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to validate share link",
+        ) from exc
+    if context is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shared exhibition link not found")
 
-    try:
-        pdf_bytes = build_pdf_bytes(payload)
-    except ExportGenerationError as exc:  # pragma: no cover - defensive path
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if not context.is_valid:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shared exhibition link expired")
 
-    filename = build_export_filename(payload.title, "pdf")
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+    filter_query = {
+        "client_name": context.client_name.strip(),
+        "app_name": context.app_name.strip(),
+        "project_name": context.project_name.strip(),
+    }
+
+    record = await collection.find_one({**filter_query, "document_type": "layout_snapshot"})
+    if not record:
+        record = await collection.find_one(filter_query)
+
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exhibition layout not found")
+
+    record.pop("_id", None)
+    record.pop("document_type", None)
+    record.update(filter_query)
+    return ExhibitionLayoutConfigurationOut(**record)

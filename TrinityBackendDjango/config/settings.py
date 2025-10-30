@@ -122,12 +122,15 @@ SHARED_APPS = [
     
     # Molecules app - stores molecule definitions in public schema
     "apps.molecules",
-    
+
     # Trinity V1 Atoms app - stores atom definitions in public schema
     "apps.trinity_v1_atoms",
-    
+
     # Atoms app - stores atom definitions in public schema
     "apps.atoms",
+
+    # Share links live in the public schema so they can be accessed without tenant context
+    "apps.share_links",
 ]
 
 TENANT_APPS = [

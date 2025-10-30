@@ -103,6 +103,10 @@ export const EXHIBITION_API =
   normalizeUrl(import.meta.env.VITE_EXHIBITION_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition`;
 
+export const SHARE_LINKS_API =
+  normalizeUrl(import.meta.env.VITE_SHARE_LINKS_API) ||
+  `${backendOrigin}${djangoPrefix}/share-links`;
+
 export const IMAGES_API =
   normalizeUrl(import.meta.env.VITE_IMAGES_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/images`;

@@ -181,6 +181,16 @@ const ExhibitionMode = () => {
     return 'Unknown Presenter';
   }, [user]);
 
+  const projectSlug = useMemo(() => {
+    const name = projectContext?.project_name?.trim();
+    if (!name) {
+      return undefined;
+    }
+
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return slug || undefined;
+  }, [projectContext?.project_name]);
+
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isPresentationView, setIsPresentationView] = useState(false);
   const [draggedAtom, setDraggedAtom] = useState<
@@ -2134,6 +2144,7 @@ const ExhibitionMode = () => {
         open={isShareOpen}
         onOpenChange={setIsShareOpen}
         projectName={projectContext?.project_name ?? 'Exhibition Project'}
+        shareSlug={projectSlug}
       />
     </div>
   );
