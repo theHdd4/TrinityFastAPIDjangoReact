@@ -420,7 +420,7 @@ def _map_dash_style(style: Optional[str]) -> Optional[MSO_LINE_DASH_STYLE]:
     lookup = {
         "solid": MSO_LINE_DASH_STYLE.SOLID,
         "dashed": MSO_LINE_DASH_STYLE.DASH,
-        "dotted": MSO_LINE_DASH_STYLE.DOT,
+        "dotted": MSO_LINE_DASH_STYLE.ROUND_DOT,
         "dash-dot": MSO_LINE_DASH_STYLE.DASH_DOT,
     }
 
@@ -956,31 +956,29 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
         image_width = _safe_float(getattr(screenshot, 'width', None), 0)
         image_height = _safe_float(getattr(screenshot, 'height', None), 0)
 
-        if css_width <= 0 and image_width > 0:
+        if css_width <= 0 and image_width > 0 and pixel_ratio > 0:
             css_width = image_width / pixel_ratio
-        if css_height <= 0 and image_height > 0:
+        if css_height <= 0 and image_height > 0 and pixel_ratio > 0:
             css_height = image_height / pixel_ratio
 
-        if css_width <= 0 or css_height <= 0:
+        if css_width <= 0:
             css_width = width
+        if css_height <= 0:
             css_height = height
 
-        scale = width / css_width if css_width else 1.0
-        if scale <= 0:
-            scale = 1.0
+        aspect_ratio = css_height / css_width if css_width > 0 else 1.0
+        if aspect_ratio <= 0:
+            aspect_ratio = height / width if width > 0 else 1.0
 
         draw_width = page_width
-        if css_height > 0:
-            draw_height = _px_to_pt(css_height * scale)
-        elif image_height > 0 and pixel_ratio > 0:
-            draw_height = _px_to_pt((image_height / pixel_ratio) * scale)
-        else:
-            draw_height = page_height
+        draw_height = draw_width * aspect_ratio
 
-        if draw_height > page_height:
+        if draw_height > page_height and draw_height > 0:
+            scale = page_height / draw_height
             draw_height = page_height
+            draw_width = draw_width * scale
 
-        offset_x = 0.0
+        offset_x = (page_width - draw_width) / 2 if draw_width < page_width else 0.0
         offset_y = (page_height - draw_height) / 2 if draw_height < page_height else 0.0
 
         pdf.drawImage(
@@ -989,7 +987,7 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
             offset_y,
             width=draw_width,
             height=draw_height,
-            preserveAspectRatio=True,
+            preserveAspectRatio=False,
             mask='auto',
         )
         if index < len(ordered_slides) - 1:

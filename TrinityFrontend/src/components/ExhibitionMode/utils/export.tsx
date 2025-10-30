@@ -549,6 +549,12 @@ export const prepareSlidesForExport = async (
               style: {
                 transform: 'none',
                 transformOrigin: 'top left',
+                margin: '0',
+                padding: '0',
+                boxShadow: 'none',
+                maxWidth: 'none',
+                left: '0',
+                top: '0',
                 width: `${targetWidth}px`,
                 height: `${targetHeight}px`,
               },
