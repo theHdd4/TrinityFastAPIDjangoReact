@@ -134,20 +134,44 @@ class WorkflowCompositionAgent:
         
         logger.info("Sending prompt to LLM...")
         
-        # Call LLM
-        try:
-            response = call_workflow_llm(self.api_url, self.model_name, self.bearer_token, prompt)
-            logger.info(f"✅ LLM response received (length: {len(response)})")
-        except Exception as e:
-            logger.error(f"❌ LLM call failed: {e}")
-            return self._create_fallback_response(session_id, str(e), user_prompt)
+        # Call LLM with retry logic
+        max_retries = 2
+        result = None
         
-        # Extract JSON from response
-        result = extract_json(response)
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    logger.warning(f"🔄 Retry attempt {attempt + 1}/{max_retries} with stricter JSON instructions")
+                    # Add stricter JSON requirement for retry
+                    retry_prompt = prompt + f"\n\n**CRITICAL RETRY INSTRUCTION**: Your previous response was not valid JSON. You MUST return ONLY a JSON object starting with {{ and ending with }}. No text before or after. Start your response immediately with {{."
+                    response = call_workflow_llm(self.api_url, self.model_name, self.bearer_token, retry_prompt)
+                else:
+                    response = call_workflow_llm(self.api_url, self.model_name, self.bearer_token, prompt)
+                
+                logger.info(f"✅ LLM response received (length: {len(response)})")
+                
+                # Extract JSON from response
+                result = extract_json(response)
+                
+                if result:
+                    logger.info(f"✅ Successfully extracted JSON on attempt {attempt + 1}")
+                    break
+                else:
+                    logger.warning(f"❌ Attempt {attempt + 1} failed to extract JSON")
+                    if attempt == 0:
+                        logger.error(f"❌ LLM returned non-JSON text response (first 500 chars):")
+                        logger.error(f"{response[:500]}")
+                    
+            except Exception as e:
+                logger.error(f"❌ LLM call failed on attempt {attempt + 1}: {e}")
+                if attempt == max_retries - 1:
+                    return self._create_fallback_response(session_id, str(e), user_prompt)
         
         if not result:
-            logger.warning("❌ Failed to extract JSON from LLM response")
-            return self._create_fallback_response(session_id, "Could not parse LLM response", user_prompt)
+            logger.error("❌ Failed to extract JSON from LLM response after all retries")
+            logger.error(f"❌ This indicates the LLM is not following JSON format instructions")
+            logger.error(f"❌ Please check the model configuration or try a different model")
+            return self._create_fallback_response(session_id, f"Could not parse LLM response - LLM returned plain text instead of JSON after {max_retries} attempts", user_prompt)
         
         # Add session ID if not present
         result["session_id"] = session_id

@@ -383,7 +383,25 @@ The "execution_plan" is a JSON array that provides step-by-step instructions for
 - The plan executes sequentially to create molecules one at a time, then adds atoms to each molecule
 - This creates a visual animation as the workflow builds step by step
 
-Return ONLY the JSON response:"""
+**CRITICAL OUTPUT REQUIREMENTS**:
+1. You MUST return ONLY valid JSON - no explanatory text before or after
+2. Do NOT include any markdown formatting, thinking tags, or commentary
+3. Do NOT write explanations outside the JSON structure
+4. Start your response with {{ and end with }}
+5. The JSON must be parseable by json.loads() in Python
+6. If you're unsure, use success: false with a helpful message in the JSON
+
+**WRONG OUTPUT EXAMPLES (DO NOT DO THIS)**:
+❌ "To measure the customer churn or pirce elasticity or forecast demand or analyze sales data or mmm or pricing optimization or dashboard or segmentation or sentiment analysis, follow these steps: 1. Data Ingestion..."
+❌ "Here's the workflow: {{ ... }}"
+❌ "Based on your request, I suggest: ..."
+❌ Any text explanation outside of JSON structure
+
+**CORRECT OUTPUT EXAMPLES (DO THIS)**:
+✅ {{"success": true, "workflow_composition": {{ ... }}, "smart_response": "...", ...}}
+✅ {{"success": false, "answer": "...", "smart_response": "...", ...}}
+
+YOU MUST RETURN ONLY THE JSON OBJECT. START YOUR RESPONSE WITH {{ AND END WITH }}"""
 
     logger.info(f"BUILDING WORKFLOW PROMPT:")
     logger.info(f"User Prompt: {user_prompt}")
@@ -411,12 +429,22 @@ def call_workflow_llm(api_url: str, model_name: str, bearer_token: str, prompt: 
     
     payload = {
         "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [
+            {
+                "role": "system", 
+                "content": "You are a JSON-only API. You MUST return valid JSON objects only. Never return plain text explanations. Always start responses with { and end with }."
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ],
         "stream": False,
+        "format": "json",  # Request JSON format from Ollama
         "options": {
-            "temperature": 0.4,  # Increased for more creativity and less rigid template matching
+            "temperature": 0.3,  # Reduced for more consistent JSON output
             "num_predict": 6000,  # Increased for longer, more detailed workflows
-            "top_p": 0.95,  # Higher for more diverse atom selection
+            "top_p": 0.9,  # Slightly reduced for more focused output
             "repeat_penalty": 1.15  # Slightly higher to avoid repetition in long workflows
         }
     }
