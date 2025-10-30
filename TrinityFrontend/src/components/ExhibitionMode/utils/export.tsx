@@ -138,18 +138,21 @@ const ensureImageDataUrl = async (props: Record<string, unknown>): Promise<Recor
   }
 };
 
-const loadImageDimensions = (dataUrl: string): Promise<{ width: number; height: number }> => {
+const loadImageElement = (dataUrl: string): Promise<HTMLImageElement> => {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.decoding = 'async';
-    image.onload = () => {
-      resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    };
-    image.onerror = () => {
-      reject(new Error('Unable to determine captured image dimensions'));
-    };
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Unable to load captured image.'));
     image.src = dataUrl;
   });
+};
+
+const loadImageDimensions = async (
+  dataUrl: string,
+): Promise<{ image: HTMLImageElement; width: number; height: number }> => {
+  const image = await loadImageElement(dataUrl);
+  return { image, width: image.naturalWidth, height: image.naturalHeight };
 };
 
 const sanitiseTitle = (value?: string | null) => {
@@ -569,11 +572,51 @@ export const prepareSlidesForExport = async (
           throw new Error('Unable to capture slide image.');
         }
 
-        const { width: imageWidth, height: imageHeight } = await loadImageDimensions(dataUrl);
+        const { image, width: initialWidth, height: initialHeight } = await loadImageDimensions(dataUrl);
+        const expectedWidth = Math.round(designWidth * pixelRatio);
+        const expectedHeight = Math.round(designHeight * pixelRatio);
+
+        let imageWidth = initialWidth;
+        let imageHeight = initialHeight;
+        let finalDataUrl = dataUrl;
+
+        if (
+          expectedWidth > 0 &&
+          expectedHeight > 0 &&
+          (Math.abs(imageWidth - expectedWidth) > 1 || Math.abs(imageHeight - expectedHeight) > 1)
+        ) {
+          const canvas = document.createElement('canvas');
+          canvas.width = expectedWidth;
+          canvas.height = expectedHeight;
+          const context = canvas.getContext('2d');
+
+          if (!context) {
+            throw new Error('Unable to adjust slide capture dimensions.');
+          }
+
+          const sourceWidth = Math.min(expectedWidth, imageWidth);
+          const sourceHeight = Math.min(expectedHeight, imageHeight);
+
+          context.drawImage(
+            image,
+            0,
+            0,
+            sourceWidth,
+            sourceHeight,
+            0,
+            0,
+            expectedWidth,
+            expectedHeight,
+          );
+
+          finalDataUrl = canvas.toDataURL('image/png');
+          imageWidth = expectedWidth;
+          imageHeight = expectedHeight;
+        }
 
         captures.push({
           cardId: card.id,
-          dataUrl,
+          dataUrl: finalDataUrl,
           cssWidth: designWidth,
           cssHeight: designHeight,
           imageWidth,

@@ -167,6 +167,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
                 <Download className="h-6 w-6" strokeWidth={2.25} />
               </div>
               <div>
+                <span className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/70">
+                  Export options
+                </span>
                 <DialogTitle className="text-2xl font-semibold text-foreground">
                   Export presentation
                 </DialogTitle>
@@ -199,6 +202,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
                 <FileText className="h-5 w-5" strokeWidth={2.25} />
               </div>
               <div className="flex-1 text-left">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.32em] text-muted-foreground/70">
+                  Portable Document Format
+                </span>
                 <div className="flex items-center gap-2">
                   <span className="text-base font-semibold text-foreground">PDF document</span>
                   <Badge
@@ -237,6 +243,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
                 <Presentation className="h-5 w-5" strokeWidth={2.25} />
               </div>
               <div className="flex-1 text-left">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.32em] text-muted-foreground/70">
+                  Editable slide deck
+                </span>
                 <div className="flex items-center gap-2">
                   <span className="text-base font-semibold text-foreground">PowerPoint presentation</span>
                   <Badge
@@ -275,6 +284,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
                 <Image className="h-5 w-5" strokeWidth={2.25} />
               </div>
               <div className="flex-1 text-left">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.32em] text-muted-foreground/70">
+                  High resolution assets
+                </span>
                 <div className="flex items-center gap-2">
                   <span className="text-base font-semibold text-foreground">Image files</span>
                   <Badge

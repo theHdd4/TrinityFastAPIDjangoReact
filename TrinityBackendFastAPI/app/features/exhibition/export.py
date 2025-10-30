@@ -14,7 +14,8 @@ from pptx import Presentation
 from pptx.chart.data import ChartData
 from pptx.dml.color import RGBColor
 from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.dml import MSO_LINE_DASH_STYLE
+from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Pt
 from reportlab.lib.utils import ImageReader
@@ -58,6 +59,35 @@ GRADIENT_PRESETS: dict[str, dict[str, object]] = {
 }
 
 DEFAULT_OVERLAY_COLOR = "#7c3aed"
+
+SHAPE_ID_TO_MSO: dict[str, MSO_SHAPE] = {
+    "rectangle": MSO_SHAPE.RECTANGLE,
+    "rounded-rectangle": MSO_SHAPE.ROUNDED_RECTANGLE,
+    "ellipse": MSO_SHAPE.OVAL,
+    "circle": MSO_SHAPE.OVAL,
+    "triangle": MSO_SHAPE.ISOSCELES_TRIANGLE,
+    "diamond": MSO_SHAPE.DIAMOND,
+    "pentagon": MSO_SHAPE.PENTAGON,
+    "hexagon": MSO_SHAPE.HEXAGON,
+    "octagon": MSO_SHAPE.OCTAGON,
+    "star": MSO_SHAPE.STAR_5_POINT,
+    "burst": MSO_SHAPE.EXPLOSION1,
+    "arrow-right": MSO_SHAPE.RIGHT_ARROW,
+    "arrow-left": MSO_SHAPE.LEFT_ARROW,
+    "arrow-up": MSO_SHAPE.UP_ARROW,
+    "arrow-down": MSO_SHAPE.DOWN_ARROW,
+    "process": MSO_SHAPE.FLOWCHART_PROCESS,
+    "decision": MSO_SHAPE.FLOWCHART_DECISION,
+    "terminator": MSO_SHAPE.FLOWCHART_TERMINATOR,
+    "data": MSO_SHAPE.FLOWCHART_DATA,
+    "speech-rectangle": MSO_SHAPE.RECTANGULAR_CALLOUT,
+    "speech-oval": MSO_SHAPE.OVAL_CALLOUT,
+    "thought-bubble": MSO_SHAPE.CLOUD_CALLOUT,
+    "cloud": MSO_SHAPE.CLOUD,
+    "double-cloud": MSO_SHAPE.CLOUD,
+}
+
+LINE_SHAPES = {"line-horizontal", "line-vertical", "line-diagonal"}
 
 
 class ExportGenerationError(Exception):
@@ -135,6 +165,20 @@ def _parse_hex_color(value: Optional[str]) -> Optional[RGBColor]:
     except ValueError:
         return None
     return RGBColor(red, green, blue)
+
+
+def _parse_color_token(value: Optional[str]) -> Optional[RGBColor]:
+    if value is None:
+        return None
+
+    token = str(value).strip()
+    if not token or token.lower() in {"transparent", "none", "currentcolor"}:
+        return None
+
+    if token.startswith("var("):
+        return None
+
+    return _parse_hex_color(token)
 
 
 def _map_alignment(value: Optional[str]) -> PP_ALIGN:
@@ -369,6 +413,121 @@ def _render_image(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, o
         shape.rotation = rotation
 
 
+def _map_dash_style(style: Optional[str]) -> Optional[MSO_LINE_DASH_STYLE]:
+    if not style:
+        return None
+
+    lookup = {
+        "solid": MSO_LINE_DASH_STYLE.SOLID,
+        "dashed": MSO_LINE_DASH_STYLE.DASH,
+        "dotted": MSO_LINE_DASH_STYLE.DOT,
+        "dash-dot": MSO_LINE_DASH_STYLE.DASH_DOT,
+    }
+
+    return lookup.get(style.lower())
+
+
+def _apply_shape_styles(shape, props: dict, *, is_line: bool = False) -> None:
+    opacity = _safe_float(props.get("opacity"), 1.0)
+    opacity = min(max(opacity, 0.0), 1.0)
+
+    if not is_line:
+        fill_color = _parse_color_token(props.get("fill"))
+        if fill_color is None or opacity <= 0:
+            shape.fill.background()
+        else:
+            fill = shape.fill
+            fill.solid()
+            fill.fore_color.rgb = fill_color
+            if opacity < 1.0:
+                fill.fore_color.transparency = max(0.0, min(1.0, 1.0 - opacity))
+
+    stroke_width = _safe_float(props.get("strokeWidth"), 0.0)
+    stroke_color = _parse_color_token(props.get("stroke"))
+    line = getattr(shape, "line", None)
+
+    if line is not None:
+        if stroke_color is None or stroke_width <= 0:
+            try:
+                line.fill.background()
+            except AttributeError:
+                pass
+            line.width = 0
+        else:
+            try:
+                line.color.rgb = stroke_color
+            except AttributeError:
+                pass
+            line.width = Pt(_px_to_pt(stroke_width))
+            dash = _map_dash_style(props.get("strokeStyle"))
+            if dash is not None:
+                line.dash_style = dash
+            if opacity < 1.0:
+                try:
+                    line.fill.solid()
+                    line.fill.fore_color.rgb = stroke_color
+                    line.fill.fore_color.transparency = max(0.0, min(1.0, 1.0 - opacity))
+                except AttributeError:
+                    pass
+
+
+def _resolve_line_points(
+    shape_id: str,
+    obj: SlideExportObjectPayload,
+    offset_x: float,
+    offset_y: float,
+) -> tuple[float, float, float, float]:
+    width = _safe_float(obj.width, 0.0)
+    height = _safe_float(obj.height, 0.0)
+    left = obj.x + offset_x
+    top = obj.y + offset_y
+
+    if shape_id == "line-vertical":
+        x = left + (width / 2.0)
+        return x, top, x, top + height
+
+    if shape_id == "line-diagonal":
+        return left, top + height, left + width, top
+
+    # Default to horizontal line
+    y = top + (height / 2.0)
+    return left, y, left + width, y
+
+
+def _render_shape(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, offset_y: float = 0.0) -> None:
+    props = obj.props or {}
+    shape_id = str(props.get("shapeId") or props.get("shape_id") or "").strip()
+
+    if shape_id in LINE_SHAPES:
+        x1, y1, x2, y2 = _resolve_line_points(shape_id, obj, offset_x, offset_y)
+        shape = slide.shapes.add_connector(
+            MSO_CONNECTOR.STRAIGHT,
+            _px_to_emu(x1),
+            _px_to_emu(y1),
+            _px_to_emu(x2),
+            _px_to_emu(y2),
+        )
+        _apply_shape_styles(shape, props, is_line=True)
+    else:
+        width = _safe_float(obj.width, 0.0)
+        height = _safe_float(obj.height, 0.0)
+        if width <= 0 or height <= 0:
+            return
+
+        mapped_shape = SHAPE_ID_TO_MSO.get(shape_id, MSO_SHAPE.RECTANGLE)
+        shape = slide.shapes.add_shape(
+            mapped_shape,
+            _px_to_emu(obj.x + offset_x),
+            _px_to_emu(obj.y + offset_y),
+            _px_to_emu(width),
+            _px_to_emu(height),
+        )
+        _apply_shape_styles(shape, props)
+
+    rotation = _safe_float(obj.rotation, 0.0)
+    if rotation:
+        shape.rotation = rotation
+
 def _extract_table_data(obj: SlideExportObjectPayload) -> Optional[list]:
     data = obj.props.get('data')
     if isinstance(data, list) and data:
@@ -555,6 +714,8 @@ def _render_slide_objects(
                 _render_table(slide, obj, offset_x, offset_y)
             elif obj.type == 'chart':
                 _render_chart(slide, obj, offset_x, offset_y)
+            elif obj.type == 'shape':
+                _render_shape(slide, obj, offset_x, offset_y)
             else:
                 logger.debug('Skipping unsupported object type %s on slide %s', obj.type, slide_payload.id)
         except ExportGenerationError:
@@ -804,14 +965,23 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
             css_width = width
             css_height = height
 
-        scale = min(width / css_width if css_width else 1.0, height / css_height if css_height else 1.0)
+        scale = width / css_width if css_width else 1.0
         if scale <= 0:
             scale = 1.0
 
-        draw_width = _px_to_pt(css_width * scale)
-        draw_height = _px_to_pt(css_height * scale)
-        offset_x = (page_width - draw_width) / 2
-        offset_y = (page_height - draw_height) / 2
+        draw_width = page_width
+        if css_height > 0:
+            draw_height = _px_to_pt(css_height * scale)
+        elif image_height > 0 and pixel_ratio > 0:
+            draw_height = _px_to_pt((image_height / pixel_ratio) * scale)
+        else:
+            draw_height = page_height
+
+        if draw_height > page_height:
+            draw_height = page_height
+
+        offset_x = 0.0
+        offset_y = (page_height - draw_height) / 2 if draw_height < page_height else 0.0
 
         pdf.drawImage(
             image,

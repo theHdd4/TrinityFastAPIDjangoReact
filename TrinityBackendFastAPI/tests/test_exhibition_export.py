@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 from PIL import Image
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -99,6 +101,21 @@ def _build_payload(include_screenshot: bool = True):
                     "height": 120,
                     "props": {"src": _png_data_url()},
                 },
+                {
+                    "id": "shape-001",
+                    "type": "shape",
+                    "x": 320,
+                    "y": 120,
+                    "width": 180,
+                    "height": 180,
+                    "props": {
+                        "shapeId": "rounded-rectangle",
+                        "fill": "#7C3AED",
+                        "stroke": "#312E81",
+                        "strokeWidth": 8,
+                        "opacity": 0.9,
+                    },
+                },
             ],
             "screenshot": screenshot,
         },
@@ -133,6 +150,22 @@ def test_build_pptx_bytes_renders_slides(tmp_path: Path) -> None:
         if hasattr(shape, "text") and "Hello" in shape.text
     ]
     assert text_shapes, "Expected text box to contain exported content"
+
+
+def test_build_pptx_bytes_includes_shape() -> None:
+    payload = _build_payload()
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    shape_fills = [
+        getattr(getattr(shape.fill, "fore_color", None), "rgb", None)
+        for shape in presentation.slides[0].shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+    ]
+
+    assert any(fill == RGBColor(0x7C, 0x3A, 0xED) for fill in shape_fills)
 
 
 def test_build_pptx_bytes_uses_max_dimensions() -> None:
