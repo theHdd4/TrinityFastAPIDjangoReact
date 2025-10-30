@@ -51,7 +51,13 @@ const resolveShareLink = (link: string): string => {
   return link;
 };
 
-const copyToClipboard = async (text: string) => {
+type CopyToClipboardOptions = {
+  fallbackTarget?: HTMLInputElement | HTMLTextAreaElement | null;
+};
+
+const copyToClipboard = async (text: string, options?: CopyToClipboardOptions) => {
+  const fallbackTarget = options?.fallbackTarget ?? null;
+
   const attemptClipboardData = () => {
     if (typeof window === 'undefined') {
       return false;
@@ -73,7 +79,12 @@ const copyToClipboard = async (text: string) => {
   };
 
   const attemptNativeClipboard = async () => {
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+    if (
+      typeof navigator === 'undefined' ||
+      typeof window === 'undefined' ||
+      !window.isSecureContext ||
+      !navigator.clipboard?.writeText
+    ) {
       return false;
     }
 
@@ -84,6 +95,69 @@ const copyToClipboard = async (text: string) => {
       console.warn('navigator.clipboard.writeText failed, falling back to execCommand', error);
       return false;
     }
+  };
+
+  const attemptWithTarget = () => {
+    if (!fallbackTarget) {
+      return false;
+    }
+
+    const element = fallbackTarget;
+    const wasReadOnly = 'readOnly' in element ? element.readOnly : false;
+    const wasDisabled = 'disabled' in element ? element.disabled : false;
+    const previouslyFocused = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+
+    if ('readOnly' in element) {
+      element.readOnly = false;
+    }
+
+    if ('disabled' in element) {
+      element.disabled = false;
+    }
+
+    try {
+      element.focus();
+    } catch (error) {
+      console.warn('focus on fallback target failed', error);
+    }
+
+    element.select();
+
+    let successful = false;
+
+    try {
+      successful = document.execCommand('copy');
+    } catch (error) {
+      console.warn('document.execCommand copy via fallback target failed', error);
+      successful = false;
+    }
+
+    const caretPosition = element.value.length;
+    try {
+      element.setSelectionRange(caretPosition, caretPosition);
+    } catch (error) {
+      console.warn('setSelectionRange on fallback target failed', error);
+    }
+
+    if ('readOnly' in element) {
+      element.readOnly = wasReadOnly;
+    }
+
+    if ('disabled' in element) {
+      element.disabled = wasDisabled;
+    }
+
+    if (previouslyFocused && previouslyFocused !== element) {
+      try {
+        previouslyFocused.focus();
+      } catch (error) {
+        console.warn('unable to restore focus after clipboard copy', error);
+      }
+    } else {
+      element.blur();
+    }
+
+    return successful;
   };
 
   const attemptExecCommand = () => {
@@ -119,6 +193,10 @@ const copyToClipboard = async (text: string) => {
     return;
   }
 
+  if (attemptWithTarget()) {
+    return;
+  }
+
   if (attemptExecCommand()) {
     return;
   }
@@ -147,6 +225,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   const [shareExpiresAt, setShareExpiresAt] = useState<string | null>(null);
   const generationIdRef = useRef(0);
   const isMountedRef = useRef(true);
+  const shareLinkInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -241,10 +320,16 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     }
 
     try {
-      await copyToClipboard(shareLink);
+      await copyToClipboard(shareLink, { fallbackTarget: shareLinkInputRef.current });
       setCopied(true);
       toast.success('Link copied to clipboard');
-      setTimeout(() => setCopied(false), 2000);
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => {
+          if (isMountedRef.current) {
+            setCopied(false);
+          }
+        }, 2000);
+      }
     } catch (error) {
       console.error('Failed to copy share link', error);
       toast.error('Unable to copy the link. Please copy it manually.');
@@ -260,7 +345,13 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       await copyToClipboard(embedCode);
       setEmbedCopied(true);
       toast.success('Embed code copied');
-      setTimeout(() => setEmbedCopied(false), 2000);
+      if (typeof window !== 'undefined') {
+        window.setTimeout(() => {
+          if (isMountedRef.current) {
+            setEmbedCopied(false);
+          }
+        }, 2000);
+      }
     } catch (error) {
       console.error('Failed to copy embed code', error);
       toast.error('Unable to copy the embed code. Please copy it manually.');
@@ -356,6 +447,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       readOnly
                       placeholder={isGenerating ? 'Generating link…' : 'No share link available'}
                       className="flex-1 h-9 text-sm bg-background"
+                      ref={shareLinkInputRef}
                     />
                     <Button
                       onClick={handleCopyLink}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { AlertCircle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
@@ -27,6 +27,8 @@ const SharedExhibition = () => {
   const [error, setError] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<SharedMetadata | null>(null);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const brandTitleRef = useRef<HTMLSpanElement | null>(null);
+  const [brandAccentWidth, setBrandAccentWidth] = useState<number | null>(null);
 
   const handleDrop = useCallback<
     (
@@ -102,6 +104,28 @@ const SharedExhibition = () => {
       setActiveSlideIndex(0);
     }
   }, [status]);
+
+  useEffect(() => {
+    const updateBrandAccent = () => {
+      if (!brandTitleRef.current) {
+        setBrandAccentWidth(null);
+        return;
+      }
+
+      setBrandAccentWidth(brandTitleRef.current.offsetWidth);
+    };
+
+    updateBrandAccent();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', updateBrandAccent);
+      return () => {
+        window.removeEventListener('resize', updateBrandAccent);
+      };
+    }
+
+    return () => undefined;
+  }, []);
 
   useEffect(() => {
     const totalSlides = exhibitedCards.length;
@@ -299,9 +323,13 @@ const SharedExhibition = () => {
         <header className="space-y-6 text-center">
           <div className="flex flex-col items-center justify-center gap-2 text-sm text-white/60">
             <AnimatedLogo className="h-16 w-16 drop-shadow-[0_0_12px_rgba(255,255,255,0.5)]" />
-            <span className="text-3xl font-mono font-semibold text-white">Trinity</span>
-            <span className="tracking-[0.4em] uppercase text-xs text-white/70">Enter The Matrix</span>
-            <div className="h-1 w-40 max-w-full bg-[#fec107] rounded-full" />
+            <span ref={brandTitleRef} className="text-3xl font-mono font-semibold text-white">
+              Trinity
+            </span>
+            <div
+              className="h-1 bg-[#fec107] rounded-full"
+              style={brandAccentWidth ? { width: `${brandAccentWidth}px` } : undefined}
+            />
             <span className="text-xs text-white/60">A Quant Matrix AI Experience</span>
           </div>
           <div className="space-y-2">
