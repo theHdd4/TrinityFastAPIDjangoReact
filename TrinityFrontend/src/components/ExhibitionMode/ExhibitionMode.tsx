@@ -739,13 +739,21 @@ const ExhibitionMode = () => {
         }
 
         const selection = document.getSelection();
-        const selectionElement =
-          selection?.anchorNode instanceof HTMLElement
-            ? selection.anchorNode
-            : selection?.anchorNode?.parentElement ?? null;
+        if (selection) {
+          const anchorNode = selection.anchorNode;
+          let selectionElement: EventTarget | null = null;
 
-        if (isEditableTarget(selectionElement)) {
-          return true;
+          if (anchorNode) {
+            if (typeof Element !== 'undefined' && anchorNode instanceof Element) {
+              selectionElement = anchorNode;
+            } else {
+              selectionElement = anchorNode.parentElement;
+            }
+          }
+
+          if (isEditableTarget(selectionElement)) {
+            return true;
+          }
         }
       }
 
