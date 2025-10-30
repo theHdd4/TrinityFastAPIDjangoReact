@@ -328,7 +328,7 @@ Molecule 3: Visualization & Reporting
 Purpose: "Create interactive charts to visualize trends. Add insights to provide context for stakeholders."
 
 **MOLECULE DESCRIPTION FORMULA (STRICT):**
-Each molecule "purpose" must be EXACTLY 2 lines and MAXIMUM 50 words total:
+Each molecule "purpose" must be EXACTLY 2 lines and MAXIMUM 35 words total:
 - Line 1: Start with action verbs (e.g., "Start with...", "Use...", "Create...") and briefly explain WHAT operations happen (20-25 words)
 - Line 2: Briefly explain WHY it matters - the business outcome or next step (20-25 words)
 - Keep it concise and actionable - NOT verbose or lengthy
@@ -356,7 +356,7 @@ Each molecule "purpose" must be EXACTLY 2 lines and MAXIMUM 50 words total:
 12. **INTELLIGENT GROUPING**: Group 2-5 atoms per molecule based on their purpose and data dependencies
 13. **LOGICAL SEQUENCING**: Ensure each molecule flows into the next with proper data transformations
 14. **BUSINESS VALUE**: Think about what business outcome this workflow achieves
-15. **CONCISE MOLECULE DESCRIPTIONS**: Write EXACTLY 2-line purpose descriptions (MAX 50 words total) that briefly explain operations and value. Use action verbs like "Start with...", "Use...", "Create..." but keep it short. The detailed richness goes in the "smart_response" chat message above, NOT in molecule descriptions.
+15. **CONCISE MOLECULE DESCRIPTIONS**: Write EXACTLY 2-line purpose descriptions (MAX 40 words total) that briefly explain operations and value. Use action verbs like "Start with...", "Use...", "Create..." but keep it short. The detailed richness goes in the "smart_response" chat message above, NOT in molecule descriptions.
 
 **WORKFLOW DESIGN PHILOSOPHY**:
 - Simple tasks (basic dashboards): 3-4 molecules
@@ -383,7 +383,25 @@ The "execution_plan" is a JSON array that provides step-by-step instructions for
 - The plan executes sequentially to create molecules one at a time, then adds atoms to each molecule
 - This creates a visual animation as the workflow builds step by step
 
-Return ONLY the JSON response:"""
+**CRITICAL OUTPUT REQUIREMENTS**:
+1. You MUST return ONLY valid JSON - no explanatory text before or after
+2. Do NOT include any markdown formatting, thinking tags, or commentary
+3. Do NOT write explanations outside the JSON structure
+4. Start your response with {{ and end with }}
+5. The JSON must be parseable by json.loads() in Python
+6. If you're unsure, use success: false with a helpful message in the JSON
+
+**WRONG OUTPUT EXAMPLES (DO NOT DO THIS)**:
+❌ "To measure the customer churn or pirce elasticity or forecast demand or analyze sales data or mmm or pricing optimization or dashboard or segmentation or sentiment analysis, follow these steps: 1. Data Ingestion..."
+❌ "Here's the workflow: {{ ... }}"
+❌ "Based on your request, I suggest: ..."
+❌ Any text explanation outside of JSON structure
+
+**CORRECT OUTPUT EXAMPLES (DO THIS)**:
+✅ {{"success": true, "workflow_composition": {{ ... }}, "smart_response": "...", ...}}
+✅ {{"success": false, "answer": "...", "smart_response": "...", ...}}
+
+YOU MUST RETURN ONLY THE JSON OBJECT. START YOUR RESPONSE WITH {{ AND END WITH }}"""
 
     logger.info(f"BUILDING WORKFLOW PROMPT:")
     logger.info(f"User Prompt: {user_prompt}")
@@ -411,12 +429,22 @@ def call_workflow_llm(api_url: str, model_name: str, bearer_token: str, prompt: 
     
     payload = {
         "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [
+            {
+                "role": "system", 
+                "content": "You are a JSON-only API. You MUST return valid JSON objects only. Never return plain text explanations. Always start responses with { and end with }."
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ],
         "stream": False,
+        "format": "json",  # Request JSON format from Ollama
         "options": {
-            "temperature": 0.4,  # Increased for more creativity and less rigid template matching
+            "temperature": 0.3,  # Reduced for more consistent JSON output
             "num_predict": 6000,  # Increased for longer, more detailed workflows
-            "top_p": 0.95,  # Higher for more diverse atom selection
+            "top_p": 0.9,  # Slightly reduced for more focused output
             "repeat_penalty": 1.15  # Slightly higher to avoid repetition in long workflows
         }
     }

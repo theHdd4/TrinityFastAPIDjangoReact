@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from .deps import get_exhibition_layout_collection
@@ -10,11 +12,18 @@ from .persistence import save_exhibition_list_configuration
 from .schemas import (
     ExhibitionConfigurationIn,
     ExhibitionConfigurationOut,
+    ExhibitionExportRequest,
     ExhibitionLayoutConfigurationIn,
     ExhibitionLayoutConfigurationOut,
     ExhibitionManifestOut,
 )
 from .service import ExhibitionStorage
+from .export import (
+    ExportGenerationError,
+    build_export_filename,
+    build_pdf_bytes,
+    build_pptx_bytes,
+)
 
 router = APIRouter(prefix="/exhibition", tags=["Exhibition"])
 storage = ExhibitionStorage()
@@ -142,3 +151,43 @@ async def save_layout_configuration(
         "updated_at": updated_at,
         "documents_inserted": persistence_result.get("documents_written", 0),
     }
+
+
+@router.post("/export/pptx")
+async def export_presentation_pptx(payload: ExhibitionExportRequest) -> Response:
+    if not payload.slides:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No slides provided for export.",
+        )
+
+    try:
+        pptx_bytes = build_pptx_bytes(payload)
+    except ExportGenerationError as exc:  # pragma: no cover - defensive path
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    filename = build_export_filename(payload.title, "pptx")
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(
+        content=pptx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers=headers,
+    )
+
+
+@router.post("/export/pdf")
+async def export_presentation_pdf(payload: ExhibitionExportRequest) -> Response:
+    if not payload.slides:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No slides provided for export.",
+        )
+
+    try:
+        pdf_bytes = build_pdf_bytes(payload)
+    except ExportGenerationError as exc:  # pragma: no cover - defensive path
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    filename = build_export_filename(payload.title, "pdf")
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)

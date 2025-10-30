@@ -8,6 +8,9 @@ import io
 from .database import client
 
 logger = logging.getLogger(__name__)
+# logger.disabled = True  # Disabled earlier; now we keep logging enabled
+# Suppress routine noise; we will log important values using CRITICAL
+logger.setLevel(logging.CRITICAL)
 
 def generate_scaled_media_series(recent_series: List[float], x_range: List[float]) -> Tuple[List[List[float]], List[float]]:
     """
@@ -118,23 +121,17 @@ def get_last_12_months_data(df: pd.DataFrame, date_column: str, combination_id: 
     if df_filtered.empty:
         return df_filtered
     
-    # Convert date column to datetime
+    # Convert date column to datetime (retain original order)
     df_filtered[date_column] = pd.to_datetime(df_filtered[date_column], errors='coerce')
     df_filtered = df_filtered.dropna(subset=[date_column])
-    
+
     if df_filtered.empty:
         return df_filtered
-    
-    # Get the latest date and calculate 12 months ago
-    latest_date = df_filtered[date_column].max()
-    twelve_months_ago = latest_date - timedelta(days=365)
-    
-    # Filter for last 12 months
-    df_last_12_months = df_filtered[df_filtered[date_column] > twelve_months_ago].copy()
-    
-    # Sort by date
-    df_last_12_months = df_last_12_months.sort_values(date_column)
-    
+
+    # Do NOT sort here; simply take the last 12 rows in the existing order
+    # This honors the original dataset ordering as requested
+    df_last_12_months = df_filtered.tail(12).copy()
+
     return df_last_12_months
 
 def get_roi_variables_from_config(roi_config: Dict[str, Any]) -> List[str]:
@@ -309,25 +306,40 @@ def calculate_transformed_means(df: pd.DataFrame, transformation_metadata: Dict[
         if not original_series:
             continue
         
-        # Calculate 12-month mean and std for standardization
-        data_mean = np.mean(original_series)
-        data_std = np.std(original_series)
-        
-        logger.info(f"🔍 12-month data for {variable}: mean={data_mean:.4f}, std={data_std:.4f}")
-        
-        # Apply transformations but override standardization with 12-month data
+        # Calculate adstocked original mean/std for use in standardization (Streamlit-aligned)
         transformation_steps = metadata.get('transformation_steps', [])
-        
-        # Override standardization steps with 12-month data
+        adstock_mean = None
+        adstock_std = None
+        try:
+            adstock_step = next((s for s in transformation_steps if s.get('step') == 'adstock'), None)
+            if adstock_step:
+                decay_rate = adstock_step.get('decay_rate', 0.4)
+                adstocked = []
+                for i, v in enumerate(original_series):
+                    if i == 0:
+                        adstocked.append(v)
+                    else:
+                        adstocked.append(v + decay_rate * adstocked[i-1])
+                adstock_mean = float(np.mean(adstocked))
+                adstock_std = float(np.std(adstocked))
+            else:
+                # Fallback to raw series stats if no adstock step exists
+                adstock_mean = float(np.mean(original_series))
+                adstock_std = float(np.std(original_series))
+        except Exception:
+            adstock_mean = float(np.mean(original_series))
+            adstock_std = float(np.std(original_series))
+
+        logger.info(f"🔍 Standardization for {variable} will use adstock stats: mean={adstock_mean:.4f}, std={adstock_std:.4f}")
+
+        # Override standardization steps with adstock stats
         modified_steps = []
         for step in transformation_steps:
             if step.get('step') == 'standardization':
-                # Override with 12-month data mean and std
                 modified_step = step.copy()
-                modified_step['scaler_mean'] = data_mean
-                modified_step['scaler_scale'] = data_std if data_std != 0 else 1.0
+                modified_step['scaler_mean'] = adstock_mean
+                modified_step['scaler_scale'] = adstock_std if adstock_std != 0 else 1.0
                 modified_steps.append(modified_step)
-                # logger.info(f"🔍 Overriding standardization for {variable}: mean={data_mean:.4f}, scale={data_std:.4f}")
             else:
                 modified_steps.append(step)
         
@@ -377,6 +389,9 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
         current_series = original_series.copy()
         saved_steps = []
         
+        # Track adstock stats from original after adstock step
+        adstock_stats = None  # (mean, std)
+
         for step in transformation_steps:
             step_type = step.get('step', '')
             # logger.info(f"🔍 Applying {step_type} transformation to {variable}...")
@@ -399,28 +414,38 @@ def transform_12month_and_save_parameters(df_12month: pd.DataFrame, transformati
                     'decay_rate': decay_rate
                 })
                 # logger.info(f"🔍 Adstock applied - decay_rate: {decay_rate}")
+
+                # Capture adstock stats for use in standardization
+                try:
+                    adstock_mean = float(np.mean(current_series))
+                    adstock_std = float(np.std(current_series))
+                    adstock_stats = (adstock_mean, adstock_std)
+                except Exception:
+                    adstock_stats = None
                 
             elif step_type == 'logistic':
                 # Use original parameters, apply transformation
                 growth_rate = step.get('growth_rate', 1.0)
                 midpoint = step.get('midpoint', 0.0)
-                carryover = step.get('carryover', 0.0)
-                logistic_series = [1 / (1 + np.exp(-growth_rate * (x - midpoint))) + carryover for x in current_series]
+                # Do NOT add carryover at logistic step; carryover is handled via adstock
+                logistic_series = [1 / (1 + np.exp(-growth_rate * (x - midpoint))) for x in current_series]
                 current_series = logistic_series
                 
                 # Save parameters
                 saved_steps.append({
                     'step': 'logistic',
                     'growth_rate': growth_rate,
-                    'midpoint': midpoint,
-                    'carryover': carryover
+                    'midpoint': midpoint
                 })
                 # logger.info(f"🔍 Logistic applied - growth_rate: {growth_rate}, midpoint: {midpoint}")
                 
             elif step_type == 'standardization':
-                # Calculate fresh parameters from current series
-                data_mean = np.mean(current_series)
-                data_std = np.std(current_series)
+                # Use adstock stats if available to align with Streamlit behavior
+                if adstock_stats is not None:
+                    data_mean, data_std = adstock_stats
+                else:
+                    data_mean = np.mean(current_series)
+                    data_std = np.std(current_series)
                 if data_std == 0:
                     standardized_series = [0.0] * len(current_series)
                 else:
@@ -477,7 +502,10 @@ def calculate_volume_series(
     transformation_metadata: Dict[str, Any]
 ) -> List[float]:
     """
-    Calculate volume series using the model equation.
+    Calculate volume series using the complete model equation.
+    
+    The prediction formula is:
+    Volume = Intercept + (Target_Variable × Beta_Target) + Σ(Other_Variable_Mean × Beta_Other)
     
     Args:
         scaled_series: Scaled series for the variable of interest
@@ -506,17 +534,101 @@ def calculate_volume_series(
             break
     
     if variable_beta is None:
-        # logger.warning(f"⚠️ No beta found for variable {variable_name}")
+        logger.warning(f"⚠️ No beta found for variable {variable_name}")
         return [intercept] * len(transformed_scaled_series)
+
+    # If the target beta is negative, clamp it to zero as per requirement
+    if variable_beta < 0:
+        logger.info(f"🔧 Clamping negative beta for '{variable_name}' from {variable_beta:.4f} to 0.0")
+        variable_beta = 0.0
     
-    # Calculate volume for each point: Volume = Intercept + (Variable × Beta)
+    # Calculate the constant contribution from all other variables
+    # This represents the baseline contribution when the target variable is at its mean
+    other_variables_contribution = 0.0
+    for var_name, beta in betas.items():
+        actual_var_name = var_name.replace("Beta_", "").lower()
+        if actual_var_name != variable_name.lower():
+            # Use transformed mean for this variable
+            if actual_var_name in transformed_means:
+                other_variables_contribution += transformed_means[actual_var_name] * beta
+                logger.info(f"🔍 Other variable '{actual_var_name}': mean={transformed_means[actual_var_name]:.4f}, beta={beta:.4f}, contribution={transformed_means[actual_var_name] * beta:.4f}")
+            else:
+                logger.warning(f"⚠️ No transformed mean found for other variable '{actual_var_name}'")
+    
+    logger.info(f"🔍 Target variable '{variable_name}': beta={variable_beta:.4f}")
+    logger.info(f"🔍 Other variables total contribution: {other_variables_contribution:.4f}")
+    
+    # Calculate volume for each point using the complete model equation:
+    # Volume = Intercept + (Target_Variable × Beta_Target) + Σ(Other_Variable_Mean × Beta_Other)
     volume_series = []
     for i, transformed_value in enumerate(transformed_scaled_series):
-        volume = intercept + (transformed_value * variable_beta) 
+        volume = intercept + (transformed_value * variable_beta) + other_variables_contribution
         volume_series.append(volume)
+        if i == 0:  # Log first calculation for debugging
+            logger.info(f"🔍 First volume calculation: intercept={intercept:.4f} + (target={transformed_value:.4f} × {variable_beta:.4f}) + others={other_variables_contribution:.4f} = {volume:.4f}")
 
     
     return volume_series
+
+def find_diminishing_point(media_values: List[float], predictions: List[float]) -> Tuple[float, float]:
+    """
+    Find the point where the curve starts to diminish in the second half.
+    Based on the original Streamlit implementation.
+    
+    Args:
+        media_values: List of media investment values (dummy_media_values)
+        predictions: List of corresponding volume predictions
+    
+    Returns:
+        Tuple of (diminishing_point_value, diminishing_point_prediction)
+    """
+    import numpy as np
+    
+    slopes = np.diff(predictions) / np.diff(media_values)
+    second_half_start = len(slopes) // 2
+    second_half_slopes = slopes[second_half_start:]
+    diminishing_point_index = np.argmax(second_half_slopes < np.percentile(second_half_slopes, 70))
+    diminishing_point_value = media_values[second_half_start + diminishing_point_index]
+    diminishing_point_prediction = predictions[second_half_start + diminishing_point_index]
+    return diminishing_point_value, diminishing_point_prediction
+
+def find_start_point(media_values: List[float], predictions: List[float]) -> Tuple[float, float]:
+    """
+    Find the start point where the curve begins to show meaningful response.
+    Based on the original Streamlit implementation.
+    
+    Args:
+        media_values: List of media investment values (dummy_media_values)
+        predictions: List of corresponding volume predictions
+    
+    Returns:
+        Tuple of (start_point_value, start_point_prediction)
+    """
+    import numpy as np
+    
+    slopes = np.diff(predictions) / np.diff(media_values)
+    
+    # Define first half dynamically
+    first_half_start = len(slopes) // 4  # Adjust starting point
+    first_half_end = len(slopes) // 2    # Midpoint as the end of first half
+    
+    first_half_slopes = slopes[first_half_start:first_half_end]
+    
+    # Compute the threshold (30th percentile)
+    threshold = np.percentile(first_half_slopes, 30)
+    
+    # Find the first index where the slope is above the threshold
+    valid_indices = np.where(first_half_slopes > threshold)[0]
+    
+    if len(valid_indices) > 0:
+        diminishing_point_index = valid_indices[0]  # First valid index
+    else:
+        diminishing_point_index = 0  # Default to 0 if no valid index is found
+    
+    start_point_value = media_values[first_half_start + diminishing_point_index]
+    start_point_prediction = predictions[first_half_start + diminishing_point_index]
+    
+    return start_point_value, start_point_prediction
 
 async def get_s_curve_endpoint(
     client_name: str,
@@ -790,9 +902,8 @@ async def get_s_curve_endpoint(
                 logger.warning(f"No valid data for variable {variable}")
                 continue
             
-            # Generate scaled series around the original series
-            # 10 series below original (negative range) + original (0) + 10 series above original (positive range) = 21 total
-            x_range_values = list(range(-100, 0, 10)) + [0] + list(range(10, 101, 10)) 
+            # Generate 51 points so that 0 is guaranteed to be included
+            x_range_values = np.linspace(-100, 100, 51).tolist()
             
 
             scaled_series_list, percent_changes = generate_scaled_media_series(original_series, x_range_values)
@@ -814,6 +925,33 @@ async def get_s_curve_endpoint(
             total_volumes = [sum(volume_series) for volume_series in volume_series_list]
             logger.info(f"🔍 Total volumes: {total_volumes}")
             
+            # Find max and min points using the diminishing return analysis
+            # We need to use the media values (reach/investment) and predictions separately
+            # The media values are the sum of each scaled series (total media investment)
+            media_values = [sum(scaled_series) for scaled_series in scaled_series_list]
+            # Explicit log for media_values (use CRITICAL so it shows while other logs are suppressed)
+            try:
+                logger.critical(f"S-CURVE media_values for {variable}: {media_values}")
+            except Exception:
+                pass
+            diminishing_point_value, diminishing_point_prediction = find_diminishing_point(media_values, total_volumes)
+            start_point_value, start_point_prediction = find_start_point(media_values, total_volumes)
+
+            # Base/original point at 0% change
+            base_idx = None
+            try:
+                base_idx = percent_changes.index(0)
+            except ValueError:
+                if percent_changes:
+                    base_idx = int(np.argmin([abs(pc) for pc in percent_changes]))
+            base_point = None
+            if base_idx is not None and 0 <= base_idx < len(media_values):
+                base_point = {
+                    "media_value": media_values[base_idx],
+                    "volume_prediction": total_volumes[base_idx],
+                    "percent_change": percent_changes[base_idx]
+                }
+            
             # Get date range
             date_range = {
                 "start": df_last_12_months[date_column].min().isoformat(),
@@ -826,6 +964,7 @@ async def get_s_curve_endpoint(
                 "scaled_series": scaled_series_list,  # Original scaled series (before transformation)
                 "volume_series": volume_series_list,  # Volume series for each scaled series
                 "total_volumes": total_volumes,       # Total volume for each percentage change
+                "media_values": media_values,         # Sum of each scaled series (reach/investment)
                 "percent_changes": percent_changes,
                 "date_range": date_range,
                 "transformation_applied": variable in transformation_metadata,
@@ -834,6 +973,19 @@ async def get_s_curve_endpoint(
                     "intercept": intercept,
                     "coefficients": betas,
                     "transformed_means": transformed_means
+                },
+                "curve_analysis": {
+                    "max_point": {
+                        "media_value": diminishing_point_value,
+                        "volume_prediction": diminishing_point_prediction,
+                        "percent_change": percent_changes[media_values.index(diminishing_point_value)] if diminishing_point_value in media_values else None
+                    },
+                    "min_point": {
+                        "media_value": start_point_value,
+                        "volume_prediction": start_point_prediction,
+                        "percent_change": percent_changes[media_values.index(start_point_value)] if start_point_value in media_values else None
+                    },
+                    "base_point": base_point
                 }
             }
            

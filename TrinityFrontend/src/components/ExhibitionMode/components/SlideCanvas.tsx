@@ -1459,6 +1459,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                     !canEdit && !presentationMode && 'opacity-90'
                   )}
+                  data-exhibition-slide="true"
+                  data-exhibition-slide-id={card.id}
                 style={
                   presentationMode
                     ? {
@@ -2112,10 +2114,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             return;
           }
 
-          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
-            return;
-          }
-
           onRemoveObject(object.id);
         });
 
@@ -2202,10 +2200,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           if (object.type === 'accent-image') {
-            return;
-          }
-
-          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
             return;
           }
 
@@ -3011,10 +3005,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (!canEdit) {
           return;
         }
+
+        if (editingTextState?.type === 'text-box' && editingTextState.id === objectId) {
+          return;
+        }
+
         const object = objectsMap.get(objectId);
         if (!object || object.type !== 'text-box') {
           return;
         }
+
         const formatting = extractTextBoxFormatting(object.props as Record<string, unknown> | undefined);
         onInteract();
         focusCanvas();
@@ -3026,7 +3026,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           original: formatting.text,
         });
       },
-      [canEdit, focusCanvas, objectsMap, onInteract],
+      [canEdit, editingTextState, focusCanvas, objectsMap, onInteract],
     );
 
     const handleEditingValueChange = useCallback(
@@ -4025,26 +4025,33 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
             const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
-          const renderObject = () => (
-            <div
-              className="absolute group"
-              style={{
-                left: object.x,
-                top: object.y,
-                width: object.width,
-                height: object.height,
-                zIndex: isSelected ? zIndex + 100 : zIndex,
-              }}
-              onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
-              onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
-            >
+          const renderObject = () => {
+            return (
+              <div
+                className="absolute group"
+                style={{
+                  left: object.x,
+                  top: object.y,
+                  width: object.width,
+                  height: object.height,
+                  zIndex: isSelected ? zIndex + 100 : zIndex,
+                }}
+                onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
+                onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
+              >
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className={cn(
-                    'pointer-events-none absolute inset-0 z-40 border border-dotted border-yellow-400 transition-all duration-200',
-                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
-                      ? 'rounded-[22px]'
-                      : 'rounded-[32px]'
+                    'pointer-events-none absolute -inset-1 z-40 border-2 border-dotted border-yellow-400 transition-all duration-200',
+                    (() => {
+                      if (isShapeObject) {
+                        return 'rounded-[12px]';
+                      }
+                      if (suppressCardChrome || isTextBoxObject || isTableObject || isChartObject) {
+                        return 'rounded-[22px]';
+                      }
+                      return 'rounded-[32px]';
+                    })(),
                   )}
                   aria-hidden="true"
                 />
@@ -4246,7 +4253,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   />
                 ))}
             </div>
-          );
+            );
+          };
 
           if (isTableObject) {
             return React.cloneElement(renderObject(), { key: object.id });

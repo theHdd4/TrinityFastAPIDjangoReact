@@ -66,6 +66,7 @@ class ActualPredictedItem(BaseModel):
     file_key: str
     actual_values: List[float]
     predicted_values: List[float]
+    dates: Optional[List[str]] = None
     performance_metrics: PerformanceMetrics
     data_points: int
 
