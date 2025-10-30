@@ -1449,6 +1449,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             >
               <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
                 <div
+                  data-exhibition-slide-id={card.id}
                   className={cn(
                     'relative overflow-hidden shadow-2xl transition-all duration-300',
                     presentationMode ? 'w-auto' : 'w-full',
@@ -4020,6 +4021,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           const renderObject = () => {
             return (
               <div
+                data-exhibition-object-id={object.id}
+                data-exhibition-object-type={object.type}
                 className="absolute group"
                 style={{
                   left: object.x,

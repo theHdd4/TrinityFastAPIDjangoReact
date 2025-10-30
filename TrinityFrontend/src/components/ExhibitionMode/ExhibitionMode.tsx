@@ -1,6 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronRight, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
+import { ChevronRight, FileText, Grid3x3 } from 'lucide-react';
 import Header from '@/components/Header';
 import {
   useExhibitionStore,
@@ -23,6 +23,7 @@ import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
 import { GridView } from './components/GridView';
 import { ExportDialog } from './components/ExportDialog';
+import { ControlPanel } from './components/controlPanel';
 import { ImagePanel, type ImageSelectionRequest } from './components/Images';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -1535,58 +1536,19 @@ const ExhibitionMode = () => {
   const disableDownload = exhibitedCards.length === 0;
 
   const renderHeaderSection = () => (
-    <div className="bg-white/80 backdrop-blur-sm border-b border-border/60 px-6 py-6 flex-shrink-0 shadow-sm">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="text-3xl font-light text-foreground mb-1">Exhibition Mode</h2>
-          <p className="text-muted-foreground font-light">
-            Transform laboratory insights into presentation-ready stories.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2" data-exhibition-toolbar="true">
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-border text-foreground/80 font-medium"
-            onClick={handleUndo}
-            disabled={!canEdit || !undoAvailable}
-          >
-            <Undo2 className="w-4 h-4 mr-2" />
-            Undo
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-border text-foreground/80 font-medium"
-            onClick={handleSave}
-            disabled={!canEdit || isSaving}
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {isSaving ? 'Saving…' : 'Save'}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-border text-foreground/80 font-medium"
-            onClick={handleShare}
-            disabled={!hasSlides}
-          >
-            <Share2 className="w-4 h-4 mr-2" />
-            Share
-          </Button>
-          <Button
-            size="sm"
-            className="bg-blue-600 text-white font-medium hover:bg-blue-500 focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2"
-            onClick={() => setIsExportOpen(true)}
-            disabled={disableDownload}
-          >
-            <Download className="w-4 h-4 mr-2" />
-            Download
-          </Button>
-        </div>
-      </div>
-    </div>
+    <ControlPanel
+      title="Exhibition Mode"
+      description="Transform laboratory insights into presentation-ready stories."
+      onUndo={handleUndo}
+      onSave={handleSave}
+      onShare={handleShare}
+      onDownload={() => setIsExportOpen(true)}
+      disableUndo={!canEdit || !undoAvailable}
+      disableSave={!canEdit || isSaving}
+      disableShare={!hasSlides}
+      disableDownload={disableDownload}
+      isSaving={isSaving}
+    />
   );
 
   const transitionFrames = presentationTransition
