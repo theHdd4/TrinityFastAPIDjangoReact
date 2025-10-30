@@ -306,8 +306,6 @@ const createTemplate = (
   slides: buildSlides(meta.id, accentColor, slides),
 });
 
-*** End Patch
-
 const churnSlides: SlideSpec[] = [
   {
     title: 'Churn Prediction for [Brand]',
