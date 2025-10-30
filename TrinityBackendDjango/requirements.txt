@@ -43,3 +43,5 @@ pykalman
 openpyxl
 xlsxwriter
 prophet
+python-pptx==0.6.23
+reportlab==4.2.5
