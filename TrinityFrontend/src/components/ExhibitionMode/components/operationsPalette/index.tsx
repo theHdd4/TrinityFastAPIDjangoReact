@@ -23,6 +23,7 @@ interface OperationsPaletteProps {
   onOpenShapesPanel?: () => void;
   onOpenImagesPanel?: () => void;
   onOpenChartPanel?: () => void;
+  onOpenTemplatesPanel?: () => void;
   onOpenThemesPanel?: () => void;
   onOpenSettingsPanel?: () => void;
   canEdit?: boolean;
@@ -37,6 +38,7 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
   onOpenShapesPanel,
   onOpenImagesPanel,
   onOpenChartPanel,
+  onOpenTemplatesPanel,
   onOpenThemesPanel,
   onOpenSettingsPanel,
   canEdit = true,
@@ -75,11 +77,11 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
 
   const tools = useMemo<PaletteOperation[]>(
     () => [
-      createTemplatesTool(),
+      createTemplatesTool({ onOpenTemplatesPanel, canEdit }),
       createThemesTool({ onOpenThemesPanel, canEdit }),
       createSettingsTool({ onOpenSettingsPanel, canEdit }),
     ],
-    [canEdit, onOpenSettingsPanel, onOpenThemesPanel],
+    [canEdit, onOpenSettingsPanel, onOpenTemplatesPanel, onOpenThemesPanel],
   );
 
   const isPanelVisible = Boolean(positionPanel);
