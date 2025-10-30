@@ -161,6 +161,13 @@ class SlideScreenshotPayload(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class SlideScreenshotResponse(SlideScreenshotPayload):
+    """Screenshot payload returned to clients requesting rendered slides."""
+
+    id: str = Field(..., min_length=1)
+    index: int = Field(..., ge=0)
+
+
 class SlideDomSnapshotPayload(BaseModel):
     """Serialised DOM snapshot used for server-side rendering."""
 
@@ -214,3 +221,9 @@ class ExhibitionExportRequest(BaseModel):
     document_styles: Optional[DocumentStylesPayload] = Field(
         default=None, alias="documentStyles"
     )
+
+
+class SlideScreenshotsResponse(BaseModel):
+    """Response returned when generating slide screenshots."""
+
+    slides: List[SlideScreenshotResponse] = Field(default_factory=list)

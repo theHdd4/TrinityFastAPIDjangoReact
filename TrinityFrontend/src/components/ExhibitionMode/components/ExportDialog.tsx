@@ -16,9 +16,10 @@ import {
   prepareSlidesForExport,
   buildPresentationExportPayload,
   downloadBlob,
-  downloadSlidesAsImages,
   requestPresentationExport,
   sanitizeFileName,
+  requestRenderedSlideScreenshots,
+  downloadRenderedSlideScreenshots,
   type PreparedSlidesForExport,
 } from '../utils/export';
 
@@ -77,8 +78,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
   const performSlidePreparation = async (format: ExportFormat): Promise<PreparedSlidesForExport | null> => {
     if (format === 'Images') {
       return prepareSlidesForExport(exhibitedCards, {
-        captureImages: true,
-        includeDomSnapshot: false,
+        captureImages: false,
+        includeDomSnapshot: true,
         pixelRatio: 3,
       });
     }
@@ -101,21 +102,6 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
     try {
       let prepared: PreparedSlidesForExport | null = null;
 
-      if (format === 'Images') {
-        prepared = await performSlidePreparation(format);
-        if (!prepared || prepared.captures.length !== exhibitedCards.length) {
-          throw new Error('We could not capture every slide for export. Please try again.');
-        }
-
-        await downloadSlidesAsImages(prepared.captures, presentationTitle);
-
-        toast.success(`Downloaded ${prepared.captures.length} PNG ${prepared.captures.length === 1 ? 'file' : 'files'}.`, {
-          id: toastId,
-        });
-        onOpenChange(false);
-        return;
-      }
-
       prepared = await performSlidePreparation(format);
 
       if (!prepared) {
@@ -124,6 +110,36 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
 
       if (prepared.domSnapshots.size !== exhibitedCards.length) {
         throw new Error('We could not prepare every slide for export. Please try again.');
+      }
+
+      if (format === 'Images') {
+        if (!prepared.documentStyles) {
+          throw new Error('We could not collect the styles required to render your slides.');
+        }
+
+        const payload = await buildPresentationExportPayload(
+          exhibitedCards,
+          slideObjectsByCardId,
+          prepared,
+          { title: presentationTitle },
+        );
+
+        const screenshots = await requestRenderedSlideScreenshots(payload);
+
+        if (screenshots.length !== exhibitedCards.length) {
+          throw new Error('We were only able to render a subset of your slides.');
+        }
+
+        await downloadRenderedSlideScreenshots(screenshots, presentationTitle);
+
+        toast.success(
+          `Downloaded ${screenshots.length} PNG ${screenshots.length === 1 ? 'file' : 'files'}.`,
+          {
+            id: toastId,
+          },
+        );
+        onOpenChange(false);
+        return;
       }
 
       const payload = await buildPresentationExportPayload(

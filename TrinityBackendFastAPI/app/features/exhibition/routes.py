@@ -18,6 +18,7 @@ from .schemas import (
     ExhibitionLayoutConfigurationIn,
     ExhibitionLayoutConfigurationOut,
     ExhibitionManifestOut,
+    SlideScreenshotsResponse,
 )
 from .service import ExhibitionStorage
 from .export import (
@@ -25,6 +26,7 @@ from .export import (
     build_export_filename,
     build_pdf_bytes,
     build_pptx_bytes,
+    render_slide_screenshots,
 )
 
 router = APIRouter(prefix="/exhibition", tags=["Exhibition"])
@@ -237,3 +239,21 @@ async def export_presentation_pdf(payload: ExhibitionExportRequest) -> Response:
     filename = build_export_filename(payload.title, "pdf")
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@router.post("/export/screenshots", response_model=SlideScreenshotsResponse)
+async def export_presentation_screenshots(
+    payload: ExhibitionExportRequest,
+) -> SlideScreenshotsResponse:
+    if not payload.slides:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No slides provided for export.",
+        )
+
+    try:
+        slides = render_slide_screenshots(payload)
+    except ExportGenerationError as exc:  # pragma: no cover - defensive path
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return SlideScreenshotsResponse(slides=slides)

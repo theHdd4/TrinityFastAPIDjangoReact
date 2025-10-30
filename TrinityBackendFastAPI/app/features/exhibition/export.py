@@ -28,6 +28,7 @@ from .schemas import (
     SlideExportObjectPayload,
     SlideExportPayload,
     SlideScreenshotPayload,
+    SlideScreenshotResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -891,6 +892,37 @@ def _ensure_slide_screenshots(
         if not isinstance(data, dict):
             raise ExportGenerationError(f'Unable to render screenshot for slide {slide.id}.')
         slide.screenshot = SlideScreenshotPayload.model_validate(data)
+
+
+def render_slide_screenshots(payload: ExhibitionExportRequest) -> list[dict[str, object]]:
+    """Render slide screenshots using the server-side rendering service."""
+
+    if not payload.slides:
+        raise ExportGenerationError('No slides provided for export.')
+
+    ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
+
+    _attempt_server_screenshots(payload, ordered_slides)
+    _ensure_slide_screenshots(payload, ordered_slides)
+
+    rendered: list[SlideScreenshotResponse] = []
+    for slide in ordered_slides:
+        screenshot = slide.screenshot
+        if not isinstance(screenshot, SlideScreenshotPayload):
+            raise ExportGenerationError(
+                f'Unable to render screenshot for slide {slide.id}.'
+            )
+
+        entry = SlideScreenshotResponse.model_validate(
+            {
+                "id": slide.id,
+                "index": slide.index,
+                **screenshot.model_dump(by_alias=True),
+            }
+        )
+        rendered.append(entry)
+
+    return [entry.model_dump(by_alias=True) for entry in rendered]
 
 
 def build_pptx_bytes(payload: ExhibitionExportRequest) -> bytes:
