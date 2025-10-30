@@ -420,27 +420,56 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
         raise ExportGenerationError('No slides provided for export.')
 
     ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
-    first = ordered_slides[0]
-    width, height = _resolve_slide_dimensions(first)
 
     buffer = io.BytesIO()
-    pdf = canvas.Canvas(buffer, pagesize=(_px_to_pt(width), _px_to_pt(height)))
+    pdf = canvas.Canvas(buffer)
     pdf.setTitle(payload.title or 'Exhibition Presentation')
 
     for index, slide in enumerate(ordered_slides):
+        width, height = _resolve_slide_dimensions(slide)
+        page_width = _px_to_pt(width)
+        page_height = _px_to_pt(height)
+        pdf.setPageSize((page_width, page_height))
+
         screenshot = slide.screenshot
         if not screenshot or not isinstance(screenshot.data_url, str):
             raise ExportGenerationError('Every slide must include a screenshot for PDF export.')
 
         image_stream = io.BytesIO(_decode_data_url(screenshot.data_url))
         image = ImageReader(image_stream)
+
+        css_width = _safe_float(getattr(screenshot, 'css_width', None), 0)
+        css_height = _safe_float(getattr(screenshot, 'css_height', None), 0)
+        pixel_ratio = _safe_float(getattr(screenshot, 'pixel_ratio', None), 0) or 1.0
+        image_width = _safe_float(getattr(screenshot, 'width', None), 0)
+        image_height = _safe_float(getattr(screenshot, 'height', None), 0)
+
+        if css_width <= 0 and image_width > 0:
+            css_width = image_width / pixel_ratio
+        if css_height <= 0 and image_height > 0:
+            css_height = image_height / pixel_ratio
+
+        if css_width <= 0 or css_height <= 0:
+            css_width = width
+            css_height = height
+
+        scale = min(width / css_width if css_width else 1.0, height / css_height if css_height else 1.0)
+        if scale <= 0:
+            scale = 1.0
+
+        draw_width = _px_to_pt(css_width * scale)
+        draw_height = _px_to_pt(css_height * scale)
+        offset_x = (page_width - draw_width) / 2
+        offset_y = (page_height - draw_height) / 2
+
         pdf.drawImage(
             image,
-            0,
-            0,
-            width=_px_to_pt(width),
-            height=_px_to_pt(height),
+            offset_x,
+            offset_y,
+            width=draw_width,
+            height=draw_height,
             preserveAspectRatio=True,
+            mask='auto',
         )
         if index < len(ordered_slides) - 1:
             pdf.showPage()

@@ -86,7 +86,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           id: toastId,
         });
       } else {
-        const payload = buildPresentationExportPayload(
+        const payload = await buildPresentationExportPayload(
           exhibitedCards,
           slideObjectsByCardId,
           captures,

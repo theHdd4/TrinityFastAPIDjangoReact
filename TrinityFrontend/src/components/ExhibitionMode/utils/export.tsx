@@ -56,6 +56,79 @@ const clonePlainObject = <T,>(value: T): T => {
   }
 };
 
+const DATA_URL_PATTERN = /^data:image\//i;
+
+const imageDataUrlCache = new Map<string, Promise<string>>();
+
+const readBlobAsDataUrl = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string' && reader.result.length > 0) {
+        resolve(reader.result);
+      } else {
+        reject(new Error('Unable to convert image to data URL.'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Unable to read image contents.'));
+    reader.readAsDataURL(blob);
+  });
+};
+
+const fetchImageAsDataUrl = async (src: string): Promise<string> => {
+  if (imageDataUrlCache.has(src)) {
+    return imageDataUrlCache.get(src) as Promise<string>;
+  }
+
+  const request = fetch(src, { credentials: 'include', mode: 'cors' })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`Unable to fetch image (${response.status})`);
+      }
+      return response.blob();
+    })
+    .then(readBlobAsDataUrl);
+
+  imageDataUrlCache.set(src, request);
+  return request;
+};
+
+const ensureImageDataUrl = async (props: Record<string, unknown>): Promise<Record<string, unknown>> => {
+  const nextProps = { ...props };
+
+  const dataUrlValue = typeof nextProps.dataUrl === 'string' ? nextProps.dataUrl : null;
+  if (dataUrlValue && DATA_URL_PATTERN.test(dataUrlValue)) {
+    return nextProps;
+  }
+
+  const srcValue = typeof nextProps.src === 'string' ? nextProps.src : null;
+  const candidate = dataUrlValue || srcValue;
+
+  if (!candidate) {
+    return nextProps;
+  }
+
+  if (DATA_URL_PATTERN.test(candidate)) {
+    nextProps.dataUrl = candidate;
+    if (!srcValue) {
+      nextProps.src = candidate;
+    }
+    return nextProps;
+  }
+
+  try {
+    const dataUrl = await fetchImageAsDataUrl(candidate);
+    nextProps.dataUrl = dataUrl;
+    if (!srcValue || srcValue === candidate) {
+      nextProps.src = dataUrl;
+    }
+    return nextProps;
+  } catch (error) {
+    console.error('[Exhibition Export] Unable to inline image for export', candidate, error);
+    throw new Error('We could not include one of the slide images in the export.');
+  }
+};
+
 const loadImageDimensions = (dataUrl: string): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -303,22 +376,32 @@ export interface BuildPresentationExportOptions {
   title?: string;
 }
 
-const normaliseObjects = (objects: SlideObject[] | undefined): SlideExportObjectPayload[] => {
+const normaliseObjects = async (
+  objects: SlideObject[] | undefined,
+): Promise<SlideExportObjectPayload[]> => {
   if (!objects || objects.length === 0) {
     return [];
   }
 
-  return objects.map(object => ({
-    id: object.id,
-    type: object.type,
-    x: object.x,
-    y: object.y,
-    width: object.width,
-    height: object.height,
-    rotation: object.rotation,
-    zIndex: object.zIndex,
-    props: clonePlainObject(object.props ?? {}),
-  }));
+  return Promise.all(
+    objects.map(async object => {
+      const props = clonePlainObject(object.props ?? {});
+      const normalisedProps =
+        object.type === 'image' ? await ensureImageDataUrl(props) : props;
+
+      return {
+        id: object.id,
+        type: object.type,
+        x: object.x,
+        y: object.y,
+        width: object.width,
+        height: object.height,
+        rotation: object.rotation,
+        zIndex: object.zIndex,
+        props: normalisedProps,
+      };
+    }),
+  );
 };
 
 const normalisePresentationSettings = (
@@ -342,12 +425,12 @@ const resolveExportTitle = (cards: LayoutCard[], provided?: string): string => {
   return sanitiseTitle(resolved);
 };
 
-export const buildPresentationExportPayload = (
+export const buildPresentationExportPayload = async (
   cards: LayoutCard[],
   slideObjectsByCardId: SlideObjectMap,
   captures: SlideCaptureResult[],
   options?: BuildPresentationExportOptions,
-): ExhibitionExportPayload => {
+): Promise<ExhibitionExportPayload> => {
   const captureLookup = new Map<string, SlideCaptureResult>();
   captures.forEach(capture => {
     captureLookup.set(capture.cardId, capture);
@@ -356,9 +439,9 @@ export const buildPresentationExportPayload = (
   const fallbackWidth = captures[0]?.cssWidth ?? FALLBACK_BASE_WIDTH;
   const fallbackHeight = captures[0]?.cssHeight ?? FALLBACK_BASE_HEIGHT;
 
-  const slides: SlideExportPayload[] = cards.map((card, index) => {
+  const slides: SlideExportPayload[] = await Promise.all(cards.map(async (card, index) => {
     const capture = captureLookup.get(card.id);
-    const objects = normaliseObjects(slideObjectsByCardId[card.id]);
+    const objects = await normaliseObjects(slideObjectsByCardId[card.id]);
     const baseWidth = capture?.cssWidth ?? fallbackWidth;
     const baseHeight = capture?.cssHeight ?? fallbackHeight;
 
@@ -381,7 +464,7 @@ export const buildPresentationExportPayload = (
           }
         : undefined,
     };
-  });
+  }));
 
   return {
     title: resolveExportTitle(cards, options?.title),
