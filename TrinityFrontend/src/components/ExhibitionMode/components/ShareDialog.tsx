@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import {
+import { 
   Users,
   Share2,
   Download,
@@ -21,15 +21,12 @@ import {
   ChevronDown,
   BarChart3,
   Check,
+  Loader2,
+  RefreshCcw,
 } from 'lucide-react';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { toast } from 'sonner';
+import { createExhibitionShareLink } from '@/lib/shareLinks';
+import { getActiveProjectContext } from '@/utils/projectEnv';
 
 interface ShareDialogProps {
   open: boolean;
@@ -37,14 +34,21 @@ interface ShareDialogProps {
   projectName?: string;
 }
 
-const SHARE_PATH = '/exhibition/shared/';
-
-const generateShareLink = () => {
-  if (typeof window === 'undefined') {
+const resolveShareLink = (link: string): string => {
+  if (!link) {
     return '';
   }
 
-  return `${window.location.origin}${SHARE_PATH}${Date.now()}`;
+  if (/^https?:\/\//i.test(link)) {
+    return link;
+  }
+
+  if (typeof window !== 'undefined') {
+    const prefix = link.startsWith('/') ? '' : '/';
+    return `${window.location.origin}${prefix}${link}`;
+  }
+
+  return link;
 };
 
 const copyToClipboard = async (text: string) => {
@@ -79,20 +83,95 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 }) => {
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
-  const [permission, setPermission] = useState('view');
   const [hideBadge, setHideBadge] = useState(false);
   const [discoverable, setDiscoverable] = useState(false);
   const [requirePassword, setRequirePassword] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [embedCopied, setEmbedCopied] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareExpiresAt, setShareExpiresAt] = useState<string | null>(null);
+  const generationIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const runShareLinkGeneration = useCallback(async () => {
+    const context = getActiveProjectContext();
+    const generationId = (generationIdRef.current += 1);
+
+    setIsGenerating(true);
+    setShareError(null);
+    setShareExpiresAt(null);
+    setCopied(false);
+    setEmbedCopied(false);
+
+    if (!context) {
+      if (isMountedRef.current && generationId === generationIdRef.current) {
+        setShareLink('');
+        setIsGenerating(false);
+        setShareError('Connect to a project to generate a share link.');
+      }
+      return;
+    }
+
+    try {
+      const response = await createExhibitionShareLink(context);
+      if (!isMountedRef.current || generationId !== generationIdRef.current) {
+        return;
+      }
+
+      const resolvedLink = resolveShareLink(response.share_url);
+      setShareLink(resolvedLink);
+      setShareExpiresAt(response.expires_at);
+    } catch (error) {
+      if (!isMountedRef.current || generationId !== generationIdRef.current) {
+        return;
+      }
+      console.error('Failed to generate share link', error);
+      const message = error instanceof Error ? error.message : 'Failed to generate share link';
+      setShareLink('');
+      setShareExpiresAt(null);
+      setShareError(message);
+      toast.error('Unable to generate share link');
+    } finally {
+      if (isMountedRef.current && generationId === generationIdRef.current) {
+        setIsGenerating(false);
+      }
+    }
+  }, [toast]);
 
   useEffect(() => {
     if (open) {
-      setShareLink(generateShareLink());
+      void runShareLinkGeneration();
+    } else {
+      setShareLink('');
+      setShareExpiresAt(null);
+      setShareError(null);
       setCopied(false);
       setEmbedCopied(false);
     }
-  }, [open]);
+  }, [open, runShareLinkGeneration]);
+
+  const handleGenerateNewLink = useCallback(() => {
+    void runShareLinkGeneration();
+  }, [runShareLinkGeneration]);
+
+  const expiresLabel = useMemo(() => {
+    if (!shareExpiresAt) {
+      return null;
+    }
+    try {
+      return new Date(shareExpiresAt).toLocaleString();
+    } catch {
+      return shareExpiresAt;
+    }
+  }, [shareExpiresAt]);
 
   const embedCode = useMemo(() => {
     if (!shareLink) {
@@ -103,7 +182,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   }, [shareLink]);
 
   const handleCopyLink = useCallback(async () => {
-    if (!shareLink) {
+    if (!shareLink || isGenerating) {
       return;
     }
 
@@ -116,10 +195,10 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       console.error('Failed to copy share link', error);
       toast.error('Unable to copy the link. Please copy it manually.');
     }
-  }, [shareLink]);
+  }, [shareLink, isGenerating]);
 
   const handleCopyEmbed = useCallback(async () => {
-    if (!embedCode) {
+    if (!embedCode || isGenerating) {
       return;
     }
 
@@ -132,7 +211,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       console.error('Failed to copy embed code', error);
       toast.error('Unable to copy the embed code. Please copy it manually.');
     }
-  }, [embedCode]);
+  }, [embedCode, isGenerating]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -193,26 +272,43 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
               <div className="flex items-start gap-3 p-4 rounded-lg border bg-muted/50">
                 <Link2 className="h-5 w-5 text-muted-foreground mt-0.5" />
                 <div className="flex-1 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="font-medium text-sm">Anyone with the link</p>
-                      <p className="text-xs text-muted-foreground">Can {permission}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {shareError ? 'Link unavailable' : 'Can view'}
+                      </p>
                     </div>
-                    <Select value={permission} onValueChange={setPermission}>
-                      <SelectTrigger className="w-32 h-8">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="view">View</SelectItem>
-                        <SelectItem value="comment">Comment</SelectItem>
-                        <SelectItem value="edit">Edit</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={handleGenerateNewLink}
+                      disabled={isGenerating}
+                      title="Generate a new share link"
+                    >
+                      {isGenerating ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCcw className="h-4 w-4" />
+                      )}
+                    </Button>
                   </div>
 
                   <div className="flex gap-2">
-                    <Input value={shareLink} readOnly className="flex-1 h-9 text-sm bg-background" />
-                    <Button onClick={handleCopyLink} variant="secondary" className="h-9 px-4" disabled={!shareLink}>
+                    <Input
+                      value={shareLink}
+                      readOnly
+                      placeholder={isGenerating ? 'Generating link…' : 'No share link available'}
+                      className="flex-1 h-9 text-sm bg-background"
+                    />
+                    <Button
+                      onClick={handleCopyLink}
+                      variant="secondary"
+                      className="h-9 px-4"
+                      disabled={!shareLink || isGenerating}
+                    >
                       {copied ? (
                         <>
                           <Check className="h-4 w-4 mr-2" />
@@ -226,6 +322,27 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                       )}
                     </Button>
                   </div>
+
+                  {isGenerating && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Generating secure link…
+                    </p>
+                  )}
+
+                  {shareError && !isGenerating && (
+                    <p className="text-xs text-destructive">{shareError}</p>
+                  )}
+
+                  {!shareError && !isGenerating && shareLink && (
+                    <p className="text-xs text-muted-foreground">
+                      Share this read-only exhibition experience with anyone who has the link.
+                    </p>
+                  )}
+
+                  {expiresLabel && !shareError && (
+                    <p className="text-xs text-muted-foreground">Expires on {expiresLabel}</p>
+                  )}
                 </div>
               </div>
 
@@ -310,9 +427,16 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">Embed this exhibition on your website.</p>
               <div className="bg-muted p-3 rounded-lg font-mono text-xs">
-                {embedCode || 'Generating embed code...'}
+                {shareError
+                  ? 'Embed code unavailable until a share link is generated.'
+                  : embedCode || (isGenerating ? 'Generating embed code...' : 'Generate a share link to view the embed code.')}
               </div>
-              <Button variant="secondary" className="w-full" onClick={handleCopyEmbed} disabled={!embedCode}>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={handleCopyEmbed}
+                disabled={!embedCode || isGenerating}
+              >
                 {embedCopied ? (
                   <>
                     <Check className="h-4 w-4 mr-2" />
