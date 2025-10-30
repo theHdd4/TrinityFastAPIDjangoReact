@@ -52,12 +52,25 @@ const resolveShareLink = (link: string): string => {
 };
 
 const copyToClipboard = async (text: string) => {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
+  const attemptNativeClipboard = async () => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      return false;
+    }
 
-  if (typeof document !== 'undefined') {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      console.warn('navigator.clipboard.writeText failed, falling back to execCommand', error);
+      return false;
+    }
+  };
+
+  const attemptExecCommand = () => {
+    if (typeof document === 'undefined') {
+      return false;
+    }
+
     const textarea = document.createElement('textarea');
     textarea.value = text;
     textarea.setAttribute('readonly', '');
@@ -65,12 +78,25 @@ const copyToClipboard = async (text: string) => {
     textarea.style.left = '-9999px';
     document.body.appendChild(textarea);
     textarea.select();
-    const successful = document.execCommand('copy');
-    document.body.removeChild(textarea);
 
-    if (successful) {
-      return;
+    let successful = false;
+    try {
+      successful = document.execCommand('copy');
+    } catch (error) {
+      console.warn('document.execCommand copy failed', error);
+      successful = false;
     }
+
+    document.body.removeChild(textarea);
+    return successful;
+  };
+
+  if (await attemptNativeClipboard()) {
+    return;
+  }
+
+  if (attemptExecCommand()) {
+    return;
   }
 
   throw new Error('Copy not supported');
