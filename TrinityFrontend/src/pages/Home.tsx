@@ -18,7 +18,7 @@ import {
   ArrowUp,
   LineChart
 } from 'lucide-react';
-import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
+import { TrinityAssets } from '@/components/PrimaryMenu';
 import {
   Accordion,
   AccordionContent,
@@ -347,8 +347,8 @@ const Home = () => {
       <header className="border-b border-border/50 bg-white sticky top-0 z-50">
         <div className="w-full px-6 lg:px-12 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => scrollToTop()}>
-            <AnimatedLogo className="w-10 h-10 transition-transform group-hover:scale-105" />
-            <h1 className="text-xl font-bold text-foreground">Trinity</h1>
+            <TrinityAssets.AnimatedLogo className="w-12 h-12 group-hover:shadow-xl transition-all duration-300" />
+            <TrinityAssets.LogoText />
           </div>
           
           <nav className="hidden md:flex items-center space-x-8">
@@ -1900,7 +1900,7 @@ const Home = () => {
           <div className="grid md:grid-cols-4 gap-12 mb-12">
             <div className="space-y-6">
               <div className="flex items-center space-x-3 cursor-pointer group" onClick={() => scrollToTop()}>
-                <AnimatedLogo className="w-12 h-12 shadow-md group-hover:shadow-lg group-hover:scale-110 transition-all" />
+                <TrinityAssets.AnimatedLogo className="w-12 h-12 shadow-md group-hover:shadow-lg group-hover:scale-110 transition-all" />
                 <h3 className="text-2xl font-bold text-foreground group-hover:text-primary transition-colors">Trinity</h3>
               </div>
               <p className="text-muted-foreground leading-relaxed">
