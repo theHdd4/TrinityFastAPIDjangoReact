@@ -7,6 +7,7 @@ interface SlideChartProps {
   data: ChartDataRow[];
   config: ChartConfig;
   className?: string;
+  captureId?: string;
 }
 
 const normaliseData = (rows: ChartDataRow[]): ChartDataRow[] => {
@@ -19,8 +20,11 @@ const normaliseData = (rows: ChartDataRow[]): ChartDataRow[] => {
   }));
 };
 
-const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
+const SlideChart: React.FC<SlideChartProps> = ({ data, config, className, captureId }) => {
   const chartData = useMemo(() => normaliseData(data), [data]);
+  const rootAttributes = captureId
+    ? { 'data-exhibition-chart-root': 'true', 'data-exhibition-chart-id': captureId }
+    : {};
   const colors = useMemo(() => getColorSchemeColors(config.colorScheme), [config.colorScheme]);
   const horizontalAlignment = config.horizontalAlignment ?? 'center';
   const justifyClass =
@@ -79,7 +83,10 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
 
   if (config.type === 'blank') {
     return (
-      <div className={cn('h-full w-full flex items-center justify-center text-muted-foreground', className)}>
+      <div
+        className={cn('h-full w-full flex items-center justify-center text-muted-foreground', className)}
+        {...rootAttributes}
+      >
         <div className="text-center">
           <p className="text-sm font-medium">Blank diagram</p>
           <p className="text-xs">Add your custom content here</p>
@@ -91,7 +98,7 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
   if (config.type === 'calendar') {
     const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return (
-      <div className={cn('h-full w-full p-6', textAlignClass, className)}>
+      <div className={cn('h-full w-full p-6', textAlignClass, className)} {...rootAttributes}>
         <div className="grid grid-cols-7 gap-1 h-full">
           {labels.map((label, idx) => (
             <div key={label} className="text-center">
@@ -112,7 +119,7 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
 
   if (config.type === 'gantt') {
     return (
-      <div className={cn('h-full w-full p-6', textAlignClass, className)}>
+      <div className={cn('h-full w-full p-6', textAlignClass, className)} {...rootAttributes}>
         <div className="space-y-3">
           {chartData.map((item, index) => (
             <div key={item.label} className="flex items-center gap-3">
@@ -323,12 +330,16 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
   const outerClass = cn('h-full w-full', className);
 
   if (!legendVisible) {
-    return <div className={cn(outerClass, 'flex')}>{chartContent}</div>;
+    return (
+      <div className={cn(outerClass, 'flex')} {...rootAttributes}>
+        {chartContent}
+      </div>
+    );
   }
 
   if (legendPosition === 'top') {
     return (
-      <div className={cn(outerClass, 'flex flex-col')}>
+      <div className={cn(outerClass, 'flex flex-col')} {...rootAttributes}>
         {renderLegend('mb-4')}
         {chartContent}
       </div>
@@ -337,7 +348,7 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
 
   if (legendPosition === 'bottom') {
     return (
-      <div className={cn(outerClass, 'flex flex-col')}>
+      <div className={cn(outerClass, 'flex flex-col')} {...rootAttributes}>
         {chartContent}
         {renderLegend('mt-4')}
       </div>
@@ -346,7 +357,7 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
 
   if (legendPosition === 'left') {
     return (
-      <div className={cn(outerClass, 'flex flex-row')}>
+      <div className={cn(outerClass, 'flex flex-row')} {...rootAttributes}>
         {renderLegend('mr-4')}
         {chartContent}
       </div>
@@ -354,7 +365,7 @@ const SlideChart: React.FC<SlideChartProps> = ({ data, config, className }) => {
   }
 
   return (
-    <div className={cn(outerClass, 'flex flex-row-reverse')}>
+    <div className={cn(outerClass, 'flex flex-row-reverse')} {...rootAttributes}>
       {renderLegend('ml-4')}
       {chartContent}
     </div>

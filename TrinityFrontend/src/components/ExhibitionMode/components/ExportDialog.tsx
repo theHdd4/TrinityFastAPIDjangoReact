@@ -85,14 +85,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
         captureImages: false,
         includeDomSnapshot: true,
         pixelRatio: 3,
-      });
+      }, slideObjectsByCardId);
     }
 
     return prepareSlidesForExport(exhibitedCards, {
       captureImages: true,
       includeDomSnapshot: true,
       pixelRatio: format === 'PDF' ? 3 : 2,
-    });
+    }, slideObjectsByCardId);
   };
 
   const handleExport = async (format: ExportFormat) => {

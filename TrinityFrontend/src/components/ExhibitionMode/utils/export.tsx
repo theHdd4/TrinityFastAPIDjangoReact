@@ -1,6 +1,6 @@
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { toPng } from 'html-to-image';
+import { toPng, toSvg } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 
 import { EXHIBITION_API } from '@/lib/api';
@@ -618,6 +618,7 @@ export interface PreparedSlidesForExport {
   captures: SlideCaptureResult[];
   domSnapshots: Map<string, SlideDomSnapshot>;
   documentStyles: ExportDocumentStyles | null;
+  chartCaptures: Map<string, Map<string, ChartCaptureResult>>;
 }
 
 export interface RenderedSlideScreenshot {
@@ -629,6 +630,14 @@ export interface RenderedSlideScreenshot {
   cssWidth?: number | null;
   cssHeight?: number | null;
   pixelRatio?: number | null;
+}
+
+export interface ChartCaptureResult {
+  svgDataUrl: string;
+  pngDataUrl: string;
+  width: number;
+  height: number;
+  pixelRatio: number;
 }
 
 const buildSlideIndexLookup = (cards: LayoutCard[]): Map<string, number> => {
@@ -716,9 +725,103 @@ const renderSlideForCapture = (
   });
 };
 
+const captureChartSnapshotsForSlide = async (
+  slideElement: HTMLElement,
+  cardId: string,
+  slideObjects: SlideObject[] | undefined,
+  pixelRatio: number,
+): Promise<Map<string, ChartCaptureResult>> => {
+  if (!slideObjects || slideObjects.length === 0) {
+    return new Map();
+  }
+
+  const captures = await Promise.all(
+    slideObjects.map(async object => {
+      const container = slideElement.querySelector<HTMLElement>(
+        `[data-exhibition-object-id="${object.id}"]`,
+      );
+      if (!container) {
+        return null;
+      }
+
+      const chartNode = container.querySelector<HTMLElement>('[data-exhibition-chart-root="true"]');
+      if (!chartNode) {
+        return null;
+      }
+
+      const rect = chartNode.getBoundingClientRect();
+      const width = Math.max(Math.round(rect.width), 0);
+      const height = Math.max(Math.round(rect.height), 0);
+      if (width === 0 || height === 0) {
+        return null;
+      }
+
+      const exportStyle: Record<string, string> = {
+        transform: 'none',
+        transformOrigin: 'top left',
+        margin: '0',
+        padding: '0',
+        background: 'transparent',
+      };
+
+      try {
+        const [svgDataUrl, pngDataUrl] = await Promise.all([
+          toSvg(chartNode, {
+            pixelRatio,
+            cacheBust: true,
+            width,
+            height,
+            style: exportStyle,
+          }),
+          toPng(chartNode, {
+            pixelRatio,
+            cacheBust: true,
+            width,
+            height,
+            style: exportStyle,
+          }),
+        ]);
+
+        if (typeof svgDataUrl !== 'string' || typeof pngDataUrl !== 'string') {
+          return null;
+        }
+
+        return [
+          object.id,
+          {
+            svgDataUrl,
+            pngDataUrl,
+            width,
+            height,
+            pixelRatio,
+          } satisfies ChartCaptureResult,
+        ] as const;
+      } catch (error) {
+        console.warn(
+          '[Exhibition Export] Unable to capture chart snapshot for slide',
+          cardId,
+          object.id,
+          error,
+        );
+        return null;
+      }
+    }),
+  );
+
+  return captures.reduce((map, entry) => {
+    if (!entry) {
+      return map;
+    }
+    const [objectId, snapshot] = entry;
+    map.set(objectId, snapshot);
+    return map;
+  }, new Map<string, ChartCaptureResult>());
+};
+
 export const prepareSlidesForExport = async (
   cards: LayoutCard[],
   options?: PrepareSlidesForExportOptions,
+  slideObjectsByCardId?: SlideObjectMap,
 ): Promise<PreparedSlidesForExport> => {
   ensureBrowserEnvironment('Slide preparation');
   ensureStaticCaptureStyles();
@@ -731,6 +834,7 @@ export const prepareSlidesForExport = async (
       captures: [],
       domSnapshots: new Map(),
       documentStyles: null,
+      chartCaptures: new Map(),
     };
   }
 
@@ -739,6 +843,7 @@ export const prepareSlidesForExport = async (
       captures: [],
       domSnapshots: new Map(),
       documentStyles: includeDomSnapshot ? collectDocumentStyles() : null,
+      chartCaptures: new Map(),
     };
   }
 
@@ -761,6 +866,7 @@ export const prepareSlidesForExport = async (
 
   const captures: SlideCaptureResult[] = [];
   const domSnapshots = new Map<string, SlideDomSnapshot>();
+  const chartCaptures = new Map<string, Map<string, ChartCaptureResult>>();
   const failures: string[] = [];
   const pixelRatio = getPixelRatio(options?.pixelRatio);
   let collectedStyles: ExportDocumentStyles | null = null;
@@ -790,6 +896,16 @@ export const prepareSlidesForExport = async (
 
       slideElement.setAttribute(EXPORT_STATIC_ATTRIBUTE, '');
       stripAnimationArtifacts(slideElement);
+
+      const slideChartSnapshots = await captureChartSnapshotsForSlide(
+        slideElement,
+        card.id,
+        slideObjectsByCardId?.[card.id],
+        pixelRatio,
+      );
+      if (slideChartSnapshots.size > 0) {
+        chartCaptures.set(card.id, slideChartSnapshots);
+      }
 
       const { width: measuredWidth, height: measuredHeight } = resolveSlideDimensions(slideElement);
       const { width: designWidth, height: designHeight } = resolveDesignDimensions(
@@ -943,6 +1059,7 @@ export const prepareSlidesForExport = async (
     captures,
     domSnapshots,
     documentStyles: includeDomSnapshot ? collectedStyles ?? collectDocumentStyles() : null,
+    chartCaptures,
   };
 };
 
@@ -965,7 +1082,7 @@ export const renderSlidesClientSideForDownload = async (
             captureImages: true,
             includeDomSnapshot: false,
             pixelRatio: preferredPixelRatio,
-          })
+          }, undefined)
         ).captures;
 
   return createRenderedSlideScreenshotsFromCaptures(captures, cards);
@@ -1112,6 +1229,7 @@ export interface BuildPresentationExportOptions {
 
 const normaliseObjects = async (
   objects: SlideObject[] | undefined,
+  chartSnapshots?: Map<string, ChartCaptureResult>,
 ): Promise<SlideExportObjectPayload[]> => {
   if (!objects || objects.length === 0) {
     return [];
@@ -1120,8 +1238,17 @@ const normaliseObjects = async (
   return Promise.all(
     objects.map(async object => {
       const props = clonePlainObject(object.props ?? {});
-      const normalisedProps =
+      const normalisedProps: Record<string, unknown> =
         object.type === 'image' ? await ensureImageDataUrl(props) : props;
+
+      const chartSnapshot = chartSnapshots?.get(object.id);
+      if (chartSnapshot) {
+        normalisedProps.postAnimationSvg = chartSnapshot.svgDataUrl;
+        normalisedProps.postAnimationPng = chartSnapshot.pngDataUrl;
+        normalisedProps.postAnimationWidth = chartSnapshot.width;
+        normalisedProps.postAnimationHeight = chartSnapshot.height;
+        normalisedProps.postAnimationPixelRatio = chartSnapshot.pixelRatio;
+      }
 
       const groupId =
         typeof object.groupId === 'string' && object.groupId.trim().length > 0
@@ -1198,6 +1325,7 @@ export const buildPresentationExportPayload = async (
 
   const domSnapshots = prepared?.domSnapshots ?? new Map<string, SlideDomSnapshot>();
   const firstSnapshot = domSnapshots.size > 0 ? domSnapshots.values().next().value : undefined;
+  const chartSnapshotsByCard = prepared?.chartCaptures ?? new Map<string, Map<string, ChartCaptureResult>>();
 
   const fallbackWidth = captures[0]?.cssWidth ?? firstSnapshot?.width ?? FALLBACK_BASE_WIDTH;
   const fallbackHeight = captures[0]?.cssHeight ?? firstSnapshot?.height ?? FALLBACK_BASE_HEIGHT;
@@ -1205,7 +1333,10 @@ export const buildPresentationExportPayload = async (
   const slides: SlideExportPayload[] = await Promise.all(cards.map(async (card, index) => {
     const capture = captureLookup.get(card.id);
     const domSnapshot = domSnapshots.get(card.id);
-    const objects = await normaliseObjects(slideObjectsByCardId[card.id]);
+    const objects = await normaliseObjects(
+      slideObjectsByCardId[card.id],
+      chartSnapshotsByCard.get(card.id),
+    );
     const presentationSettings = await normalisePresentationSettings(
       card.presentationSettings ?? undefined,
     );
