@@ -1,6 +1,7 @@
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toPng } from 'html-to-image';
+import { jsPDF } from 'jspdf';
 
 import { EXHIBITION_API } from '@/lib/api';
 import {
@@ -24,9 +25,76 @@ type JsonCompatible =
   | null;
 
 const EXPORT_CONTAINER_ID = 'exhibition-export-container';
-const WAIT_FOR_RENDER_MS = 120;
+const WAIT_FOR_RENDER_MS = 240;
 const DOWNLOAD_DELAY_MS = 80;
 const PRESENTATION_STAGE_HEIGHT = 520;
+const CLIENT_RENDER_PIXEL_RATIO = 3;
+
+const EXPORT_STATIC_ATTRIBUTE = 'data-exhibition-export-static';
+const STATIC_STYLE_ELEMENT_ID = 'exhibition-export-static-style';
+
+const RENDERER_UNAVAILABLE_PATTERNS = [
+  /server-side renderer failed/i,
+  /playwright is not installed/i,
+  /renderer is not available/i,
+  /renderer failed/i,
+  /rendering service unavailable/i,
+];
+
+const extractRendererErrorMessage = (raw: string): string => {
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'string') {
+      return parsed;
+    }
+    if (parsed && typeof parsed === 'object') {
+      const detail = (parsed as { detail?: unknown }).detail;
+      if (typeof detail === 'string') {
+        return detail;
+      }
+      if (detail && typeof detail === 'object') {
+        const detailMessage = (detail as { message?: unknown }).message;
+        if (typeof detailMessage === 'string') {
+          return detailMessage;
+        }
+        try {
+          return JSON.stringify(detail);
+        } catch {
+          /* no-op */
+        }
+      }
+      const message = (parsed as { message?: unknown }).message;
+      if (typeof message === 'string') {
+        return message;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  return raw;
+};
+
+const isRendererUnavailable = (status: number, message: string): boolean => {
+  if (status >= 500) {
+    return true;
+  }
+  if (!message) {
+    return false;
+  }
+  return RENDERER_UNAVAILABLE_PATTERNS.some(pattern => pattern.test(message));
+};
+
+export class SlideRendererUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SlideRendererUnavailableError';
+  }
+}
 
 const CARD_WIDTH_DIMENSIONS: Record<CardWidth, { width: number; height: number }> = {
   M: { width: 832, height: PRESENTATION_STAGE_HEIGHT },
@@ -36,6 +104,8 @@ const CARD_WIDTH_DIMENSIONS: Record<CardWidth, { width: number; height: number }
 const FALLBACK_BASE_WIDTH = CARD_WIDTH_DIMENSIONS[DEFAULT_PRESENTATION_SETTINGS.cardWidth].width;
 const FALLBACK_BASE_HEIGHT = CARD_WIDTH_DIMENSIONS[DEFAULT_PRESENTATION_SETTINGS.cardWidth].height;
 const MAX_CAPTURE_ATTEMPTS = 2;
+
+const DEFAULT_PDF_UNIT: 'pt' | 'px' = 'px';
 
 const isSecurityError = (error: unknown): boolean => {
   if (!(error instanceof Error)) {
@@ -68,6 +138,63 @@ const clonePlainObject = <T,>(value: T): T => {
 const DATA_URL_PATTERN = /^data:image\//i;
 
 const imageDataUrlCache = new Map<string, Promise<string>>();
+
+const ensureStaticCaptureStyles = () => {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  if (document.getElementById(STATIC_STYLE_ELEMENT_ID)) {
+    return;
+  }
+
+  const style = document.createElement('style');
+  style.id = STATIC_STYLE_ELEMENT_ID;
+  style.textContent = `
+[${EXPORT_STATIC_ATTRIBUTE}] *,
+[${EXPORT_STATIC_ATTRIBUTE}] *::before,
+[${EXPORT_STATIC_ATTRIBUTE}] *::after {
+  animation: none !important;
+  animation-delay: 0s !important;
+  animation-duration: 0s !important;
+  animation-play-state: paused !important;
+  transition-property: none !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+`;
+  document.head.appendChild(style);
+};
+
+const stripAnimationArtifacts = (root: HTMLElement) => {
+  const nodes: Element[] = [root, ...Array.from(root.querySelectorAll('*'))];
+
+  nodes.forEach(node => {
+    const classValue = node.getAttribute('class');
+    if (classValue && classValue.includes('animate-')) {
+      const filtered = classValue
+        .split(/\s+/)
+        .filter(token => token.length > 0 && !token.startsWith('animate-'));
+      if (filtered.length > 0) {
+        node.setAttribute('class', Array.from(new Set(filtered)).join(' '));
+      } else {
+        node.removeAttribute('class');
+      }
+    }
+
+    if (node instanceof HTMLElement) {
+      node.style.animation = '';
+      node.style.animationDelay = '';
+      node.style.animationDuration = '';
+      node.style.animationName = '';
+      node.style.removeProperty('animation');
+      node.style.removeProperty('animation-delay');
+      node.style.removeProperty('animation-duration');
+      node.style.removeProperty('animation-iteration-count');
+      node.style.removeProperty('animation-name');
+    }
+  });
+};
 
 const readBlobAsDataUrl = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -301,6 +428,94 @@ const resolveSlideDimensions = (
   };
 };
 
+const copyElementAttributes = (source: Element, target: Element) => {
+  Array.from(source.attributes).forEach(attribute => {
+    try {
+      target.setAttribute(attribute.name, attribute.value);
+    } catch (error) {
+      console.warn('[Exhibition Export] Failed to copy attribute', attribute.name, error);
+    }
+  });
+};
+
+const replaceCanvasElementsWithImages = (sourceRoot: HTMLElement, cloneRoot: HTMLElement) => {
+  const sourceCanvases = Array.from(sourceRoot.querySelectorAll('canvas'));
+  const clonedCanvases = Array.from(cloneRoot.querySelectorAll('canvas'));
+
+  if (sourceCanvases.length === 0 || clonedCanvases.length === 0) {
+    return;
+  }
+
+  sourceCanvases.forEach((sourceCanvas, index) => {
+    const clonedCanvas = clonedCanvases[index];
+    if (!(clonedCanvas instanceof HTMLCanvasElement)) {
+      return;
+    }
+
+    let dataUrl: string | null = null;
+    try {
+      dataUrl = sourceCanvas.toDataURL('image/png');
+    } catch (error) {
+      console.warn('[Exhibition Export] Unable to serialise canvas content for export', error);
+      dataUrl = null;
+    }
+
+    if (!dataUrl || dataUrl === 'data:,') {
+      return;
+    }
+
+    const image = document.createElement('img');
+    image.src = dataUrl;
+    image.draggable = false;
+    image.dataset.exhibitionCanvasSnapshot = 'true';
+
+    copyElementAttributes(clonedCanvas, image);
+
+    const ariaLabel =
+      sourceCanvas.getAttribute('aria-label') ||
+      clonedCanvas.getAttribute('aria-label') ||
+      clonedCanvas.getAttribute('data-chart-title');
+    if (ariaLabel) {
+      image.setAttribute('alt', ariaLabel);
+    }
+
+    if (clonedCanvas.id && !image.id) {
+      image.id = clonedCanvas.id;
+    }
+
+    if (clonedCanvas.className) {
+      image.className = clonedCanvas.className;
+    }
+
+    const inlineStyle = clonedCanvas.getAttribute('style');
+    if (inlineStyle) {
+      image.setAttribute('style', inlineStyle);
+    }
+
+    const computed = window.getComputedStyle(sourceCanvas);
+    if (computed?.width && computed.width !== 'auto') {
+      image.style.width = computed.width;
+    }
+    if (computed?.height && computed.height !== 'auto') {
+      image.style.height = computed.height;
+    }
+
+    if (clonedCanvas.width > 0) {
+      image.width = clonedCanvas.width;
+    } else if (sourceCanvas.width > 0) {
+      image.width = sourceCanvas.width;
+    }
+
+    if (clonedCanvas.height > 0) {
+      image.height = clonedCanvas.height;
+    } else if (sourceCanvas.height > 0) {
+      image.height = sourceCanvas.height;
+    }
+
+    clonedCanvas.replaceWith(image);
+  });
+};
+
 const serialiseSlideElement = (element: HTMLElement, width: number, height: number): string => {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.style.transform = 'none';
@@ -315,6 +530,9 @@ const serialiseSlideElement = (element: HTMLElement, width: number, height: numb
   if (!clone.style.position) {
     clone.style.position = 'relative';
   }
+  clone.setAttribute(EXPORT_STATIC_ATTRIBUTE, '');
+  replaceCanvasElementsWithImages(element, clone);
+  stripAnimationArtifacts(clone);
   return clone.outerHTML;
 };
 
@@ -413,6 +631,61 @@ export interface RenderedSlideScreenshot {
   pixelRatio?: number | null;
 }
 
+const buildSlideIndexLookup = (cards: LayoutCard[]): Map<string, number> => {
+  return cards.reduce((lookup, card, index) => {
+    lookup.set(card.id, index);
+    return lookup;
+  }, new Map<string, number>());
+};
+
+const resolvePreparedPixelRatio = (
+  prepared?: PreparedSlidesForExport | null,
+): number | null => {
+  if (!prepared?.domSnapshots || prepared.domSnapshots.size === 0) {
+    return null;
+  }
+
+  const iterator = prepared.domSnapshots.values().next();
+  if (!iterator || !iterator.value) {
+    return null;
+  }
+
+  const ratio = iterator.value.pixelRatio;
+  return typeof ratio === 'number' && Number.isFinite(ratio) && ratio > 0 ? ratio : null;
+};
+
+export const createRenderedSlideScreenshotsFromCaptures = (
+  captures: SlideCaptureResult[],
+  cards: LayoutCard[],
+): RenderedSlideScreenshot[] => {
+  if (!Array.isArray(captures) || captures.length === 0) {
+    return [];
+  }
+
+  const indexLookup = buildSlideIndexLookup(cards);
+
+  return captures
+    .map(capture => {
+      const index = indexLookup.get(capture.cardId);
+      if (typeof index !== 'number') {
+        return null;
+      }
+
+      return {
+        id: capture.cardId,
+        index,
+        dataUrl: capture.dataUrl,
+        width: capture.imageWidth,
+        height: capture.imageHeight,
+        cssWidth: capture.cssWidth,
+        cssHeight: capture.cssHeight,
+        pixelRatio: capture.pixelRatio,
+      } satisfies RenderedSlideScreenshot;
+    })
+    .filter((entry): entry is RenderedSlideScreenshot => Boolean(entry))
+    .sort((a, b) => a.index - b.index);
+};
+
 const renderSlideForCapture = (
   root: ReturnType<typeof createRoot>,
   card: LayoutCard,
@@ -448,6 +721,7 @@ export const prepareSlidesForExport = async (
   options?: PrepareSlidesForExportOptions,
 ): Promise<PreparedSlidesForExport> => {
   ensureBrowserEnvironment('Slide preparation');
+  ensureStaticCaptureStyles();
 
   const captureImages = options?.captureImages ?? true;
   const includeDomSnapshot = options?.includeDomSnapshot ?? false;
@@ -470,6 +744,7 @@ export const prepareSlidesForExport = async (
 
   const container = document.createElement('div');
   container.id = EXPORT_CONTAINER_ID;
+  container.setAttribute(EXPORT_STATIC_ATTRIBUTE, '');
   container.style.position = 'fixed';
   container.style.top = '-10000px';
   container.style.left = '-10000px';
@@ -512,6 +787,9 @@ export const prepareSlidesForExport = async (
         failures.push(card.id);
         continue;
       }
+
+      slideElement.setAttribute(EXPORT_STATIC_ATTRIBUTE, '');
+      stripAnimationArtifacts(slideElement);
 
       const { width: measuredWidth, height: measuredHeight } = resolveSlideDimensions(slideElement);
       const { width: designWidth, height: designHeight } = resolveDesignDimensions(
@@ -668,6 +946,119 @@ export const prepareSlidesForExport = async (
   };
 };
 
+export const renderSlidesClientSideForDownload = async (
+  cards: LayoutCard[],
+  prepared?: PreparedSlidesForExport | null,
+  options?: { pixelRatio?: number },
+): Promise<RenderedSlideScreenshot[]> => {
+  const preferredPixelRatio =
+    (typeof options?.pixelRatio === 'number' && Number.isFinite(options.pixelRatio) && options.pixelRatio > 0
+      ? options.pixelRatio
+      : null) ?? resolvePreparedPixelRatio(prepared) ?? CLIENT_RENDER_PIXEL_RATIO;
+
+  const existingCaptures = prepared?.captures ?? [];
+  const captures =
+    existingCaptures.length > 0
+      ? existingCaptures
+      : (
+          await prepareSlidesForExport(cards, {
+            captureImages: true,
+            includeDomSnapshot: false,
+            pixelRatio: preferredPixelRatio,
+          })
+        ).captures;
+
+  return createRenderedSlideScreenshotsFromCaptures(captures, cards);
+};
+
+const toPositiveNumber = (value: unknown): number | null => {
+  if (typeof value !== 'number') {
+    return null;
+  }
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
+};
+
+const computeScreenshotDimensions = (
+  screenshot: RenderedSlideScreenshot,
+): { width: number; height: number } => {
+  const pixelRatio = toPositiveNumber(screenshot.pixelRatio) ?? 1;
+
+  const normalisedWidth =
+    toPositiveNumber(screenshot.cssWidth) ?? toPositiveNumber(screenshot.width / pixelRatio) ?? screenshot.width;
+  const normalisedHeight =
+    toPositiveNumber(screenshot.cssHeight) ?? toPositiveNumber(screenshot.height / pixelRatio) ?? screenshot.height;
+
+  const width = Math.max(Math.round(normalisedWidth), 1);
+  const height = Math.max(Math.round(normalisedHeight), 1);
+
+  return { width, height };
+};
+
+const createPdfFromScreenshots = (
+  screenshots: RenderedSlideScreenshot[],
+): jsPDF => {
+  if (screenshots.length === 0) {
+    throw new Error('No slides available for PDF export.');
+  }
+
+  const ordered = [...screenshots].sort((a, b) => a.index - b.index);
+  const baseDimensions = computeScreenshotDimensions(ordered[0]);
+  const baseOrientation = baseDimensions.width >= baseDimensions.height ? 'landscape' : 'portrait';
+
+  const pdf = new jsPDF({
+    orientation: baseOrientation,
+    unit: DEFAULT_PDF_UNIT,
+    format: [baseDimensions.width, baseDimensions.height],
+  });
+
+  ordered.forEach((screenshot, index) => {
+    const { width, height } = computeScreenshotDimensions(screenshot);
+    const orientation = width >= height ? 'landscape' : 'portrait';
+
+    if (index > 0) {
+      pdf.addPage([width, height], orientation);
+    }
+
+    pdf.addImage(screenshot.dataUrl, 'PNG', 0, 0, width, height);
+  });
+
+  return pdf;
+};
+
+export interface ExportSlidesAsPdfOptions {
+  title?: string;
+  pixelRatio?: number;
+}
+
+export const exportSlidesAsPdfClientSide = async (
+  cards: LayoutCard[],
+  prepared: PreparedSlidesForExport | null,
+  options?: ExportSlidesAsPdfOptions,
+): Promise<{ fileName: string; slideCount: number }> => {
+  ensureBrowserEnvironment('Client-side PDF export');
+
+  const screenshots = await renderSlidesClientSideForDownload(cards, prepared, {
+    pixelRatio: options?.pixelRatio,
+  });
+
+  if (screenshots.length === 0) {
+    throw new Error('Unable to capture slides for PDF export.');
+  }
+
+  const pdf = createPdfFromScreenshots(screenshots);
+  const resolvedTitle = sanitiseTitle(options?.title);
+  const fileName = `${sanitizeFileName(resolvedTitle)}.pdf`;
+
+  await pdf.save(fileName, { returnPromise: true });
+
+  return { fileName, slideCount: screenshots.length };
+};
+
 export interface SlideExportObjectPayload {
   id: string;
   type: string;
@@ -677,6 +1068,7 @@ export interface SlideExportObjectPayload {
   height?: number;
   rotation?: number;
   zIndex?: number;
+  groupId?: string | null;
   props: Record<string, unknown>;
 }
 
@@ -731,6 +1123,13 @@ const normaliseObjects = async (
       const normalisedProps =
         object.type === 'image' ? await ensureImageDataUrl(props) : props;
 
+      const groupId =
+        typeof object.groupId === 'string' && object.groupId.trim().length > 0
+          ? object.groupId
+          : object.groupId === null
+            ? null
+            : undefined;
+
       return {
         id: object.id,
         type: object.type,
@@ -740,6 +1139,7 @@ const normaliseObjects = async (
         height: object.height,
         rotation: object.rotation,
         zIndex: object.zIndex,
+        groupId,
         props: normalisedProps,
       };
     }),
@@ -941,28 +1341,47 @@ export const requestRenderedSlideScreenshots = async (
   ensureBrowserEnvironment('Rendered slide capture');
 
   const endpoint = `${EXHIBITION_API}/export/screenshots`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(payload as JsonCompatible),
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload as JsonCompatible),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Renderer request failed.';
+    throw new SlideRendererUnavailableError(message);
+  }
 
   if (!response.ok) {
-    const message = await response.text();
+    const raw = await response.text();
+    const message = extractRendererErrorMessage(raw);
+    if (isRendererUnavailable(response.status, message)) {
+      throw new SlideRendererUnavailableError(
+        message || 'The slide rendering service is currently unavailable.',
+      );
+    }
     throw new Error(message || 'Failed to render slides for download.');
   }
 
-  const body = (await response.json()) as { slides?: unknown };
+  let body: { slides?: unknown };
+  try {
+    body = (await response.json()) as { slides?: unknown };
+  } catch {
+    throw new SlideRendererUnavailableError(
+      'Received an invalid response from the slide rendering service.',
+    );
+  }
   const slides = Array.isArray(body?.slides) ? body.slides : [];
   const rendered = slides
     .map(normaliseRenderedScreenshot)
     .filter((value): value is RenderedSlideScreenshot => Boolean(value));
 
   if (rendered.length === 0) {
-    throw new Error('The rendering service did not return any slides.');
+    throw new SlideRendererUnavailableError('The rendering service did not return any slides.');
   }
 
   return rendered;
@@ -998,19 +1417,37 @@ export const requestPresentationExport = async (
   ensureBrowserEnvironment('Presentation export');
 
   const endpoint = `${EXHIBITION_API}/export/${format}`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(payload as JsonCompatible),
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload as JsonCompatible),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Renderer request failed.';
+    throw new SlideRendererUnavailableError(message);
+  }
 
   if (!response.ok) {
-    const message = await response.text();
+    const raw = await response.text();
+    const message = extractRendererErrorMessage(raw);
+    if (isRendererUnavailable(response.status, message)) {
+      throw new SlideRendererUnavailableError(
+        message || `The slide rendering service is unavailable for ${format.toUpperCase()} exports.`,
+      );
+    }
     throw new Error(message || `Failed to export presentation as ${format.toUpperCase()}`);
   }
 
-  return response.blob();
+  try {
+    return await response.blob();
+  } catch {
+    throw new SlideRendererUnavailableError(
+      `Received an invalid response when exporting ${format.toUpperCase()} presentation.`,
+    );
+  }
 };

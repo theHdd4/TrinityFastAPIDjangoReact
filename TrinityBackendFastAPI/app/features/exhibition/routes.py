@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from motor.motor_asyncio import AsyncIOMotorCollection
 
@@ -210,7 +211,7 @@ async def export_presentation_pptx(payload: ExhibitionExportRequest) -> Response
         )
 
     try:
-        pptx_bytes = build_pptx_bytes(payload)
+        pptx_bytes = await run_in_threadpool(build_pptx_bytes, payload)
     except ExportGenerationError as exc:  # pragma: no cover - defensive path
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -232,7 +233,7 @@ async def export_presentation_pdf(payload: ExhibitionExportRequest) -> Response:
         )
 
     try:
-        pdf_bytes = build_pdf_bytes(payload)
+        pdf_bytes = await run_in_threadpool(build_pdf_bytes, payload)
     except ExportGenerationError as exc:  # pragma: no cover - defensive path
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -252,7 +253,7 @@ async def export_presentation_screenshots(
         )
 
     try:
-        slides = render_slide_screenshots(payload)
+        slides = await run_in_threadpool(render_slide_screenshots, payload)
     except ExportGenerationError as exc:  # pragma: no cover - defensive path
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

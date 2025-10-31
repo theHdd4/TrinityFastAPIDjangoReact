@@ -27,6 +27,21 @@ except ImportError:  # pragma: no cover - executed when playwright is missing
 _browser_install_lock = threading.Lock()
 _browser_install_ready = False
 
+STATIC_CAPTURE_ATTRIBUTE = "data-exhibition-export-static"
+STATIC_CAPTURE_STYLE = (
+    f"[{STATIC_CAPTURE_ATTRIBUTE}] *,"
+    f"[{STATIC_CAPTURE_ATTRIBUTE}] *::before,"
+    f"[{STATIC_CAPTURE_ATTRIBUTE}] *::after {{"
+    "animation: none !important;"
+    "animation-delay: 0s !important;"
+    "animation-duration: 0s !important;"
+    "animation-play-state: paused !important;"
+    "transition-property: none !important;"
+    "transition-duration: 0s !important;"
+    "transition-delay: 0s !important;"
+    "}"
+)
+
 
 class ExhibitionRendererError(RuntimeError):
     """Raised when the exhibition renderer is unable to capture a slide."""
@@ -142,6 +157,8 @@ def _compose_document(slide: SlideRenderInput, styles: DocumentStylesPayload) ->
         "<style>html,body{margin:0;padding:0;background:transparent;}</style>",
     ]
 
+    head_parts.append(f"<style>{''.join(STATIC_CAPTURE_STYLE)}</style>")
+
     for css in styles.inline or []:
         css_content = (css or "").strip()
         if css_content:
@@ -243,7 +260,7 @@ class ExhibitionRenderer:
                         )
                     except PlaywrightTimeoutError:  # pragma: no cover - slow font load
                         logger.debug("Timed out waiting for fonts when rendering slide %s", slide.id)
-                page.wait_for_timeout(100)
+                page.wait_for_timeout(250)
 
                 screenshot_bytes = page.screenshot(type="png", full_page=False)
             except Exception as exc:
