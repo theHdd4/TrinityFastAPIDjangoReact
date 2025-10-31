@@ -48,6 +48,7 @@ export interface ImagePanelProps {
 
 const FREE_IMAGE_LIBRARY_ENDPOINT = 'https://pixabay.com/api/';
 const FREE_IMAGE_LIBRARY_FALLBACK_KEY = '53025349-5cb3ede8add7ca256da259955';
+const DEFAULT_LIBRARY_SEARCH_TERM = 'Business Analytics';
 
 const resolveFreeImageLibraryKey = (): string => {
   const envKey = (import.meta.env?.VITE_PIXABAY_API_KEY as string | undefined) ?? undefined;
@@ -267,7 +268,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     new Map<string, SelectedImage>(),
   );
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(DEFAULT_LIBRARY_SEARCH_TERM);
   const [searchResults, setSearchResults] = useState<LibraryImage[]>([]);
   const [isSearchingLibrary, setIsSearchingLibrary] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -424,6 +425,12 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     },
     [performLibrarySearch, searchQuery],
   );
+
+  useEffect(() => {
+    if (!hasSearchedLibrary && searchQuery === DEFAULT_LIBRARY_SEARCH_TERM) {
+      void performLibrarySearch(DEFAULT_LIBRARY_SEARCH_TERM);
+    }
+  }, [hasSearchedLibrary, performLibrarySearch, searchQuery]);
 
   const handleUploadToggle = useCallback(
     (image: StoredImage) => {
