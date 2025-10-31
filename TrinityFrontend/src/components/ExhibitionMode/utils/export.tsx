@@ -27,6 +27,70 @@ const EXPORT_CONTAINER_ID = 'exhibition-export-container';
 const WAIT_FOR_RENDER_MS = 120;
 const DOWNLOAD_DELAY_MS = 80;
 const PRESENTATION_STAGE_HEIGHT = 520;
+const CLIENT_RENDER_PIXEL_RATIO = 3;
+
+const RENDERER_UNAVAILABLE_PATTERNS = [
+  /server-side renderer failed/i,
+  /playwright is not installed/i,
+  /renderer is not available/i,
+  /renderer failed/i,
+  /rendering service unavailable/i,
+];
+
+const extractRendererErrorMessage = (raw: string): string => {
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'string') {
+      return parsed;
+    }
+    if (parsed && typeof parsed === 'object') {
+      const detail = (parsed as { detail?: unknown }).detail;
+      if (typeof detail === 'string') {
+        return detail;
+      }
+      if (detail && typeof detail === 'object') {
+        const detailMessage = (detail as { message?: unknown }).message;
+        if (typeof detailMessage === 'string') {
+          return detailMessage;
+        }
+        try {
+          return JSON.stringify(detail);
+        } catch {
+          /* no-op */
+        }
+      }
+      const message = (parsed as { message?: unknown }).message;
+      if (typeof message === 'string') {
+        return message;
+      }
+    }
+  } catch {
+    /* fall through */
+  }
+
+  return raw;
+};
+
+const isRendererUnavailable = (status: number, message: string): boolean => {
+  if (status >= 500) {
+    return true;
+  }
+  if (!message) {
+    return false;
+  }
+  return RENDERER_UNAVAILABLE_PATTERNS.some(pattern => pattern.test(message));
+};
+
+export class SlideRendererUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SlideRendererUnavailableError';
+  }
+}
 
 const CARD_WIDTH_DIMENSIONS: Record<CardWidth, { width: number; height: number }> = {
   M: { width: 832, height: PRESENTATION_STAGE_HEIGHT },
@@ -413,6 +477,61 @@ export interface RenderedSlideScreenshot {
   pixelRatio?: number | null;
 }
 
+const buildSlideIndexLookup = (cards: LayoutCard[]): Map<string, number> => {
+  return cards.reduce((lookup, card, index) => {
+    lookup.set(card.id, index);
+    return lookup;
+  }, new Map<string, number>());
+};
+
+const resolvePreparedPixelRatio = (
+  prepared?: PreparedSlidesForExport | null,
+): number | null => {
+  if (!prepared?.domSnapshots || prepared.domSnapshots.size === 0) {
+    return null;
+  }
+
+  const iterator = prepared.domSnapshots.values().next();
+  if (!iterator || !iterator.value) {
+    return null;
+  }
+
+  const ratio = iterator.value.pixelRatio;
+  return typeof ratio === 'number' && Number.isFinite(ratio) && ratio > 0 ? ratio : null;
+};
+
+export const createRenderedSlideScreenshotsFromCaptures = (
+  captures: SlideCaptureResult[],
+  cards: LayoutCard[],
+): RenderedSlideScreenshot[] => {
+  if (!Array.isArray(captures) || captures.length === 0) {
+    return [];
+  }
+
+  const indexLookup = buildSlideIndexLookup(cards);
+
+  return captures
+    .map(capture => {
+      const index = indexLookup.get(capture.cardId);
+      if (typeof index !== 'number') {
+        return null;
+      }
+
+      return {
+        id: capture.cardId,
+        index,
+        dataUrl: capture.dataUrl,
+        width: capture.imageWidth,
+        height: capture.imageHeight,
+        cssWidth: capture.cssWidth,
+        cssHeight: capture.cssHeight,
+        pixelRatio: capture.pixelRatio,
+      } satisfies RenderedSlideScreenshot;
+    })
+    .filter((entry): entry is RenderedSlideScreenshot => Boolean(entry))
+    .sort((a, b) => a.index - b.index);
+};
+
 const renderSlideForCapture = (
   root: ReturnType<typeof createRoot>,
   card: LayoutCard,
@@ -666,6 +785,31 @@ export const prepareSlidesForExport = async (
     domSnapshots,
     documentStyles: includeDomSnapshot ? collectedStyles ?? collectDocumentStyles() : null,
   };
+};
+
+export const renderSlidesClientSideForDownload = async (
+  cards: LayoutCard[],
+  prepared?: PreparedSlidesForExport | null,
+  options?: { pixelRatio?: number },
+): Promise<RenderedSlideScreenshot[]> => {
+  const preferredPixelRatio =
+    (typeof options?.pixelRatio === 'number' && Number.isFinite(options.pixelRatio) && options.pixelRatio > 0
+      ? options.pixelRatio
+      : null) ?? resolvePreparedPixelRatio(prepared) ?? CLIENT_RENDER_PIXEL_RATIO;
+
+  const existingCaptures = prepared?.captures ?? [];
+  const captures =
+    existingCaptures.length > 0
+      ? existingCaptures
+      : (
+          await prepareSlidesForExport(cards, {
+            captureImages: true,
+            includeDomSnapshot: false,
+            pixelRatio: preferredPixelRatio,
+          })
+        ).captures;
+
+  return createRenderedSlideScreenshotsFromCaptures(captures, cards);
 };
 
 export interface SlideExportObjectPayload {
@@ -941,28 +1085,47 @@ export const requestRenderedSlideScreenshots = async (
   ensureBrowserEnvironment('Rendered slide capture');
 
   const endpoint = `${EXHIBITION_API}/export/screenshots`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(payload as JsonCompatible),
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload as JsonCompatible),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Renderer request failed.';
+    throw new SlideRendererUnavailableError(message);
+  }
 
   if (!response.ok) {
-    const message = await response.text();
+    const raw = await response.text();
+    const message = extractRendererErrorMessage(raw);
+    if (isRendererUnavailable(response.status, message)) {
+      throw new SlideRendererUnavailableError(
+        message || 'The slide rendering service is currently unavailable.',
+      );
+    }
     throw new Error(message || 'Failed to render slides for download.');
   }
 
-  const body = (await response.json()) as { slides?: unknown };
+  let body: { slides?: unknown };
+  try {
+    body = (await response.json()) as { slides?: unknown };
+  } catch {
+    throw new SlideRendererUnavailableError(
+      'Received an invalid response from the slide rendering service.',
+    );
+  }
   const slides = Array.isArray(body?.slides) ? body.slides : [];
   const rendered = slides
     .map(normaliseRenderedScreenshot)
     .filter((value): value is RenderedSlideScreenshot => Boolean(value));
 
   if (rendered.length === 0) {
-    throw new Error('The rendering service did not return any slides.');
+    throw new SlideRendererUnavailableError('The rendering service did not return any slides.');
   }
 
   return rendered;
