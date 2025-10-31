@@ -743,6 +743,20 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     };
   }, [activeTheme]);
 
+  const shouldApplyThemeBackground = useMemo(() => {
+    const mode = settings.backgroundMode ?? 'preset';
+    if (mode !== 'preset') {
+      return false;
+    }
+
+    const backgroundColor =
+      settings.backgroundColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
+
+    return backgroundColor === 'default' || backgroundColor === DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
+  }, [settings.backgroundMode, settings.backgroundColor]);
+
+  const themeBackgroundStyle = shouldApplyThemeBackground ? themeContext.backgroundStyle : undefined;
+
   const accentButtonStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (!themeContext.accent) {
       return undefined;
@@ -1432,8 +1446,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 style={
                   presentationMode
                     ? {
+                        ...(themeBackgroundStyle ?? {}),
                         ...slideBackgroundStyle,
-                        ...(themeContext.backgroundStyle ?? {}),
                         ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
                         ...(!settings.fullBleed && themeContext.borderRadius
                           ? { borderRadius: themeContext.borderRadius }
@@ -1451,8 +1465,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       }
                     : {
                         height: CANVAS_STAGE_HEIGHT,
+                        ...(themeBackgroundStyle ?? {}),
                         ...slideBackgroundStyle,
-                        ...(themeContext.backgroundStyle ?? {}),
                         ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
                         ...(!settings.fullBleed && themeContext.borderRadius
                           ? { borderRadius: themeContext.borderRadius }
