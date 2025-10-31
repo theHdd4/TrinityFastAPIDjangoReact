@@ -1,6 +1,7 @@
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { toPng } from 'html-to-image';
+import { jsPDF } from 'jspdf';
 
 import { EXHIBITION_API } from '@/lib/api';
 import {
@@ -100,6 +101,8 @@ const CARD_WIDTH_DIMENSIONS: Record<CardWidth, { width: number; height: number }
 const FALLBACK_BASE_WIDTH = CARD_WIDTH_DIMENSIONS[DEFAULT_PRESENTATION_SETTINGS.cardWidth].width;
 const FALLBACK_BASE_HEIGHT = CARD_WIDTH_DIMENSIONS[DEFAULT_PRESENTATION_SETTINGS.cardWidth].height;
 const MAX_CAPTURE_ATTEMPTS = 2;
+
+const DEFAULT_PDF_UNIT: 'pt' | 'px' = 'px';
 
 const isSecurityError = (error: unknown): boolean => {
   if (!(error instanceof Error)) {
@@ -812,6 +815,94 @@ export const renderSlidesClientSideForDownload = async (
   return createRenderedSlideScreenshotsFromCaptures(captures, cards);
 };
 
+const toPositiveNumber = (value: unknown): number | null => {
+  if (typeof value !== 'number') {
+    return null;
+  }
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
+};
+
+const computeScreenshotDimensions = (
+  screenshot: RenderedSlideScreenshot,
+): { width: number; height: number } => {
+  const pixelRatio = toPositiveNumber(screenshot.pixelRatio) ?? 1;
+
+  const normalisedWidth =
+    toPositiveNumber(screenshot.cssWidth) ?? toPositiveNumber(screenshot.width / pixelRatio) ?? screenshot.width;
+  const normalisedHeight =
+    toPositiveNumber(screenshot.cssHeight) ?? toPositiveNumber(screenshot.height / pixelRatio) ?? screenshot.height;
+
+  const width = Math.max(Math.round(normalisedWidth), 1);
+  const height = Math.max(Math.round(normalisedHeight), 1);
+
+  return { width, height };
+};
+
+const createPdfFromScreenshots = (
+  screenshots: RenderedSlideScreenshot[],
+): jsPDF => {
+  if (screenshots.length === 0) {
+    throw new Error('No slides available for PDF export.');
+  }
+
+  const ordered = [...screenshots].sort((a, b) => a.index - b.index);
+  const baseDimensions = computeScreenshotDimensions(ordered[0]);
+  const baseOrientation = baseDimensions.width >= baseDimensions.height ? 'landscape' : 'portrait';
+
+  const pdf = new jsPDF({
+    orientation: baseOrientation,
+    unit: DEFAULT_PDF_UNIT,
+    format: [baseDimensions.width, baseDimensions.height],
+  });
+
+  ordered.forEach((screenshot, index) => {
+    const { width, height } = computeScreenshotDimensions(screenshot);
+    const orientation = width >= height ? 'landscape' : 'portrait';
+
+    if (index > 0) {
+      pdf.addPage([width, height], orientation);
+    }
+
+    pdf.addImage(screenshot.dataUrl, 'PNG', 0, 0, width, height);
+  });
+
+  return pdf;
+};
+
+export interface ExportSlidesAsPdfOptions {
+  title?: string;
+  pixelRatio?: number;
+}
+
+export const exportSlidesAsPdfClientSide = async (
+  cards: LayoutCard[],
+  prepared: PreparedSlidesForExport | null,
+  options?: ExportSlidesAsPdfOptions,
+): Promise<{ fileName: string; slideCount: number }> => {
+  ensureBrowserEnvironment('Client-side PDF export');
+
+  const screenshots = await renderSlidesClientSideForDownload(cards, prepared, {
+    pixelRatio: options?.pixelRatio,
+  });
+
+  if (screenshots.length === 0) {
+    throw new Error('Unable to capture slides for PDF export.');
+  }
+
+  const pdf = createPdfFromScreenshots(screenshots);
+  const resolvedTitle = sanitiseTitle(options?.title);
+  const fileName = `${sanitizeFileName(resolvedTitle)}.pdf`;
+
+  await pdf.save(fileName, { returnPromise: true });
+
+  return { fileName, slideCount: screenshots.length };
+};
+
 export interface SlideExportObjectPayload {
   id: string;
   type: string;
@@ -1161,19 +1252,37 @@ export const requestPresentationExport = async (
   ensureBrowserEnvironment('Presentation export');
 
   const endpoint = `${EXHIBITION_API}/export/${format}`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(payload as JsonCompatible),
-  });
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(payload as JsonCompatible),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Renderer request failed.';
+    throw new SlideRendererUnavailableError(message);
+  }
 
   if (!response.ok) {
-    const message = await response.text();
+    const raw = await response.text();
+    const message = extractRendererErrorMessage(raw);
+    if (isRendererUnavailable(response.status, message)) {
+      throw new SlideRendererUnavailableError(
+        message || `The slide rendering service is unavailable for ${format.toUpperCase()} exports.`,
+      );
+    }
     throw new Error(message || `Failed to export presentation as ${format.toUpperCase()}`);
   }
 
-  return response.blob();
+  try {
+    return await response.blob();
+  } catch {
+    throw new SlideRendererUnavailableError(
+      `Received an invalid response when exporting ${format.toUpperCase()} presentation.`,
+    );
+  }
 };

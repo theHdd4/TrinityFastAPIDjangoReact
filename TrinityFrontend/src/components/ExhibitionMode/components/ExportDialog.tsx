@@ -21,6 +21,7 @@ import {
   requestRenderedSlideScreenshots,
   downloadRenderedSlideScreenshots,
   renderSlidesClientSideForDownload,
+  exportSlidesAsPdfClientSide,
   SlideRendererUnavailableError,
   type PreparedSlidesForExport,
   type RenderedSlideScreenshot,
@@ -187,6 +188,55 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
       );
 
       const presentationFormat = presentationFormatFor(format);
+      if (format === 'PDF') {
+        try {
+          const blob = await requestPresentationExport(presentationFormat, payload);
+          const filename = `${sanitizeFileName(presentationTitle)}.${presentationFormat}`;
+
+          downloadBlob(blob, filename);
+
+          toast.success(`${formatLabel(format)} exported successfully!`, {
+            id: toastId,
+            description: `Saved ${filename} to your device.`,
+          });
+          onOpenChange(false);
+          return;
+        } catch (error) {
+          if (error instanceof SlideRendererUnavailableError) {
+            console.warn(
+              '[Exhibition Export] Server renderer unavailable for PDF, falling back to client capture',
+              error,
+            );
+            try {
+              const { fileName, slideCount } = await exportSlidesAsPdfClientSide(exhibitedCards, prepared, {
+                title: presentationTitle,
+              });
+
+              toast.success(`${formatLabel(format)} exported successfully!`, {
+                id: toastId,
+                description:
+                  slideCount > 0
+                    ? `Saved ${fileName} to your device. Captured ${slideCount} ${
+                        slideCount === 1 ? 'slide' : 'slides'
+                      } directly in your browser.`
+                    : `Saved ${fileName} to your device.`,
+              });
+              onOpenChange(false);
+              return;
+            } catch (fallbackError) {
+              console.error('[Exhibition Export] Client-side PDF fallback failed', fallbackError);
+              const fallbackMessage =
+                fallbackError instanceof Error
+                  ? fallbackError.message
+                  : 'Unable to capture slides for PDF export in the browser.';
+              throw new Error(`${error.message}. Additionally, ${fallbackMessage}`);
+            }
+          }
+
+          throw error;
+        }
+      }
+
       const blob = await requestPresentationExport(presentationFormat, payload);
       const filename = `${sanitizeFileName(presentationTitle)}.${presentationFormat}`;
 
