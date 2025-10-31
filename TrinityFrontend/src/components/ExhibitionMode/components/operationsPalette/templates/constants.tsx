@@ -117,6 +117,11 @@ interface SlideSpec {
 }
 const BODY_POSITION = { x: 96, y: 188 };
 const BODY_SIZE = { width: 312, height: 212 };
+const MIN_TEXT_BOX_BUFFER = 36;
+const growHeight = (height: number, factor = 0.2, buffer = MIN_TEXT_BOX_BUFFER): number => {
+  const scaled = height + Math.round(height * factor);
+  return scaled + buffer;
+};
 
 const DEFAULT_PLACEHOLDER_FRAMES = [
   { x: 420, y: 188, width: 320, height: 200 },
@@ -191,7 +196,7 @@ const createStructuredContent = (
     textBoxes.push({
       text: value,
       position: { x: frame.x + 22, y: frame.y + 60 },
-      size: { width: frame.width - 44, height: 64 },
+      size: { width: frame.width - 44, height: growHeight(64, 0.25) },
       fontSize: 44,
       bold: true,
       color: metricColor,
@@ -206,7 +211,7 @@ const createStructuredContent = (
     textBoxes.push({
       text: 'Replace with live KPI value and commentary.',
       position: { x: frame.x + 22, y: frame.y + 164 },
-      size: { width: frame.width - 44, height: 48 },
+      size: { width: frame.width - 44, height: growHeight(48, 0.3) },
       fontSize: 13,
       color: '#475569',
     });
@@ -259,10 +264,12 @@ const buildSlideDefinition = (
   }
 
   if (bodySegments.length > 0) {
+    const baseBodySize = spec.bodySize ?? BODY_SIZE;
+    const expandedHeight = growHeight(baseBodySize.height, 0.25);
     textBoxes.push({
       text: bodySegments.join('\n\n'),
       position: spec.bodyPosition ?? BODY_POSITION,
-      size: spec.bodySize ?? BODY_SIZE,
+      size: { width: baseBodySize.width, height: expandedHeight },
       fontSize: 18,
       color: '#475569',
     });
@@ -302,7 +309,7 @@ const buildSlideDefinition = (
     placeholderTextBoxes.push({
       text: placeholderTitle,
       position: { x: frame.x + 16, y: frame.y + 12 },
-      size: { width: frame.width - 32, height: 24 },
+      size: { width: frame.width - 32, height: growHeight(24, 0.15, 20) },
       fontSize: 13,
       color: '#1f2937',
       bold: true,
@@ -315,7 +322,7 @@ const buildSlideDefinition = (
       placeholderTextBoxes.push({
         text: caption,
         position: { x: frame.x + 16, y: frame.y + frame.height - 28 },
-        size: { width: frame.width - 32, height: 22 },
+        size: { width: frame.width - 32, height: growHeight(22, 0.2, 16) },
         fontSize: 12,
         color: '#475569',
       });
@@ -324,7 +331,7 @@ const buildSlideDefinition = (
         placeholderTextBoxes.push({
           text: placeholder.description,
           position: { x: frame.x + 16, y: frame.y + frame.height - 32 },
-          size: { width: frame.width - 32, height: 24 },
+          size: { width: frame.width - 32, height: growHeight(24, 0.15, 18) },
           fontSize: 12,
           color: '#475569',
         });
@@ -335,11 +342,12 @@ const buildSlideDefinition = (
       const bodyTopOffset = 36;
       const bodyBottomPadding = 8;
       const bodyHeight = Math.max(frame.height - bodyTopOffset - bodyBottomPadding, 40);
+      const expandedBodyHeight = growHeight(bodyHeight, 0.35);
 
       placeholderTextBoxes.push({
         text: placeholderBody,
         position: { x: frame.x + 16, y: frame.y + bodyTopOffset },
-        size: { width: frame.width - 32, height: bodyHeight },
+        size: { width: frame.width - 32, height: expandedBodyHeight },
         fontSize: 13,
         color: '#475569',
       });
