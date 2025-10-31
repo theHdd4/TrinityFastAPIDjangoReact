@@ -1390,6 +1390,20 @@ def _render_atom(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, of
     table_preview = _extract_table_preview(metadata)
     chart_preview = _extract_chart_preview(metadata)
 
+    chart_overlay_props: dict[str, Any] = {}
+    for key in (
+        'postAnimationPng',
+        'postAnimationSvg',
+        'postAnimationWidth',
+        'postAnimationHeight',
+        'postAnimationPixelRatio',
+    ):
+        value = metadata.get(key)
+        if value is None and key in props:
+            value = props.get(key)
+        if value is not None:
+            chart_overlay_props[key] = value
+
     preview_image = None
     for key in ('previewImage', 'preview_image', 'image', 'thumbnail'):
         candidate = metadata.get(key)
@@ -1431,26 +1445,18 @@ def _render_atom(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, of
         )
         _render_table(slide, table_object, offset_x, offset_y)
         next_y = content_start + primary_height
-    elif chart_preview:
-        chart_props: dict[str, Any] = {
-            'chartData': chart_preview,
-            'chartConfig': {
+    elif chart_preview or chart_overlay_props:
+        chart_props: dict[str, Any] = {}
+        if chart_preview:
+            chart_props['chartData'] = chart_preview
+            chart_props['chartConfig'] = {
                 'type': chart_preview.get('type'),
                 'legendPosition': chart_preview.get('legendPosition'),
                 'showValues': chart_preview.get('showValues'),
                 'axisIncludesZero': chart_preview.get('axisIncludesZero'),
                 'seriesColors': chart_preview.get('seriesColors'),
-            },
-        }
-        for key in (
-            'postAnimationPng',
-            'postAnimationSvg',
-            'postAnimationWidth',
-            'postAnimationHeight',
-            'postAnimationPixelRatio',
-        ):
-            if key in props:
-                chart_props[key] = props[key]
+            }
+        chart_props.update(chart_overlay_props)
 
         chart_object = SlideExportObjectPayload.model_validate(
             {
