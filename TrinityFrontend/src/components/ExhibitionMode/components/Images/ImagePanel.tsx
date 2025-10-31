@@ -11,6 +11,7 @@ import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv
 
 const PIXABAY_API_ENDPOINT = 'https://pixabay.com/api/';
 const DEFAULT_PIXABAY_QUERY = 'business analytics';
+const FALLBACK_PIXABAY_API_KEY = '53025349-5cb3ede8add7ca256da259955';
 
 export type ImagePanelSource = 'stock' | 'upload' | 'existing' | 'pixabay';
 
@@ -263,7 +264,8 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   const [hasPixabaySearched, setHasPixabaySearched] = useState(false);
   const [lastPixabayQuery, setLastPixabayQuery] = useState(DEFAULT_PIXABAY_QUERY);
 
-  const pixabayApiKey = (import.meta.env.VITE_PIXABAY_API_KEY as string | undefined)?.trim() ?? '';
+  const pixabayApiKey =
+    (import.meta.env.VITE_PIXABAY_API_KEY as string | undefined)?.trim() ?? FALLBACK_PIXABAY_API_KEY;
   const isPixabayConfigured = pixabayApiKey.length > 0;
 
   useEffect(() => {
