@@ -268,12 +268,22 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
     [onUpdateSettings],
   );
 
+  const applyBackgroundPresetColor = useCallback(
+    (color: PresentationSettings['backgroundColor']) => {
+      onUpdateSettings({
+        backgroundMode: 'preset',
+        backgroundColor: color,
+      });
+    },
+    [onUpdateSettings],
+  );
+
   const handleCustomBackgroundColor = useCallback(
     (hex: string) => {
       const token = createSolidToken(hex);
-      onUpdateSettings({ backgroundColor: token as PresentationSettings['backgroundColor'] });
+      applyBackgroundPresetColor(token as PresentationSettings['backgroundColor']);
     },
-    [onUpdateSettings],
+    [applyBackgroundPresetColor],
   );
 
   return (
@@ -562,9 +572,9 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                       sections={backgroundColorSections}
                       selectedId={settings.backgroundColor}
                       onSelect={option =>
-                        onUpdateSettings({
-                          backgroundColor: option.id as PresentationSettings['backgroundColor'],
-                        })
+                        applyBackgroundPresetColor(
+                          option.id as PresentationSettings['backgroundColor'],
+                        )
                       }
                       disabled={!canEdit}
                       defaultSectionId="solids"
