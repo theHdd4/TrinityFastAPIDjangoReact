@@ -11,16 +11,9 @@ import {
   Network,
   Database,
 } from 'lucide-react';
-import {
-  DEFAULT_CHART_CONFIG,
-  DEFAULT_CHART_DATA,
-} from '../charts';
 import type { ChartConfig, ChartDataRow } from '../charts';
 import type {
-  TemplateChartDefinition,
   TemplateDefinition,
-  TemplateImageDefinition,
-  TemplateShapeDefinition,
   TemplateSlideDefinition,
   TemplateTextBoxDefinition,
 } from './types';
@@ -121,11 +114,7 @@ interface SlideSpec {
   accentColor?: string;
   placeholders: PlaceholderSpec[];
   extraTextBoxes?: TemplateTextBoxDefinition[];
-  extraShapes?: TemplateShapeDefinition[];
 }
-
-const PANEL_POSITION = { x: 64, y: 152 };
-const PANEL_SIZE = { width: 736, height: 344 };
 const BODY_POSITION = { x: 96, y: 188 };
 const BODY_SIZE = { width: 312, height: 212 };
 
@@ -137,339 +126,17 @@ const DEFAULT_PLACEHOLDER_FRAMES = [
 
 type FrameRect = { x: number; y: number; width: number; height: number };
 
-const cloneChartData = (rows: readonly ChartDataRow[]): ChartDataRow[] =>
-  rows.map(row => ({ ...row }));
-
-const CHANNEL_CHART_DATA: ChartDataRow[] = [
-  { label: 'Paid Search', value: 32 },
-  { label: 'Social', value: 26 },
-  { label: 'TV', value: 18 },
-  { label: 'Affiliate', value: 14 },
-  { label: 'Email', value: 10 },
-];
-
-const SEGMENT_CHART_DATA: ChartDataRow[] = [
-  { label: 'Loyalists', value: 28 },
-  { label: 'High-value', value: 22 },
-  { label: 'At-risk', value: 18 },
-  { label: 'Newcomers', value: 16 },
-  { label: 'Seasonal', value: 12 },
-];
-
-const ROI_CHART_DATA: ChartDataRow[] = [
-  { label: 'Baseline', value: 64 },
-  { label: 'Scenario A', value: 78 },
-  { label: 'Scenario B', value: 84 },
-  { label: 'Scenario C', value: 72 },
-];
-
-const FORECAST_CHART_DATA: ChartDataRow[] = [
-  { label: 'Q1', value: 48 },
-  { label: 'Q2', value: 54 },
-  { label: 'Q3', value: 62 },
-  { label: 'Q4', value: 69 },
-];
-
-const RISK_CHART_DATA: ChartDataRow[] = [
-  { label: 'High risk', value: 38 },
-  { label: 'Medium risk', value: 34 },
-  { label: 'Low risk', value: 28 },
-];
-
-const PROMO_CHART_DATA: ChartDataRow[] = [
-  { label: 'BOGO', value: 24 },
-  { label: 'Bundle', value: 18 },
-  { label: 'Flash Sale', value: 16 },
-  { label: 'Loyalty', value: 12 },
-];
-
-const PRICE_CHART_DATA: ChartDataRow[] = [
-  { label: 'Premium', value: 54 },
-  { label: 'Standard', value: 46 },
-  { label: 'Value', value: 34 },
-  { label: 'Discount', value: 28 },
-];
-
-const DATA_QUALITY_CHART_DATA: ChartDataRow[] = [
-  { label: 'Completeness', value: 92 },
-  { label: 'Latency', value: 76 },
-  { label: 'Freshness', value: 84 },
-  { label: 'Conformity', value: 88 },
-];
-
-const KEYWORD_CHART_PRESETS: { keywords: string[]; data: ChartDataRow[] }[] = [
-  { keywords: ['channel', 'media', 'mix', 'budget', 'spend', 'promotion'], data: CHANNEL_CHART_DATA },
-  { keywords: ['segment', 'customer', 'profile', 'cluster', 'persona'], data: SEGMENT_CHART_DATA },
-  { keywords: ['roi', 'impact', 'revenue', 'profit', 'margin', 'uplift'], data: ROI_CHART_DATA },
-  { keywords: ['forecast', 'trend', 'timeline', 'demand', 'governance', 'projection'], data: FORECAST_CHART_DATA },
-  { keywords: ['risk', 'churn', 'probability', 'retention'], data: RISK_CHART_DATA },
-  { keywords: ['promo', 'campaign', 'discount', 'uplift'], data: PROMO_CHART_DATA },
-  { keywords: ['price', 'elasticity', 'ladder'], data: PRICE_CHART_DATA },
-  { keywords: ['data', 'integration', 'quality', 'latency'], data: DATA_QUALITY_CHART_DATA },
-];
-
 const normaliseKeywords = (placeholder: PlaceholderSpec): string =>
   [placeholder.key, placeholder.label, placeholder.description]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
 
-const keywordMatch = (keywords: string, candidates: string[]): boolean =>
-  candidates.some(candidate => keywords.includes(candidate));
-
-const pickChartType = (
-  placeholder: PlaceholderSpec,
-  keywords: string,
-): ChartConfig['type'] => {
-  if (placeholder.chartType) {
-    return placeholder.chartType;
-  }
-
-  if (keywords.includes('donut')) {
-    return 'donut';
-  }
-
-  if (keywords.includes('pie') || keywords.includes('mix') || keywords.includes('share') || keywords.includes('composition')) {
-    return 'pie';
-  }
-
-  if (
-    keywords.includes('line') ||
-    keywords.includes('trend') ||
-    keywords.includes('timeline') ||
-    keywords.includes('forecast') ||
-    keywords.includes('growth')
-  ) {
-    return 'line';
-  }
-
-  if (
-    keywords.includes('stacked') ||
-    keywords.includes('bar') ||
-    keywords.includes('ranking') ||
-    keywords.includes('comparison') ||
-    keywords.includes('tornado') ||
-    keywords.includes('waterfall')
-  ) {
-    return 'bar';
-  }
-
-  if (keywords.includes('histogram') || keywords.includes('distribution')) {
-    return 'column';
-  }
-
-  return 'column';
-};
-
-const pickChartData = (placeholder: PlaceholderSpec, keywords: string): ChartDataRow[] => {
-  if (placeholder.chartData && placeholder.chartData.length > 0) {
-    return cloneChartData(placeholder.chartData);
-  }
-
-  const preset = KEYWORD_CHART_PRESETS.find(entry => keywordMatch(keywords, entry.keywords));
-  if (preset) {
-    return cloneChartData(preset.data);
-  }
-
-  return cloneChartData(DEFAULT_CHART_DATA);
-};
-
-const pickChartColorScheme = (keywords: string, type: ChartConfig['type']): string => {
-  if (keywords.includes('churn') || keywords.includes('risk')) {
-    return 'rose';
-  }
-  if (keywords.includes('roi') || keywords.includes('profit') || keywords.includes('impact')) {
-    return 'emerald';
-  }
-  if (keywords.includes('forecast') || keywords.includes('trend') || keywords.includes('demand')) {
-    return 'sky';
-  }
-  if (keywords.includes('price') || keywords.includes('ladder')) {
-    return 'navy';
-  }
-  if (keywords.includes('promo') || keywords.includes('campaign')) {
-    return 'peach';
-  }
-  if (keywords.includes('segment') || keywords.includes('customer')) {
-    return 'pastel';
-  }
-  if (keywords.includes('data') || keywords.includes('integration') || keywords.includes('quality')) {
-    return 'steel';
-  }
-  if (type === 'pie' || type === 'donut') {
-    return 'spring';
-  }
-  return 'default';
-};
-
-const computeVisualBounds = (frame: FrameRect) => {
-  let top = Math.max(32, Math.min(56, Math.round(frame.height * 0.22)));
-  let bottom = Math.max(28, Math.min(64, Math.round(frame.height * 0.26)));
-
-  const minSpace = 64;
-  if (top + bottom > frame.height - minSpace) {
-    const excess = top + bottom - (frame.height - minSpace);
-    const reduceTop = Math.min(excess / 2, Math.max(0, top - 24));
-    const reduceBottom = Math.min(excess - reduceTop, Math.max(0, bottom - 24));
-    top -= reduceTop;
-    bottom -= reduceBottom;
-  }
-
-  const contentHeight = Math.max(48, frame.height - (top + bottom));
-
-  const innerWidth = Math.max(120, frame.width - 32);
-  const maxWidth = Math.max(96, frame.width - 24);
-  const contentWidth = Math.min(Math.max(innerWidth, 160), maxWidth);
-
-  return {
-    top,
-    bottom,
-    width: contentWidth,
-    height: Math.max(64, contentHeight),
-  };
-};
-
-const createChartPlaceholderDefinition = (
-  placeholder: PlaceholderSpec,
-  frame: FrameRect,
-): TemplateChartDefinition => {
-  const keywords = normaliseKeywords(placeholder);
-  const chartType = pickChartType(placeholder, keywords);
-  const chartData = pickChartData(placeholder, keywords);
-  const bounds = computeVisualBounds(frame);
-
-  const config: ChartConfig = {
-    ...DEFAULT_CHART_CONFIG,
-    ...placeholder.chartConfig,
-    type: chartType,
-    colorScheme: placeholder.chartConfig?.colorScheme ?? pickChartColorScheme(keywords, chartType),
-    showLabels: placeholder.chartConfig?.showLabels ?? chartType !== 'line',
-    showValues:
-      placeholder.chartConfig?.showValues ??
-      (chartType !== 'line' && (keywords.includes('roi') || keywords.includes('margin'))),
-    horizontalAlignment: placeholder.chartConfig?.horizontalAlignment ?? 'center',
-    axisIncludesZero:
-      placeholder.chartConfig?.axisIncludesZero ??
-      (chartType === 'line' ? false : true),
-    legendPosition:
-      placeholder.chartConfig?.legendPosition ??
-      (chartType === 'pie' || chartType === 'donut' ? 'bottom' : 'top'),
-  };
-
-  return {
-    position: {
-      x: frame.x + Math.max(16, (frame.width - bounds.width) / 2),
-      y: frame.y + bounds.top,
-    },
-    size: {
-      width: bounds.width,
-      height: bounds.height,
-    },
-    data: chartData,
-    config,
-    caption: placeholder.description ?? placeholder.label,
-  };
-};
-
-type ImagePlaceholder = { src: string; name: string; source: string };
-
-const IMAGE_LIBRARY: Array<ImagePlaceholder & { keywords?: string[] }> = [
-  {
-    keywords: ['churn', 'customer', 'retention', 'experience'],
-    src: 'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=960&q=80',
-    name: 'Placeholder: Customer success conversation',
-    source: 'Unsplash – Brooke Cagle',
-  },
-  {
-    keywords: ['segment', 'persona', 'profile'],
-    src: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=960&q=80',
-    name: 'Placeholder: Persona workshop',
-    source: 'Unsplash – Mimi Thian',
-  },
-  {
-    keywords: ['marketing', 'campaign', 'media', 'promo'],
-    src: 'https://images.unsplash.com/photo-1556761175-5973dc0f32e7?auto=format&fit=crop&w=960&q=80',
-    name: 'Placeholder: Marketing collaboration',
-    source: 'Unsplash – Austin Distel',
-  },
-  {
-    keywords: ['forecast', 'demand', 'planning'],
-    src: 'https://images.unsplash.com/photo-1556740749-887f6717d7e4?auto=format&fit=crop&w=960&q=80',
-    name: 'Placeholder: Demand planning session',
-    source: 'Unsplash – UX Indonesia',
-  },
-  {
-    keywords: ['price', 'pricing', 'commerce'],
-    src: 'https://images.unsplash.com/photo-1515165562835-c4c9eade68e0?auto=format&fit=crop&w=960&q=80',
-    name: 'Placeholder: Pricing analytics',
-    source: 'Unsplash – Markus Spiske',
-  },
-  {
-    keywords: ['data', 'integration', 'platform'],
-    src: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=960&q=80',
-    name: 'Placeholder: Data integration platform',
-    source: 'Unsplash – Luca Bravo',
-  },
-  {
-    keywords: ['e-com', 'commerce', 'digital'],
-    src: 'https://images.unsplash.com/photo-1523475472560-d2df97ec485c?auto=format&fit=crop&w=960&q=80',
-    name: 'Placeholder: E-commerce planning',
-    source: 'Unsplash – Campaign Creators',
-  },
-];
-
-const DEFAULT_IMAGE_PLACEHOLDER: ImagePlaceholder = {
-  src: 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=960&q=80',
-  name: 'Placeholder: Analytics collaboration',
-  source: 'Unsplash – Annie Spratt',
-};
-
-const selectPlaceholderImage = (placeholder: PlaceholderSpec): ImagePlaceholder => {
-  if (placeholder.imageSrc) {
-    return {
-      src: placeholder.imageSrc,
-      name: placeholder.imageName ?? `Placeholder: ${placeholder.label}`,
-      source: placeholder.imageSource ?? 'Template placeholder',
-    };
-  }
-
-  const keywords = normaliseKeywords(placeholder);
-  const match = IMAGE_LIBRARY.find(entry => entry.keywords?.some(keyword => keywords.includes(keyword)));
-  if (match) {
-    return { src: match.src, name: match.name ?? DEFAULT_IMAGE_PLACEHOLDER.name, source: match.source ?? DEFAULT_IMAGE_PLACEHOLDER.source };
-  }
-
-  return DEFAULT_IMAGE_PLACEHOLDER;
-};
-
-const createImagePlaceholderDefinition = (
-  placeholder: PlaceholderSpec,
-  frame: FrameRect,
-): TemplateImageDefinition => {
-  const bounds = computeVisualBounds(frame);
-  const image = selectPlaceholderImage(placeholder);
-
-  return {
-    position: {
-      x: frame.x + Math.max(16, (frame.width - bounds.width) / 2),
-      y: frame.y + bounds.top,
-    },
-    size: {
-      width: bounds.width,
-      height: bounds.height,
-    },
-    src: image.src,
-    name: image.name,
-    source: image.source,
-    description: placeholder.description ?? placeholder.label,
-  };
-};
-
 const createStructuredContent = (
   placeholder: PlaceholderSpec,
   frame: FrameRect,
   accent: string,
-): { shapes?: TemplateShapeDefinition[]; textBoxes?: TemplateTextBoxDefinition[] } => {
+): TemplateTextBoxDefinition[] | undefined => {
   const textBoxes: TemplateTextBoxDefinition[] = [];
   const shaded = (strength: number, fallback = `rgba(79, 70, 229, ${strength})`) =>
     withAlpha(accent, strength, fallback);
@@ -530,9 +197,7 @@ const createStructuredContent = (
     });
   }
 
-  return {
-    textBoxes: textBoxes.length > 0 ? textBoxes : undefined,
-  };
+  return textBoxes.length > 0 ? textBoxes : undefined;
 };
 
 const buildSlideDefinition = (
@@ -542,25 +207,6 @@ const buildSlideDefinition = (
   _index: number,
 ): TemplateSlideDefinition => {
   const accent = spec.accentColor ?? accentColor;
-  const shapes: TemplateShapeDefinition[] = [
-    {
-      shapeId: 'rounded-rectangle',
-      position: { x: PANEL_POSITION.x - 12, y: PANEL_POSITION.y - 12 },
-      size: { width: PANEL_SIZE.width + 24, height: PANEL_SIZE.height + 24 },
-      fill: withAlpha(accent, 0.08, 'rgba(79, 70, 229, 0.08)'),
-      stroke: withAlpha(accent, 0.24, 'rgba(79, 70, 229, 0.24)'),
-      strokeWidth: 2,
-    },
-    {
-      shapeId: 'rectangle',
-      position: { x: PANEL_POSITION.x - 12, y: PANEL_POSITION.y - 12 },
-      size: { width: 6, height: PANEL_SIZE.height + 24 },
-      fill: withAlpha(accent, 0.5, 'rgba(79, 70, 229, 0.5)'),
-    },
-  ];
-
-  const charts: TemplateChartDefinition[] = [];
-  const images: TemplateImageDefinition[] = [];
 
   const textBoxes: TemplateTextBoxDefinition[] = [
     {
@@ -619,7 +265,6 @@ const buildSlideDefinition = (
     });
   }
 
-  const placeholderShapes: TemplateShapeDefinition[] = [];
   const placeholderTextBoxes: TemplateTextBoxDefinition[] = [];
 
   spec.placeholders.forEach((placeholder, placeholderIndex) => {
@@ -637,16 +282,6 @@ const buildSlideDefinition = (
       : fallbackFrame;
 
     const placeholderAccent = placeholder.accentColor ?? accent;
-
-    placeholderShapes.push({
-      shapeId: 'rounded-rectangle',
-      position: { x: frame.x, y: frame.y },
-      size: { width: frame.width, height: frame.height },
-      fill: 'transparent',
-      stroke: withAlpha(placeholderAccent, 0.4, 'rgba(79, 70, 229, 0.4)'),
-      strokeWidth: 2,
-      opacity: 0.9,
-    });
 
     const placeholderTitle = placeholder.label;
     placeholderTextBoxes.push({
@@ -691,18 +326,9 @@ const buildSlideDefinition = (
       });
     }
 
-    if (placeholder.type === 'chart') {
-      charts.push(createChartPlaceholderDefinition(placeholder, frame));
-    } else if (placeholder.type === 'image') {
-      images.push(createImagePlaceholderDefinition(placeholder, frame));
-    }
-
     const structured = createStructuredContent(placeholder, frame, placeholderAccent);
-    if (structured.shapes) {
-      placeholderShapes.push(...structured.shapes);
-    }
-    if (structured.textBoxes) {
-      placeholderTextBoxes.push(...structured.textBoxes);
+    if (structured) {
+      placeholderTextBoxes.push(...structured);
     }
   });
 
@@ -720,24 +346,9 @@ const buildSlideDefinition = (
     textBoxes.push(...spec.extraTextBoxes);
   }
 
-  shapes.push(...placeholderShapes);
-
-  if (spec.extraShapes) {
-    shapes.push(...spec.extraShapes);
-  }
-
   const content: TemplateSlideDefinition['content'] = {
     textBoxes: [...textBoxes, ...placeholderTextBoxes],
-    shapes,
   };
-
-  if (charts.length > 0) {
-    content.charts = charts;
-  }
-
-  if (images.length > 0) {
-    content.images = images;
-  }
 
   return {
     title: spec.title,
