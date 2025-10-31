@@ -3,10 +3,11 @@ from __future__ import annotations
 import base64
 import html
 import io
+import json
 import logging
 import math
 import re
-from typing import Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 from pptx import Presentation
 from pptx.chart.data import ChartData
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 PX_PER_INCH = 96.0
 EMU_PER_INCH = 914400
 PT_PER_INCH = 72.0
+
+METADATA_MARKER = "TRINITY_EXPORT_METADATA"
 
 CANVAS_STAGE_HEIGHT = 520.0
 TOP_LAYOUT_MIN_HEIGHT = 210.0
@@ -714,6 +717,57 @@ def _render_slide_objects(
             logger.exception('Failed to render %s on slide %s: %s', obj.type, slide_payload.id, exc)
 
 
+def _render_screenshot_background(
+    slide,
+    slide_payload: SlideExportPayload,
+    base_width: float,
+    base_height: float,
+    offset_x: float,
+    offset_y: float,
+) -> bool:
+    screenshot = slide_payload.screenshot
+    if not isinstance(screenshot, SlideScreenshotPayload):
+        return False
+
+    try:
+        image_bytes = _decode_data_url(screenshot.data_url)
+    except ExportGenerationError as exc:
+        logger.warning('Unable to decode screenshot for slide %s: %s', slide_payload.id, exc)
+        return False
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning('Unexpected screenshot decoding error for slide %s: %s', slide_payload.id, exc)
+        return False
+
+    image_stream = io.BytesIO(image_bytes)
+    try:
+        picture = slide.shapes.add_picture(
+            image_stream,
+            _px_to_emu(offset_x),
+            _px_to_emu(offset_y),
+            width=_px_to_emu(base_width),
+            height=_px_to_emu(base_height),
+        )
+    except Exception as exc:  # pragma: no cover - drawing edge cases
+        logger.warning('Unable to add screenshot background for slide %s: %s', slide_payload.id, exc)
+        return False
+
+    try:
+        picture.name = f"{slide_payload.id}-background"
+    except Exception:  # pragma: no cover - property best effort
+        pass
+
+    try:
+        lock = picture.lock
+        lock.aspect_ratio = True
+        lock.position = True
+        lock.rotation = True
+        lock.crop = True
+    except AttributeError:
+        pass
+
+    return True
+
+
 def _resolve_slide_dimensions(slide: SlideExportPayload) -> tuple[float, float]:
     width = _safe_float(slide.base_width, 0)
     height = _safe_float(slide.base_height, 0)
@@ -735,6 +789,83 @@ def _resolve_slide_dimensions(slide: SlideExportPayload) -> tuple[float, float]:
         raise ExportGenerationError('Slide dimensions are missing or invalid.')
 
     return width, height
+
+
+def _build_slide_metadata(slide_payload: SlideExportPayload) -> dict[str, Any]:
+    objects: list[dict[str, Any]] = []
+    for obj in slide_payload.objects:
+        entry: dict[str, Any] = {
+            "id": obj.id,
+            "type": obj.type,
+            "x": obj.x,
+            "y": obj.y,
+            "width": obj.width,
+            "height": obj.height,
+            "rotation": obj.rotation,
+            "zIndex": obj.z_index,
+            "props": obj.props or {},
+        }
+        group_id = getattr(obj, "group_id", None)
+        if group_id is not None:
+            entry["groupId"] = group_id
+        objects.append(entry)
+
+    metadata: dict[str, Any] = {
+        "id": slide_payload.id,
+        "index": slide_payload.index,
+        "title": slide_payload.title,
+        "baseWidth": slide_payload.base_width,
+        "baseHeight": slide_payload.base_height,
+        "presentationSettings": slide_payload.presentation_settings,
+        "objects": objects,
+    }
+
+    screenshot = slide_payload.screenshot
+    if isinstance(screenshot, SlideScreenshotPayload):
+        metadata["screenshot"] = {
+            "width": screenshot.width,
+            "height": screenshot.height,
+            "cssWidth": getattr(screenshot, "css_width", None),
+            "cssHeight": getattr(screenshot, "css_height", None),
+            "pixelRatio": getattr(screenshot, "pixel_ratio", None),
+        }
+
+    return metadata
+
+
+def _attach_slide_metadata(slide, slide_payload: SlideExportPayload) -> None:
+    metadata = _build_slide_metadata(slide_payload)
+    try:
+        serialised = json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        logger.warning('Unable to serialise metadata for slide %s: %s', slide_payload.id, exc)
+        return
+
+    notes_slide = slide.notes_slide
+    text_frame = notes_slide.notes_text_frame
+    existing_text = [paragraph.text for paragraph in text_frame.paragraphs if paragraph.text.strip()]
+
+    text_frame.clear()
+
+    for paragraph_text in existing_text:
+        paragraph = text_frame.add_paragraph()
+        paragraph.text = paragraph_text
+
+    marker = text_frame.add_paragraph()
+    marker.text = METADATA_MARKER
+    marker.level = 0
+    try:
+        marker.font.size = Pt(6)
+    except AttributeError:
+        pass
+
+    data_paragraph = text_frame.add_paragraph()
+    data_paragraph.text = serialised
+    data_paragraph.level = 0
+    try:
+        data_paragraph.font.size = Pt(6)
+    except AttributeError:
+        pass
 
 
 def _prepare_render_slide(slide: SlideExportPayload) -> dict:
@@ -910,8 +1041,15 @@ def build_pptx_bytes(payload: ExhibitionExportRequest) -> bytes:
         slide = presentation.slides.add_slide(presentation.slide_layouts[6])
         offset_x = max((max_width - base_width) / 2, 0.0)
         offset_y = max((max_height - base_height) / 2, 0.0)
-        _render_layout_overlay(slide, slide_payload, base_width, base_height, offset_x, offset_y)
+        background_added = _render_screenshot_background(
+            slide, slide_payload, base_width, base_height, offset_x, offset_y
+        )
+        if not background_added:
+            _render_layout_overlay(slide, slide_payload, base_width, base_height, offset_x, offset_y)
+        else:
+            logger.debug('Using screenshot background for slide %s', slide_payload.id)
         _render_slide_objects(slide, slide_payload, offset_x, offset_y)
+        _attach_slide_metadata(slide, slide_payload)
 
     output = io.BytesIO()
     presentation.save(output)

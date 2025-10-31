@@ -190,6 +190,7 @@ class SlideExportObjectPayload(BaseModel):
     height: Optional[float] = None
     rotation: Optional[float] = None
     z_index: Optional[int] = Field(default=None, alias="zIndex")
+    group_id: Optional[str] = Field(default=None, alias="groupId")
     props: Dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(populate_by_name=True)

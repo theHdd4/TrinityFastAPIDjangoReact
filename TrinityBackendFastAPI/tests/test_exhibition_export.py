@@ -2,6 +2,7 @@ import base64
 import importlib.util
 import io
 import sys
+import json
 import types
 from pathlib import Path
 
@@ -85,6 +86,7 @@ def _build_payload(include_screenshot: bool = True):
                     "y": 140,
                     "width": 400,
                     "height": 160,
+                    "groupId": "group-01",
                     "props": {
                         "text": "<strong>Hello</strong> world!",
                         "fontFamily": "Arial",
@@ -166,6 +168,29 @@ def test_build_pptx_bytes_includes_shape() -> None:
     ]
 
     assert any(fill == RGBColor(0x7C, 0x3A, 0xED) for fill in shape_fills)
+
+
+def test_build_pptx_bytes_embeds_background_and_metadata() -> None:
+    payload = _build_payload()
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    slide = presentation.slides[0]
+
+    background_width = _px_to_emu(payload.slides[0].base_width)
+    pictures = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert any(abs(picture.width - background_width) <= 1 for picture in pictures)
+
+    paragraphs = [para.text for para in slide.notes_slide.notes_text_frame.paragraphs if para.text]
+    assert paragraphs and paragraphs[0] == export_module.METADATA_MARKER
+    assert len(paragraphs) >= 2
+
+    metadata = json.loads(paragraphs[1])
+    assert metadata["objects"], "Expected slide metadata to include objects"
+    assert metadata["objects"][0]["groupId"] == "group-01"
+    assert "dataUrl" not in metadata.get("screenshot", {})
 
 
 def test_build_pptx_bytes_uses_max_dimensions() -> None:

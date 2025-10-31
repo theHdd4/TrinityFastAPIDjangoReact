@@ -912,6 +912,7 @@ export interface SlideExportObjectPayload {
   height?: number;
   rotation?: number;
   zIndex?: number;
+  groupId?: string | null;
   props: Record<string, unknown>;
 }
 
@@ -966,6 +967,13 @@ const normaliseObjects = async (
       const normalisedProps =
         object.type === 'image' ? await ensureImageDataUrl(props) : props;
 
+      const groupId =
+        typeof object.groupId === 'string' && object.groupId.trim().length > 0
+          ? object.groupId
+          : object.groupId === null
+            ? null
+            : undefined;
+
       return {
         id: object.id,
         type: object.type,
@@ -975,6 +983,7 @@ const normaliseObjects = async (
         height: object.height,
         rotation: object.rotation,
         zIndex: object.zIndex,
+        groupId,
         props: normalisedProps,
       };
     }),
