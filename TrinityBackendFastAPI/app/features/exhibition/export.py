@@ -6,7 +6,7 @@ import io
 import logging
 import math
 import re
-from typing import Iterable, Optional, Sequence
+from typing import Any, Callable, Iterable, Optional, Sequence
 
 from pptx import Presentation
 from pptx.chart.data import ChartData
@@ -16,6 +16,7 @@ from pptx.enum.dml import MSO_LINE_DASH_STYLE
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Pt
+from reportlab.lib import colors
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
@@ -23,6 +24,7 @@ from .renderer import ExhibitionRendererError, build_inputs, render_slide_batch
 from .schemas import (
     DocumentStylesPayload,
     ExhibitionExportRequest,
+    PdfExportMode,
     SlideDomSnapshotPayload,
     SlideExportObjectPayload,
     SlideExportPayload,
@@ -919,12 +921,331 @@ def build_pptx_bytes(payload: ExhibitionExportRequest) -> bytes:
     return output.getvalue()
 
 
-def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
-    if not payload.slides:
-        raise ExportGenerationError('No slides provided for export.')
+def _parse_color_components(value: Optional[str]) -> Optional[tuple[float, float, float]]:
+    if value is None:
+        return None
 
-    ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
+    token = str(value).strip()
+    if not token or token.lower() in {"transparent", "none"}:
+        return None
 
+    if token.startswith("var("):
+        return None
+
+    cleaned = token.lstrip('#')
+    if len(cleaned) == 3:
+        cleaned = ''.join(ch * 2 for ch in cleaned)
+
+    if len(cleaned) != 6:
+        return None
+
+    try:
+        red = int(cleaned[0:2], 16) / 255.0
+        green = int(cleaned[2:4], 16) / 255.0
+        blue = int(cleaned[4:6], 16) / 255.0
+    except ValueError:
+        return None
+
+    return (red, green, blue)
+
+
+def _reportlab_color_from_token(value: Optional[str]) -> Optional[colors.Color]:
+    components = _parse_color_components(value)
+    if not components:
+        return None
+    return colors.Color(*components)
+
+
+def _resolve_font_name(font_family: Optional[str], bold: bool, italic: bool) -> str:
+    name = (font_family or '').strip().lower()
+
+    if 'serif' in name or 'times' in name:
+        base = 'Times-Roman'
+    elif 'mono' in name or 'code' in name or 'courier' in name:
+        base = 'Courier'
+    else:
+        base = 'Helvetica'
+
+    if base == 'Times-Roman':
+        if bold and italic:
+            return 'Times-BoldItalic'
+        if bold:
+            return 'Times-Bold'
+        if italic:
+            return 'Times-Italic'
+        return 'Times-Roman'
+
+    if base == 'Courier':
+        if bold and italic:
+            return 'Courier-BoldOblique'
+        if bold:
+            return 'Courier-Bold'
+        if italic:
+            return 'Courier-Oblique'
+        return 'Courier'
+
+    if bold and italic:
+        return 'Helvetica-BoldOblique'
+    if bold:
+        return 'Helvetica-Bold'
+    if italic:
+        return 'Helvetica-Oblique'
+    return 'Helvetica'
+
+
+def _render_rotated(
+    pdf: canvas.Canvas,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    rotation: Optional[float],
+    painter: Callable[[canvas.Canvas, float, float, float, float], None],
+) -> None:
+    angle = _safe_float(rotation, 0.0)
+    if not angle:
+        painter(pdf, x, y, width, height)
+        return
+
+    pdf.saveState()
+    centre_x = x + width / 2
+    centre_y = y + height / 2
+    pdf.translate(centre_x, centre_y)
+    pdf.rotate(-angle)
+    pdf.translate(-centre_x, -centre_y)
+    painter(pdf, x, y, width, height)
+    pdf.restoreState()
+
+
+def _resolve_object_rect(
+    obj: SlideExportObjectPayload, page_height: float
+) -> tuple[float, float, float, float]:
+    width = _px_to_pt(_safe_float(obj.width, 0.0))
+    height = _px_to_pt(_safe_float(obj.height, 0.0))
+    x = _px_to_pt(_safe_float(obj.x, 0.0))
+    y = page_height - _px_to_pt(_safe_float(obj.y, 0.0) + _safe_float(obj.height, 0.0))
+    return x, y, width, height
+
+
+def _draw_slide_background(pdf: canvas.Canvas, slide: SlideExportPayload, page_width: float, page_height: float) -> None:
+    settings = slide.presentation_settings or {}
+    background_color: Optional[str] = None
+
+    if isinstance(settings, dict):
+        if isinstance(settings.get('background'), dict):
+            background = settings['background']
+            candidate = background.get('color') if isinstance(background, dict) else None
+            if isinstance(candidate, str):
+                background_color = candidate
+        if not background_color and isinstance(settings.get('backgroundColor'), str):
+            background_color = settings['backgroundColor']
+
+    fill = _reportlab_color_from_token(background_color) or colors.white
+    pdf.saveState()
+    pdf.setFillColor(fill)
+    pdf.rect(0, 0, page_width, page_height, fill=1, stroke=0)
+    pdf.restoreState()
+
+
+def _draw_text_box_object(pdf: canvas.Canvas, obj: SlideExportObjectPayload, page_height: float) -> None:
+    props = obj.props or {}
+    text_content = _html_to_plain_text(str(props.get('text', '') or '')).replace('\r\n', '\n')
+    if not text_content.strip():
+        return
+
+    x, y, width, height = _resolve_object_rect(obj, page_height)
+    if width <= 0 or height <= 0:
+        return
+
+    font_size_px = _safe_float(props.get('fontSize'), 18.0)
+    font_size = max(_px_to_pt(font_size_px), 6.0)
+    bold = bool(props.get('bold'))
+    italic = bool(props.get('italic'))
+    font_name = _resolve_font_name(props.get('fontFamily'), bold, italic)
+    align = str(props.get('align') or 'left').lower()
+    text_color = _reportlab_color_from_token(props.get('color')) or colors.black
+    background_color = _reportlab_color_from_token(props.get('backgroundColor'))
+
+    lines = text_content.splitlines() or ['']
+    line_height = font_size * 1.25
+
+    def painter(pdf_canvas: canvas.Canvas, rx: float, ry: float, rw: float, rh: float) -> None:
+        pdf_canvas.saveState()
+        if background_color is not None:
+            pdf_canvas.setFillColor(background_color)
+            pdf_canvas.rect(rx, ry, rw, rh, fill=1, stroke=0)
+        pdf_canvas.setFillColor(text_color)
+        pdf_canvas.setFont(font_name, font_size)
+
+        cursor_y = ry + rh - font_size
+        for raw_line in lines:
+            line = raw_line.rstrip()
+            if cursor_y < ry - font_size:
+                break
+            text_width = pdf_canvas.stringWidth(line, font_name, font_size)
+            if align == 'center':
+                draw_x = rx + max((rw - text_width) / 2, 0)
+            elif align == 'right':
+                draw_x = rx + max(rw - text_width, 0)
+            else:
+                draw_x = rx
+            pdf_canvas.drawString(draw_x, cursor_y, line)
+            cursor_y -= line_height
+        pdf_canvas.restoreState()
+
+    _render_rotated(pdf, x, y, width, height, obj.rotation, painter)
+
+
+def _draw_shape_object(pdf: canvas.Canvas, obj: SlideExportObjectPayload, page_height: float) -> None:
+    props = obj.props or {}
+    x, y, width, height = _resolve_object_rect(obj, page_height)
+    if width <= 0 or height <= 0:
+        return
+
+    fill_color = _reportlab_color_from_token(str(props.get('fill')) if props.get('fill') else None)
+    stroke_color = _reportlab_color_from_token(str(props.get('stroke')) if props.get('stroke') else None)
+    stroke_width = _px_to_pt(_safe_float(props.get('strokeWidth'), 0.0))
+    stroke_style = str(props.get('strokeStyle') or '').lower()
+    opacity = max(min(_safe_float(props.get('opacity'), 1.0), 1.0), 0.0)
+
+    if opacity <= 0:
+        return
+
+    def painter(pdf_canvas: canvas.Canvas, rx: float, ry: float, rw: float, rh: float) -> None:
+        pdf_canvas.saveState()
+        if hasattr(pdf_canvas, 'setFillAlpha'):
+            pdf_canvas.setFillAlpha(opacity)
+        if hasattr(pdf_canvas, 'setStrokeAlpha'):
+            pdf_canvas.setStrokeAlpha(opacity)
+
+        if fill_color is not None:
+            pdf_canvas.setFillColor(fill_color)
+        if stroke_color is not None and stroke_width > 0:
+            pdf_canvas.setStrokeColor(stroke_color)
+            pdf_canvas.setLineWidth(stroke_width)
+            if stroke_style == 'dashed':
+                pdf_canvas.setDash(6, 4)
+            elif stroke_style == 'dotted':
+                pdf_canvas.setDash(1, 3)
+        else:
+            pdf_canvas.setLineWidth(0)
+
+        shape_id = str(props.get('shapeId') or '').lower()
+        fill_flag = 1 if fill_color is not None else 0
+        stroke_flag = 1 if stroke_color is not None and stroke_width > 0 else 0
+
+        if shape_id in {'rounded-rectangle', 'rounded_rect', 'rounded'}:
+            radius = min(rw, rh) * 0.12
+            pdf_canvas.roundRect(rx, ry, rw, rh, radius, stroke=stroke_flag, fill=fill_flag)
+        elif shape_id in {'circle', 'ellipse', 'oval'}:
+            pdf_canvas.ellipse(rx, ry, rx + rw, ry + rh, stroke=stroke_flag, fill=fill_flag)
+        else:
+            pdf_canvas.rect(rx, ry, rw, rh, stroke=stroke_flag, fill=fill_flag)
+
+        pdf_canvas.restoreState()
+
+    _render_rotated(pdf, x, y, width, height, obj.rotation, painter)
+
+
+def _draw_image_object(pdf: canvas.Canvas, obj: SlideExportObjectPayload, page_height: float) -> None:
+    props = obj.props or {}
+    source = props.get('dataUrl') or props.get('src')
+    if not isinstance(source, str) or not source.startswith('data:'):
+        return
+
+    try:
+        image_bytes = _decode_data_url(source)
+    except ExportGenerationError:
+        return
+
+    x, y, width, height = _resolve_object_rect(obj, page_height)
+    if width <= 0 or height <= 0:
+        return
+
+    reader = ImageReader(io.BytesIO(image_bytes))
+
+    def painter(pdf_canvas: canvas.Canvas, rx: float, ry: float, rw: float, rh: float) -> None:
+        pdf_canvas.drawImage(
+            reader,
+            rx,
+            ry,
+            width=rw,
+            height=rh,
+            preserveAspectRatio=True,
+            mask='auto',
+        )
+
+    _render_rotated(pdf, x, y, width, height, obj.rotation, painter)
+
+
+def _coerce_pdf_mode(value: object) -> PdfExportMode:
+    if isinstance(value, PdfExportMode):
+        return value
+    if isinstance(value, str):
+        try:
+            return PdfExportMode(value.lower())
+        except ValueError:
+            return PdfExportMode.DIGITAL
+    return PdfExportMode.DIGITAL
+
+
+def _draw_slide_screenshot(
+    pdf: canvas.Canvas, slide: SlideExportPayload, page_width: float, page_height: float
+) -> None:
+    screenshot = slide.screenshot
+    if not screenshot or not isinstance(screenshot.data_url, str):
+        raise ExportGenerationError('Every slide must include a screenshot for PDF export.')
+
+    image_stream = io.BytesIO(_decode_data_url(screenshot.data_url))
+    image = ImageReader(image_stream)
+
+    css_width = _safe_float(getattr(screenshot, 'css_width', None), 0)
+    css_height = _safe_float(getattr(screenshot, 'css_height', None), 0)
+    pixel_ratio = _safe_float(getattr(screenshot, 'pixel_ratio', None), 0) or 1.0
+    image_width = _safe_float(getattr(screenshot, 'width', None), 0)
+    image_height = _safe_float(getattr(screenshot, 'height', None), 0)
+
+    width, height = _resolve_slide_dimensions(slide)
+
+    if css_width <= 0 and image_width > 0 and pixel_ratio > 0:
+        css_width = image_width / pixel_ratio
+    if css_height <= 0 and image_height > 0 and pixel_ratio > 0:
+        css_height = image_height / pixel_ratio
+
+    if css_width <= 0:
+        css_width = width
+    if css_height <= 0:
+        css_height = height
+
+    aspect_ratio = css_height / css_width if css_width > 0 else 1.0
+    if aspect_ratio <= 0:
+        aspect_ratio = height / width if width > 0 else 1.0
+
+    draw_width = page_width
+    draw_height = draw_width * aspect_ratio
+
+    if draw_height > page_height and draw_height > 0:
+        scale = page_height / draw_height
+        draw_height = page_height
+        draw_width = draw_width * scale
+
+    offset_x = (page_width - draw_width) / 2 if draw_width < page_width else 0.0
+    offset_y = (page_height - draw_height) / 2 if draw_height < page_height else 0.0
+
+    pdf.drawImage(
+        image,
+        offset_x,
+        offset_y,
+        width=draw_width,
+        height=draw_height,
+        preserveAspectRatio=False,
+        mask='auto',
+    )
+
+
+def _build_digital_pdf_bytes(
+    payload: ExhibitionExportRequest, ordered_slides: Sequence[SlideExportPayload]
+) -> bytes:
     _attempt_server_screenshots(payload, ordered_slides)
     _ensure_slide_screenshots(payload, ordered_slides)
 
@@ -938,59 +1259,68 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
         page_height = _px_to_pt(height)
         pdf.setPageSize((page_width, page_height))
 
-        screenshot = slide.screenshot
-        if not screenshot or not isinstance(screenshot.data_url, str):
-            raise ExportGenerationError('Every slide must include a screenshot for PDF export.')
+        _draw_slide_screenshot(pdf, slide, page_width, page_height)
 
-        image_stream = io.BytesIO(_decode_data_url(screenshot.data_url))
-        image = ImageReader(image_stream)
-
-        css_width = _safe_float(getattr(screenshot, 'css_width', None), 0)
-        css_height = _safe_float(getattr(screenshot, 'css_height', None), 0)
-        pixel_ratio = _safe_float(getattr(screenshot, 'pixel_ratio', None), 0) or 1.0
-        image_width = _safe_float(getattr(screenshot, 'width', None), 0)
-        image_height = _safe_float(getattr(screenshot, 'height', None), 0)
-
-        if css_width <= 0 and image_width > 0 and pixel_ratio > 0:
-            css_width = image_width / pixel_ratio
-        if css_height <= 0 and image_height > 0 and pixel_ratio > 0:
-            css_height = image_height / pixel_ratio
-
-        if css_width <= 0:
-            css_width = width
-        if css_height <= 0:
-            css_height = height
-
-        aspect_ratio = css_height / css_width if css_width > 0 else 1.0
-        if aspect_ratio <= 0:
-            aspect_ratio = height / width if width > 0 else 1.0
-
-        draw_width = page_width
-        draw_height = draw_width * aspect_ratio
-
-        if draw_height > page_height and draw_height > 0:
-            scale = page_height / draw_height
-            draw_height = page_height
-            draw_width = draw_width * scale
-
-        offset_x = (page_width - draw_width) / 2 if draw_width < page_width else 0.0
-        offset_y = (page_height - draw_height) / 2 if draw_height < page_height else 0.0
-
-        pdf.drawImage(
-            image,
-            offset_x,
-            offset_y,
-            width=draw_width,
-            height=draw_height,
-            preserveAspectRatio=False,
-            mask='auto',
-        )
         if index < len(ordered_slides) - 1:
             pdf.showPage()
 
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def _build_print_pdf_bytes(
+    payload: ExhibitionExportRequest, ordered_slides: Sequence[SlideExportPayload]
+) -> bytes:
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer)
+    pdf.setTitle(payload.title or 'Exhibition Presentation')
+
+    for index, slide in enumerate(ordered_slides):
+        width, height = _resolve_slide_dimensions(slide)
+        page_width = _px_to_pt(width)
+        page_height = _px_to_pt(height)
+        pdf.setPageSize((page_width, page_height))
+
+        _draw_slide_background(pdf, slide, page_width, page_height)
+
+        supported_types = {'text-box', 'shape', 'image'}
+        needs_fallback = any(obj.type not in supported_types for obj in slide.objects)
+
+        if needs_fallback and slide.screenshot:
+            try:
+                _draw_slide_screenshot(pdf, slide, page_width, page_height)
+            except ExportGenerationError:
+                logger.debug('Unable to use slide screenshot fallback for %s', slide.id)
+
+        ordered_objects = sorted(slide.objects, key=lambda obj: obj.z_index or 0)
+        for obj in ordered_objects:
+            if obj.type == 'text-box':
+                _draw_text_box_object(pdf, obj, page_height)
+            elif obj.type == 'shape':
+                _draw_shape_object(pdf, obj, page_height)
+            elif obj.type == 'image':
+                _draw_image_object(pdf, obj, page_height)
+
+        if index < len(ordered_slides) - 1:
+            pdf.showPage()
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
+    if not payload.slides:
+        raise ExportGenerationError('No slides provided for export.')
+
+    ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
+    export_mode = _coerce_pdf_mode(payload.pdf_mode)
+
+    if export_mode is PdfExportMode.PRINT:
+        return _build_print_pdf_bytes(payload, ordered_slides)
+
+    return _build_digital_pdf_bytes(payload, ordered_slides)
 
 
 def build_export_filename(title: Optional[str], extension: str) -> str:
