@@ -428,6 +428,94 @@ const resolveSlideDimensions = (
   };
 };
 
+const copyElementAttributes = (source: Element, target: Element) => {
+  Array.from(source.attributes).forEach(attribute => {
+    try {
+      target.setAttribute(attribute.name, attribute.value);
+    } catch (error) {
+      console.warn('[Exhibition Export] Failed to copy attribute', attribute.name, error);
+    }
+  });
+};
+
+const replaceCanvasElementsWithImages = (sourceRoot: HTMLElement, cloneRoot: HTMLElement) => {
+  const sourceCanvases = Array.from(sourceRoot.querySelectorAll('canvas'));
+  const clonedCanvases = Array.from(cloneRoot.querySelectorAll('canvas'));
+
+  if (sourceCanvases.length === 0 || clonedCanvases.length === 0) {
+    return;
+  }
+
+  sourceCanvases.forEach((sourceCanvas, index) => {
+    const clonedCanvas = clonedCanvases[index];
+    if (!(clonedCanvas instanceof HTMLCanvasElement)) {
+      return;
+    }
+
+    let dataUrl: string | null = null;
+    try {
+      dataUrl = sourceCanvas.toDataURL('image/png');
+    } catch (error) {
+      console.warn('[Exhibition Export] Unable to serialise canvas content for export', error);
+      dataUrl = null;
+    }
+
+    if (!dataUrl || dataUrl === 'data:,') {
+      return;
+    }
+
+    const image = document.createElement('img');
+    image.src = dataUrl;
+    image.draggable = false;
+    image.dataset.exhibitionCanvasSnapshot = 'true';
+
+    copyElementAttributes(clonedCanvas, image);
+
+    const ariaLabel =
+      sourceCanvas.getAttribute('aria-label') ||
+      clonedCanvas.getAttribute('aria-label') ||
+      clonedCanvas.getAttribute('data-chart-title');
+    if (ariaLabel) {
+      image.setAttribute('alt', ariaLabel);
+    }
+
+    if (clonedCanvas.id && !image.id) {
+      image.id = clonedCanvas.id;
+    }
+
+    if (clonedCanvas.className) {
+      image.className = clonedCanvas.className;
+    }
+
+    const inlineStyle = clonedCanvas.getAttribute('style');
+    if (inlineStyle) {
+      image.setAttribute('style', inlineStyle);
+    }
+
+    const computed = window.getComputedStyle(sourceCanvas);
+    if (computed?.width && computed.width !== 'auto') {
+      image.style.width = computed.width;
+    }
+    if (computed?.height && computed.height !== 'auto') {
+      image.style.height = computed.height;
+    }
+
+    if (clonedCanvas.width > 0) {
+      image.width = clonedCanvas.width;
+    } else if (sourceCanvas.width > 0) {
+      image.width = sourceCanvas.width;
+    }
+
+    if (clonedCanvas.height > 0) {
+      image.height = clonedCanvas.height;
+    } else if (sourceCanvas.height > 0) {
+      image.height = sourceCanvas.height;
+    }
+
+    clonedCanvas.replaceWith(image);
+  });
+};
+
 const serialiseSlideElement = (element: HTMLElement, width: number, height: number): string => {
   const clone = element.cloneNode(true) as HTMLElement;
   clone.style.transform = 'none';
@@ -443,6 +531,7 @@ const serialiseSlideElement = (element: HTMLElement, width: number, height: numb
     clone.style.position = 'relative';
   }
   clone.setAttribute(EXPORT_STATIC_ATTRIBUTE, '');
+  replaceCanvasElementsWithImages(element, clone);
   stripAnimationArtifacts(clone);
   return clone.outerHTML;
 };
