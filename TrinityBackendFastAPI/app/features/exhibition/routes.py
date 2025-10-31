@@ -18,6 +18,7 @@ from .schemas import (
     ExhibitionLayoutConfigurationIn,
     ExhibitionLayoutConfigurationOut,
     ExhibitionManifestOut,
+    PDFExportMode,
     SlideScreenshotsResponse,
 )
 from .service import ExhibitionStorage
@@ -232,11 +233,17 @@ async def export_presentation_pdf(payload: ExhibitionExportRequest) -> Response:
         )
 
     try:
-        pdf_bytes = build_pdf_bytes(payload)
+        mode = payload.pdf_mode or PDFExportMode.DIGITAL
+        pdf_bytes = build_pdf_bytes(payload, mode=mode)
     except ExportGenerationError as exc:  # pragma: no cover - defensive path
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    filename = build_export_filename(payload.title, "pdf")
+    base_filename = build_export_filename(payload.title, "pdf")
+    suffix = "-print" if mode == PDFExportMode.PRINT else "-digital"
+    if base_filename.lower().endswith(".pdf"):
+        filename = f"{base_filename[:-4]}{suffix}.pdf"
+    else:
+        filename = f"{base_filename}{suffix}.pdf"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 

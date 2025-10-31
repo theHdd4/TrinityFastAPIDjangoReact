@@ -42,6 +42,7 @@ export_module = _load_module("app.features.exhibition.export", EXHIBITION_PATH /
 
 DocumentStylesPayload = schemas_module.DocumentStylesPayload
 ExhibitionExportRequest = schemas_module.ExhibitionExportRequest
+PDFExportMode = schemas_module.PDFExportMode
 ExportGenerationError = export_module.ExportGenerationError
 SlideDomSnapshotPayload = schemas_module.SlideDomSnapshotPayload
 build_export_filename = export_module.build_export_filename
@@ -188,12 +189,12 @@ def test_build_pptx_bytes_uses_max_dimensions() -> None:
 
 def test_build_pdf_bytes_requires_screenshots() -> None:
     payload = _build_payload(include_screenshot=True)
-    pdf_bytes = build_pdf_bytes(payload)
+    pdf_bytes = build_pdf_bytes(payload, PDFExportMode.DIGITAL)
     assert pdf_bytes.startswith(b"%PDF")
 
     payload_missing = _build_payload(include_screenshot=False)
     with pytest.raises(ExportGenerationError):
-        build_pdf_bytes(payload_missing)
+        build_pdf_bytes(payload_missing, PDFExportMode.DIGITAL)
 
 
 def test_build_pdf_bytes_renders_missing_screenshots(monkeypatch) -> None:
@@ -239,7 +240,7 @@ def test_build_pdf_bytes_renders_missing_screenshots(monkeypatch) -> None:
 
     monkeypatch.setattr(export_module, "_request_slide_screenshots", fake_request)
 
-    pdf_bytes = build_pdf_bytes(payload)
+    pdf_bytes = build_pdf_bytes(payload, PDFExportMode.DIGITAL)
     assert pdf_bytes.startswith(b"%PDF")
     assert captured_calls == [
         (False, [slide.id for slide in payload.slides]),
@@ -266,7 +267,22 @@ def test_build_pdf_bytes_falls_back_to_client_capture(monkeypatch) -> None:
 
     monkeypatch.setattr(export_module, "_request_slide_screenshots", failing_request)
 
-    pdf_bytes = build_pdf_bytes(payload)
+    pdf_bytes = build_pdf_bytes(payload, PDFExportMode.DIGITAL)
+    assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_build_pdf_bytes_print_mode_vectors_without_screenshots() -> None:
+    payload = _build_payload(include_screenshot=False)
+    pdf_bytes = build_pdf_bytes(payload, PDFExportMode.PRINT)
+    assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_build_pdf_bytes_print_mode_falls_back_to_screenshot() -> None:
+    payload = _build_payload(include_screenshot=True)
+    for slide in payload.slides:
+        slide.objects.clear()
+
+    pdf_bytes = build_pdf_bytes(payload, PDFExportMode.PRINT)
     assert pdf_bytes.startswith(b"%PDF")
 
 

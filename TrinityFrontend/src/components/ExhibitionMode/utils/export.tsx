@@ -708,10 +708,13 @@ export interface SlideExportPayload {
   domSnapshot?: SlideDomSnapshotPayload;
 }
 
+export type PdfExportMode = 'digital' | 'print';
+
 export interface ExhibitionExportPayload {
   title: string;
   slides: SlideExportPayload[];
   documentStyles?: ExportDocumentStyles | null;
+  pdfMode?: PdfExportMode;
 }
 
 export interface BuildPresentationExportOptions {
@@ -868,9 +871,69 @@ export const downloadBlob = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
+export interface DownloadSlidesOptions {
+  format?: 'png' | 'jpeg';
+  quality?: number;
+}
+
+const convertCaptureToBlob = async (
+  capture: SlideCaptureResult,
+  format: 'png' | 'jpeg',
+  quality: number,
+): Promise<Blob> => {
+  if (format === 'png') {
+    const response = await fetch(capture.dataUrl);
+    return response.blob();
+  }
+
+  const image = await loadImageElement(capture.dataUrl);
+  const width = Math.max(
+    1,
+    Math.round(
+      capture.imageWidth ||
+        (capture.cssWidth && capture.pixelRatio
+          ? capture.cssWidth * capture.pixelRatio
+          : image.naturalWidth),
+    ),
+  );
+  const height = Math.max(
+    1,
+    Math.round(
+      capture.imageHeight ||
+        (capture.cssHeight && capture.pixelRatio
+          ? capture.cssHeight * capture.pixelRatio
+          : image.naturalHeight),
+    ),
+  );
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error('Unable to prepare canvas for image conversion.');
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(blobValue => {
+      if (blobValue) {
+        resolve(blobValue);
+      } else {
+        reject(new Error('Unable to encode slide as JPEG.'));
+      }
+    }, 'image/jpeg', quality);
+  });
+
+  return blob;
+};
+
 export const downloadSlidesAsImages = async (
   captures: SlideCaptureResult[],
   baseTitle: string,
+  options?: DownloadSlidesOptions,
 ): Promise<void> => {
   ensureBrowserEnvironment('Image download');
 
@@ -878,14 +941,16 @@ export const downloadSlidesAsImages = async (
     return;
   }
 
+  const format = options?.format ?? 'png';
+  const quality = options?.quality ?? 0.92;
+  const extension = format === 'jpeg' ? 'jpg' : 'png';
   const safeBase = sanitizeFileName(baseTitle);
 
   for (let index = 0; index < captures.length; index += 1) {
     const capture = captures[index];
-    const response = await fetch(capture.dataUrl);
-    const blob = await response.blob();
+    const blob = await convertCaptureToBlob(capture, format, quality);
     const paddedIndex = String(index + 1).padStart(2, '0');
-    downloadBlob(blob, `${safeBase}-slide-${paddedIndex}.png`);
+    downloadBlob(blob, `${safeBase}-slide-${paddedIndex}.${extension}`);
     await new Promise(resolve => setTimeout(resolve, DOWNLOAD_DELAY_MS));
   }
 };
@@ -991,20 +1056,29 @@ export const downloadRenderedSlideScreenshots = async (
   }
 };
 
+export interface PresentationExportOptions {
+  pdfMode?: PdfExportMode;
+}
+
 export const requestPresentationExport = async (
   format: 'pptx' | 'pdf',
   payload: ExhibitionExportPayload,
+  options: PresentationExportOptions = {},
 ): Promise<Blob> => {
   ensureBrowserEnvironment('Presentation export');
 
   const endpoint = `${EXHIBITION_API}/export/${format}`;
+  const requestPayload =
+    format === 'pdf' && options.pdfMode
+      ? { ...payload, pdfMode: options.pdfMode }
+      : payload;
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     credentials: 'include',
-    body: JSON.stringify(payload as JsonCompatible),
+    body: JSON.stringify(requestPayload as JsonCompatible),
   });
 
   if (!response.ok) {
