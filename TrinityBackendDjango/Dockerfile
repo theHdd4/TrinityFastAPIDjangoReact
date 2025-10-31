@@ -13,7 +13,7 @@ WORKDIR /code
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       build-essential \
-      fonts-ubuntu \
+      fonts-dejavu-core \
       fonts-unifont \
       libasound2 \
       libatk-bridge2.0-0 \

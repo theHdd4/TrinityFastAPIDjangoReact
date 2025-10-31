@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libxss1 \
     libxtst6 \
-    fonts-ubuntu \
+    fonts-dejavu-core \
     fonts-unifont \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
