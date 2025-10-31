@@ -267,6 +267,43 @@ def test_render_chart_prefers_post_animation_png() -> None:
     assert any(abs(picture.width - _px_to_emu(320)) <= 1 for picture in pictures)
 
 
+def test_atom_renders_chart_image_without_preview_metadata() -> None:
+    payload = _build_payload()
+
+    atom_object = SlideExportObjectPayload.model_validate(
+        {
+            'id': 'atom-no-chart-preview',
+            'type': 'atom',
+            'x': 80,
+            'y': 120,
+            'width': 480,
+            'height': 320,
+            'props': {
+                'atom': {
+                    'title': 'Animated Chart',
+                    'subtitle': 'Post-animation snapshot only',
+                    'metadata': {
+                        'postAnimationPng': _png_data_url(),
+                        'summary': ['Uses captured chart snapshot when data is absent.'],
+                    },
+                }
+            },
+        }
+    )
+
+    payload.slides[0].objects.append(atom_object)
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    slide = presentation.slides[0]
+
+    pictures = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert pictures, 'Expected atom without chart metadata to still render post-animation image'
+    assert any('Animated Chart' in getattr(shape, 'text', '') for shape in slide.shapes if hasattr(shape, 'text'))
+
+
 def test_render_slide_screenshots_overlays_post_animation_png() -> None:
     payload = _build_payload()
 
