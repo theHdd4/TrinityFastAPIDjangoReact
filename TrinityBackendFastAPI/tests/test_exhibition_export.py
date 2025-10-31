@@ -45,6 +45,7 @@ DocumentStylesPayload = schemas_module.DocumentStylesPayload
 ExhibitionExportRequest = schemas_module.ExhibitionExportRequest
 ExportGenerationError = export_module.ExportGenerationError
 SlideDomSnapshotPayload = schemas_module.SlideDomSnapshotPayload
+SlideExportObjectPayload = schemas_module.SlideExportObjectPayload
 build_export_filename = export_module.build_export_filename
 build_pdf_bytes = export_module.build_pdf_bytes
 build_pptx_bytes = export_module.build_pptx_bytes
@@ -170,6 +171,53 @@ def test_build_pptx_bytes_includes_shape() -> None:
     assert any(fill == RGBColor(0x7C, 0x3A, 0xED) for fill in shape_fills)
 
 
+def test_build_pptx_bytes_renders_atom_component() -> None:
+    payload = _build_payload()
+
+    atom_object = SlideExportObjectPayload.model_validate(
+        {
+            'id': 'atom-001',
+            'type': 'atom',
+            'x': 320,
+            'y': 320,
+            'width': 360,
+            'height': 220,
+            'props': {
+                'atom': {
+                    'id': 'component-001',
+                    'atomId': 'chart-maker',
+                    'title': 'Sales by Region',
+                    'category': 'Revenue Overview',
+                    'color': '#2563EB',
+                    'metadata': {
+                        'chartData': [
+                            {'label': 'North', 'value': 120},
+                            {'label': 'South', 'value': 90},
+                            {'label': 'West', 'value': 60},
+                        ],
+                        'chartType': 'bar',
+                        'summary': ['Revenue continues to grow across key regions.'],
+                    },
+                }
+            },
+        }
+    )
+
+    payload.slides[0].objects.append(atom_object)
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    slide = presentation.slides[0]
+
+    charts = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.CHART]
+    assert charts, 'Expected atom component to render as a chart'
+
+    text_shapes = [getattr(shape, 'text', '') for shape in slide.shapes if hasattr(shape, 'text')]
+    assert any('Sales by Region' in text for text in text_shapes)
+
+
 def test_build_pptx_bytes_embeds_background_and_metadata() -> None:
     payload = _build_payload()
 
@@ -181,7 +229,8 @@ def test_build_pptx_bytes_embeds_background_and_metadata() -> None:
 
     background_width = _px_to_emu(payload.slides[0].base_width)
     pictures = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE]
-    assert any(abs(picture.width - background_width) <= 1 for picture in pictures)
+    assert pictures, 'Expected inline images to render on the slide'
+    assert not any(abs(picture.width - background_width) <= 1 for picture in pictures)
 
     paragraphs = [para.text for para in slide.notes_slide.notes_text_frame.paragraphs if para.text]
     assert paragraphs and paragraphs[0] == export_module.METADATA_MARKER
