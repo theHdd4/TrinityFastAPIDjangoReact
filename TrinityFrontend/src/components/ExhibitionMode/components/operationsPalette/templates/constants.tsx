@@ -465,314 +465,72 @@ const createImagePlaceholderDefinition = (
   };
 };
 
-const createStructuredShapes = (
+const createStructuredContent = (
   placeholder: PlaceholderSpec,
   frame: FrameRect,
   accent: string,
 ): { shapes?: TemplateShapeDefinition[]; textBoxes?: TemplateTextBoxDefinition[] } => {
-  const shapes: TemplateShapeDefinition[] = [];
   const textBoxes: TemplateTextBoxDefinition[] = [];
   const shaded = (strength: number, fallback = `rgba(79, 70, 229, ${strength})`) =>
     withAlpha(accent, strength, fallback);
 
-  switch (placeholder.type) {
-    case 'diagram':
-    case 'flow': {
-      const nodeWidth = Math.max(120, Math.min(180, (frame.width - 80) / 3));
-      const nodeHeight = Math.max(60, frame.height - 120);
-      const baseY = frame.y + (frame.height - nodeHeight) / 2;
-      let cursorX = frame.x + 24;
-      for (let index = 0; index < 3; index += 1) {
-        shapes.push({
-          shapeId: 'rounded-rectangle',
-          position: { x: cursorX, y: baseY },
-          size: { width: nodeWidth, height: nodeHeight },
-          fill: shaded(0.16),
-          stroke: shaded(0.28),
-          strokeWidth: 2,
-        });
+  if (placeholder.type === 'metric') {
+    const keywords = normaliseKeywords(placeholder);
+    let headline = 'Metric placeholder';
+    let value = '92%';
 
-        if (index < 2) {
-          shapes.push({
-            shapeId: 'line-horizontal',
-            position: { x: cursorX + nodeWidth + 12, y: baseY + nodeHeight / 2 - 6 },
-            size: { width: 36, height: 12 },
-            stroke: shaded(0.52),
-            strokeWidth: 6,
-          });
-        }
-        cursorX += nodeWidth + 60;
-      }
-      break;
+    if (keywords.includes('churn')) {
+      headline = 'Churn probability';
+      value = '18%';
+    } else if (keywords.includes('retention')) {
+      headline = 'Retention rate';
+      value = '82%';
+    } else if (keywords.includes('roi') || keywords.includes('impact')) {
+      headline = 'Marketing ROI';
+      value = '3.4x';
+    } else if (keywords.includes('revenue') || keywords.includes('forecast')) {
+      headline = 'Projected revenue';
+      value = '$4.2M';
+    } else if (keywords.includes('segment')) {
+      headline = 'Segment uplift';
+      value = '+28%';
+    } else if (keywords.includes('price')) {
+      headline = 'Optimal price';
+      value = '$24.90';
+    } else if (keywords.includes('promo') || keywords.includes('uplift')) {
+      headline = 'Promo uplift';
+      value = '+12.5%';
+    } else if (keywords.includes('data')) {
+      headline = 'Data completeness';
+      value = '97%';
     }
-    case 'funnel': {
-      const layers = 3;
-      const stageHeight = Math.max(48, (frame.height - 80) / layers);
-      for (let index = 0; index < layers; index += 1) {
-        const width = frame.width - 40 - index * 48;
-        const x = frame.x + 20 + index * 24;
-        const y = frame.y + 40 + index * (stageHeight + 12);
-        shapes.push({
-          shapeId: 'rectangle',
-          position: { x, y },
-          size: { width, height: stageHeight },
-          fill: shaded(0.16 + index * 0.08),
-        });
-      }
-      break;
-    }
-    case 'timeline': {
-      const lineY = frame.y + frame.height / 2 - 4;
-      shapes.push({
-        shapeId: 'line-horizontal',
-        position: { x: frame.x + 24, y: lineY },
-        size: { width: frame.width - 48, height: 12 },
-        stroke: shaded(0.55),
-        strokeWidth: 6,
-      });
-      const steps = 4;
-      const stepWidth = (frame.width - 48) / (steps - 1);
-      for (let index = 0; index < steps; index += 1) {
-        const markerX = frame.x + 24 + stepWidth * index - 16;
-        shapes.push({
-          shapeId: 'circle',
-          position: { x: markerX, y: lineY - 16 },
-          size: { width: 32, height: 32 },
-          fill: shaded(index === 0 ? 0.45 : 0.22),
-        });
-      }
-      break;
-    }
-    case 'calendar': {
-      shapes.push({
-        shapeId: 'rounded-rectangle',
-        position: { x: frame.x + 18, y: frame.y + 34 },
-        size: { width: frame.width - 36, height: frame.height - 60 },
-        fill: shaded(0.12),
-        stroke: shaded(0.24),
-        strokeWidth: 2,
-      });
-      const columns = 4;
-      const rows = 3;
-      const cellWidth = (frame.width - 76) / columns;
-      const cellHeight = (frame.height - 128) / rows;
-      for (let row = 0; row < rows; row += 1) {
-        for (let col = 0; col < columns; col += 1) {
-          shapes.push({
-            shapeId: 'rectangle',
-            position: {
-              x: frame.x + 30 + col * (cellWidth + 6),
-              y: frame.y + 74 + row * (cellHeight + 10),
-            },
-            size: { width: cellWidth, height: cellHeight },
-            fill: shaded(0.08 + (row + col) * 0.02),
-          });
-        }
-      }
-      break;
-    }
-    case 'bubble': {
-      const radii = [54, 40, 32];
-      const offsets = [0, 120, 60];
-      radii.forEach((radius, index) => {
-        const x = frame.x + 36 + offsets[index];
-        const y = frame.y + 48 + index * 32;
-        shapes.push({
-          shapeId: 'circle',
-          position: { x, y },
-          size: { width: radius * 2, height: radius * 2 },
-          fill: shaded(0.14 + index * 0.08),
-        });
-      });
-      break;
-    }
-    case 'waterfall': {
-      const columnWidth = (frame.width - 80) / 4;
-      const baseY = frame.y + frame.height - 48;
-      const heights = [120, 88, 142, 96];
-      heights.forEach((height, index) => {
-        const x = frame.x + 32 + index * (columnWidth + 8);
-        shapes.push({
-          shapeId: 'rectangle',
-          position: { x, y: baseY - height },
-          size: { width: columnWidth, height },
-          fill: shaded(0.18 + index * 0.06),
-        });
-      });
-      break;
-    }
-    case 'radar': {
-      shapes.push({
-        shapeId: 'pentagon',
-        position: { x: frame.x + frame.width / 2 - 120, y: frame.y + frame.height / 2 - 120 },
-        size: { width: 240, height: 240 },
-        fill: shaded(0.16),
-        stroke: shaded(0.28),
-        strokeWidth: 2,
-      });
-      break;
-    }
-    case 'map': {
-      shapes.push({
-        shapeId: 'hexagon',
-        position: { x: frame.x + frame.width / 2 - 130, y: frame.y + frame.height / 2 - 110 },
-        size: { width: 260, height: 220 },
-        fill: shaded(0.14),
-        stroke: shaded(0.3),
-        strokeWidth: 2,
-      });
-      const markers = [
-        { x: frame.x + 48, y: frame.y + 52 },
-        { x: frame.x + frame.width - 96, y: frame.y + frame.height - 112 },
-        { x: frame.x + frame.width / 2 - 14, y: frame.y + frame.height / 2 - 14 },
-      ];
-      markers.forEach((marker, index) => {
-        shapes.push({
-          shapeId: 'circle',
-          position: marker,
-          size: { width: 28, height: 28 },
-          fill: shaded(index === 0 ? 0.42 : 0.22),
-        });
-      });
-      break;
-    }
-    case 'dashboard': {
-      const topHeight = Math.max(72, (frame.height - 96) / 2);
-      const bottomHeight = Math.max(72, (frame.height - 96) / 2);
-      shapes.push({
-        shapeId: 'rounded-rectangle',
-        position: { x: frame.x + 20, y: frame.y + 36 },
-        size: { width: frame.width - 40, height: topHeight },
-        fill: shaded(0.12),
-      });
-      const bottomWidth = (frame.width - 52) / 2;
-      shapes.push({
-        shapeId: 'rectangle',
-        position: { x: frame.x + 20, y: frame.y + 48 + topHeight },
-        size: { width: bottomWidth, height: bottomHeight },
-        fill: shaded(0.16),
-      });
-      shapes.push({
-        shapeId: 'rectangle',
-        position: { x: frame.x + 32 + bottomWidth, y: frame.y + 48 + topHeight },
-        size: { width: bottomWidth, height: bottomHeight },
-        fill: shaded(0.2),
-      });
-      break;
-    }
-    case 'table': {
-      shapes.push({
-        shapeId: 'rounded-rectangle',
-        position: { x: frame.x + 18, y: frame.y + 34 },
-        size: { width: frame.width - 36, height: frame.height - 60 },
-        fill: shaded(0.12),
-        stroke: shaded(0.24),
-        strokeWidth: 2,
-      });
-      const rows = 4;
-      for (let row = 1; row < rows; row += 1) {
-        shapes.push({
-          shapeId: 'line-horizontal',
-          position: { x: frame.x + 26, y: frame.y + 34 + row * ((frame.height - 60) / rows) },
-          size: { width: frame.width - 52, height: 8 },
-          stroke: shaded(0.28),
-          strokeWidth: 4,
-        });
-      }
-      const columns = 3;
-      for (let column = 1; column < columns; column += 1) {
-        shapes.push({
-          shapeId: 'line-vertical',
-          position: { x: frame.x + 18 + column * ((frame.width - 36) / columns), y: frame.y + 34 },
-          size: { width: 8, height: frame.height - 60 },
-          stroke: shaded(0.22),
-          strokeWidth: 4,
-        });
-      }
-      break;
-    }
-    case 'heatmap': {
-      const rows = 3;
-      const cols = 4;
-      const cellWidth = (frame.width - 72) / cols;
-      const cellHeight = (frame.height - 96) / rows;
-      for (let row = 0; row < rows; row += 1) {
-        for (let col = 0; col < cols; col += 1) {
-          shapes.push({
-            shapeId: 'rectangle',
-            position: {
-              x: frame.x + 26 + col * (cellWidth + 6),
-              y: frame.y + 40 + row * (cellHeight + 10),
-            },
-            size: { width: cellWidth, height: cellHeight },
-            fill: shaded(0.08 + (row * cols + col) * 0.02),
-          });
-        }
-      }
-      break;
-    }
-    case 'metric': {
-      const keywords = normaliseKeywords(placeholder);
-      let headline = 'Metric placeholder';
-      let value = '92%';
 
-      if (keywords.includes('churn')) {
-        headline = 'Churn probability';
-        value = '18%';
-      } else if (keywords.includes('retention')) {
-        headline = 'Retention rate';
-        value = '82%';
-      } else if (keywords.includes('roi') || keywords.includes('impact')) {
-        headline = 'Marketing ROI';
-        value = '3.4x';
-      } else if (keywords.includes('revenue') || keywords.includes('forecast')) {
-        headline = 'Projected revenue';
-        value = '$4.2M';
-      } else if (keywords.includes('segment')) {
-        headline = 'Segment uplift';
-        value = '+28%';
-      } else if (keywords.includes('price')) {
-        headline = 'Optimal price';
-        value = '$24.90';
-      } else if (keywords.includes('promo') || keywords.includes('uplift')) {
-        headline = 'Promo uplift';
-        value = '+12.5%';
-      } else if (keywords.includes('data')) {
-        headline = 'Data completeness';
-        value = '97%';
-      }
-
-      const metricColor = shaded(0.82);
-      textBoxes.push({
-        text: value,
-        position: { x: frame.x + 22, y: frame.y + 60 },
-        size: { width: frame.width - 44, height: 64 },
-        fontSize: 44,
-        bold: true,
-        color: metricColor,
-      });
-      textBoxes.push({
-        text: headline,
-        position: { x: frame.x + 22, y: frame.y + 128 },
-        size: { width: frame.width - 44, height: 32 },
-        fontSize: 18,
-        color: '#334155',
-      });
-      textBoxes.push({
-        text: 'Replace with live KPI value and commentary.',
-        position: { x: frame.x + 22, y: frame.y + 164 },
-        size: { width: frame.width - 44, height: 48 },
-        fontSize: 13,
-        color: '#475569',
-      });
-      break;
-    }
-    default:
-      break;
+    const metricColor = shaded(0.82);
+    textBoxes.push({
+      text: value,
+      position: { x: frame.x + 22, y: frame.y + 60 },
+      size: { width: frame.width - 44, height: 64 },
+      fontSize: 44,
+      bold: true,
+      color: metricColor,
+    });
+    textBoxes.push({
+      text: headline,
+      position: { x: frame.x + 22, y: frame.y + 128 },
+      size: { width: frame.width - 44, height: 32 },
+      fontSize: 18,
+      color: '#334155',
+    });
+    textBoxes.push({
+      text: 'Replace with live KPI value and commentary.',
+      position: { x: frame.x + 22, y: frame.y + 164 },
+      size: { width: frame.width - 44, height: 48 },
+      fontSize: 13,
+      color: '#475569',
+    });
   }
 
   return {
-    shapes: shapes.length > 0 ? shapes : undefined,
     textBoxes: textBoxes.length > 0 ? textBoxes : undefined,
   };
 };
@@ -884,20 +642,13 @@ const buildSlideDefinition = (
       shapeId: 'rounded-rectangle',
       position: { x: frame.x, y: frame.y },
       size: { width: frame.width, height: frame.height },
-      fill: withAlpha(placeholderAccent, 0.1, 'rgba(79, 70, 229, 0.1)'),
-      stroke: withAlpha(placeholderAccent, 0.3, 'rgba(79, 70, 229, 0.3)'),
+      fill: 'transparent',
+      stroke: withAlpha(placeholderAccent, 0.4, 'rgba(79, 70, 229, 0.4)'),
       strokeWidth: 2,
+      opacity: 0.9,
     });
 
-    placeholderShapes.push({
-      shapeId: 'rectangle',
-      position: { x: frame.x, y: frame.y + frame.height - 8 },
-      size: { width: frame.width, height: 8 },
-      fill: withAlpha(placeholderAccent, 0.4, 'rgba(79, 70, 229, 0.4)'),
-      opacity: 0.75,
-    });
-
-    const placeholderTitle = `${placeholder.type.toUpperCase()} PLACEHOLDER`;
+    const placeholderTitle = placeholder.label;
     placeholderTextBoxes.push({
       text: placeholderTitle,
       position: { x: frame.x + 16, y: frame.y + 14 },
@@ -929,9 +680,7 @@ const buildSlideDefinition = (
         });
       }
     } else {
-      const placeholderBody = placeholder.description
-        ? `${placeholder.label}\n${placeholder.description}`
-        : placeholder.label;
+      const placeholderBody = placeholder.description ?? placeholder.label;
 
       placeholderTextBoxes.push({
         text: placeholderBody,
@@ -948,7 +697,7 @@ const buildSlideDefinition = (
       images.push(createImagePlaceholderDefinition(placeholder, frame));
     }
 
-    const structured = createStructuredShapes(placeholder, frame, placeholderAccent);
+    const structured = createStructuredContent(placeholder, frame, placeholderAccent);
     if (structured.shapes) {
       placeholderShapes.push(...structured.shapes);
     }
