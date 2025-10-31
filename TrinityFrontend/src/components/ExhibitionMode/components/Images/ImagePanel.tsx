@@ -1,14 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Image as ImageIcon, Loader2, Trash2, Upload, X } from 'lucide-react';
+import { Check, Image as ImageIcon, Loader2, Search, Trash2, Upload, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
 import { IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
-export type ImagePanelSource = 'stock' | 'upload' | 'existing';
+const PIXABAY_API_ENDPOINT = 'https://pixabay.com/api/';
+const DEFAULT_PIXABAY_QUERY = 'business analytics';
+
+export type ImagePanelSource = 'stock' | 'upload' | 'existing' | 'pixabay';
 
 export interface ImageSelectionMetadata {
   title?: string | null;
@@ -28,6 +32,14 @@ interface SelectedImage {
   label?: string | null;
   title?: string | null;
   source: ImagePanelSource;
+}
+
+interface PixabayImage {
+  id: string;
+  previewUrl: string;
+  fullUrl: string;
+  title: string;
+  attribution: string | null;
 }
 
 export type ImageSelectionRequest = {
@@ -84,6 +96,47 @@ const SELECTED_CLASSES = 'border-primary ring-2 ring-primary/20';
 const buildDisplayUrl = (objectName: string): string => {
   const encoded = encodeURIComponent(objectName);
   return `${IMAGES_API}/content?object_name=${encoded}`;
+};
+
+const normalisePixabayImage = (value: any): PixabayImage | null => {
+  if (!value) {
+    return null;
+  }
+
+  const previewUrl =
+    typeof value.webformatURL === 'string'
+      ? value.webformatURL
+      : typeof value.previewURL === 'string'
+      ? value.previewURL
+      : null;
+  const fullUrl =
+    typeof value.largeImageURL === 'string'
+      ? value.largeImageURL
+      : typeof value.fullHDURL === 'string'
+      ? value.fullHDURL
+      : previewUrl;
+
+  if (!previewUrl || !fullUrl) {
+    return null;
+  }
+
+  const id = String(value.id ?? fullUrl);
+  const tags = typeof value.tags === 'string' ? value.tags : '';
+  const user = typeof value.user === 'string' && value.user.trim().length > 0 ? value.user.trim() : null;
+  const titleBase = tags
+    .split(',')
+    .map((tag: string) => tag.trim())
+    .filter(Boolean)
+    .shift();
+  const title = titleBase ? `${titleBase} (${user ?? 'Pixabay'})` : user ? `Pixabay • ${user}` : 'Pixabay image';
+
+  return {
+    id,
+    previewUrl,
+    fullUrl,
+    title,
+    attribution: user ? `Pixabay • ${user}` : 'Pixabay',
+  };
 };
 
 const normaliseStoredImage = (image: any): StoredImage | null => {
@@ -203,6 +256,15 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   const [selectedUploads, setSelectedUploads] = useState<Map<string, SelectedImage>>(
     new Map<string, SelectedImage>(),
   );
+  const [pixabayQuery, setPixabayQuery] = useState(DEFAULT_PIXABAY_QUERY);
+  const [pixabayImages, setPixabayImages] = useState<PixabayImage[]>([]);
+  const [isSearchingPixabay, setIsSearchingPixabay] = useState(false);
+  const [pixabayError, setPixabayError] = useState<string | null>(null);
+  const [hasPixabaySearched, setHasPixabaySearched] = useState(false);
+  const [lastPixabayQuery, setLastPixabayQuery] = useState(DEFAULT_PIXABAY_QUERY);
+
+  const pixabayApiKey = (import.meta.env.VITE_PIXABAY_API_KEY as string | undefined)?.trim() ?? '';
+  const isPixabayConfigured = pixabayApiKey.length > 0;
 
   useEffect(() => {
     setProjectContext(getActiveProjectContext());
@@ -304,6 +366,114 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     },
     [canEdit],
   );
+
+  const performPixabaySearch = useCallback(
+    async (query: string, signal?: AbortSignal) => {
+      if (!isPixabayConfigured) {
+        return;
+      }
+
+      const trimmedQuery = query.trim();
+      if (trimmedQuery.length === 0) {
+        setPixabayImages([]);
+        setHasPixabaySearched(false);
+        setPixabayError(null);
+        setIsSearchingPixabay(false);
+        return;
+      }
+
+      setIsSearchingPixabay(true);
+      setPixabayError(null);
+
+      try {
+        const params = new URLSearchParams({
+          key: pixabayApiKey,
+          q: trimmedQuery,
+          image_type: 'photo',
+          orientation: 'horizontal',
+          safesearch: 'true',
+          per_page: '40',
+        });
+
+        const response = await fetch(`${PIXABAY_API_ENDPOINT}?${params.toString()}`, {
+          signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Pixabay request failed (${response.status})`);
+        }
+
+        const payload = await response.json();
+        if (signal?.aborted) {
+          return;
+        }
+
+        const mapped = Array.isArray(payload?.hits)
+          ? (payload.hits as any[])
+              .map(normalisePixabayImage)
+              .filter((value): value is PixabayImage => Boolean(value))
+          : [];
+
+        setPixabayImages(mapped);
+        setHasPixabaySearched(true);
+        setLastPixabayQuery(trimmedQuery);
+      } catch (error) {
+        if (
+          (error instanceof DOMException && error.name === 'AbortError') ||
+          (typeof error === 'object' && error !== null && 'name' in error && (error as any).name === 'AbortError')
+        ) {
+          return;
+        }
+        console.error('Unable to fetch Pixabay images', error);
+        setPixabayError(
+          error instanceof Error
+            ? error.message
+            : 'We were unable to fetch images from Pixabay at this time.',
+        );
+      } finally {
+        if (!signal?.aborted) {
+          setIsSearchingPixabay(false);
+        }
+      }
+    },
+    [isPixabayConfigured, pixabayApiKey],
+  );
+
+  const handlePixabaySubmit = useCallback(
+    (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!isPixabayConfigured) {
+        return;
+      }
+
+      void performPixabaySearch(pixabayQuery);
+    },
+    [isPixabayConfigured, performPixabaySearch, pixabayQuery],
+  );
+
+  const handlePixabayRetry = useCallback(() => {
+    if (!isPixabayConfigured) {
+      return;
+    }
+
+    void performPixabaySearch(lastPixabayQuery || pixabayQuery);
+  }, [isPixabayConfigured, lastPixabayQuery, performPixabaySearch, pixabayQuery]);
+
+  useEffect(() => {
+    if (!isPixabayConfigured) {
+      setPixabayImages([]);
+      setHasPixabaySearched(false);
+      setPixabayError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    void performPixabaySearch(DEFAULT_PIXABAY_QUERY, controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [isPixabayConfigured, performPixabaySearch]);
 
   const handleFileUpload = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -610,6 +780,122 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               ) : (
                 <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
                   Upload images to see them here during this session. Connect to a project to access shared uploads.
+                </div>
+              )}
+            </section>
+
+            <section className="space-y-3">
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">Pixabay free images</p>
+                <p className="text-xs text-muted-foreground">
+                  Search millions of royalty-free visuals from Pixabay.
+                </p>
+              </div>
+
+              {isPixabayConfigured ? (
+                <div className="space-y-3">
+                  <form className="flex items-center gap-2" onSubmit={handlePixabaySubmit}>
+                    <div className="relative flex-1">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={pixabayQuery}
+                        onChange={event => setPixabayQuery(event.target.value)}
+                        placeholder="Search Pixabay (e.g. data visualization)"
+                        className="h-9 rounded-lg border border-border/60 bg-background pl-9 text-sm"
+                        disabled={!canEdit}
+                      />
+                    </div>
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      className="h-9 px-3 text-xs"
+                      disabled={!canEdit || isSearchingPixabay}
+                    >
+                      {isSearchingPixabay ? (
+                        <>
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          Searching…
+                        </>
+                      ) : (
+                        'Search'
+                      )}
+                    </Button>
+                  </form>
+
+                  {pixabayError ? (
+                    <div className="space-y-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-4 text-xs text-destructive">
+                      <p>We couldn’t load Pixabay images.</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button type="button" size="sm" variant="ghost" className="h-7 px-3 text-xs" onClick={handlePixabayRetry}>
+                          Try again
+                        </Button>
+                        <p className="text-[11px] text-destructive/80">{pixabayError}</p>
+                      </div>
+                    </div>
+                  ) : isSearchingPixabay ? (
+                    <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
+                      Fetching images from Pixabay…
+                    </div>
+                  ) : pixabayImages.length > 0 ? (
+                    <>
+                      <div className="max-h-64 overflow-y-auto pr-1">
+                        <div className="grid grid-cols-2 gap-3">
+                          {pixabayImages.map(image => {
+                            const isSelected = selectedImage?.url === image.fullUrl;
+                            return (
+                              <button
+                                key={image.id}
+                                type="button"
+                                onClick={() =>
+                                  handleImageClick({
+                                    url: image.fullUrl,
+                                    title: image.title,
+                                    label: image.title,
+                                    source: 'pixabay',
+                                  })
+                                }
+                                className={cn(
+                                  'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
+                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                                  canEdit && 'hover:scale-[1.02] hover:border-primary/40',
+                                  isSelected ? SELECTED_CLASSES : 'border-border/60',
+                                  !canEdit && 'cursor-not-allowed opacity-75',
+                                )}
+                                disabled={!canEdit}
+                              >
+                                <img src={image.previewUrl} alt={image.title} className="h-full w-full object-cover" />
+                                <div className="absolute inset-x-0 bottom-0 space-y-0.5 bg-gradient-to-t from-black/70 to-transparent p-2">
+                                  <p className="truncate text-[11px] font-medium text-white">{image.title}</p>
+                                  {image.attribution && (
+                                    <p className="truncate text-[10px] text-white/80">{image.attribution}</p>
+                                  )}
+                                </div>
+                                {isSelected && (
+                                  <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+                                      <Check className="h-4 w-4 text-primary-foreground" />
+                                    </div>
+                                  </div>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
+                  ) : hasPixabaySearched ? (
+                    <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+                      No Pixabay results for “{lastPixabayQuery}”. Try another search.
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Try searching for terms like “business intelligence”, “data analytics”, or “teamwork”.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+                  Add a <span className="font-medium text-foreground">VITE_PIXABAY_API_KEY</span> environment variable to enable Pixabay search.
                 </div>
               )}
             </section>
