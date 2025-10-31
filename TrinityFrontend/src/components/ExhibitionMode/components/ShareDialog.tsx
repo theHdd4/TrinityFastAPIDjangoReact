@@ -403,7 +403,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
         setIsGenerating(false);
       }
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -484,7 +484,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       console.error('Failed to copy share link', error);
       toast.error('Unable to copy the link. Please copy it manually.');
     }
-  }, [shareLink, isGenerating, toast]);
+  }, [shareLink, isGenerating]);
 
   const handleCopyEmbed = useCallback(async () => {
     if (!embedCode || isGenerating) {
@@ -506,7 +506,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       console.error('Failed to copy embed code', error);
       toast.error('Unable to copy the embed code. Please copy it manually.');
     }
-  }, [embedCode, isGenerating, toast]);
+  }, [embedCode, isGenerating]);
 
   const beginDownload = useCallback(
     (kind: DownloadKind): string => {
@@ -704,7 +704,6 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       hasSlides,
       projectName,
       slideObjectsByCardId,
-      toast,
       updateDownload,
     ],
   );
