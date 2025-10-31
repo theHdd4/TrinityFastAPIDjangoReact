@@ -15,11 +15,17 @@ RUN apt-get update && \
       build-essential libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
+# Ensure Playwright stores browsers in a predictable, cacheable location
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 # 5. Copy and install Python deps into venv
 COPY requirements.txt .
+# Ensure guardian & gunicorn remain available alongside project requirements
 RUN pip install --upgrade pip \
     && pip install --timeout 1000 -r requirements.txt \
-    && pip install gunicorn django-guardian  # ensure guardian & gunicorn are present
+    && pip install gunicorn django-guardian \
+    && python -m playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 
 # 6. Copy project files
 COPY . .
