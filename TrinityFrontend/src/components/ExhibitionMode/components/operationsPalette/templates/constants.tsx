@@ -126,6 +126,21 @@ const DEFAULT_PLACEHOLDER_FRAMES = [
 
 type FrameRect = { x: number; y: number; width: number; height: number };
 
+const PLACEHOLDER_LAYOUTS: Record<number, FrameRect[]> = {
+  1: [
+    { x: 420, y: 188, width: 328, height: 268 },
+  ],
+  2: [
+    { x: 420, y: 188, width: 320, height: 216 },
+    { x: 420, y: 420, width: 320, height: 112 },
+  ],
+  3: [
+    { x: 420, y: 188, width: 320, height: 200 },
+    { x: 420, y: 404, width: 320, height: 120 },
+    { x: 96, y: 404, width: 312, height: 116 },
+  ],
+};
+
 const normaliseKeywords = (placeholder: PlaceholderSpec): string =>
   [placeholder.key, placeholder.label, placeholder.description]
     .filter(Boolean)
@@ -268,9 +283,9 @@ const buildSlideDefinition = (
   const placeholderTextBoxes: TemplateTextBoxDefinition[] = [];
 
   spec.placeholders.forEach((placeholder, placeholderIndex) => {
+    const layoutFrames = PLACEHOLDER_LAYOUTS[spec.placeholders.length] ?? DEFAULT_PLACEHOLDER_FRAMES;
     const fallbackFrame =
-      DEFAULT_PLACEHOLDER_FRAMES[placeholderIndex] ??
-      DEFAULT_PLACEHOLDER_FRAMES[DEFAULT_PLACEHOLDER_FRAMES.length - 1];
+      layoutFrames[placeholderIndex] ?? layoutFrames[layoutFrames.length - 1] ?? DEFAULT_PLACEHOLDER_FRAMES[DEFAULT_PLACEHOLDER_FRAMES.length - 1];
 
     const frame = placeholder.position
       ? {
@@ -286,7 +301,7 @@ const buildSlideDefinition = (
     const placeholderTitle = placeholder.label;
     placeholderTextBoxes.push({
       text: placeholderTitle,
-      position: { x: frame.x + 16, y: frame.y + 14 },
+      position: { x: frame.x + 16, y: frame.y + 12 },
       size: { width: frame.width - 32, height: 24 },
       fontSize: 13,
       color: '#1f2937',
@@ -317,10 +332,14 @@ const buildSlideDefinition = (
     } else {
       const placeholderBody = placeholder.description ?? placeholder.label;
 
+      const bodyTopOffset = 36;
+      const bodyBottomPadding = 8;
+      const bodyHeight = Math.max(frame.height - bodyTopOffset - bodyBottomPadding, 40);
+
       placeholderTextBoxes.push({
         text: placeholderBody,
-        position: { x: frame.x + 16, y: frame.y + 46 },
-        size: { width: frame.width - 32, height: frame.height - 64 },
+        position: { x: frame.x + 16, y: frame.y + bodyTopOffset },
+        size: { width: frame.width - 32, height: bodyHeight },
         fontSize: 13,
         color: '#475569',
       });
