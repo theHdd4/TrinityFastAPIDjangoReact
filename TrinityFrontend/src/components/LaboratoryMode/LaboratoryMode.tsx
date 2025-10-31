@@ -19,7 +19,8 @@ import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/l
 import { useLaboratoryStore } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
-import { getActiveProjectContext } from '@/utils/projectEnv';
+import { ShareDialog } from '@/components/ExhibitionMode/components/ShareDialog';
+import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import {
   animateLabElementsIn,
   cleanupProjectTransition,
@@ -42,6 +43,8 @@ const LaboratoryMode = () => {
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'superagent' | null>(null);
+  const [isShareOpen, setIsShareOpen] = useState(false);
+  const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
   const { toast } = useToast();
   const { cards, setCards: setLabCards } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
@@ -86,6 +89,12 @@ const LaboratoryMode = () => {
       setIsPreparingAnimation(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (isShareOpen) {
+      setProjectContext(getActiveProjectContext());
+    }
+  }, [isShareOpen]);
 
   useEffect(() => {
     if (typeof document === 'undefined' || typeof window === 'undefined') {
@@ -223,6 +232,15 @@ const LaboratoryMode = () => {
   const toggleHelpPanel = () => {
     if (!canEdit) return;
     setAuxActive(prev => (prev === 'help' ? null : 'help'));
+  };
+
+  const handleShareClick = () => {
+    if (!canEdit) {
+      return;
+    }
+    const context = getActiveProjectContext();
+    setProjectContext(context);
+    setIsShareOpen(true);
   };
 
   const handleSave = async () => {
@@ -389,6 +407,7 @@ const LaboratoryMode = () => {
               variant="outline"
               size="sm"
               className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
+              onClick={handleShareClick}
               disabled={!canEdit}
             >
               <Share2 className="w-4 h-4 mr-2" />
@@ -402,8 +421,8 @@ const LaboratoryMode = () => {
               Run Pipeline
             </Button>
           </div>
+          </div>
         </div>
-      </div>
 
         <div className="flex-1 flex overflow-hidden">
           {/* Atoms Sidebar */}
@@ -450,6 +469,13 @@ const LaboratoryMode = () => {
             />
           </div>
         </div>
+
+        <ShareDialog
+          open={isShareOpen}
+          onOpenChange={setIsShareOpen}
+          projectName={projectContext?.project_name ?? 'Laboratory Project'}
+          hideShareTab
+        />
     </div>
   );
 };

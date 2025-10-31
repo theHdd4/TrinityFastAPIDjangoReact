@@ -32,6 +32,7 @@ interface ShareDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectName?: string;
+  hideShareTab?: boolean;
 }
 
 const resolveShareLink = (link: string): string => {
@@ -212,6 +213,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   open,
   onOpenChange,
   projectName = 'Exhibition Project',
+  hideShareTab = false,
 }) => {
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
@@ -226,6 +228,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   const generationIdRef = useRef(0);
   const isMountedRef = useRef(true);
   const shareLinkInputRef = useRef<HTMLInputElement | null>(null);
+  const defaultTab = hideShareTab ? 'collaborate' : 'share';
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -368,7 +371,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
           </DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="share" className="w-full">
+        <Tabs defaultValue={defaultTab} className="w-full">
           <div className="px-6">
             <TabsList className="w-full justify-start border-b rounded-none h-auto p-0 bg-transparent">
               <TabsTrigger
@@ -378,13 +381,15 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 <Users className="h-4 w-4 mr-2" />
                 Collaborate
               </TabsTrigger>
-              <TabsTrigger
-                value="share"
-                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none"
-              >
-                <Share2 className="h-4 w-4 mr-2" />
-                Share
-              </TabsTrigger>
+              {!hideShareTab && (
+                <TabsTrigger
+                  value="share"
+                  className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none"
+                >
+                  <Share2 className="h-4 w-4 mr-2" />
+                  Share
+                </TabsTrigger>
+              )}
               <TabsTrigger
                 value="export"
                 className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:shadow-none"
@@ -412,7 +417,8 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             </div>
           </TabsContent>
 
-          <TabsContent value="share" className="px-6 py-4 mt-0 space-y-4">
+          {!hideShareTab && (
+            <TabsContent value="share" className="px-6 py-4 mt-0 space-y-4">
             <div className="space-y-4">
               <div className="flex items-start gap-3 p-4 rounded-lg border bg-muted/50">
                 <Link2 className="h-5 w-5 text-muted-foreground mt-0.5" />
@@ -547,7 +553,8 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
                 )}
               </div>
             </div>
-          </TabsContent>
+            </TabsContent>
+          )}
 
           <TabsContent value="export" className="px-6 py-4 mt-0">
             <div className="space-y-3">
