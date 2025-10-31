@@ -44,6 +44,13 @@ export interface ImagePanelProps {
   onImageSelect: (selections: ImageSelectionRequest[]) => void;
   onRemoveImage?: () => void;
   canEdit?: boolean;
+  fullscreenOpen?: boolean;
+  onFullscreenOpenChange?: (open: boolean) => void;
+  fullscreenOnly?: boolean;
+  fullscreenTitle?: string;
+  fullscreenDescription?: string;
+  insertButtonLabel?: string;
+  allowMultipleUploadSelection?: boolean;
 }
 
 const FREE_IMAGE_LIBRARY_ENDPOINT = 'https://pixabay.com/api/';
@@ -255,6 +262,13 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   onImageSelect,
   onRemoveImage,
   canEdit = true,
+  fullscreenOpen,
+  onFullscreenOpenChange,
+  fullscreenOnly = false,
+  fullscreenTitle = 'Image library',
+  fullscreenDescription = 'Browse uploads and explore free visuals in a spacious view for confident selections.',
+  insertButtonLabel = 'Insert image',
+  allowMultipleUploadSelection = true,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -267,7 +281,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   const [selectedUploads, setSelectedUploads] = useState<Map<string, SelectedImage>>(
     new Map<string, SelectedImage>(),
   );
-  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+  const [uncontrolledFullscreenOpen, setUncontrolledFullscreenOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState(DEFAULT_LIBRARY_SEARCH_TERM);
   const [searchResults, setSearchResults] = useState<LibraryImage[]>([]);
   const [isSearchingLibrary, setIsSearchingLibrary] = useState(false);
@@ -439,6 +453,19 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
       }
 
       setSelectedUploads(prev => {
+        if (!allowMultipleUploadSelection) {
+          const next = new Map<string, SelectedImage>();
+          if (prev.has(image.id)) {
+            return next;
+          }
+          next.set(image.id, {
+            url: image.displayUrl,
+            label: image.label,
+            source: 'upload',
+          });
+          return next;
+        }
+
         const next = new Map(prev);
         if (next.has(image.id)) {
           next.delete(image.id);
@@ -453,7 +480,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
       });
       setSelectedImage(null);
     },
-    [canEdit],
+    [allowMultipleUploadSelection, canEdit],
   );
 
   const handleImageClick = useCallback(
@@ -648,10 +675,29 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
       : selectedImage?.source === 'existing' && selectedImage.url === currentImage);
   const insertLabel = hasUploadSelections && selectedUploadCount > 1
     ? `Insert ${selectedUploadCount} images`
-    : 'Insert image';
+    : insertButtonLabel;
 
-  const openFullscreen = useCallback(() => setIsFullscreenOpen(true), []);
-  const closeFullscreen = useCallback(() => setIsFullscreenOpen(false), []);
+  const isFullscreenControlled = typeof fullscreenOpen === 'boolean';
+  const resolvedFullscreenOpen = isFullscreenControlled ? fullscreenOpen! : uncontrolledFullscreenOpen;
+
+  const setFullscreenState = useCallback(
+    (next: boolean) => {
+      if (!isFullscreenControlled) {
+        setUncontrolledFullscreenOpen(next);
+      }
+      onFullscreenOpenChange?.(next);
+    },
+    [isFullscreenControlled, onFullscreenOpenChange],
+  );
+
+  const openFullscreen = useCallback(() => setFullscreenState(true), [setFullscreenState]);
+  const closeFullscreen = useCallback(() => setFullscreenState(false), [setFullscreenState]);
+
+  useEffect(() => {
+    if (fullscreenOnly && fullscreenOpen === undefined && !resolvedFullscreenOpen) {
+      setFullscreenState(true);
+    }
+  }, [fullscreenOnly, fullscreenOpen, resolvedFullscreenOpen, setFullscreenState]);
 
   const renderImageSections = useCallback(
     (variant: 'default' | 'fullscreen' = 'default') => {
@@ -736,9 +782,11 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
               </div>
             ) : availableUploads.length > 0 ? (
               <>
+              {allowMultipleUploadSelection && (
                 <p className="text-[11px] text-muted-foreground">
                   Tip: Click multiple uploads to insert them together.
                 </p>
+              )}
                 <div className={uploadsScrollClasses}>
                   <div className={uploadsGridClasses}>
                     {availableUploads.map(image => {
@@ -893,6 +941,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     },
     [
       availableUploads,
+      allowMultipleUploadSelection,
       canEdit,
       handleFileUpload,
       handleImageClick,
@@ -977,7 +1026,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
   return (
     <>
-      <Dialog open={isFullscreenOpen} onOpenChange={state => setIsFullscreenOpen(state)}>
+      <Dialog open={resolvedFullscreenOpen} onOpenChange={setFullscreenState}>
         <DialogContent className="max-w-6xl w-[92vw] h-[85vh] p-0 gap-0 overflow-hidden border border-border/60 bg-background shadow-[0_20px_60px_rgba(15,23,42,0.25)]">
           <DialogHeader className="px-8 py-6 border-b border-border/60 bg-muted/30">
             <div className="flex items-start justify-between">
@@ -986,10 +1035,8 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                   <ImageIcon className="h-6 w-6 text-primary" />
                 </div>
                 <div>
-                  <DialogTitle className="text-2xl font-semibold text-foreground">Image library</DialogTitle>
-                  <p className="text-sm text-muted-foreground">
-                    Browse uploads and explore free visuals in a spacious view for confident selections.
-                  </p>
+                  <DialogTitle className="text-2xl font-semibold text-foreground">{fullscreenTitle}</DialogTitle>
+                  <p className="text-sm text-muted-foreground">{fullscreenDescription}</p>
                 </div>
               </div>
               <Button
@@ -1012,42 +1059,42 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
         </DialogContent>
       </Dialog>
 
-      <div className="flex h-full w-full max-w-[22rem] flex-col rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
-      <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
-        <div className="flex items-center gap-2">
-          <ImageIcon className="h-4 w-4 text-muted-foreground" />
-          <h3 className="text-lg font-semibold text-foreground">Images</h3>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            type="button"
-            className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
-            onClick={openFullscreen}
-            aria-label="Open full screen image library"
-          >
-            <Maximize2 className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            type="button"
-            className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
-            onClick={onClose}
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      {!fullscreenOnly && (
+        <div className="flex h-full w-full max-w-[22rem] flex-col rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-lg font-semibold text-foreground">Images</h3>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                onClick={openFullscreen}
+                aria-label="Open full screen image library"
+              >
+                <Maximize2 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+                onClick={onClose}
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
 
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <ScrollArea className="flex-1">
-          {renderImageSections('default')}
-        </ScrollArea>
-        {renderFooter('default')}
-      </div>
-    </div>
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <ScrollArea className="flex-1">{renderImageSections('default')}</ScrollArea>
+            {renderFooter('default')}
+          </div>
+        </div>
+      )}
     </>
   );
 };

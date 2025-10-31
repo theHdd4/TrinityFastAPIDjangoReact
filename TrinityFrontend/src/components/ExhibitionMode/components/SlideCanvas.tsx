@@ -461,7 +461,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }));
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
-  const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
   const [canvasDimensions, setCanvasDimensions] = useState({
@@ -1252,33 +1251,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     });
   };
 
-  const handleAccentImageChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      if (!canEdit) {
-        return;
-      }
-
-      const file = event.target.files?.[0];
-      event.target.value = '';
-
-      if (!file) {
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result !== 'string' || reader.result.length === 0) {
-          return;
-        }
-
-        updateSettings({ accentImage: reader.result, accentImageName: file.name });
-      };
-
-      reader.readAsDataURL(file);
-    },
-    [canEdit, updateSettings],
-  );
-
   const handleCloseFormatPanel = useCallback(() => {
     setShowFormatPanel(false);
   }, []);
@@ -1327,15 +1299,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         canEdit={canEdit}
         onUpdateSettings={updateSettings}
         onReset={resetSettings}
-        onAccentImageChange={handleAccentImageChange}
-        accentImageInputRef={accentImageInputRef}
         onClose={handleCloseFormatPanel}
       />
     );
   }, [
-    accentImageInputRef,
     canEdit,
-    handleAccentImageChange,
     handleCloseFormatPanel,
     resetSettings,
     settings,
