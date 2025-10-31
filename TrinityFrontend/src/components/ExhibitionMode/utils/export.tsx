@@ -25,10 +25,13 @@ type JsonCompatible =
   | null;
 
 const EXPORT_CONTAINER_ID = 'exhibition-export-container';
-const WAIT_FOR_RENDER_MS = 120;
+const WAIT_FOR_RENDER_MS = 240;
 const DOWNLOAD_DELAY_MS = 80;
 const PRESENTATION_STAGE_HEIGHT = 520;
 const CLIENT_RENDER_PIXEL_RATIO = 3;
+
+const EXPORT_STATIC_ATTRIBUTE = 'data-exhibition-export-static';
+const STATIC_STYLE_ELEMENT_ID = 'exhibition-export-static-style';
 
 const RENDERER_UNAVAILABLE_PATTERNS = [
   /server-side renderer failed/i,
@@ -135,6 +138,63 @@ const clonePlainObject = <T,>(value: T): T => {
 const DATA_URL_PATTERN = /^data:image\//i;
 
 const imageDataUrlCache = new Map<string, Promise<string>>();
+
+const ensureStaticCaptureStyles = () => {
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  if (document.getElementById(STATIC_STYLE_ELEMENT_ID)) {
+    return;
+  }
+
+  const style = document.createElement('style');
+  style.id = STATIC_STYLE_ELEMENT_ID;
+  style.textContent = `
+[${EXPORT_STATIC_ATTRIBUTE}] *,
+[${EXPORT_STATIC_ATTRIBUTE}] *::before,
+[${EXPORT_STATIC_ATTRIBUTE}] *::after {
+  animation: none !important;
+  animation-delay: 0s !important;
+  animation-duration: 0s !important;
+  animation-play-state: paused !important;
+  transition-property: none !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+`;
+  document.head.appendChild(style);
+};
+
+const stripAnimationArtifacts = (root: HTMLElement) => {
+  const nodes: Element[] = [root, ...Array.from(root.querySelectorAll('*'))];
+
+  nodes.forEach(node => {
+    const classValue = node.getAttribute('class');
+    if (classValue && classValue.includes('animate-')) {
+      const filtered = classValue
+        .split(/\s+/)
+        .filter(token => token.length > 0 && !token.startsWith('animate-'));
+      if (filtered.length > 0) {
+        node.setAttribute('class', Array.from(new Set(filtered)).join(' '));
+      } else {
+        node.removeAttribute('class');
+      }
+    }
+
+    if (node instanceof HTMLElement) {
+      node.style.animation = '';
+      node.style.animationDelay = '';
+      node.style.animationDuration = '';
+      node.style.animationName = '';
+      node.style.removeProperty('animation');
+      node.style.removeProperty('animation-delay');
+      node.style.removeProperty('animation-duration');
+      node.style.removeProperty('animation-iteration-count');
+      node.style.removeProperty('animation-name');
+    }
+  });
+};
 
 const readBlobAsDataUrl = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -382,6 +442,8 @@ const serialiseSlideElement = (element: HTMLElement, width: number, height: numb
   if (!clone.style.position) {
     clone.style.position = 'relative';
   }
+  clone.setAttribute(EXPORT_STATIC_ATTRIBUTE, '');
+  stripAnimationArtifacts(clone);
   return clone.outerHTML;
 };
 
@@ -570,6 +632,7 @@ export const prepareSlidesForExport = async (
   options?: PrepareSlidesForExportOptions,
 ): Promise<PreparedSlidesForExport> => {
   ensureBrowserEnvironment('Slide preparation');
+  ensureStaticCaptureStyles();
 
   const captureImages = options?.captureImages ?? true;
   const includeDomSnapshot = options?.includeDomSnapshot ?? false;
@@ -592,6 +655,7 @@ export const prepareSlidesForExport = async (
 
   const container = document.createElement('div');
   container.id = EXPORT_CONTAINER_ID;
+  container.setAttribute(EXPORT_STATIC_ATTRIBUTE, '');
   container.style.position = 'fixed';
   container.style.top = '-10000px';
   container.style.left = '-10000px';
@@ -634,6 +698,9 @@ export const prepareSlidesForExport = async (
         failures.push(card.id);
         continue;
       }
+
+      slideElement.setAttribute(EXPORT_STATIC_ATTRIBUTE, '');
+      stripAnimationArtifacts(slideElement);
 
       const { width: measuredWidth, height: measuredHeight } = resolveSlideDimensions(slideElement);
       const { width: designWidth, height: designHeight } = resolveDesignDimensions(
