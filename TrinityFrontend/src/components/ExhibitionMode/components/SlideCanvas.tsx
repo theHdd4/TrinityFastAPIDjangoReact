@@ -36,8 +36,6 @@ import {
 } from '@/templates/color-tray';
 import {
   useExhibitionStore,
-  CardLayout,
-  CardColor,
   LayoutCard,
   DroppedAtom,
   PresentationSettings,
@@ -51,6 +49,7 @@ import {
   buildSlideTitleObjectId,
   resolveCardTitle,
 } from '../store/exhibitionStore';
+import { CardLayout, CardColor, CARD_LAYOUT_PRESETS, getLayoutPreset } from '../layouts';
 import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
 import { SlideTextBoxObject } from './operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './operationsPalette/textBox/constants';
@@ -694,17 +693,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [card.id, groupSlideObjects],
   );
 
-  const layoutDefaultColors: Record<CardLayout, CardColor> = useMemo(
-    () => ({
-      none: 'default',
-      top: 'blue',
-      bottom: 'green',
-      right: 'purple',
-      left: 'orange',
-      full: 'purple',
-    }),
-    [],
-  );
+  const layoutDefaultColors: Record<CardLayout, CardColor> = useMemo(() => {
+    const map = {} as Record<CardLayout, CardColor>;
+    CARD_LAYOUT_PRESETS.forEach(preset => {
+      map[preset.id] = preset.defaultColor;
+    });
+    return map;
+  }, []);
 
   const themeContext = useMemo(() => {
     if (!activeTheme) {
@@ -872,6 +867,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     onPresentationChange?.(defaults, card.id);
   }, [canEdit, card.id, onPresentationChange]);
 
+  const activeLayoutPreset = useMemo(
+    () => getLayoutPreset(settings.cardLayout),
+    [settings.cardLayout],
+  );
+
   const layoutConfig = useMemo(() => {
     const shared = {
       showOverview: true,
@@ -882,33 +882,29 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       overviewContainerClass: '',
     } as const;
 
-    switch (settings.cardLayout) {
-      case 'none':
-        return {
-          ...shared,
-        };
-      case 'top':
-      case 'bottom':
-        return {
-          ...shared,
-        };
-      case 'left':
-      case 'right':
-        return {
-          ...shared,
-          wrapper: 'lg:flex-row lg:items-stretch',
-          contentClass: 'lg:w-[35%] lg:pr-8',
-          overviewOuterClass: 'lg:flex-1 lg:pl-8 min-h-0',
-          overviewContainerClass: 'h-full',
-        };
-      case 'full':
-      default:
-        return {
-          ...shared,
-          gridClass: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
-        };
+    const accentKind = activeLayoutPreset.accent.kind;
+
+    if (accentKind === 'left' || accentKind === 'right') {
+      return {
+        ...shared,
+        wrapper: 'lg:flex-row lg:items-stretch',
+        contentClass: 'lg:w-[35%] lg:pr-8',
+        overviewOuterClass: 'lg:flex-1 lg:pl-8 min-h-0',
+        overviewContainerClass: 'h-full',
+      };
     }
-  }, [settings.cardLayout]);
+
+    if (accentKind === 'full') {
+      return {
+        ...shared,
+        gridClass: 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3',
+      };
+    }
+
+    return {
+      ...shared,
+    };
+  }, [activeLayoutPreset]);
 
   const showOverview = layoutConfig.showOverview && atomObjects.length > 1;
 
@@ -1451,6 +1447,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       }
                     : {
                         height: CANVAS_STAGE_HEIGHT,
+                        width: DEFAULT_PRESENTATION_WIDTH,
                         ...slideBackgroundStyle,
                         ...(themeContext.backgroundStyle ?? {}),
                         ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
@@ -1639,10 +1636,8 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
 const CANVAS_STAGE_HEIGHT = 520;
 const DEFAULT_PRESENTATION_WIDTH = 960;
 const PRESENTATION_PADDING = 160;
-const TOP_LAYOUT_MIN_HEIGHT = 210;
-const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
-const SIDE_LAYOUT_MIN_WIDTH = 280;
-const SIDE_LAYOUT_RATIO = 0.34;
+const DEFAULT_VERTICAL_OVERLAY_RATIO = 0.28;
+const DEFAULT_HORIZONTAL_OVERLAY_RATIO = 0.34;
 
 const LayoutOverlay: React.FC<{
   layout: CardLayout;
@@ -1651,7 +1646,10 @@ const LayoutOverlay: React.FC<{
   accentImageName?: string | null;
   fullBleed: boolean;
 }> = ({ layout, color, accentImage, accentImageName, fullBleed }) => {
-  if (layout === 'none') {
+  const preset = useMemo(() => getLayoutPreset(layout), [layout]);
+  const accent = preset.accent;
+
+  if (!accent || accent.kind === 'none') {
     return null;
   }
 
@@ -1672,59 +1670,60 @@ const LayoutOverlay: React.FC<{
     <div className="h-full w-full" style={overlayStyle} />
   );
 
-  if (layout === 'full') {
+  const resolvedRatio = (() => {
+    const base =
+      accent.kind === 'left' || accent.kind === 'right'
+        ? DEFAULT_HORIZONTAL_OVERLAY_RATIO
+        : accent.kind === 'full'
+          ? 1
+          : DEFAULT_VERTICAL_OVERLAY_RATIO;
+    const candidate = typeof accent.size === 'number' ? accent.size : base;
+    return Math.min(Math.max(candidate, 0.08), accent.kind === 'full' ? 1 : 0.6);
+  })();
+
+  if (accent.kind === 'full') {
     return <div className={wrapperClass}>{content}</div>;
   }
 
-  const renderVerticalOverlay = (position: 'top' | 'bottom') => {
-    const minHeight = position === 'top' ? TOP_LAYOUT_MIN_HEIGHT : BOTTOM_LAYOUT_MIN_HEIGHT;
-    const ratio = minHeight / CANVAS_STAGE_HEIGHT;
+  if (accent.kind === 'top' || accent.kind === 'bottom') {
+    const minHeight = CANVAS_STAGE_HEIGHT * resolvedRatio;
 
     return (
       <div className={wrapperClass}>
         <div className="flex h-full w-full flex-col">
-          {position === 'bottom' && <div className="flex-1 min-h-0" />}
+          {accent.kind === 'bottom' && <div className="flex-1 min-h-0" />}
           <div
             className="relative flex-shrink-0 overflow-hidden"
-            style={{ flexBasis: `${ratio * 100}%`, minHeight }}
+            style={{ flexBasis: `${resolvedRatio * 100}%`, minHeight }}
           >
             {content}
           </div>
-          {position === 'top' && <div className="flex-1 min-h-0" />}
+          {accent.kind === 'top' && <div className="flex-1 min-h-0" />}
         </div>
       </div>
     );
-  };
+  }
 
-  const renderHorizontalOverlay = (position: 'left' | 'right') => {
+  if (accent.kind === 'left' || accent.kind === 'right') {
+    const minWidth = DEFAULT_PRESENTATION_WIDTH * resolvedRatio;
+
     return (
       <div className={wrapperClass}>
         <div className="flex h-full w-full flex-row">
-          {position === 'right' && <div className="flex-1 min-w-0" />}
+          {accent.kind === 'right' && <div className="flex-1 min-w-0" />}
           <div
             className="relative flex-shrink-0 overflow-hidden"
-            style={{ flexBasis: `${SIDE_LAYOUT_RATIO * 100}%`, minWidth: SIDE_LAYOUT_MIN_WIDTH }}
+            style={{ flexBasis: `${resolvedRatio * 100}%`, minWidth }}
           >
             {content}
           </div>
-          {position === 'left' && <div className="flex-1 min-w-0" />}
+          {accent.kind === 'left' && <div className="flex-1 min-w-0" />}
         </div>
       </div>
     );
-  };
-
-  switch (layout) {
-    case 'top':
-      return renderVerticalOverlay('top');
-    case 'bottom':
-      return renderVerticalOverlay('bottom');
-    case 'left':
-      return renderHorizontalOverlay('left');
-    case 'right':
-      return renderHorizontalOverlay('right');
-    default:
-      return <div className={wrapperClass}>{content}</div>;
   }
+
+  return <div className={wrapperClass}>{content}</div>;
 };
 
 interface OverviewSectionProps {

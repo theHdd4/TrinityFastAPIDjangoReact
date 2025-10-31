@@ -31,6 +31,12 @@ import {
 } from '@/templates/color-tray';
 import type { ColorTrayOption, ColorTraySection } from '@/templates/color-tray';
 import type { PresentationSettings } from '../../store/exhibitionStore';
+import {
+  CARD_LAYOUT_PRESETS,
+  LAYOUT_BASE_HEIGHT,
+  LAYOUT_BASE_WIDTH,
+} from '../../layouts';
+import type { CardLayoutPreset } from '../../layouts';
 import { cn } from '@/lib/utils';
 
 const BACKGROUND_PRESET_GROUP_ID = 'preset-backgrounds';
@@ -99,6 +105,101 @@ const backgroundPresetOptions: readonly ColorTrayOption[] = (
 const backgroundGradientOptions = DEFAULT_GRADIENT_COLOR_OPTIONS.filter(option =>
   option.id.startsWith('gradient-'),
 ) as readonly ColorTrayOption[];
+
+const PREVIEW_WIDTH = 96;
+const PREVIEW_HEIGHT = 64;
+const PREVIEW_VERTICAL_RATIO = 0.28;
+const PREVIEW_HORIZONTAL_RATIO = 0.34;
+
+const clampRatio = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+
+const LayoutPreview: React.FC<{ preset: CardLayoutPreset; active: boolean }> = ({
+  preset,
+  active,
+}) => {
+  const accent = preset.accent;
+  const scaleX = PREVIEW_WIDTH / LAYOUT_BASE_WIDTH;
+  const scaleY = PREVIEW_HEIGHT / LAYOUT_BASE_HEIGHT;
+  const baseRatio =
+    accent.kind === 'left' || accent.kind === 'right'
+      ? accent.size ?? PREVIEW_HORIZONTAL_RATIO
+      : accent.kind === 'full'
+        ? 1
+        : accent.size ?? PREVIEW_VERTICAL_RATIO;
+  const ratio = clampRatio(baseRatio, 0.08, accent.kind === 'full' ? 1 : 0.7);
+
+  const accentStyle = (() => {
+    if (accent.kind === 'none') {
+      return null;
+    }
+
+    if (accent.kind === 'full') {
+      return { inset: 0 } as React.CSSProperties;
+    }
+
+    if (accent.kind === 'top') {
+      return {
+        top: 0,
+        left: 0,
+        right: 0,
+        height: PREVIEW_HEIGHT * ratio,
+      } as React.CSSProperties;
+    }
+
+    if (accent.kind === 'bottom') {
+      return {
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: PREVIEW_HEIGHT * ratio,
+      } as React.CSSProperties;
+    }
+
+    if (accent.kind === 'left') {
+      return {
+        top: 0,
+        bottom: 0,
+        left: 0,
+        width: PREVIEW_WIDTH * ratio,
+      } as React.CSSProperties;
+    }
+
+    if (accent.kind === 'right') {
+      return {
+        top: 0,
+        bottom: 0,
+        right: 0,
+        width: PREVIEW_WIDTH * ratio,
+      } as React.CSSProperties;
+    }
+
+    return null;
+  })();
+
+  return (
+    <div
+      className={cn(
+        'relative overflow-hidden rounded-lg border transition-colors duration-200',
+        active ? 'border-primary ring-1 ring-primary/40 bg-primary/10' : 'border-border/80 bg-muted/40',
+      )}
+      style={{ width: PREVIEW_WIDTH, height: PREVIEW_HEIGHT }}
+    >
+      {accentStyle && <div className="absolute rounded-sm bg-primary/25" style={accentStyle} />}
+      {preset.textBoxes.map(definition => (
+        <div
+          key={definition.role}
+          className="absolute rounded-[2px] border border-muted-foreground/40 bg-background/90"
+          style={{
+            left: definition.x * scaleX,
+            top: definition.y * scaleY,
+            width: Math.max(definition.width * scaleX, 4),
+            height: Math.max(definition.height * scaleY, 4),
+          }}
+        />
+      ))}
+    </div>
+  );
+};
 
 const layoutColorSections: readonly ColorTraySection[] = [
   {
@@ -319,87 +420,32 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium">Layout</span>
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            <Button
-              size="icon"
-              variant={settings.cardLayout === 'none' ? 'default' : 'outline'}
-              className="h-12 w-12 rounded-lg"
-              onClick={() => onUpdateSettings({ cardLayout: 'none' })}
-              type="button"
-              disabled={!canEdit}
-            >
-              <span className="sr-only">No layout</span>
-              <div className="flex h-6 w-6 items-center justify-center rounded border-2 border-current">
-                <div className="h-2 w-2 rounded-full bg-current/20" />
-              </div>
-            </Button>
-            <Button
-              size="icon"
-              variant={settings.cardLayout === 'top' ? 'default' : 'outline'}
-              className="h-12 w-12 rounded-lg"
-              onClick={() => onUpdateSettings({ cardLayout: 'top' })}
-              type="button"
-              disabled={!canEdit}
-            >
-              <span className="sr-only">Top layout</span>
-              <div className="flex h-6 w-6 flex-col">
-                <div className="h-2 rounded-t border-2 border-current bg-current/20" />
-                <div className="flex-1 rounded-b border-2 border-current" />
-              </div>
-            </Button>
-            <Button
-              size="icon"
-              variant={settings.cardLayout === 'bottom' ? 'default' : 'outline'}
-              className="h-12 w-12 rounded-lg"
-              onClick={() => onUpdateSettings({ cardLayout: 'bottom' })}
-              type="button"
-              disabled={!canEdit}
-            >
-              <span className="sr-only">Bottom layout</span>
-              <div className="flex h-6 w-6 flex-col">
-                <div className="flex-1 rounded-t border-2 border-current" />
-                <div className="h-2 rounded-b border-2 border-current bg-current/20" />
-              </div>
-            </Button>
-            <Button
-              size="icon"
-              variant={settings.cardLayout === 'right' ? 'default' : 'outline'}
-              className="h-12 w-12 rounded-lg"
-              onClick={() => onUpdateSettings({ cardLayout: 'right' })}
-              type="button"
-              disabled={!canEdit}
-            >
-              <span className="sr-only">Right layout</span>
-              <div className="flex h-6 w-6">
-                <div className="flex-1 rounded-l border-2 border-current" />
-                <div className="w-2 rounded-r border-2 border-current bg-current/20" />
-              </div>
-            </Button>
-            <Button
-              size="icon"
-              variant={settings.cardLayout === 'left' ? 'default' : 'outline'}
-              className="h-12 w-12 rounded-lg"
-              onClick={() => onUpdateSettings({ cardLayout: 'left' })}
-              type="button"
-              disabled={!canEdit}
-            >
-              <span className="sr-only">Left layout</span>
-              <div className="flex h-6 w-6">
-                <div className="w-2 rounded-l border-2 border-current bg-current/20" />
-                <div className="flex-1 rounded-r border-2 border-current" />
-              </div>
-            </Button>
-            <Button
-              size="icon"
-              variant={settings.cardLayout === 'full' ? 'default' : 'outline'}
-              className="h-12 w-12 rounded-lg"
-              onClick={() => onUpdateSettings({ cardLayout: 'full' })}
-              type="button"
-              disabled={!canEdit}
-            >
-              <span className="sr-only">Entire background layout</span>
-              <div className="h-6 w-6 rounded border-2 border-current bg-current/20" />
-            </Button>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {CARD_LAYOUT_PRESETS.map(preset => {
+              const isActive = settings.cardLayout === preset.id;
+              return (
+                <div key={preset.id} className="flex flex-col items-center gap-2">
+                  <Button
+                    variant={isActive ? 'default' : 'outline'}
+                    className={cn(
+                      'px-0 py-0 rounded-xl border bg-background/80',
+                      'flex items-center justify-center shadow-sm transition-colors duration-200',
+                      isActive ? 'border-primary shadow-primary/20' : 'border-border/70 hover:border-primary/40',
+                    )}
+                    onClick={() => onUpdateSettings({ cardLayout: preset.id })}
+                    type="button"
+                    disabled={!canEdit}
+                    title={preset.description}
+                  >
+                    <span className="sr-only">{preset.label}</span>
+                    <LayoutPreview preset={preset} active={isActive} />
+                  </Button>
+                  <span className="text-xs text-muted-foreground text-center leading-snug">
+                    {preset.label}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </section>
 
