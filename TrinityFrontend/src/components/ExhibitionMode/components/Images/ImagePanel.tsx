@@ -1027,7 +1027,10 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   return (
     <>
       <Dialog open={resolvedFullscreenOpen} onOpenChange={setFullscreenState}>
-        <DialogContent className="max-w-6xl w-[92vw] h-[85vh] p-0 gap-0 overflow-hidden border border-border/60 bg-background shadow-[0_20px_60px_rgba(15,23,42,0.25)]">
+        <DialogContent
+          hideCloseButton
+          className="max-w-6xl w-[92vw] h-[85vh] p-0 gap-0 overflow-hidden border border-border/60 bg-background shadow-[0_20px_60px_rgba(15,23,42,0.25)]"
+        >
           <DialogHeader className="px-8 py-6 border-b border-border/60 bg-muted/30">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-4">
