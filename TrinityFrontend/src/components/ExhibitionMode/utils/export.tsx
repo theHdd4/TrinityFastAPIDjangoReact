@@ -1,6 +1,5 @@
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { toPng } from 'html-to-image';
 
 import { EXHIBITION_API } from '@/lib/api';
 import {
@@ -66,6 +65,17 @@ const clonePlainObject = <T,>(value: T): T => {
 };
 
 const DATA_URL_PATTERN = /^data:image\//i;
+
+type Html2CanvasFn = (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+
+let html2CanvasPromise: Promise<Html2CanvasFn> | null = null;
+
+const loadHtml2Canvas = async (): Promise<Html2CanvasFn> => {
+  if (!html2CanvasPromise) {
+    html2CanvasPromise = import('html2canvas').then(module => (module.default ?? module) as Html2CanvasFn);
+  }
+  return html2CanvasPromise;
+};
 
 const imageDataUrlCache = new Map<string, Promise<string>>();
 
@@ -542,47 +552,74 @@ export const prepareSlidesForExport = async (
       try {
         let dataUrl: string | null = null;
         let attempt = 0;
+        const targetWidth = Math.round(designWidth);
+        const targetHeight = Math.round(designHeight);
 
-        while (attempt < MAX_CAPTURE_ATTEMPTS && !dataUrl) {
-          attempt += 1;
+        const originalStyle = {
+          width: slideElement.style.width,
+          height: slideElement.style.height,
+          transform: slideElement.style.transform,
+          transformOrigin: slideElement.style.transformOrigin,
+          position: slideElement.style.position,
+          left: slideElement.style.left,
+          top: slideElement.style.top,
+          maxWidth: slideElement.style.maxWidth,
+          maxHeight: slideElement.style.maxHeight,
+          margin: slideElement.style.margin,
+        };
 
-          try {
-            const targetWidth = Math.round(designWidth);
-            const targetHeight = Math.round(designHeight);
+        slideElement.style.width = `${targetWidth}px`;
+        slideElement.style.height = `${targetHeight}px`;
+        slideElement.style.transform = 'none';
+        slideElement.style.transformOrigin = 'top left';
+        slideElement.style.position = 'relative';
+        slideElement.style.left = '0';
+        slideElement.style.top = '0';
+        slideElement.style.maxWidth = 'none';
+        slideElement.style.maxHeight = 'none';
+        slideElement.style.margin = '0';
 
-            const pngOptions = {
-              pixelRatio,
-              cacheBust: true,
-              width: targetWidth,
-              height: targetHeight,
-              canvasWidth: Math.round(targetWidth * pixelRatio),
-              canvasHeight: Math.round(targetHeight * pixelRatio),
-              style: {
-                transform: 'none',
-                transformOrigin: 'top left',
-                margin: '0',
-                padding: '0',
-                boxShadow: 'none',
-                maxWidth: 'none',
-                left: '0',
-                top: '0',
-                width: `${targetWidth}px`,
-                height: `${targetHeight}px`,
-              },
-              ...(attempt > 1 ? { skipFonts: true } : {}),
-            } as Parameters<typeof toPng>[1];
+        try {
+          const html2canvas = await loadHtml2Canvas();
 
-            dataUrl = await toPng(slideElement, pngOptions);
-          } catch (error) {
-            if (attempt >= MAX_CAPTURE_ATTEMPTS || !isSecurityError(error)) {
-              throw error;
+          while (attempt < MAX_CAPTURE_ATTEMPTS && !dataUrl) {
+            attempt += 1;
+
+            try {
+              const canvas = await html2canvas(slideElement, {
+                backgroundColor: null,
+                scale: pixelRatio,
+                width: targetWidth,
+                height: targetHeight,
+                windowWidth: targetWidth,
+                windowHeight: targetHeight,
+                logging: false,
+                useCORS: true,
+                allowTaint: attempt > 1,
+              });
+              dataUrl = canvas.toDataURL('image/png', 1.0);
+            } catch (error) {
+              if (attempt >= MAX_CAPTURE_ATTEMPTS || !isSecurityError(error)) {
+                throw error;
+              }
+
+              console.warn(
+                '[Exhibition Export] Retrying slide capture without strict CORS due to restricted stylesheet',
+                error,
+              );
             }
-
-            console.warn(
-              '[Exhibition Export] Retrying slide capture without embedding fonts due to restricted stylesheet',
-              error,
-            );
           }
+        } finally {
+          slideElement.style.width = originalStyle.width;
+          slideElement.style.height = originalStyle.height;
+          slideElement.style.transform = originalStyle.transform;
+          slideElement.style.transformOrigin = originalStyle.transformOrigin;
+          slideElement.style.position = originalStyle.position;
+          slideElement.style.left = originalStyle.left;
+          slideElement.style.top = originalStyle.top;
+          slideElement.style.maxWidth = originalStyle.maxWidth;
+          slideElement.style.maxHeight = originalStyle.maxHeight;
+          slideElement.style.margin = originalStyle.margin;
         }
 
         if (!dataUrl) {
@@ -712,7 +749,10 @@ export interface ExhibitionExportPayload {
   title: string;
   slides: SlideExportPayload[];
   documentStyles?: ExportDocumentStyles | null;
+  pdfMode?: PdfExportMode;
 }
+
+export type PdfExportMode = 'digital' | 'print';
 
 export interface BuildPresentationExportOptions {
   title?: string;
@@ -991,20 +1031,26 @@ export const downloadRenderedSlideScreenshots = async (
   }
 };
 
+export type PresentationExportFormat = 'pptx' | 'pdf';
+
 export const requestPresentationExport = async (
-  format: 'pptx' | 'pdf',
+  format: PresentationExportFormat,
   payload: ExhibitionExportPayload,
 ): Promise<Blob> => {
   ensureBrowserEnvironment('Presentation export');
 
   const endpoint = `${EXHIBITION_API}/export/${format}`;
+  const bodyPayload =
+    format === 'pdf'
+      ? { ...payload, pdfMode: payload.pdfMode ?? 'digital' }
+      : payload;
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     credentials: 'include',
-    body: JSON.stringify(payload as JsonCompatible),
+    body: JSON.stringify(bodyPayload as JsonCompatible),
   });
 
   if (!response.ok) {

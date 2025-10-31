@@ -11,7 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { 
+import { Progress } from '@/components/ui/progress';
+import {
   Users,
   Share2,
   Download,
@@ -23,10 +24,26 @@ import {
   Check,
   Loader2,
   RefreshCcw,
+  ImageDown,
+  Monitor,
+  Printer,
+  Presentation,
+  AlertCircle,
+  type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { createExhibitionShareLink } from '@/lib/shareLinks';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import {
+  buildPresentationExportPayload,
+  downloadBlob,
+  downloadSlidesAsImages,
+  prepareSlidesForExport,
+  requestPresentationExport,
+  sanitizeFileName,
+  type PdfExportMode,
+} from '../utils/export';
+import { useExhibitionStore } from '../store/exhibitionStore';
 
 interface ShareDialogProps {
   open: boolean;
@@ -208,6 +225,108 @@ const copyToClipboard = async (text: string, options?: CopyToClipboardOptions) =
   throw new Error('Copy not supported');
 };
 
+type DownloadKind = 'images' | 'pdf-digital' | 'pdf-print' | 'pptx';
+
+type DownloadStatus =
+  | 'queued'
+  | 'preparing'
+  | 'rendering'
+  | 'downloading'
+  | 'complete'
+  | 'error';
+
+type DownloadEntry = {
+  id: string;
+  kind: DownloadKind;
+  label: string;
+  status: DownloadStatus;
+  progress: number;
+  message?: string;
+  timestamp: number;
+};
+
+type ExportOption = {
+  kind: DownloadKind;
+  title: string;
+  description: string;
+  badge: string;
+  footnote: string;
+  icon: LucideIcon;
+};
+
+const DOWNLOAD_LABELS: Record<DownloadKind, string> = {
+  images: 'PNG/JPEG image bundle',
+  'pdf-digital': 'Digital media PDF',
+  'pdf-print': 'Print-ready PDF',
+  pptx: 'Editable PowerPoint deck',
+};
+
+const STATUS_LABELS: Record<DownloadStatus, string> = {
+  queued: 'Queued',
+  preparing: 'Preparing',
+  rendering: 'Rendering',
+  downloading: 'Downloading',
+  complete: 'Complete',
+  error: 'Failed',
+};
+
+const pdfModeByKind: Partial<Record<DownloadKind, PdfExportMode>> = {
+  'pdf-digital': 'digital',
+  'pdf-print': 'print',
+};
+
+const requiresImageCapture = (kind: DownloadKind): boolean => kind === 'images' || kind === 'pdf-digital';
+
+const statusAccentClass = (status: DownloadStatus): string => {
+  if (status === 'error') {
+    return 'text-destructive';
+  }
+  if (status === 'complete') {
+    return 'text-emerald-600 dark:text-emerald-400';
+  }
+  return 'text-muted-foreground';
+};
+
+const DownloadStatusBar: React.FC<{ downloads: DownloadEntry[] }> = ({ downloads }) => {
+  const items = downloads.slice(-4).reverse();
+
+  return (
+    <div className="px-6 py-4 border-t border-border/60 bg-muted/40 space-y-3">
+      <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+        <Share2 className="h-3 w-3" />
+        <span>Download status</span>
+      </div>
+
+      {items.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Export slides to monitor progress and delivery of each format in real time.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {items.map(item => (
+            <div key={item.id} className="space-y-1 rounded-md border border-border/40 bg-background/60 p-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-foreground">{item.label}</span>
+                <span className={statusAccentClass(item.status)}>{STATUS_LABELS[item.status]}</span>
+              </div>
+              <Progress value={item.progress} className="h-2" />
+              {item.message && (
+                <p
+                  className={`text-[11px] leading-relaxed ${
+                    item.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                  }`}
+                >
+                  {item.message}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const ShareDialog: React.FC<ShareDialogProps> = ({
   open,
   onOpenChange,
@@ -226,6 +345,13 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   const generationIdRef = useRef(0);
   const isMountedRef = useRef(true);
   const shareLinkInputRef = useRef<HTMLInputElement | null>(null);
+  const { exhibitedCards, slideObjectsByCardId } = useExhibitionStore(state => ({
+    exhibitedCards: state.exhibitedCards,
+    slideObjectsByCardId: state.slideObjectsByCardId,
+  }));
+  const [downloads, setDownloads] = useState<DownloadEntry[]>([]);
+  const [activeDownload, setActiveDownload] = useState<{ id: string; kind: DownloadKind } | null>(null);
+  const hasSlides = exhibitedCards.length > 0;
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -357,6 +483,249 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       toast.error('Unable to copy the embed code. Please copy it manually.');
     }
   }, [embedCode, isGenerating, toast]);
+
+  const beginDownload = useCallback(
+    (kind: DownloadKind): string => {
+      const id = `${kind}-${Date.now()}`;
+      const label = DOWNLOAD_LABELS[kind];
+      setDownloads(prev => {
+        const entry: DownloadEntry = {
+          id,
+          kind,
+          label,
+          status: 'queued',
+          progress: 6,
+          message: 'Queued for export…',
+          timestamp: Date.now(),
+        };
+        const next = [...prev, entry];
+        return next.slice(-8);
+      });
+      setActiveDownload({ id, kind });
+      return id;
+    },
+    [],
+  );
+
+  const updateDownload = useCallback((id: string, patch: Partial<DownloadEntry>) => {
+    setDownloads(prev =>
+      prev.map(entry =>
+        entry.id === id
+          ? {
+              ...entry,
+              ...patch,
+              timestamp: patch.timestamp ?? entry.timestamp,
+            }
+          : entry,
+      ),
+    );
+  }, []);
+
+  const completeDownload = useCallback(
+    (id: string, message: string) => {
+      updateDownload(id, {
+        status: 'complete',
+        progress: 100,
+        message,
+        timestamp: Date.now(),
+      });
+      setActiveDownload(null);
+    },
+    [updateDownload],
+  );
+
+  const failDownload = useCallback(
+    (id: string, message: string) => {
+      updateDownload(id, {
+        status: 'error',
+        progress: 8,
+        message,
+        timestamp: Date.now(),
+      });
+      setActiveDownload(null);
+    },
+    [updateDownload],
+  );
+
+  const handleExportDownload = useCallback(
+    async (kind: DownloadKind) => {
+      if (!hasSlides) {
+        toast.error('No slides to export', {
+          description: 'Add at least one exhibition slide before exporting.',
+        });
+        return;
+      }
+
+      if (activeDownload) {
+        toast.error('Export already in progress', {
+          description: 'Please wait for the current download to finish before starting another.',
+        });
+        return;
+      }
+
+      const downloadId = beginDownload(kind);
+
+      try {
+        updateDownload(downloadId, {
+          status: 'preparing',
+          progress: 14,
+          message: 'Serialising slide layouts and theme data…',
+        });
+
+        const prepared = await prepareSlidesForExport(exhibitedCards, {
+          captureImages: requiresImageCapture(kind),
+          includeDomSnapshot: true,
+          pixelRatio: requiresImageCapture(kind) ? 3 : 2,
+        });
+
+        if (!prepared) {
+          throw new Error('Unable to prepare slides for export.');
+        }
+
+        if (requiresImageCapture(kind) && prepared.captures.length === 0) {
+          throw new Error('Slide imagery could not be captured.');
+        }
+
+        updateDownload(downloadId, {
+          status: 'rendering',
+          progress: requiresImageCapture(kind) ? 36 : 32,
+          message: requiresImageCapture(kind)
+            ? 'Capturing high-resolution slide imagery with html2canvas…'
+            : 'Normalising slide JSON for backend rendering…',
+        });
+
+        const payload = await buildPresentationExportPayload(
+          exhibitedCards,
+          slideObjectsByCardId,
+          prepared,
+          { title: projectName },
+        );
+
+        updateDownload(downloadId, {
+          status: 'rendering',
+          progress: 54,
+          message: 'Packaging structured slide data for delivery…',
+        });
+
+        if (kind === 'images') {
+          await downloadSlidesAsImages(prepared.captures, payload.title);
+          completeDownload(
+            downloadId,
+            `Saved ${prepared.captures.length} ${prepared.captures.length === 1 ? 'image' : 'images'} to your device.`,
+          );
+          toast.success('Images downloaded', {
+            description: 'Each slide was exported as a standalone PNG via html2canvas.',
+          });
+          return;
+        }
+
+        const pdfMode = pdfModeByKind[kind];
+        const exportPayload = pdfMode ? { ...payload, pdfMode } : payload;
+
+        if (kind === 'pptx') {
+          updateDownload(downloadId, {
+            status: 'downloading',
+            progress: 72,
+            message: 'Rebuilding an editable deck with python-pptx…',
+          });
+          const blob = await requestPresentationExport('pptx', exportPayload);
+          const filename = `${sanitizeFileName(payload.title)}.pptx`;
+          downloadBlob(blob, filename);
+          completeDownload(downloadId, `Saved ${filename}.`);
+          toast.success('PowerPoint ready', {
+            description: 'Layout precision was preserved by converting pixel coordinates to inches.',
+          });
+          return;
+        }
+
+        updateDownload(downloadId, {
+          status: 'downloading',
+          progress: 72,
+          message:
+            pdfMode === 'print'
+              ? 'Generating a vector print PDF with FastAPI + ReportLab…'
+              : 'Flattening slide imagery into a digital PDF via FastAPI…',
+        });
+
+        const blob = await requestPresentationExport('pdf', exportPayload);
+        const suffix = pdfMode === 'print' ? '-print' : '-digital';
+        const filename = `${sanitizeFileName(payload.title)}${suffix}.pdf`;
+        downloadBlob(blob, filename);
+        completeDownload(
+          downloadId,
+          pdfMode === 'print'
+            ? 'High-fidelity vector PDF ready for the press.'
+            : 'Digital PDF generated from slide screenshots.',
+        );
+        toast.success('PDF exported', {
+          description:
+            pdfMode === 'print'
+              ? 'ReportLab kept charts and typography crisp for print runs.'
+              : 'FastAPI streamed a flattened PDF built from slide screenshots.',
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unexpected export failure.';
+        failDownload(downloadId, message);
+        toast.error('Export failed', {
+          description: message,
+        });
+      }
+    },
+    [
+      activeDownload,
+      beginDownload,
+      completeDownload,
+      exhibitedCards,
+      failDownload,
+      hasSlides,
+      projectName,
+      slideObjectsByCardId,
+      toast,
+      updateDownload,
+    ],
+  );
+
+  const exportOptions = useMemo<ExportOption[]>(
+    () => [
+      {
+        kind: 'images',
+        title: 'Images (PNG/JPEG)',
+        description:
+          'Capture each slide instantly with html2canvas for quick PNG or JPEG downloads straight from the browser.',
+        badge: 'Instant',
+        footnote: 'Perfect for Slack threads, email recaps, and social snippets.',
+        icon: ImageDown,
+      },
+      {
+        kind: 'pdf-digital',
+        title: 'PDF — Digital Media',
+        description:
+          'FastAPI assembles flattened PDFs from slide screenshots so every viewer sees the exact on-screen design.',
+        badge: 'Digital',
+        footnote: 'Optimised for devices, sharing portals, and lightweight attachments.',
+        icon: Monitor,
+      },
+      {
+        kind: 'pdf-print',
+        title: 'PDF — Print',
+        description:
+          'ReportLab rebuilds the slide JSON as vector artwork for crisp, scalable print-ready documents.',
+        badge: 'Print',
+        footnote: 'Use for press proofs, large-format outputs, and production handoffs.',
+        icon: Printer,
+      },
+      {
+        kind: 'pptx',
+        title: 'PowerPoint (PPTX)',
+        description:
+          'python-pptx reconstructs the structured layout data so charts, text, and shapes stay fully editable.',
+        badge: 'Editable',
+        footnote: 'Continue polishing in Microsoft PowerPoint or Google Slides without rebuilding layouts.',
+        icon: Presentation,
+      },
+    ],
+    [],
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -549,24 +918,82 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             </div>
           </TabsContent>
 
-          <TabsContent value="export" className="px-6 py-4 mt-0">
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">Download your exhibition in various formats.</p>
-              <div className="space-y-2">
-                <Button variant="outline" className="w-full justify-start">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export as PowerPoint
-                </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export as PDF
-                </Button>
-                <Button variant="outline" className="w-full justify-start">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export as Images
-                </Button>
-              </div>
+          <TabsContent value="export" className="px-6 py-4 mt-0 space-y-5">
+            <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/80">
+                Hybrid export pipeline
+              </p>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Trinity mirrors Canva’s hybrid export architecture: html2canvas delivers instant PNG/JPEG captures in the
+                browser, FastAPI streams PDFs as either flattened digital documents or vector-rich print files, and
+                python-pptx rebuilds the slide JSON for fully editable decks.
+              </p>
             </div>
+
+            <div className="grid gap-3">
+              {exportOptions.map(option => {
+                const Icon = option.icon;
+                const isActive = activeDownload?.kind === option.kind;
+                const latest = (() => {
+                  for (let index = downloads.length - 1; index >= 0; index -= 1) {
+                    const entry = downloads[index];
+                    if (entry.kind === option.kind) {
+                      return entry;
+                    }
+                  }
+                  return null;
+                })();
+
+                return (
+                  <Button
+                    key={option.kind}
+                    variant="outline"
+                    className="w-full justify-start h-auto py-4 px-4 border border-border/70 bg-card hover:bg-muted transition-colors"
+                    onClick={() => handleExportDownload(option.kind)}
+                    disabled={!hasSlides || Boolean(activeDownload)}
+                  >
+                    <div className="flex items-start gap-4 w-full">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        {isActive ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon className="h-5 w-5" />}
+                      </div>
+                      <div className="flex-1 space-y-2 text-left">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-base font-semibold text-foreground">{option.title}</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.24em] px-2 py-0.5 rounded-full border border-border/50 text-muted-foreground/90">
+                            {option.badge}
+                          </span>
+                          {isActive && (
+                            <span className="flex items-center gap-1 text-xs text-primary">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              In progress…
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-muted-foreground leading-relaxed">{option.description}</p>
+                        <p className="text-xs text-muted-foreground/80">{option.footnote}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 text-xs">
+                        <span className={latest ? statusAccentClass(latest.status) : 'text-muted-foreground'}>
+                          {latest ? STATUS_LABELS[latest.status] : 'Ready'}
+                        </span>
+                        {latest?.message && latest.status !== 'complete' && latest.status !== 'error' && (
+                          <span className="text-[11px] text-muted-foreground/80 max-w-[12rem] text-right">
+                            {latest.message}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </Button>
+                );
+              })}
+            </div>
+
+            {!hasSlides && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                <AlertCircle className="h-4 w-4 mt-0.5" />
+                <span>Add at least one slide to enable exports.</span>
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="embed" className="px-6 py-4 mt-0">
@@ -598,6 +1025,8 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             </div>
           </TabsContent>
         </Tabs>
+
+        <DownloadStatusBar downloads={downloads} />
 
         <div className="px-6 py-4 border-t bg-muted/30">
           <div className="flex items-center justify-between">
