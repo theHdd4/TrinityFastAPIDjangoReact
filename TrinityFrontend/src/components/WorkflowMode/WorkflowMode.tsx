@@ -138,8 +138,13 @@ const WorkflowMode = () => {
 
   const handleMoleculeAdd = (moleculeData: any) => {
     // Add the molecule to canvasMolecules with its position preserved
-    setCanvasMolecules(prev => [...prev, moleculeData]);
-    console.log(`✅ Added molecule "${moleculeData.title}" to canvasMolecules with position:`, moleculeData.position);
+    // Preserve isAICreated flag if it exists
+    const enrichedMoleculeData = {
+      ...moleculeData,
+      isAICreated: moleculeData.isAICreated ?? false
+    };
+    setCanvasMolecules(prev => [...prev, enrichedMoleculeData]);
+    console.log(`✅ Added molecule "${moleculeData.title}" to canvasMolecules with position:`, moleculeData.position, 'isAICreated:', enrichedMoleculeData.isAICreated);
   };
 
   const handleMoleculePositionsUpdate = (positions: { moleculeId: string; position: { x: number; y: number } }[]) => {
@@ -442,6 +447,44 @@ const WorkflowMode = () => {
       description: 'Molecule has been removed from the canvas'
     });
   };
+
+  // Helper function to check if canvas has any molecules
+  const checkCanvasHasMolecules = useCallback(() => {
+    return canvasMolecules.length > 0;
+  }, [canvasMolecules]);
+
+  // Helper function to get AI-created molecule IDs
+  const getAICreatedMolecules = useCallback(() => {
+    return canvasMolecules
+      .filter(mol => mol.isAICreated === true)
+      .map(mol => mol.id);
+  }, [canvasMolecules]);
+
+  // Helper function to clear only AI-created molecules
+  const clearAICreatedMolecules = useCallback(() => {
+    const beforeCount = canvasMolecules.length;
+    setCanvasMolecules(prev => prev.filter(mol => mol.isAICreated !== true));
+    setCustomMolecules(prev => prev.filter(mol => {
+      const canvasMol = canvasMolecules.find(cm => cm.id === mol.id);
+      return !canvasMol || canvasMol.isAICreated !== true;
+    }));
+    const afterCount = canvasMolecules.filter(mol => mol.isAICreated !== true).length;
+    console.log(`🗑️ Cleared ${beforeCount - afterCount} AI-created molecules`);
+  }, [canvasMolecules]);
+
+  // Helper function to get rightmost molecule position
+  const getRightmostMoleculePosition = useCallback(() => {
+    if (canvasMolecules.length === 0) return 0;
+    
+    const moleculeWidth = 280;
+    const rightmostMolecule = canvasMolecules.reduce((rightmost, mol) => {
+      const molRight = (mol.position?.x || 0) + moleculeWidth;
+      const rightmostRight = (rightmost.position?.x || 0) + moleculeWidth;
+      return molRight > rightmostRight ? mol : rightmost;
+    }, canvasMolecules[0]);
+    
+    return (rightmostMolecule.position?.x || 0) + moleculeWidth;
+  }, [canvasMolecules]);
 
   // Handle molecule addition (for fetched molecules)
 
@@ -903,6 +946,11 @@ const WorkflowMode = () => {
             onAtomLibraryVisibilityChange={handleAtomLibraryVisibilityChange}
             onRightPanelToolVisibilityChange={handleRightPanelToolVisibilityChange}
             onMoleculeAdd={handleMoleculeAdd}
+            onRenderWorkflow={handleRenderWorkflow}
+            onCheckCanvasHasMolecules={checkCanvasHasMolecules}
+            onGetAICreatedMolecules={getAICreatedMolecules}
+            onClearAIMolecules={clearAICreatedMolecules}
+            onGetRightmostPosition={getRightmostMoleculePosition}
           />
         </div>
 
