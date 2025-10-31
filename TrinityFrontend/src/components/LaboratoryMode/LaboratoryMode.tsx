@@ -19,7 +19,7 @@ import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/l
 import { useLaboratoryStore } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
-import { ShareDialog } from '@/components/ExhibitionMode/components/ShareDialog';
+import { ShareDialog } from './components/ShareDialog';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import {
   animateLabElementsIn,
@@ -474,7 +474,6 @@ const LaboratoryMode = () => {
           open={isShareOpen}
           onOpenChange={setIsShareOpen}
           projectName={projectContext?.project_name ?? 'Laboratory Project'}
-          hideShareTab
         />
     </div>
   );
