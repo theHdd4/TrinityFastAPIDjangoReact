@@ -1863,27 +1863,53 @@ const RechartsChartRenderer: React.FC<Props> = ({
           xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
           yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
     } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
-          xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
-          yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          // CRITICAL FIX: Use case-insensitive matching to find actual field names first
+          if (xField) {
+            const matchedXKey = availableKeys.find(k => k.toLowerCase() === xField.toLowerCase());
+            xKey = matchedXKey || (availableKeys.includes('x') ? 'x' : availableKeys.find(k => k.toLowerCase() === 'date') || availableKeys[0]);
+          } else {
+            xKey = availableKeys.includes('x') ? 'x' : availableKeys.find(k => k.toLowerCase() === 'date') || availableKeys[0];
+          }
+          if (yField) {
+            const matchedYKey = availableKeys.find(k => k.toLowerCase() === yField.toLowerCase());
+            yKey = matchedYKey || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
+          } else {
+            yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          }
         }
         
       }
     } else {
       // If xKey and yKey are provided but don't exist in the data, try to auto-detect
-      if (firstItem && (!firstItem[xKey] || !firstItem[yKey])) {
+      // CRITICAL FIX: Use case-insensitive matching to check if keys exist
+      if (firstItem) {
         const availableKeys = Object.keys(firstItem);
+        const xKeyExists = xKey && availableKeys.some(k => k.toLowerCase() === xKey.toLowerCase());
+        const yKeyExists = yKey && availableKeys.some(k => k.toLowerCase() === yKey.toLowerCase());
         
-        if (type === 'pie_chart') {
-          xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
-          yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
-        } else if (type === 'bar_chart') {
-          xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
-          yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
-        } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
-          xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
-          yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+        if (!xKeyExists || !yKeyExists) {
+          if (type === 'pie_chart') {
+            xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
+            yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          } else if (type === 'bar_chart') {
+            xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
+            yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
+          } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
+            // CRITICAL FIX: For line/area/scatter, prioritize actual field names with case-insensitive matching
+            if (xField) {
+              const matchedXKey = availableKeys.find(k => k.toLowerCase() === xField.toLowerCase());
+              xKey = matchedXKey || (availableKeys.includes('x') ? 'x' : availableKeys.find(k => k.toLowerCase() === 'date') || availableKeys[0]);
+            } else {
+              xKey = availableKeys.includes('x') ? 'x' : availableKeys.find(k => k.toLowerCase() === 'date') || availableKeys[0];
+            }
+            if (yField) {
+              const matchedYKey = availableKeys.find(k => k.toLowerCase() === yField.toLowerCase());
+              yKey = matchedYKey || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
+            } else {
+              yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+            }
+          }
         }
-        
       }
     }
     
@@ -2148,7 +2174,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return transformed;
         }) : [];
 
-        // Ensure yKeys reflect the provided fields after transformation
+        // CRITICAL FIX: Ensure xKey and yKey use the actual field names after transformation
+        // This fixes the issue where xKey/yKey were set incorrectly before transformation
+        xKey = xField;
+        yKey = yField;
         if (yFields && yFields.length > 0) {
           yKey = yFields[0];
           yKeys = yFields;
