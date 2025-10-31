@@ -1650,9 +1650,9 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
   };
 };
 
-const CANVAS_STAGE_HEIGHT = 520;
-const DEFAULT_PRESENTATION_WIDTH = 960;
-const PRESENTATION_PADDING = 160;
+export const CANVAS_STAGE_HEIGHT = 520;
+export const DEFAULT_PRESENTATION_WIDTH = 960;
+export const PRESENTATION_PADDING = 160;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
