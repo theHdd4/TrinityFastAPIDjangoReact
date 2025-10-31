@@ -1,11 +1,4 @@
-import React, {
-  RefObject,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -23,6 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ImagePanel, type ImageSelectionRequest } from '../Images';
 import {
   ColorTray,
   DEFAULT_GRADIENT_COLOR_OPTIONS,
@@ -137,8 +131,6 @@ interface CardFormattingPanelProps {
   canEdit: boolean;
   onUpdateSettings: (partial: Partial<PresentationSettings>) => void;
   onReset: () => void;
-  onAccentImageChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  accentImageInputRef: RefObject<HTMLInputElement | null>;
   onClose: () => void;
 }
 
@@ -147,8 +139,6 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   canEdit,
   onUpdateSettings,
   onReset,
-  onAccentImageChange,
-  accentImageInputRef,
   onClose,
 }) => {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -157,6 +147,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   const layoutTriggerRef = useRef<HTMLButtonElement | null>(null);
   const backgroundTriggerRef = useRef<HTMLButtonElement | null>(null);
   const hasAccentImage = Boolean(settings.accentImage);
+  const [isAccentLibraryOpen, setIsAccentLibraryOpen] = useState(false);
 
   const getSelectedOption = (sections: readonly ColorTraySection[], id: string | null | undefined) => {
     if (!id) {
@@ -205,6 +196,40 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
     return undefined;
   }, [layoutColorOption, settings.cardColor]);
 
+  const handleAccentDialogOpen = useCallback(() => {
+    if (!canEdit) {
+      return;
+    }
+    setIsAccentLibraryOpen(true);
+  }, [canEdit]);
+
+  const handleAccentDialogClose = useCallback(() => {
+    setIsAccentLibraryOpen(false);
+  }, []);
+
+  const handleAccentImageRemove = useCallback(() => {
+    onUpdateSettings({ accentImage: null, accentImageName: null });
+  }, [onUpdateSettings]);
+
+  const handleAccentImageSelect = useCallback(
+    (selections: ImageSelectionRequest[]) => {
+      const [first] = selections;
+      if (!first) {
+        return;
+      }
+
+      const title = first.metadata?.title;
+      const fallbackName = first.metadata?.source === 'upload' ? 'Uploaded image' : 'Selected image';
+
+      onUpdateSettings({
+        accentImage: first.imageUrl,
+        accentImageName: title ?? fallbackName,
+      });
+      handleAccentDialogClose();
+    },
+    [handleAccentDialogClose, onUpdateSettings],
+  );
+
   const backgroundColorOption = getSelectedOption(backgroundColorSections, settings.backgroundColor);
   const backgroundSwatchStyle = resolveSwatchStyle(settings.backgroundColor, backgroundColorOption);
   const backgroundCustomHex = useMemo(() => {
@@ -252,7 +277,24 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
   );
 
   return (
-    <div
+    <>
+      <ImagePanel
+        fullscreenOnly
+        fullscreenOpen={isAccentLibraryOpen}
+        onFullscreenOpenChange={setIsAccentLibraryOpen}
+        currentImage={settings.accentImage}
+        currentImageName={settings.accentImageName}
+        onClose={handleAccentDialogClose}
+        onImageSelect={handleAccentImageSelect}
+        onRemoveImage={handleAccentImageRemove}
+        canEdit={canEdit}
+        insertButtonLabel="Use accent image"
+        fullscreenTitle="Choose accent image"
+        fullscreenDescription="Select an image to feature alongside your card content."
+        allowMultipleUploadSelection={false}
+      />
+
+      <div
       ref={panelRef}
       className="w-full shrink-0 rounded-3xl border border-border/70 bg-background/95 shadow-2xl"
     >
@@ -375,7 +417,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                   size="sm"
                   variant="ghost"
                   className="h-7 text-xs text-destructive"
-                  onClick={() => onUpdateSettings({ accentImage: null, accentImageName: null })}
+                  onClick={handleAccentImageRemove}
                   disabled={!canEdit}
                   type="button"
                 >
@@ -386,7 +428,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
                 size="sm"
                 variant="ghost"
                 className="h-7 text-xs text-primary"
-                onClick={() => accentImageInputRef.current?.click()}
+                onClick={handleAccentDialogOpen}
                 disabled={!canEdit}
                 type="button"
               >
@@ -410,14 +452,6 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
               </p>
             </div>
           )}
-
-          <input
-            ref={accentImageInputRef}
-            type="file"
-            accept="image/*"
-            onChange={onAccentImageChange}
-            className="hidden"
-          />
         </section>
 
         <Separator />
@@ -681,6 +715,7 @@ export const CardFormattingPanel: React.FC<CardFormattingPanelProps> = ({
         </Button>
       </div>
     </div>
+    </>
   );
 };
 

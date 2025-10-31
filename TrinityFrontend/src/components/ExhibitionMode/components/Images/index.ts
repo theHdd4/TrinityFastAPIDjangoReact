@@ -5,4 +5,3 @@ export type {
   ImageSelectionMetadata,
   ImageSelectionRequest,
 } from './ImagePanel';
-export { stockImages } from './ImagePanel';
