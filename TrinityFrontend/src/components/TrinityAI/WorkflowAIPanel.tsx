@@ -391,11 +391,36 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           setChatSessionIds(prev => ({ ...prev, [currentChatId]: sessionId }));
         }
 
-        // Send request to Workflow Agent with persistent session ID
+        // Get environment context for dynamic path resolution (SAME AS SUPERAGENT)
+        let envContext = {
+          client_name: '',
+          app_name: '',
+          project_name: ''
+        };
+        
+        try {
+          const envStr = localStorage.getItem('env');
+          if (envStr) {
+            const env = JSON.parse(envStr);
+            envContext = {
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            };
+            console.log('🔍 Environment context loaded for workflow:', envContext);
+          }
+        } catch (error) {
+          console.warn('Failed to load environment context:', error);
+        }
+
+        // Send request to Workflow Agent with persistent session ID and project context
         ws.send(JSON.stringify({
           message: currentInput,
           session_id: sessionId,
-          workflow_context: workflowContext
+          workflow_context: workflowContext,
+          client_name: envContext.client_name,
+          app_name: envContext.app_name,
+          project_name: envContext.project_name
         }));
       };
 

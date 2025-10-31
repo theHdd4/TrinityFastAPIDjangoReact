@@ -475,26 +475,42 @@ class FileAnalyzer:
     
     def _get_statistical_summary(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Get statistical summary of the DataFrame.
+        Get statistical summary of the DataFrame (pd.describe() for each column).
         
         Args:
             df: Pandas DataFrame
             
         Returns:
-            Dictionary with statistical summary
+            Dictionary with statistical summary per column
+            Format: {column_name: {stat_name: value, ...}, ...}
         """
         try:
             numeric_cols = df.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) > 0:
-                return {
-                    "numeric_columns_count": len(numeric_cols),
-                    "numeric_summary": df[numeric_cols].describe().to_dict()
-                }
-            else:
-                return {"numeric_columns_count": 0}
+            
+            if len(numeric_cols) == 0:
+                return {}
+            
+            # Get describe() output and convert to proper format
+            describe_df = df[numeric_cols].describe()
+            
+            # Convert to dictionary with column as top-level key
+            # Format: {column_name: {count: x, mean: y, std: z, ...}}
+            result = {}
+            for col in numeric_cols:
+                col_stats = {}
+                if col in describe_df.columns:
+                    for stat_name in describe_df.index:
+                        stat_value = describe_df.loc[stat_name, col]
+                        # Convert numpy types to native Python types
+                        if pd.notna(stat_value):
+                            col_stats[stat_name] = float(stat_value)
+                result[col] = col_stats
+            
+            return result
+            
         except Exception as e:
             logger.warning(f"Error generating statistical summary: {str(e)}")
-            return {"error": str(e)}
+            return {}
     
     def get_file_analysis(self, filename: str) -> Optional[Dict[str, Any]]:
         """

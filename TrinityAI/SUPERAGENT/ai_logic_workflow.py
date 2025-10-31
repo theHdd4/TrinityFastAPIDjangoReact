@@ -14,7 +14,7 @@ logger = logging.getLogger("smart.workflow.ai")
 
 
 def build_workflow_prompt(user_prompt: str, files_with_columns: Dict[str, Any], 
-                          conversation_history: List[Dict] = None) -> str:
+                          conversation_history: List[Dict] = None, file_context: Dict[str, Any] = None) -> str:
     """
     Build prompt for workflow generation with file context
     
@@ -22,28 +22,65 @@ def build_workflow_prompt(user_prompt: str, files_with_columns: Dict[str, Any],
         user_prompt: User's request
         files_with_columns: Dict of files with their columns
         conversation_history: Previous conversation for context
+        file_context: Dict of mentioned files with detailed context (from @filename parsing)
         
     Returns:
         Complete prompt string
     """
     
-    # Build file context
-    file_context = ""
+    # Build mentioned files context (from @filename parsing)
+    # Use FileHandler's enhanced formatting for rich statistical context
+    mentioned_files_context = ""
+    if file_context:
+        try:
+            from File_handler.available_minio_files import get_file_handler
+            file_handler = get_file_handler(
+                minio_endpoint=None,  # Will use existing instance
+                minio_access_key=None,
+                minio_secret_key=None,
+                minio_bucket=None
+            )
+            logger.info(f"🔍 Using FileHandler's enhanced formatting for {len(file_context)} files")
+            mentioned_files_context = file_handler.format_file_context_for_llm(file_context)
+            logger.info(f"✅ Enhanced file context formatted ({len(mentioned_files_context)} chars)")
+        except Exception as e:
+            # Fallback to basic formatting if FileHandler not available
+            logger.warning(f"⚠️ FileHandler formatting failed, using basic format: {e}")
+            mentioned_files_context = "\n\n--- MENTIONED FILES CONTEXT (@filename) ---\n"
+            for filename, context in file_context.items():
+                if "error" in context:
+                    mentioned_files_context += f"\n❌ {filename}: {context['error']}\n"
+                    continue
+                
+                mentioned_files_context += f"\n📄 {filename}:\n"
+                columns = context.get('columns', [])
+                mentioned_files_context += f"   Columns ({len(columns)}): {', '.join(columns)}\n"
+                
+                if context.get('data_types'):
+                    mentioned_files_context += "   Data Types:\n"
+                    for col, dtype in context['data_types'].items():
+                        mentioned_files_context += f"      - {col}: {dtype}\n"
+                
+                if context.get('row_count'):
+                    mentioned_files_context += f"   Rows: {context['row_count']:,}\n"
+    
+    # Build available files context
+    available_files_context = ""
     if files_with_columns:
-        file_context = f"\n\nAVAILABLE FILES ({len(files_with_columns)} total):\n"
+        available_files_context = f"\n\nAVAILABLE FILES ({len(files_with_columns)} total):\n"
         for i, (filename, info) in enumerate(list(files_with_columns.items())[:15], 1):
             columns = info.get('columns', [])
             # Clean filename (remove path prefix)
             clean_name = filename.split('/')[-1]
-            file_context += f"\n{i}. {clean_name}"
+            available_files_context += f"\n{i}. {clean_name}"
             if columns:
-                file_context += f" ({len(columns)} columns: {', '.join(columns[:5])}"
+                available_files_context += f" ({len(columns)} columns: {', '.join(columns[:5])}"
                 if len(columns) > 5:
-                    file_context += f" + {len(columns)-5} more"
-                file_context += ")"
+                    available_files_context += f" + {len(columns)-5} more"
+                available_files_context += ")"
         
         if len(files_with_columns) > 15:
-            file_context += f"\n... and {len(files_with_columns) - 15} more files"
+            available_files_context += f"\n... and {len(files_with_columns) - 15} more files"
     
     # Build conversation context
     history_context = ""
@@ -57,7 +94,7 @@ def build_workflow_prompt(user_prompt: str, files_with_columns: Dict[str, Any],
     # Build the prompt using few-shot learning
     prompt = f"""Generate a workflow JSON for this data science request.
 
-USER REQUEST: "{user_prompt}"{file_context}{history_context}
+USER REQUEST: "{user_prompt}"{mentioned_files_context}{available_files_context}{history_context}
 
 WORKFLOW STRUCTURE (exactly 3 steps):
 
