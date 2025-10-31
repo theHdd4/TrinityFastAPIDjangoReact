@@ -16,6 +16,7 @@ from pptx.enum.dml import MSO_LINE_DASH_STYLE
 from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Pt
+from reportlab.lib.colors import Color, HexColor
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 
@@ -23,6 +24,7 @@ from .renderer import ExhibitionRendererError, build_inputs, render_slide_batch
 from .schemas import (
     DocumentStylesPayload,
     ExhibitionExportRequest,
+    PDFExportMode,
     SlideDomSnapshotPayload,
     SlideExportObjectPayload,
     SlideExportPayload,
@@ -58,6 +60,8 @@ GRADIENT_PRESETS: dict[str, dict[str, object]] = {
 }
 
 DEFAULT_OVERLAY_COLOR = "#7c3aed"
+DEFAULT_TEXT_COLOR = "#111827"
+DEFAULT_BACKGROUND_COLOR = "#ffffff"
 
 SHAPE_ID_TO_MSO: dict[str, MSO_SHAPE] = {
     "rectangle": MSO_SHAPE.RECTANGLE,
@@ -87,6 +91,30 @@ SHAPE_ID_TO_MSO: dict[str, MSO_SHAPE] = {
 }
 
 LINE_SHAPES = {"line-horizontal", "line-vertical", "line-diagonal"}
+TEXT_OBJECT_TYPES = {
+    "text",
+    "text-box",
+    "text_box",
+    "heading",
+    "paragraph",
+    "rich-text",
+    "caption",
+}
+IMAGE_OBJECT_TYPES = {"image", "media", "photo", "picture"}
+PDF_FONT_FALLBACKS = {
+    "arial": "Helvetica",
+    "helvetica": "Helvetica",
+    "inter": "Helvetica",
+    "sans-serif": "Helvetica",
+    "poppins": "Helvetica",
+    "times": "Times-Roman",
+    "times new roman": "Times-Roman",
+    "georgia": "Times-Roman",
+    "serif": "Times-Roman",
+    "courier": "Courier",
+    "mono": "Courier",
+    "monospace": "Courier",
+}
 class ExportGenerationError(Exception):
     """Raised when an export file cannot be generated."""
 
@@ -155,6 +183,28 @@ def _parse_hex_color(value: Optional[str]) -> Optional[RGBColor]:
     except ValueError:
         return None
     return RGBColor(red, green, blue)
+
+
+def _resolve_pdf_color(
+    value: Optional[str], *, fallback: str = DEFAULT_TEXT_COLOR, opacity: Optional[float] = None
+) -> Color:
+    token = (value or '').strip()
+    try:
+        color = HexColor(token) if token else HexColor(fallback)
+    except Exception:  # pragma: no cover - defensive against invalid tokens
+        color = HexColor(fallback)
+
+    if opacity is not None:
+        try:
+            alpha = float(opacity)
+        except (TypeError, ValueError):
+            alpha = None
+        else:
+            alpha = min(max(alpha, 0.0), 1.0)
+        if alpha is not None:
+            color.alpha = alpha
+
+    return color
 
 
 def _parse_color_token(value: Optional[str]) -> Optional[RGBColor]:
@@ -888,6 +938,264 @@ def render_slide_screenshots(payload: ExhibitionExportRequest) -> list[dict[str,
     return [entry.model_dump(by_alias=True) for entry in rendered]
 
 
+def _resolve_pdf_font(font_name: Optional[str]) -> str:
+    if not font_name:
+        return 'Helvetica'
+
+    token = font_name.strip()
+    if not token:
+        return 'Helvetica'
+
+    lookup = token.lower()
+    return PDF_FONT_FALLBACKS.get(lookup, token)
+
+
+def _draw_pdf_text_object(pdf_canvas, obj: SlideExportObjectPayload, page_height: float) -> bool:
+    raw_text = obj.props.get('text') if isinstance(obj.props, dict) else None
+    if not isinstance(raw_text, str):
+        return False
+
+    text = _html_to_plain_text(raw_text)
+    if not text:
+        return False
+
+    font_size = max(_safe_float(obj.props.get('fontSize'), 0), 12.0)
+    font_name = _resolve_pdf_font(obj.props.get('fontFamily'))
+    align = str(obj.props.get('align') or obj.props.get('textAlign') or 'left').lower()
+
+    width_px = _safe_float(obj.width, 0)
+    height_px = _safe_float(obj.height, 0)
+    if width_px <= 0:
+        width_px = _safe_float(obj.props.get('width'), 0)
+    if height_px <= 0:
+        height_px = _safe_float(obj.props.get('height'), 0)
+
+    width_pt = _px_to_pt(width_px)
+    height_pt = _px_to_pt(height_px)
+    lines = text.splitlines() or [text]
+
+    if height_pt <= 0:
+        height_pt = max(len(lines), 1) * (font_size * 1.25)
+
+    origin_x = _px_to_pt(obj.x)
+    top = page_height - _px_to_pt(obj.y)
+    bottom = top - height_pt
+    start_y = bottom + height_pt - font_size
+
+    pdf_canvas.saveState()
+    pdf_canvas.setFillColor(
+        _resolve_pdf_color(
+            obj.props.get('color')
+            or obj.props.get('fill')
+            or obj.props.get('textColor'),
+            fallback=DEFAULT_TEXT_COLOR,
+        )
+    )
+
+    text_object = pdf_canvas.beginText()
+    text_object.setFont(font_name, font_size)
+    text_object.setLeading(font_size * 1.2)
+    text_object.setTextOrigin(origin_x, start_y)
+
+    for line in lines:
+        content = line.rstrip()
+        offset = 0.0
+        if width_pt > 0:
+            text_width = pdf_canvas.stringWidth(content, font_name, font_size)
+            if align in {'center', 'middle'}:
+                offset = max((width_pt - text_width) / 2, 0.0)
+            elif align in {'right', 'end'}:
+                offset = max(width_pt - text_width, 0.0)
+        text_object.setXPos(origin_x + offset)
+        text_object.textLine(content)
+
+    pdf_canvas.drawText(text_object)
+    pdf_canvas.restoreState()
+    return True
+
+
+def _draw_pdf_shape_object(pdf_canvas, obj: SlideExportObjectPayload, page_height: float) -> bool:
+    width_px = _safe_float(obj.width, 0)
+    height_px = _safe_float(obj.height, 0)
+    if width_px <= 0 or height_px <= 0:
+        return False
+
+    stroke_width = _safe_float(obj.props.get('strokeWidth'), 0)
+    shape_id = str(obj.props.get('shapeId') or obj.type or '').lower()
+
+    x_pt = _px_to_pt(obj.x)
+    y_pt = page_height - _px_to_pt(obj.y + height_px)
+    width_pt = _px_to_pt(width_px)
+    height_pt = _px_to_pt(height_px)
+
+    pdf_canvas.saveState()
+    pdf_canvas.setFillColor(
+        _resolve_pdf_color(
+            obj.props.get('fill'),
+            fallback=DEFAULT_OVERLAY_COLOR,
+            opacity=obj.props.get('opacity'),
+        )
+    )
+
+    stroke_color = _resolve_pdf_color(
+        obj.props.get('stroke'),
+        fallback=obj.props.get('fill') or DEFAULT_OVERLAY_COLOR,
+        opacity=obj.props.get('strokeOpacity') or obj.props.get('opacity'),
+    )
+
+    if stroke_width > 0:
+        pdf_canvas.setStrokeColor(stroke_color)
+        pdf_canvas.setLineWidth(_px_to_pt(stroke_width))
+    else:
+        pdf_canvas.setStrokeColor(stroke_color)
+        pdf_canvas.setLineWidth(0)
+
+    try:
+        if shape_id in {'rounded-rectangle', 'rounded_rectangle'}:
+            radius = _safe_float(obj.props.get('cornerRadius'), 0)
+            if radius <= 0:
+                radius = min(width_px, height_px) * 0.12
+            pdf_canvas.roundRect(
+                x_pt,
+                y_pt,
+                width_pt,
+                height_pt,
+                _px_to_pt(radius),
+                fill=1,
+                stroke=1 if stroke_width > 0 else 0,
+            )
+        elif shape_id in {'circle', 'ellipse'}:
+            pdf_canvas.ellipse(
+                x_pt,
+                y_pt,
+                x_pt + width_pt,
+                y_pt + height_pt,
+                fill=1,
+                stroke=1 if stroke_width > 0 else 0,
+            )
+        elif shape_id in LINE_SHAPES:
+            pdf_canvas.setLineWidth(max(_px_to_pt(stroke_width or 2), 0.5))
+            if shape_id == 'line-vertical':
+                pdf_canvas.line(x_pt + width_pt / 2, y_pt, x_pt + width_pt / 2, y_pt + height_pt)
+            elif shape_id == 'line-horizontal':
+                pdf_canvas.line(x_pt, y_pt + height_pt / 2, x_pt + width_pt, y_pt + height_pt / 2)
+            else:
+                pdf_canvas.line(x_pt, y_pt, x_pt + width_pt, y_pt + height_pt)
+        else:
+            pdf_canvas.rect(
+                x_pt,
+                y_pt,
+                width_pt,
+                height_pt,
+                fill=1,
+                stroke=1 if stroke_width > 0 else 0,
+            )
+    finally:
+        pdf_canvas.restoreState()
+
+    return True
+
+
+def _draw_pdf_image_object(pdf_canvas, obj: SlideExportObjectPayload, page_height: float) -> bool:
+    if not isinstance(obj.props, dict):
+        return False
+    source = obj.props.get('src')
+    if not isinstance(source, str) or not source.strip():
+        return False
+
+    width_px = _safe_float(obj.width, 0)
+    height_px = _safe_float(obj.height, 0)
+    if width_px <= 0 or height_px <= 0:
+        return False
+
+    try:
+        image_stream = io.BytesIO(_decode_data_url(source))
+    except ExportGenerationError:
+        return False
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning('Unable to decode image object %s: %s', obj.id, exc)
+        return False
+
+    image = ImageReader(image_stream)
+    width_pt = _px_to_pt(width_px)
+    height_pt = _px_to_pt(height_px)
+    x_pt = _px_to_pt(obj.x)
+    y_pt = page_height - _px_to_pt(obj.y + height_px)
+
+    pdf_canvas.drawImage(
+        image,
+        x_pt,
+        y_pt,
+        width=width_pt,
+        height=height_pt,
+        preserveAspectRatio=False,
+        mask='auto',
+    )
+    return True
+
+
+def _draw_pdf_screenshot_background(
+    pdf_canvas, slide: SlideExportPayload, page_width: float, page_height: float
+) -> bool:
+    screenshot = slide.screenshot
+    if not isinstance(screenshot, SlideScreenshotPayload) or not isinstance(
+        screenshot.data_url, str
+    ):
+        return False
+
+    try:
+        image_stream = io.BytesIO(_decode_data_url(screenshot.data_url))
+    except ExportGenerationError:
+        return False
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.warning('Unable to decode slide screenshot for %s: %s', slide.id, exc)
+        return False
+
+    image = ImageReader(image_stream)
+
+    css_width = _safe_float(getattr(screenshot, 'css_width', None), 0)
+    css_height = _safe_float(getattr(screenshot, 'css_height', None), 0)
+    pixel_ratio = _safe_float(getattr(screenshot, 'pixel_ratio', None), 0) or 1.0
+    image_width = _safe_float(getattr(screenshot, 'width', None), 0)
+    image_height = _safe_float(getattr(screenshot, 'height', None), 0)
+
+    if css_width <= 0 and image_width > 0 and pixel_ratio > 0:
+        css_width = image_width / pixel_ratio
+    if css_height <= 0 and image_height > 0 and pixel_ratio > 0:
+        css_height = image_height / pixel_ratio
+
+    if css_width <= 0:
+        css_width = page_width
+    if css_height <= 0:
+        css_height = page_height
+
+    aspect_ratio = css_height / css_width if css_width > 0 else 1.0
+    if aspect_ratio <= 0:
+        aspect_ratio = page_height / page_width if page_width > 0 else 1.0
+
+    draw_width = page_width
+    draw_height = draw_width * aspect_ratio
+
+    if draw_height > page_height and draw_height > 0:
+        scale = page_height / draw_height
+        draw_height = page_height
+        draw_width = draw_width * scale
+
+    offset_x = (page_width - draw_width) / 2 if draw_width < page_width else 0.0
+    offset_y = (page_height - draw_height) / 2 if draw_height < page_height else 0.0
+
+    pdf_canvas.drawImage(
+        image,
+        offset_x,
+        offset_y,
+        width=draw_width,
+        height=draw_height,
+        preserveAspectRatio=False,
+        mask='auto',
+    )
+    return True
+
+
 def build_pptx_bytes(payload: ExhibitionExportRequest) -> bytes:
     if not payload.slides:
         raise ExportGenerationError('No slides provided for export.')
@@ -919,12 +1227,9 @@ def build_pptx_bytes(payload: ExhibitionExportRequest) -> bytes:
     return output.getvalue()
 
 
-def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
-    if not payload.slides:
-        raise ExportGenerationError('No slides provided for export.')
-
-    ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
-
+def _build_digital_pdf_bytes(
+    payload: ExhibitionExportRequest, ordered_slides: Sequence[SlideExportPayload]
+) -> bytes:
     _attempt_server_screenshots(payload, ordered_slides)
     _ensure_slide_screenshots(payload, ordered_slides)
 
@@ -932,65 +1237,139 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
     pdf = canvas.Canvas(buffer)
     pdf.setTitle(payload.title or 'Exhibition Presentation')
 
-    for index, slide in enumerate(ordered_slides):
-        width, height = _resolve_slide_dimensions(slide)
+    dimensions: list[tuple[float, float]] = []
+    fallback_width = 960.0
+    fallback_height = 540.0
+
+    for slide in ordered_slides:
+        try:
+            width, height = _resolve_slide_dimensions(slide)
+        except ExportGenerationError:
+            width, height = fallback_width, fallback_height
+        else:
+            fallback_width = max(fallback_width, width)
+            fallback_height = max(fallback_height, height)
+        dimensions.append((width, height))
+
+    for index, (slide, (width, height)) in enumerate(zip(ordered_slides, dimensions)):
         page_width = _px_to_pt(width)
         page_height = _px_to_pt(height)
         pdf.setPageSize((page_width, page_height))
 
-        screenshot = slide.screenshot
-        if not screenshot or not isinstance(screenshot.data_url, str):
+        if not _draw_pdf_screenshot_background(pdf, slide, page_width, page_height):
             raise ExportGenerationError('Every slide must include a screenshot for PDF export.')
 
-        image_stream = io.BytesIO(_decode_data_url(screenshot.data_url))
-        image = ImageReader(image_stream)
-
-        css_width = _safe_float(getattr(screenshot, 'css_width', None), 0)
-        css_height = _safe_float(getattr(screenshot, 'css_height', None), 0)
-        pixel_ratio = _safe_float(getattr(screenshot, 'pixel_ratio', None), 0) or 1.0
-        image_width = _safe_float(getattr(screenshot, 'width', None), 0)
-        image_height = _safe_float(getattr(screenshot, 'height', None), 0)
-
-        if css_width <= 0 and image_width > 0 and pixel_ratio > 0:
-            css_width = image_width / pixel_ratio
-        if css_height <= 0 and image_height > 0 and pixel_ratio > 0:
-            css_height = image_height / pixel_ratio
-
-        if css_width <= 0:
-            css_width = width
-        if css_height <= 0:
-            css_height = height
-
-        aspect_ratio = css_height / css_width if css_width > 0 else 1.0
-        if aspect_ratio <= 0:
-            aspect_ratio = height / width if width > 0 else 1.0
-
-        draw_width = page_width
-        draw_height = draw_width * aspect_ratio
-
-        if draw_height > page_height and draw_height > 0:
-            scale = page_height / draw_height
-            draw_height = page_height
-            draw_width = draw_width * scale
-
-        offset_x = (page_width - draw_width) / 2 if draw_width < page_width else 0.0
-        offset_y = (page_height - draw_height) / 2 if draw_height < page_height else 0.0
-
-        pdf.drawImage(
-            image,
-            offset_x,
-            offset_y,
-            width=draw_width,
-            height=draw_height,
-            preserveAspectRatio=False,
-            mask='auto',
-        )
         if index < len(ordered_slides) - 1:
             pdf.showPage()
 
     pdf.save()
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def _build_print_pdf_bytes(
+    payload: ExhibitionExportRequest, ordered_slides: Sequence[SlideExportPayload]
+) -> bytes:
+    try:
+        _attempt_server_screenshots(payload, ordered_slides)
+        _ensure_slide_screenshots(payload, ordered_slides)
+    except ExportGenerationError as exc:
+        logger.info('Print PDF export continuing without renderer screenshots: %s', exc)
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer)
+    pdf.setTitle(payload.title or 'Exhibition Presentation')
+
+    dimensions: list[tuple[float, float]] = []
+    fallback_width = 960.0
+    fallback_height = 540.0
+
+    for slide in ordered_slides:
+        try:
+            width, height = _resolve_slide_dimensions(slide)
+        except ExportGenerationError:
+            width, height = fallback_width, fallback_height
+        else:
+            fallback_width = max(fallback_width, width)
+            fallback_height = max(fallback_height, height)
+        dimensions.append((width, height))
+
+    for index, (slide, (width, height)) in enumerate(zip(ordered_slides, dimensions)):
+        page_width = _px_to_pt(width)
+        page_height = _px_to_pt(height)
+        pdf.setPageSize((page_width, page_height))
+
+        background_color = DEFAULT_BACKGROUND_COLOR
+        settings = slide.presentation_settings if isinstance(slide.presentation_settings, dict) else {}
+        if isinstance(settings, dict):
+            background_color = (
+                settings.get('backgroundColor')
+                or settings.get('background_color')
+                or DEFAULT_BACKGROUND_COLOR
+            )
+
+        pdf.saveState()
+        pdf.setFillColor(_resolve_pdf_color(background_color, fallback=DEFAULT_BACKGROUND_COLOR))
+        pdf.rect(0, 0, page_width, page_height, fill=1, stroke=0)
+        pdf.restoreState()
+
+        rendered_vector = False
+        fallback_required = False
+
+        ordered_objects = sorted(
+            slide.objects,
+            key=lambda obj: (
+                obj.z_index if obj.z_index is not None else 0,
+                _safe_float(obj.y, 0),
+                _safe_float(obj.x, 0),
+            ),
+        )
+
+        for obj in ordered_objects:
+            obj_type = str(obj.type or '').lower()
+            try:
+                if obj_type in TEXT_OBJECT_TYPES:
+                    rendered_vector = _draw_pdf_text_object(pdf, obj, page_height) or rendered_vector
+                elif obj_type in IMAGE_OBJECT_TYPES:
+                    rendered_vector = _draw_pdf_image_object(pdf, obj, page_height) or rendered_vector
+                elif obj_type in LINE_SHAPES or obj_type == 'shape' or obj.props.get('shapeId'):
+                    rendered_vector = _draw_pdf_shape_object(pdf, obj, page_height) or rendered_vector
+                elif obj_type.startswith('chart'):
+                    fallback_required = True
+                else:
+                    fallback_required = True
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning(
+                    'Unable to render object %s on slide %s for print PDF: %s',
+                    getattr(obj, 'id', 'unknown'),
+                    slide.id,
+                    exc,
+                )
+                fallback_required = True
+
+        if fallback_required or not rendered_vector:
+            _draw_pdf_screenshot_background(pdf, slide, page_width, page_height)
+
+        if index < len(ordered_slides) - 1:
+            pdf.showPage()
+
+    pdf.save()
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def build_pdf_bytes(
+    payload: ExhibitionExportRequest, mode: PDFExportMode = PDFExportMode.DIGITAL
+) -> bytes:
+    if not payload.slides:
+        raise ExportGenerationError('No slides provided for export.')
+
+    ordered_slides = sorted(payload.slides, key=lambda slide: slide.index)
+
+    if mode == PDFExportMode.PRINT:
+        return _build_print_pdf_bytes(payload, ordered_slides)
+
+    return _build_digital_pdf_bytes(payload, ordered_slides)
 
 
 def build_export_filename(title: Optional[str], extension: str) -> str:

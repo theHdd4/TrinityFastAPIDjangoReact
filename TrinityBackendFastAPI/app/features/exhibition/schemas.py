@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -221,9 +222,21 @@ class ExhibitionExportRequest(BaseModel):
     document_styles: Optional[DocumentStylesPayload] = Field(
         default=None, alias="documentStyles"
     )
+    pdf_mode: Optional["PDFExportMode"] = Field(
+        default=None,
+        alias="pdfMode",
+        description="Preferred rendering mode when exporting a PDF",
+    )
 
 
 class SlideScreenshotsResponse(BaseModel):
     """Response returned when generating slide screenshots."""
 
     slides: List[SlideScreenshotResponse] = Field(default_factory=list)
+
+
+class PDFExportMode(str, Enum):
+    """Supported rendering modes for PDF exports."""
+
+    DIGITAL = "digital"
+    PRINT = "print"
