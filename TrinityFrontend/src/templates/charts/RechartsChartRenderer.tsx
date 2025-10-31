@@ -2048,10 +2048,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Final validation for dual Y-axes
     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
 
-    // CRITICAL FIX: Transform data for bar charts and line charts when data has generic keys
+    // CRITICAL FIX: Transform data for bar charts, line charts, area charts, and scatter charts when data has generic keys
     // Now also supports dual Y-axes by mapping both Y fields when available
     let transformedChartData = chartDataForRendering;
-    if ((type === 'bar_chart' || type === 'line_chart') && xField && yField && chartDataForRendering.length > 0) {
+    if ((type === 'bar_chart' || type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
 
@@ -2738,7 +2738,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           );
         }
         return (
-          <AreaChart data={chartDataForRendering} margin={getChartMargins()}>
+          <AreaChart data={transformedChartData} margin={getChartMargins()}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
@@ -2747,7 +2747,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
               {...(() => {
-                const firstValue = chartDataForRendering[0]?.[xKey];
+                const firstValue = transformedChartData[0]?.[xKey];
                 const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
                 return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
               })()}
@@ -2833,7 +2833,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               allowDuplicatedCategory={false}
               tickFormatter={isDateAxisScatter ? (value) => formatDateTickScatter(new Date(value)) : xAxisTickFormatter}
               {...(() => {
-                const firstValue = chartDataForRendering[0]?.[xKeyForScatter];
+                const firstValue = transformedChartData[0]?.[xKeyForScatter];
                 const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
                 return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
               })()}
@@ -2910,7 +2910,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               })
             ) : (
               <>
-                <Scatter data={chartDataForRendering} dataKey={yKey} fill={palette[0]} yAxisId={0}>
+                <Scatter data={transformedChartData} dataKey={yKey} fill={palette[0]} yAxisId={0}>
                   {currentShowDataLabels && (
                     <LabelList 
                       dataKey={yKey} 
@@ -2921,7 +2921,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   )}
                 </Scatter>
                 {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                  <Scatter data={chartDataForRendering} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={1}>
+                  <Scatter data={transformedChartData} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={1}>
                     {currentShowDataLabels && (
                       <LabelList 
                         dataKey={yKeys[1] || yFields[1]} 
