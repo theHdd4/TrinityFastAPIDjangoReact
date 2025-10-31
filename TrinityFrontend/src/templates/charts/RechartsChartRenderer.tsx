@@ -2056,21 +2056,36 @@ const RechartsChartRenderer: React.FC<Props> = ({
       const availableKeys = Object.keys(firstItem);
 
       // Check if data has generic keys OR if the field names don't match what we expect
+      // Use case-insensitive matching to check if actual field names exist
+      const hasXField = xField && availableKeys.some(k => k.toLowerCase() === xField.toLowerCase());
+      const hasYField = yField && availableKeys.some(k => k.toLowerCase() === yField.toLowerCase());
       const needsTransformation =
         availableKeys.includes('x') ||
         availableKeys.includes('y') ||
         availableKeys.includes('name') ||
         availableKeys.includes('value') ||
-        (xField && !availableKeys.includes(xField)) ||
-        (yField && !availableKeys.includes(yField)) ||
-        (yFields && yFields.length > 1 && !yFields.every(f => availableKeys.includes(f)));
+        (xField && !hasXField) ||
+        (yField && !hasYField) ||
+        (yFields && yFields.length > 1 && !yFields.every(f => availableKeys.some(k => k.toLowerCase() === f.toLowerCase())));
 
       if (needsTransformation) {
         transformedChartData = Array.isArray(chartDataForRendering) ? chartDataForRendering.map((item: any) => {
           const transformed: any = {};
+          const availableKeys = Object.keys(item);
+
+          // CRITICAL FIX: First check if the actual field names exist in the item (case-insensitive)
+          // This ensures that when xField and yField are explicitly provided, we use them correctly
+          // even when data structure changes (e.g., with single filter selection)
+          const actualXKey = availableKeys.find(k => k.toLowerCase() === xField.toLowerCase()) || 
+                           (item[xField] !== undefined ? xField : null);
+          const actualYKey = availableKeys.find(k => k.toLowerCase() === yField.toLowerCase()) || 
+                           (item[yField] !== undefined ? yField : null);
 
           // Map keys to actual field names for X-axis
-          if (item.x !== undefined) {
+          // Priority: actual field name > generic 'x' > other fallbacks
+          if (actualXKey) {
+            transformed[xField] = item[actualXKey];
+          } else if (item.x !== undefined) {
             transformed[xField] = item.x;
           } else if (item.name !== undefined) {
             transformed[xField] = item.name;
@@ -2081,11 +2096,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
           } else if (item.year !== undefined) {
             transformed[xField] = item.year;
           } else {
-            transformed[xField] = item[Object.keys(item)[0]];
+            // Last resort: use first key, but ensure it's not the yField
+            const firstKey = availableKeys.find(k => k.toLowerCase() !== yField.toLowerCase()) || availableKeys[0];
+            transformed[xField] = firstKey ? item[firstKey] : item[Object.keys(item)[0]];
           }
 
           // Map primary Y field
-          if (item.y !== undefined) {
+          // Priority: actual field name > generic 'y' > other fallbacks
+          if (actualYKey) {
+            transformed[yField] = item[actualYKey];
+          } else if (item.y !== undefined) {
             transformed[yField] = item.y;
           } else if (item.value !== undefined) {
             transformed[yField] = item.value;
@@ -2094,7 +2114,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
           } else if (item.volume !== undefined) {
             transformed[yField] = item.volume;
           } else {
-            transformed[yField] = item[Object.keys(item)[1]] || item[Object.keys(item)[0]];
+            // Last resort: find a key that's not the xField
+            const nonXKeys = availableKeys.filter(k => 
+              k.toLowerCase() !== xField.toLowerCase() && 
+              k.toLowerCase() !== 'x' && 
+              k.toLowerCase() !== 'name' && 
+              k.toLowerCase() !== 'category'
+            );
+            transformed[yField] = nonXKeys.length > 0 
+              ? item[nonXKeys[0]] 
+              : (availableKeys.length > 1 ? item[availableKeys[1]] : item[availableKeys[0]]);
           }
 
           // Map secondary Y field when present
