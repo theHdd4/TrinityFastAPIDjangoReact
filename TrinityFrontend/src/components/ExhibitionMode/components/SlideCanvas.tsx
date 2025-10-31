@@ -4018,6 +4018,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   height: object.height,
                   zIndex: isSelected ? zIndex + 100 : zIndex,
                 }}
+                data-exhibition-object-id={object.id}
+                data-exhibition-object-type={object.type}
                 onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
                 onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
               >
@@ -4167,6 +4169,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       data={chartProps.chartData}
                       config={chartProps.chartConfig}
                       className="h-full w-full"
+                      captureId={object.id}
                     />
                   ) : (
                     <div

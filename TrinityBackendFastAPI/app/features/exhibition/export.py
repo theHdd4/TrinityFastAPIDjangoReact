@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import re
+import urllib.parse
 from typing import Any, Iterable, Optional, Sequence
 
 from pptx import Presentation
@@ -19,6 +20,12 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Pt
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
+from PIL import Image
+
+try:  # pragma: no cover - optional dependency for SVG rasterisation
+    import cairosvg  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - optional dependency missing or misconfigured
+    cairosvg = None  # type: ignore[assignment]
 
 from .renderer import ExhibitionRendererError, build_inputs, render_slide_batch
 from .schemas import (
@@ -131,6 +138,30 @@ def _decode_data_url(data_url: str) -> bytes:
         return base64.b64decode(payload, validate=True)
     except (base64.binascii.Error, ValueError) as exc:  # type: ignore[attr-defined]
         raise ExportGenerationError('Unable to decode base64 image data.') from exc
+
+
+def _decode_svg_data_url(data_url: str) -> bytes:
+    if not data_url:
+        raise ExportGenerationError('Missing SVG data for chart render.')
+
+    if ';base64,' in data_url:
+        try:
+            _, payload = data_url.split(';base64,', 1)
+        except ValueError as exc:  # pragma: no cover - defensive
+            raise ExportGenerationError('Invalid SVG data URL.') from exc
+        try:
+            return base64.b64decode(payload, validate=True)
+        except (base64.binascii.Error, ValueError) as exc:  # type: ignore[attr-defined]
+            raise ExportGenerationError('Unable to decode base64 SVG data.') from exc
+
+    if ',' not in data_url:
+        raise ExportGenerationError('Invalid SVG data URL.')
+
+    _, payload = data_url.split(',', 1)
+    try:
+        return urllib.parse.unquote_to_bytes(payload)
+    except Exception as exc:  # pragma: no cover - unexpected percent decoding errors
+        raise ExportGenerationError('Unable to decode SVG data URL.') from exc
 
 
 _BR_TAG_RE = re.compile(r"<\s*br\s*/?\s*>", flags=re.IGNORECASE)
@@ -965,8 +996,164 @@ def _map_legend_position(position: Optional[str]) -> Optional[XL_LEGEND_POSITION
     return lookup.get(position.lower())
 
 
+def _resolve_post_animation_image(props: dict[str, Any]) -> Optional[bytes]:
+    png_candidate = props.get('postAnimationPng') or props.get('postAnimationImage')
+    if isinstance(png_candidate, str) and png_candidate.strip():
+        try:
+            return _decode_data_url(png_candidate)
+        except ExportGenerationError as exc:
+            logger.warning('Unable to decode post-animation PNG for chart: %s', exc)
+
+    svg_candidate = props.get('postAnimationSvg')
+    if isinstance(svg_candidate, str) and svg_candidate.strip():
+        if cairosvg is None:
+            logger.debug('SVG chart provided but cairosvg is unavailable; skipping rasterisation.')
+        else:
+            try:
+                svg_bytes = _decode_svg_data_url(svg_candidate)
+                return cairosvg.svg2png(bytestring=svg_bytes)
+            except ExportGenerationError as exc:
+                logger.warning('Unable to decode post-animation SVG for chart: %s', exc)
+            except Exception as exc:  # pragma: no cover - cairosvg runtime issues
+                logger.warning('Failed to rasterise SVG chart for export: %s', exc)
+
+    return None
+
+
+def _apply_post_animation_overlays(slide: SlideExportPayload) -> None:
+    screenshot = getattr(slide, 'screenshot', None)
+    if not isinstance(screenshot, SlideScreenshotPayload):
+        return
+
+    overlays: list[tuple[SlideExportObjectPayload, bytes]] = []
+    for obj in slide.objects:
+        props = obj.props or {}
+        if not isinstance(props, dict):
+            continue
+        image_bytes = _resolve_post_animation_image(props)
+        if image_bytes:
+            overlays.append((obj, image_bytes))
+
+    if not overlays:
+        return
+
+    try:
+        screenshot_bytes = _decode_data_url(screenshot.data_url)
+    except ExportGenerationError as exc:
+        logger.warning('Unable to decode screenshot for slide %s: %s', slide.id, exc)
+        return
+
+    try:
+        base_image = Image.open(io.BytesIO(screenshot_bytes)).convert('RGBA')
+    except Exception as exc:  # pragma: no cover - Pillow decoding edge cases
+        logger.warning('Unable to load screenshot image for slide %s: %s', slide.id, exc)
+        return
+
+    css_width = _safe_float(getattr(screenshot, 'css_width', None), 0)
+    css_height = _safe_float(getattr(screenshot, 'css_height', None), 0)
+    pixel_ratio = _safe_float(getattr(screenshot, 'pixel_ratio', None), 0)
+    image_width = base_image.width
+    image_height = base_image.height
+
+    if css_width <= 0 and image_width > 0 and pixel_ratio > 0:
+        css_width = image_width / pixel_ratio
+    if css_height <= 0 and image_height > 0 and pixel_ratio > 0:
+        css_height = image_height / pixel_ratio
+
+    if css_width <= 0:
+        css_width = _safe_float(slide.base_width, image_width)
+    if css_height <= 0:
+        css_height = _safe_float(slide.base_height, image_height)
+
+    scale_x = image_width / css_width if css_width > 0 else 1.0
+    scale_y = image_height / css_height if css_height > 0 else 1.0
+
+    updated = False
+    for obj, image_bytes in overlays:
+        obj_width = _safe_float(obj.width, 0)
+        obj_height = _safe_float(obj.height, 0)
+        if obj_width <= 0 or obj_height <= 0:
+            continue
+
+        try:
+            overlay_image = Image.open(io.BytesIO(image_bytes)).convert('RGBA')
+        except Exception as exc:  # pragma: no cover - Pillow decoding edge cases
+            logger.warning('Unable to decode post-animation image for object %s: %s', obj.id, exc)
+            continue
+
+        target_width = max(int(round(obj_width * scale_x)), 1)
+        target_height = max(int(round(obj_height * scale_y)), 1)
+
+        if overlay_image.size != (target_width, target_height):
+            try:
+                overlay_image = overlay_image.resize((target_width, target_height), Image.LANCZOS)
+            except Exception:  # pragma: no cover - resize issues
+                overlay_image = overlay_image.resize((target_width, target_height))
+
+        dest_x = int(round(_safe_float(obj.x, 0) * scale_x))
+        dest_y = int(round(_safe_float(obj.y, 0) * scale_y))
+
+        try:
+            base_image.paste(overlay_image, (dest_x, dest_y), overlay_image)
+            updated = True
+        except Exception as exc:  # pragma: no cover - paste errors
+            logger.warning(
+                'Unable to overlay post-animation image for object %s on slide %s: %s',
+                obj.id,
+                slide.id,
+                exc,
+            )
+
+    if not updated:
+        return
+
+    output = io.BytesIO()
+    try:
+        base_image.save(output, format='PNG')
+    except Exception as exc:  # pragma: no cover - save errors
+        logger.warning('Unable to encode overlaid screenshot for slide %s: %s', slide.id, exc)
+        return
+
+    encoded = base64.b64encode(output.getvalue()).decode('ascii')
+    updated_payload = {
+        **screenshot.model_dump(by_alias=True),
+        'dataUrl': f'data:image/png;base64,{encoded}',
+        'width': image_width,
+        'height': image_height,
+    }
+
+    try:
+        slide.screenshot = SlideScreenshotPayload.model_validate(updated_payload)
+    except Exception as exc:  # pragma: no cover - validation errors
+        logger.warning('Unable to update screenshot payload for slide %s: %s', slide.id, exc)
+
+
+def _render_chart_image(slide, obj: SlideExportObjectPayload, image_bytes: bytes, offset_x: float, offset_y: float) -> None:
+    width = _safe_float(obj.width, 0)
+    height = _safe_float(obj.height, 0)
+    if width <= 0 or height <= 0:
+        return
+
+    picture = slide.shapes.add_picture(
+        io.BytesIO(image_bytes),
+        _px_to_emu(obj.x + offset_x),
+        _px_to_emu(obj.y + offset_y),
+        width=_px_to_emu(width),
+        height=_px_to_emu(height),
+    )
+
+    rotation = _safe_float(obj.rotation, 0.0)
+    if rotation:
+        picture.rotation = rotation
+
+
 def _render_chart(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, offset_y: float = 0.0) -> None:
     props = obj.props or {}
+    image_bytes = _resolve_post_animation_image(props)
+    if image_bytes:
+        _render_chart_image(slide, obj, image_bytes, offset_x, offset_y)
+        return
+
     data = props.get('chartData')
     config = props.get('chartConfig') or {}
 
@@ -1245,6 +1432,26 @@ def _render_atom(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, of
         _render_table(slide, table_object, offset_x, offset_y)
         next_y = content_start + primary_height
     elif chart_preview:
+        chart_props: dict[str, Any] = {
+            'chartData': chart_preview,
+            'chartConfig': {
+                'type': chart_preview.get('type'),
+                'legendPosition': chart_preview.get('legendPosition'),
+                'showValues': chart_preview.get('showValues'),
+                'axisIncludesZero': chart_preview.get('axisIncludesZero'),
+                'seriesColors': chart_preview.get('seriesColors'),
+            },
+        }
+        for key in (
+            'postAnimationPng',
+            'postAnimationSvg',
+            'postAnimationWidth',
+            'postAnimationHeight',
+            'postAnimationPixelRatio',
+        ):
+            if key in props:
+                chart_props[key] = props[key]
+
         chart_object = SlideExportObjectPayload.model_validate(
             {
                 'id': f'{obj.id}::chart',
@@ -1253,16 +1460,7 @@ def _render_atom(slide, obj: SlideExportObjectPayload, offset_x: float = 0.0, of
                 'y': content_start,
                 'width': inner_width,
                 'height': primary_height,
-                'props': {
-                    'chartData': chart_preview,
-                    'chartConfig': {
-                        'type': chart_preview.get('type'),
-                        'legendPosition': chart_preview.get('legendPosition'),
-                        'showValues': chart_preview.get('showValues'),
-                        'axisIncludesZero': chart_preview.get('axisIncludesZero'),
-                        'seriesColors': chart_preview.get('seriesColors'),
-                    },
-                },
+                'props': chart_props,
             }
         )
         _render_chart(slide, chart_object, offset_x, offset_y)
@@ -1626,6 +1824,7 @@ def render_slide_screenshots(payload: ExhibitionExportRequest) -> list[dict[str,
 
     rendered: list[SlideScreenshotResponse] = []
     for slide in ordered_slides:
+        _apply_post_animation_overlays(slide)
         screenshot = slide.screenshot
         if not isinstance(screenshot, SlideScreenshotPayload):
             raise ExportGenerationError(
@@ -1742,6 +1941,45 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
             preserveAspectRatio=False,
             mask='auto',
         )
+
+        scale_x = draw_width / page_width if page_width > 0 else 1.0
+        scale_y = draw_height / page_height if page_height > 0 else 1.0
+
+        for obj in slide.objects:
+            props = obj.props or {}
+            if not isinstance(props, dict):
+                continue
+
+            image_bytes = _resolve_post_animation_image(props)
+            if not image_bytes:
+                continue
+
+            obj_width = _safe_float(obj.width, 0)
+            obj_height = _safe_float(obj.height, 0)
+            if obj_width <= 0 or obj_height <= 0:
+                continue
+
+            chart_x_pt = _px_to_pt(_safe_float(obj.x, 0))
+            chart_y_pt = _px_to_pt(_safe_float(obj.y, 0))
+            chart_width_pt = _px_to_pt(obj_width)
+            chart_height_pt = _px_to_pt(obj_height)
+            chart_bottom_pt = page_height - (chart_y_pt + chart_height_pt)
+
+            draw_x = offset_x + chart_x_pt * scale_x
+            draw_y = offset_y + chart_bottom_pt * scale_y
+            draw_w = chart_width_pt * scale_x
+            draw_h = chart_height_pt * scale_y
+
+            image_reader = ImageReader(io.BytesIO(image_bytes))
+            pdf.drawImage(
+                image_reader,
+                draw_x,
+                draw_y,
+                width=draw_w,
+                height=draw_h,
+                preserveAspectRatio=False,
+                mask='auto',
+            )
         if index < len(ordered_slides) - 1:
             pdf.showPage()
 

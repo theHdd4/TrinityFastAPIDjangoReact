@@ -46,9 +46,12 @@ ExhibitionExportRequest = schemas_module.ExhibitionExportRequest
 ExportGenerationError = export_module.ExportGenerationError
 SlideDomSnapshotPayload = schemas_module.SlideDomSnapshotPayload
 SlideExportObjectPayload = schemas_module.SlideExportObjectPayload
+SlideScreenshotPayload = schemas_module.SlideScreenshotPayload
 build_export_filename = export_module.build_export_filename
 build_pdf_bytes = export_module.build_pdf_bytes
 build_pptx_bytes = export_module.build_pptx_bytes
+render_slide_screenshots = export_module.render_slide_screenshots
+_decode_data_url = export_module._decode_data_url
 _px_to_emu = export_module._px_to_emu
 
 
@@ -56,6 +59,13 @@ _px_to_emu = export_module._px_to_emu
 def _png_data_url() -> str:
     buffer = io.BytesIO()
     Image.new("RGB", (10, 10), color="#3366FF").save(buffer, format="PNG")
+    pixel = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{pixel}"
+
+
+def _solid_png_data_url(color: str, width: int, height: int) -> str:
+    buffer = io.BytesIO()
+    Image.new("RGBA", (width, height), color=color).save(buffer, format="PNG")
     pixel = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/png;base64,{pixel}"
 
@@ -216,6 +226,88 @@ def test_build_pptx_bytes_renders_atom_component() -> None:
 
     text_shapes = [getattr(shape, 'text', '') for shape in slide.shapes if hasattr(shape, 'text')]
     assert any('Sales by Region' in text for text in text_shapes)
+
+
+def test_render_chart_prefers_post_animation_png() -> None:
+    payload = _build_payload()
+
+    chart_object = SlideExportObjectPayload.model_validate(
+        {
+            'id': 'chart-override',
+            'type': 'chart',
+            'x': 160,
+            'y': 180,
+            'width': 320,
+            'height': 240,
+            'props': {
+                'chartData': {
+                    'type': 'column',
+                    'categories': ['A', 'B'],
+                    'series': [{'name': 'Series 1', 'values': [10, 12]}],
+                },
+                'chartConfig': {'type': 'column'},
+                'postAnimationPng': _png_data_url(),
+            },
+        }
+    )
+
+    payload.slides[0].objects.append(chart_object)
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    slide = presentation.slides[0]
+
+    chart_shapes = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.CHART]
+    assert not chart_shapes, 'Expected chart metadata to be replaced by image'
+
+    pictures = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert pictures, 'Expected chart render to add a picture shape'
+    assert any(abs(picture.width - _px_to_emu(320)) <= 1 for picture in pictures)
+
+
+def test_render_slide_screenshots_overlays_post_animation_png() -> None:
+    payload = _build_payload()
+
+    slide = payload.slides[0]
+    slide.base_width = 100
+    slide.base_height = 100
+    slide.screenshot = SlideScreenshotPayload.model_validate(
+        {
+            'dataUrl': _solid_png_data_url('#FFFFFF', 100, 100),
+            'width': 100,
+            'height': 100,
+            'cssWidth': 100,
+            'cssHeight': 100,
+            'pixelRatio': 1,
+        }
+    )
+
+    slide.objects.append(
+        SlideExportObjectPayload.model_validate(
+            {
+                'id': 'chart-overlay',
+                'type': 'chart',
+                'x': 20,
+                'y': 24,
+                'width': 60,
+                'height': 48,
+                'props': {
+                    'postAnimationPng': _solid_png_data_url('#FF0000', 60, 48),
+                },
+            }
+        )
+    )
+
+    screenshots = render_slide_screenshots(payload)
+    assert screenshots, 'Expected slide screenshots to be returned'
+    first = screenshots[0]
+    data_url = first['dataUrl']
+    image_bytes = _decode_data_url(data_url)
+    image = Image.open(io.BytesIO(image_bytes))
+    pixel = image.convert('RGB').getpixel((30, 30))
+    assert pixel[0] > 200 and pixel[1] < 32 and pixel[2] < 32
 
 
 def test_build_pptx_bytes_embeds_background_and_metadata() -> None:

@@ -170,6 +170,7 @@ interface Props {
   initialShowDataLabels?: boolean; // Default state for data labels
   showGrid?: boolean; // External control for grid visibility
   chartsPerRow?: number; // For multi pie chart layouts
+  captureId?: string;
 }
 
 // Excel-like color themes
@@ -495,7 +496,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showDataLabels: propShowDataLabels, // External control for data labels visibility
   initialShowDataLabels,
   showGrid: propShowGrid, // External control for grid visibility
-  chartsPerRow
+  chartsPerRow,
+  captureId,
 }) => {
 
   // State for color theme - simplified approach
@@ -537,6 +539,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [axisLabelSubmenuPos, setAxisLabelSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
+  const rootAttributes = captureId
+    ? { 'data-exhibition-chart-root': 'true', 'data-exhibition-chart-id': captureId }
+    : {};
 
   // State for custom axis labels - use localStorage to persist across component recreations
   // Create a unique key based on chart props to make it chart-specific (excluding type for persistence across chart types)
@@ -3269,7 +3274,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full h-full flex flex-col" {...rootAttributes}>
       {/* <div className="mb-6 flex justify-center">
         <div className="relative w-full max-w-3xl">
           {(((isTitleFocused ? titleEditableRef.current?.textContent : resolvedTitle) ?? '').trim().length === 0) && (
