@@ -14,6 +14,7 @@ import {
   createSlideObjectFromAtom,
   DEFAULT_CANVAS_OBJECT_WIDTH,
   DEFAULT_CANVAS_OBJECT_HEIGHT,
+  buildSlideTitleObjectId,
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
 import { SlideCanvas } from './components/SlideCanvas';
@@ -34,8 +35,14 @@ import {
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 import { createTextBoxSlideObject } from './components/operationsPalette/textBox/constants';
+import type { TextBoxFormatting } from './components/operationsPalette/textBox/types';
 import { createTableSlideObject } from './components/operationsPalette/tables/constants';
-import { ShapesPanel, createShapeSlideObject, type ShapeDefinition } from './components/operationsPalette/shapes';
+import {
+  ShapesPanel,
+  createShapeSlideObject,
+  findShapeDefinition,
+  type ShapeDefinition,
+} from './components/operationsPalette/shapes';
 import { ChartPanel, createChartSlideObject } from './components/operationsPalette/charts';
 import type { ChartConfig, ChartDataRow } from './components/operationsPalette/charts';
 import {
@@ -44,6 +51,8 @@ import {
 } from './components/operationsPalette/images/constants';
 import { ThemesPanel } from './components/operationsPalette/themes';
 import { SettingsPanel } from './components/operationsPalette/tools/settings';
+import { TemplatesPanel, type TemplateDefinition } from './components/operationsPalette/templates';
+import type { ShapeObjectProps } from './components/operationsPalette/shapes/constants';
 import {
   buildChartRendererPropsFromManifest,
   buildTableDataFromManifest,
@@ -158,6 +167,7 @@ const ExhibitionMode = () => {
     setCards,
     lastLoadedContext,
     addSlideObject,
+    bulkUpdateSlideObjects,
     removeSlideObject,
     removeSlide,
     slideObjectsByCardId,
@@ -200,6 +210,7 @@ const ExhibitionMode = () => {
     | { type: 'shapes' }
     | { type: 'images' }
     | { type: 'charts' }
+    | { type: 'templates' }
     | { type: 'themes' }
     | { type: 'settings' }
     | null
@@ -1349,6 +1360,8 @@ const ExhibitionMode = () => {
         prev?.type === 'notes' ||
         prev?.type === 'shapes' ||
         prev?.type === 'images' ||
+        prev?.type === 'charts' ||
+        prev?.type === 'templates' ||
         prev?.type === 'themes' ||
         prev?.type === 'settings'
       ) {
@@ -1373,6 +1386,14 @@ const ExhibitionMode = () => {
   }, []);
 
   const handleCloseShapesPanel = useCallback(() => {
+    setOperationsPanelState(null);
+  }, []);
+
+  const handleOpenTemplatesPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'templates' ? null : { type: 'templates' }));
+  }, []);
+
+  const handleCloseTemplatesPanel = useCallback(() => {
     setOperationsPanelState(null);
   }, []);
 
@@ -1727,6 +1748,236 @@ const ExhibitionMode = () => {
     ],
   );
 
+  const handleApplyTemplate = useCallback(
+    (template: TemplateDefinition) => {
+      if (!canEdit) {
+        toast({
+          title: 'Read-only exhibition',
+          description: 'You need edit access to apply templates to this exhibition.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const baseSlideCount = exhibitedCards.length;
+      const createdCardIds: string[] = [];
+      const normalise = (value: string): string => value.replace(/\s+/g, ' ').trim().toLowerCase();
+
+      template.slides.forEach(slide => {
+        const afterIndex =
+          baseSlideCount === 0 && createdCardIds.length === 0
+            ? undefined
+            : baseSlideCount + createdCardIds.length - 1;
+
+        const newCard = addBlankSlide(
+          typeof afterIndex === 'number' && afterIndex >= 0 ? afterIndex : undefined,
+        );
+
+        if (!newCard) {
+          return;
+        }
+
+        createdCardIds.push(newCard.id);
+
+        const textBoxes = slide.content?.textBoxes ?? [];
+        const normalisedTitle = normalise(slide.title);
+        const titleTextBox =
+          normalisedTitle.length > 0
+            ? textBoxes.find(textBox => normalise(textBox.text) === normalisedTitle)
+            : undefined;
+
+        if (titleTextBox) {
+          const titleProps: Record<string, unknown> = {};
+          if (typeof titleTextBox.fontSize === 'number') {
+            titleProps.fontSize = titleTextBox.fontSize;
+          }
+          if (titleTextBox.align) {
+            titleProps.align = titleTextBox.align;
+          }
+          if (typeof titleTextBox.color === 'string') {
+            titleProps.color = titleTextBox.color;
+          }
+          if (typeof titleTextBox.fontFamily === 'string') {
+            titleProps.fontFamily = titleTextBox.fontFamily;
+          }
+          if (typeof titleTextBox.bold === 'boolean') {
+            titleProps.bold = titleTextBox.bold;
+          }
+          if (typeof titleTextBox.italic === 'boolean') {
+            titleProps.italic = titleTextBox.italic;
+          }
+          if (typeof titleTextBox.underline === 'boolean') {
+            titleProps.underline = titleTextBox.underline;
+          }
+
+          bulkUpdateSlideObjects(newCard.id, {
+            [buildSlideTitleObjectId(newCard.id)]: {
+              x: titleTextBox.position.x,
+              y: titleTextBox.position.y,
+              width: titleTextBox.size.width,
+              height: titleTextBox.size.height,
+              ...(Object.keys(titleProps).length > 0 ? { props: titleProps } : {}),
+            },
+          });
+        }
+
+        updateCard(newCard.id, { title: slide.title });
+
+        const supportingTextBoxes =
+          titleTextBox && textBoxes.length > 0
+            ? textBoxes.filter(textBox => textBox !== titleTextBox)
+            : textBoxes;
+
+        supportingTextBoxes
+          .filter(textBox => textBox.text.trim().length > 0)
+          .forEach(textBox => {
+            const formatting: Partial<TextBoxFormatting> = {
+              text: textBox.text,
+            };
+
+            if (typeof textBox.fontSize === 'number') {
+              formatting.fontSize = textBox.fontSize;
+            }
+            if (textBox.align) {
+              formatting.align = textBox.align;
+            }
+            if (typeof textBox.color === 'string') {
+              formatting.color = textBox.color;
+            }
+            if (typeof textBox.fontFamily === 'string') {
+              formatting.fontFamily = textBox.fontFamily;
+            }
+            if (typeof textBox.bold === 'boolean') {
+              formatting.bold = textBox.bold;
+            }
+            if (typeof textBox.italic === 'boolean') {
+              formatting.italic = textBox.italic;
+            }
+            if (typeof textBox.underline === 'boolean') {
+              formatting.underline = textBox.underline;
+            }
+
+            addSlideObject(
+              newCard.id,
+              createTextBoxSlideObject(
+                generateTextBoxId(),
+                {
+                  x: textBox.position.x,
+                  y: textBox.position.y,
+                  width: textBox.size.width,
+                  height: textBox.size.height,
+                },
+                formatting,
+              ),
+            );
+          });
+
+        slide.content?.shapes?.forEach(shape => {
+          const definition = findShapeDefinition(shape.shapeId);
+          if (!definition) {
+            return;
+          }
+
+          const shapeProps: Partial<ShapeObjectProps> = {};
+          if (typeof shape.fill === 'string') {
+            shapeProps.fill = shape.fill;
+          }
+          if (typeof shape.stroke === 'string') {
+            shapeProps.stroke = shape.stroke;
+          }
+          if (typeof shape.strokeWidth === 'number') {
+            shapeProps.strokeWidth = shape.strokeWidth;
+          }
+          if (typeof shape.opacity === 'number') {
+            shapeProps.opacity = Math.max(0, Math.min(1, shape.opacity));
+          }
+
+          addSlideObject(
+            newCard.id,
+            createShapeSlideObject(
+              generateShapeId(),
+              definition,
+              {
+                x: shape.position.x,
+                y: shape.position.y,
+                width: shape.size.width,
+                height: shape.size.height,
+                rotation: typeof shape.rotation === 'number' ? shape.rotation : 0,
+              },
+              shapeProps,
+            ),
+          );
+        });
+
+        slide.content?.charts?.forEach(chart => {
+          const chartObject = createChartSlideObject(
+            generateChartId(),
+            chart.data,
+            chart.config,
+            {
+              x: chart.position.x,
+              y: chart.position.y,
+              width: chart.size.width,
+              height: chart.size.height,
+            },
+          );
+
+          addSlideObject(newCard.id, chartObject);
+        });
+
+        slide.content?.images?.forEach(image => {
+          const imageObject = createImageSlideObject(
+            generateImageObjectId(),
+            image.src,
+            {
+              name: image.name ?? image.description ?? null,
+              source: image.source ?? 'Template placeholder image',
+            },
+            {
+              x: image.position.x,
+              y: image.position.y,
+              width: image.size.width,
+              height: image.size.height,
+            },
+          );
+
+          addSlideObject(newCard.id, imageObject);
+        });
+      });
+
+      if (createdCardIds.length > 0) {
+        setOperationsPanelState(prev => (prev?.type === 'templates' ? null : prev));
+        setCurrentSlide(baseSlideCount > 0 ? baseSlideCount : 0);
+        toast({
+          title: `${template.name} added`,
+          description: `Inserted ${createdCardIds.length} ${
+            createdCardIds.length === 1 ? 'slide' : 'slides'
+          } from the template.`,
+        });
+        return;
+      }
+
+      toast({
+        title: 'Template unavailable',
+        description: 'We could not apply that template right now. Try again in a moment.',
+        variant: 'destructive',
+      });
+    },
+    [
+      addBlankSlide,
+      addSlideObject,
+      bulkUpdateSlideObjects,
+      canEdit,
+      exhibitedCards.length,
+      generateShapeId,
+      generateTextBoxId,
+      setCurrentSlide,
+      setOperationsPanelState,
+      toast,
+      updateCard,
+    ],
+  );
+
   const notesPanelVisible = operationsPanelState?.type === 'notes';
 
   useEffect(() => {
@@ -1775,6 +2026,15 @@ const ExhibitionMode = () => {
             onSelectShape={handleShapeSelect}
             onClose={handleCloseShapesPanel}
             canEdit={canEdit}
+          />
+        );
+      case 'templates':
+        return (
+          <TemplatesPanel
+            onApplyTemplate={handleApplyTemplate}
+            onClose={handleCloseTemplatesPanel}
+            canEdit={canEdit}
+            currentApp={projectContext?.app_name}
           />
         );
       case 'images':
@@ -1833,12 +2093,14 @@ const ExhibitionMode = () => {
     handleCloseImagesPanel,
     handleCloseNotesPanel,
     handleCloseSettingsPanel,
+    handleCloseTemplatesPanel,
     handleCloseShapesPanel,
     handleCloseThemesPanel,
     handleCloseChartsPanel,
     handleImagePanelSelect,
     handleNotesChange,
     handlePresentationChange,
+    handleApplyTemplate,
     handleCreateChart,
     handleRemoveAccentImage,
     handleSettingsNotesPosition,
@@ -1847,6 +2109,7 @@ const ExhibitionMode = () => {
     notes,
     notesPanelVisible,
     operationsPanelState,
+    projectContext,
     updateCurrentPresentationSettings,
   ]);
   const emptyCanvas = (
@@ -2072,6 +2335,7 @@ const ExhibitionMode = () => {
             onOpenShapesPanel={handleOpenShapesPanel}
             onOpenImagesPanel={handleOpenImagesPanel}
             onOpenChartPanel={handleOpenChartsPanel}
+            onOpenTemplatesPanel={handleOpenTemplatesPanel}
             onOpenThemesPanel={handleOpenThemesPanel}
             onOpenSettingsPanel={handleOpenSettingsPanel}
             canEdit={canEdit}

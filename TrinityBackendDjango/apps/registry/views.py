@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.utils.text import slugify
+from typing import Any, Dict
 import os
 import logging
 from apps.accounts.views import CsrfExemptSessionAuthentication
@@ -19,6 +20,11 @@ from .atom_config import (
     save_atom_list_configuration,
     load_atom_list_configuration,
     _get_env_ids,
+)
+from .template_config import (
+    store_template_configuration,
+    apply_template_configuration,
+    remap_state_molecule_ids,
 )
 from common.minio_utils import copy_prefix, remove_prefix
 from pymongo import MongoClient
@@ -583,6 +589,14 @@ class ProjectViewSet(viewsets.ModelViewSet):
             state=state,
             base_project=serialized,
         )
+        try:
+            store_template_configuration(project=project, template=template, state=state)
+        except Exception as exc:  # pragma: no cover - Mongo failures are non-fatal
+            logger.error(
+                "Failed to persist template configuration for template %s: %s",
+                template.pk,
+                exc,
+            )
         return Response(TemplateSerializer(template).data, status=status.HTTP_201_CREATED)
 
 
@@ -722,6 +736,25 @@ class TemplateViewSet(viewsets.ModelViewSet):
             )
         except RegistryEnvironment.DoesNotExist:
             pass
+
+        remap_result: Dict[str, Any] | None = None
+        try:
+            remap_result = apply_template_configuration(project=new_project, template=template)
+        except Exception as exc:  # pragma: no cover - Mongo failures are non-fatal
+            logger.error(
+                "Failed to apply template configuration for project %s (template %s): %s",
+                new_project.pk,
+                template.pk,
+                exc,
+            )
+
+        molecule_id_map = (remap_result or {}).get("molecule_id_map") or {}
+        if molecule_id_map:
+            updated_state = remap_state_molecule_ids(state, molecule_id_map)
+            if updated_state != state:
+                state = updated_state
+                new_project.state = updated_state
+                new_project.save(update_fields=["state"])
 
         template.template_projects = (template.template_projects or []) + [
             ProjectSerializer(new_project).data
