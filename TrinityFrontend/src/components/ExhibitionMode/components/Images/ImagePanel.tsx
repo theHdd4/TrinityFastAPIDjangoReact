@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Image as ImageIcon, Loader2, Maximize2, Trash2, Upload, X } from 'lucide-react';
+import { Check, Image as ImageIcon, Loader2, Maximize2, Search, Trash2, Upload, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/use-toast';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
@@ -45,42 +46,28 @@ export interface ImagePanelProps {
   canEdit?: boolean;
 }
 
-export const stockImages: ReadonlyArray<{ url: string; title: string }> = [
-  {
-    url: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&q=80',
-    title: 'Business Analytics',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&q=80',
-    title: 'Data Dashboard',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1504868584819-f8e8b4b6d7e3?w=800&q=80',
-    title: 'Office Meeting',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1557426272-fc759fdf7a8d?w=800&q=80',
-    title: 'Collaboration',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=800&q=80',
-    title: 'Team Work',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=800&q=80',
-    title: 'Financial Reports',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1542744173-8e7e53415bb0?w=800&q=80',
-    title: 'Strategic Planning',
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1553877522-43269d4ea984?w=800&q=80',
-    title: 'Marketing',
-  },
-];
+const FREE_IMAGE_LIBRARY_ENDPOINT = 'https://pixabay.com/api/';
+const FREE_IMAGE_LIBRARY_FALLBACK_KEY = '53025349-5cb3ede8add7ca256da259955';
+
+const resolveFreeImageLibraryKey = (): string => {
+  const envKey = (import.meta.env?.VITE_PIXABAY_API_KEY as string | undefined) ?? undefined;
+  if (typeof envKey === 'string' && envKey.trim().length > 0) {
+    return envKey.trim();
+  }
+  return FREE_IMAGE_LIBRARY_FALLBACK_KEY;
+};
+
+const FREE_IMAGE_LIBRARY_KEY = resolveFreeImageLibraryKey();
 
 const SELECTED_CLASSES = 'border-primary ring-2 ring-primary/20';
+
+interface LibraryImage {
+  id: string;
+  url: string;
+  previewUrl: string;
+  label: string;
+  author?: string | null;
+}
 
 const buildDisplayUrl = (objectName: string): string => {
   const encoded = encodeURIComponent(objectName);
@@ -153,6 +140,81 @@ const normaliseStoredImage = (image: any): StoredImage | null => {
   };
 };
 
+const normaliseLibraryImage = (image: any): LibraryImage | null => {
+  if (!image) {
+    return null;
+  }
+
+  const id = (() => {
+    if (typeof image?.id === 'number' && Number.isFinite(image.id)) {
+      return String(image.id);
+    }
+    if (typeof image?.id === 'string' && image.id.trim().length > 0) {
+      return image.id.trim();
+    }
+    if (typeof image?.uuid === 'string' && image.uuid.trim().length > 0) {
+      return image.uuid.trim();
+    }
+    return null;
+  })();
+
+  const fullImageUrl = (() => {
+    const candidates = [
+      image?.largeImageURL,
+      image?.fullHDURL,
+      image?.imageURL,
+      image?.webformatURL,
+      image?.url,
+    ];
+    for (const value of candidates) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+    return null;
+  })();
+
+  const previewUrl = (() => {
+    const candidates = [image?.webformatURL, image?.previewURL, image?.thumbnailUrl, fullImageUrl];
+    for (const value of candidates) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value.trim();
+      }
+    }
+    return null;
+  })();
+
+  if (!id || !fullImageUrl || !previewUrl) {
+    return null;
+  }
+
+  const label = (() => {
+    if (typeof image?.tags === 'string' && image.tags.trim().length > 0) {
+      const tags = image.tags
+        .split(',')
+        .map((tag: string) => tag.trim())
+        .filter(Boolean);
+      if (tags.length > 0) {
+        return tags.slice(0, 2).join(' · ');
+      }
+    }
+    if (typeof image?.title === 'string' && image.title.trim().length > 0) {
+      return image.title.trim();
+    }
+    return 'Free image';
+  })();
+
+  const author = typeof image?.user === 'string' && image.user.trim().length > 0 ? image.user.trim() : null;
+
+  return {
+    id,
+    url: fullImageUrl,
+    previewUrl,
+    label,
+    author,
+  };
+};
+
 const buildUploadsPath = (context: ProjectContext | null): string | null => {
   if (!context) {
     return null;
@@ -205,9 +267,22 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     new Map<string, SelectedImage>(),
   );
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<LibraryImage[]>([]);
+  const [isSearchingLibrary, setIsSearchingLibrary] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [hasSearchedLibrary, setHasSearchedLibrary] = useState(false);
+  const [lastSearchTerm, setLastSearchTerm] = useState('');
+  const searchAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setProjectContext(getActiveProjectContext());
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      searchAbortRef.current?.abort();
+    };
   }, []);
 
   useEffect(() => {
@@ -270,6 +345,85 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   useEffect(() => {
     void fetchStoredImages();
   }, [fetchStoredImages]);
+
+  const performLibrarySearch = useCallback(
+    async (rawQuery: string) => {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+        searchAbortRef.current = null;
+      }
+
+      const trimmed = rawQuery.trim();
+      if (trimmed.length === 0) {
+        setIsSearchingLibrary(false);
+        setSearchError('Enter a search term to explore free images.');
+        setSearchResults([]);
+        setHasSearchedLibrary(false);
+        setLastSearchTerm('');
+        return;
+      }
+
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+
+      setIsSearchingLibrary(true);
+      setSearchError(null);
+      setHasSearchedLibrary(true);
+      setLastSearchTerm(trimmed);
+
+      try {
+        const params = new URLSearchParams({
+          key: FREE_IMAGE_LIBRARY_KEY,
+          q: trimmed,
+          image_type: 'photo',
+          orientation: 'horizontal',
+          safesearch: 'true',
+          per_page: '48',
+          editors_choice: 'true',
+        });
+
+        const response = await fetch(`${FREE_IMAGE_LIBRARY_ENDPOINT}?${params.toString()}`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Search failed (${response.status})`);
+        }
+
+        const payload = await response.json();
+        const mapped = Array.isArray(payload?.hits)
+          ? (payload.hits as any[])
+              .map(normaliseLibraryImage)
+              .filter((value): value is LibraryImage => Boolean(value))
+          : [];
+
+        setSearchResults(mapped);
+        setSelectedImage(prev => (prev?.source === 'stock' ? null : prev));
+        setSelectedUploads(prev => (prev.size === 0 ? prev : new Map<string, SelectedImage>()));
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        console.error('Unable to search images', error);
+        setSearchResults([]);
+        setSearchError('We could not load images. Please try again.');
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearchingLibrary(false);
+        }
+        searchAbortRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const handleLibrarySearchSubmit = useCallback(
+    (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      void performLibrarySearch(searchQuery);
+    },
+    [performLibrarySearch, searchQuery],
+  );
 
   const handleUploadToggle = useCallback(
     (image: StoredImage) => {
@@ -503,14 +657,15 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
         'grid gap-3',
         variant === 'fullscreen' ? 'grid-cols-3 xl:grid-cols-4' : 'grid-cols-2',
       );
-      const stockScrollClasses = cn(
+      const libraryScrollClasses = cn(
         'overflow-y-auto pr-1',
         variant === 'fullscreen' ? 'max-h-[55vh] pr-3' : 'max-h-64',
       );
-      const stockGridClasses = cn(
+      const libraryGridClasses = cn(
         'grid gap-3',
         variant === 'fullscreen' ? 'grid-cols-3 lg:grid-cols-4 xl:grid-cols-5' : 'grid-cols-2',
       );
+      const searchButtonDisabled = isSearchingLibrary || searchQuery.trim().length === 0;
 
       return (
         <div className={cn('space-y-5', paddingClasses)}>
@@ -622,45 +777,109 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
 
           <section className="space-y-3">
             <div className="space-y-1">
-              <p className="text-sm font-medium text-foreground">Stock images</p>
+              <p className="text-sm font-medium text-foreground">Search free images</p>
               <p className="text-xs text-muted-foreground">
-                Choose from curated royalty-free visuals.
+                Discover high-quality visuals to drop into your slide.
               </p>
             </div>
-            <div className={stockScrollClasses}>
-              <div className={stockGridClasses}>
-                {stockImages.map((image, index) => {
-                  const isSelected = selectedImage?.url === image.url;
-                  return (
-                    <button
-                      key={`stock-${index}`}
-                      type="button"
-                      onClick={() => handleImageClick({ url: image.url, title: image.title, source: 'stock' })}
-                      className={cn(
-                        'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                        canEdit && 'hover:scale-[1.02] hover:border-primary/40',
-                        isSelected ? SELECTED_CLASSES : 'border-border/60',
-                        !canEdit && 'cursor-not-allowed opacity-50',
-                      )}
-                      disabled={!canEdit}
-                    >
-                      <img src={image.url} alt={image.title} className="h-full w-full object-cover" />
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                        <p className="truncate text-[11px] font-medium text-white">{image.title}</p>
-                      </div>
-                      {isSelected && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
-                            <Check className="h-4 w-4 text-primary-foreground" />
-                          </div>
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
+            <form onSubmit={handleLibrarySearchSubmit} className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={searchQuery}
+                  onChange={event => {
+                    setSearchQuery(event.target.value);
+                    if (searchError) {
+                      setSearchError(null);
+                    }
+                  }}
+                  placeholder="Try searching for analytics, dashboards, or teams"
+                  className="h-9 flex-1"
+                  disabled={isSearchingLibrary}
+                />
+                <Button
+                  type="submit"
+                  className="h-9 px-4 text-xs"
+                  disabled={searchButtonDisabled}
+                >
+                  {isSearchingLibrary ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      Searching…
+                    </>
+                  ) : (
+                    <>
+                      <Search className="mr-1.5 h-3.5 w-3.5" />
+                      Search
+                    </>
+                  )}
+                </Button>
               </div>
-            </div>
+            </form>
+            {searchError ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                {searchError}
+              </div>
+            ) : null}
+            {isSearchingLibrary ? (
+              <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
+                Looking for images…
+              </div>
+            ) : searchResults.length > 0 ? (
+              <div className={libraryScrollClasses}>
+                <div className={libraryGridClasses}>
+                  {searchResults.map(image => {
+                    const isSelected = selectedImage?.url === image.url;
+                    return (
+                      <button
+                        key={image.id}
+                        type="button"
+                        onClick={() =>
+                          handleImageClick({
+                            url: image.url,
+                            title: image.label,
+                            label: image.author ? `${image.label} — ${image.author}` : image.label,
+                            source: 'stock',
+                          })
+                        }
+                        className={cn(
+                          'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                          canEdit && 'hover:scale-[1.02] hover:border-primary/40',
+                          isSelected ? SELECTED_CLASSES : 'border-border/60',
+                          !canEdit && 'cursor-not-allowed opacity-50',
+                        )}
+                        disabled={!canEdit}
+                      >
+                        <img src={image.previewUrl} alt={image.label} className="h-full w-full object-cover" />
+                        <div className="absolute inset-x-0 bottom-0 space-y-0.5 bg-gradient-to-t from-black/75 to-transparent p-2">
+                          <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
+                          {image.author && (
+                            <p className="truncate text-[10px] font-medium text-white/80">by {image.author}</p>
+                          )}
+                        </div>
+                        {isSelected && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+                              <Check className="h-4 w-4 text-primary-foreground" />
+                            </div>
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : hasSearchedLibrary && !searchError ? (
+              <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+                {lastSearchTerm
+                  ? `No images matched "${lastSearchTerm}". Try another search.`
+                  : 'No images found. Try another search.'}
+              </div>
+            ) : !hasSearchedLibrary ? (
+              <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+                Start by searching for the kind of image you need.
+              </div>
+            ) : null}
           </section>
         </div>
       );
@@ -670,11 +889,18 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
       canEdit,
       handleFileUpload,
       handleImageClick,
+      handleLibrarySearchSubmit,
       handleUploadToggle,
       isLoadingImages,
       isProcessingUpload,
+      isSearchingLibrary,
+      lastSearchTerm,
       selectedImage,
       selectedUploads,
+      searchError,
+      searchQuery,
+      searchResults,
+      hasSearchedLibrary,
       uploadsPath,
     ],
   );
@@ -755,7 +981,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
                 <div>
                   <DialogTitle className="text-2xl font-semibold text-foreground">Image library</DialogTitle>
                   <p className="text-sm text-muted-foreground">
-                    Browse uploads and stock visuals in a spacious view for confident selections.
+                    Browse uploads and explore free visuals in a spacious view for confident selections.
                   </p>
                 </div>
               </div>
