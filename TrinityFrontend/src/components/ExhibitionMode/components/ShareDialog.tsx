@@ -1,4 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import {
   Dialog,
   DialogContent,
@@ -45,11 +52,11 @@ import {
 } from '../utils/export';
 import { useExhibitionStore } from '../store/exhibitionStore';
 
-interface ShareDialogProps {
+type ShareDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectName?: string;
-}
+};
 
 const resolveShareLink = (link: string): string => {
   if (!link) {
@@ -227,13 +234,7 @@ const copyToClipboard = async (text: string, options?: CopyToClipboardOptions) =
 
 type DownloadKind = 'images' | 'pdf-digital' | 'pdf-print' | 'pptx';
 
-type DownloadStatus =
-  | 'queued'
-  | 'preparing'
-  | 'rendering'
-  | 'downloading'
-  | 'complete'
-  | 'error';
+type DownloadStatus = 'queued' | 'preparing' | 'rendering' | 'downloading' | 'complete' | 'error';
 
 type DownloadEntry = {
   id: string;
@@ -243,6 +244,45 @@ type DownloadEntry = {
   progress: number;
   message?: string;
   timestamp: number;
+};
+
+type DownloadAction =
+  | { type: 'enqueue'; entry: DownloadEntry }
+  | { type: 'update'; id: string; patch: Partial<DownloadEntry> }
+  | { type: 'complete'; id: string; message?: string }
+  | { type: 'fail'; id: string; message: string };
+
+const downloadsReducer = (state: DownloadEntry[], action: DownloadAction): DownloadEntry[] => {
+  switch (action.type) {
+    case 'enqueue':
+      return [...state, action.entry];
+    case 'update':
+      return state.map(entry => (entry.id === action.id ? { ...entry, ...action.patch } : entry));
+    case 'complete':
+      return state.map(entry =>
+        entry.id === action.id
+          ? {
+              ...entry,
+              status: 'complete',
+              progress: 100,
+              message: action.message ?? entry.message,
+            }
+          : entry,
+      );
+    case 'fail':
+      return state.map(entry =>
+        entry.id === action.id
+          ? {
+              ...entry,
+              status: 'error',
+              progress: entry.progress >= 100 ? entry.progress : 100,
+              message: action.message,
+            }
+          : entry,
+      );
+    default:
+      return state;
+  }
 };
 
 type ExportOption = {
@@ -309,7 +349,7 @@ const DownloadStatusBar: React.FC<{ downloads: DownloadEntry[] }> = ({ downloads
                 <span className="font-medium text-foreground">{item.label}</span>
                 <span className={statusAccentClass(item.status)}>{STATUS_LABELS[item.status]}</span>
               </div>
-              <Progress value={item.progress} className="h-2" />
+              <Progress value={Math.min(item.progress, 100)} className="h-2" />
               {item.message && (
                 <p
                   className={`text-[11px] leading-relaxed ${
@@ -349,15 +389,46 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     exhibitedCards: state.exhibitedCards,
     slideObjectsByCardId: state.slideObjectsByCardId,
   }));
-  const [downloads, setDownloads] = useState<DownloadEntry[]>([]);
-  const [activeDownload, setActiveDownload] = useState<{ id: string; kind: DownloadKind } | null>(null);
   const hasSlides = exhibitedCards.length > 0;
+  const [downloads, dispatchDownloads] = useReducer(downloadsReducer, []);
+  const [activeDownload, setActiveDownload] = useState<{ id: string; kind: DownloadKind } | null>(null);
 
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
+  }, []);
+
+  const beginDownload = useCallback((kind: DownloadKind): string => {
+    const id = `${kind}-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
+    dispatchDownloads({
+      type: 'enqueue',
+      entry: {
+        id,
+        kind,
+        label: DOWNLOAD_LABELS[kind],
+        status: 'queued',
+        progress: 6,
+        timestamp: Date.now(),
+      },
+    });
+    setActiveDownload({ id, kind });
+    return id;
+  }, []);
+
+  const updateDownload = useCallback((id: string, patch: Partial<DownloadEntry>) => {
+    dispatchDownloads({ type: 'update', id, patch });
+  }, []);
+
+  const completeDownload = useCallback((id: string, message?: string) => {
+    dispatchDownloads({ type: 'complete', id, message });
+    setActiveDownload(current => (current?.id === id ? null : current));
+  }, []);
+
+  const failDownload = useCallback((id: string, message: string) => {
+    dispatchDownloads({ type: 'fail', id, message });
+    setActiveDownload(current => (current?.id === id ? null : current));
   }, []);
 
   const runShareLinkGeneration = useCallback(async () => {
@@ -508,81 +579,18 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
     }
   }, [embedCode, isGenerating]);
 
-  const beginDownload = useCallback(
-    (kind: DownloadKind): string => {
-      const id = `${kind}-${Date.now()}`;
-      const label = DOWNLOAD_LABELS[kind];
-      setDownloads(prev => {
-        const entry: DownloadEntry = {
-          id,
-          kind,
-          label,
-          status: 'queued',
-          progress: 6,
-          message: 'Queued for export…',
-          timestamp: Date.now(),
-        };
-        const next = [...prev, entry];
-        return next.slice(-8);
-      });
-      setActiveDownload({ id, kind });
-      return id;
-    },
-    [],
-  );
-
-  const updateDownload = useCallback((id: string, patch: Partial<DownloadEntry>) => {
-    setDownloads(prev =>
-      prev.map(entry =>
-        entry.id === id
-          ? {
-              ...entry,
-              ...patch,
-              timestamp: patch.timestamp ?? entry.timestamp,
-            }
-          : entry,
-      ),
-    );
-  }, []);
-
-  const completeDownload = useCallback(
-    (id: string, message: string) => {
-      updateDownload(id, {
-        status: 'complete',
-        progress: 100,
-        message,
-        timestamp: Date.now(),
-      });
-      setActiveDownload(null);
-    },
-    [updateDownload],
-  );
-
-  const failDownload = useCallback(
-    (id: string, message: string) => {
-      updateDownload(id, {
-        status: 'error',
-        progress: 8,
-        message,
-        timestamp: Date.now(),
-      });
-      setActiveDownload(null);
-    },
-    [updateDownload],
-  );
-
-  const handleExportDownload = useCallback(
+  const handleDownload = useCallback(
     async (kind: DownloadKind) => {
       if (!hasSlides) {
         toast.error('No slides to export', {
-          description: 'Add at least one exhibition slide before exporting.',
+          description: 'Add at least one slide to your exhibition before exporting.',
         });
         return;
       }
 
-      if (activeDownload) {
-        toast.error('Export already in progress', {
-          description: 'Please wait for the current download to finish before starting another.',
+      if (activeDownload && activeDownload.kind === kind) {
+        toast.info('Export already in progress', {
+          description: 'Please wait for the current download to finish.',
         });
         return;
       }
@@ -592,8 +600,8 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
       try {
         updateDownload(downloadId, {
           status: 'preparing',
-          progress: 14,
-          message: 'Serialising slide layouts and theme data…',
+          progress: 18,
+          message: 'Collecting slide data and theme assets…',
         });
 
         const prepared = await prepareSlidesForExport(exhibitedCards, {
@@ -612,7 +620,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         updateDownload(downloadId, {
           status: 'rendering',
-          progress: requiresImageCapture(kind) ? 36 : 32,
+          progress: requiresImageCapture(kind) ? 38 : 32,
           message: requiresImageCapture(kind)
             ? 'Capturing high-resolution slide imagery with html2canvas…'
             : 'Normalising slide JSON for backend rendering…',
@@ -627,7 +635,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         updateDownload(downloadId, {
           status: 'rendering',
-          progress: 54,
+          progress: 56,
           message: 'Packaging structured slide data for delivery…',
         });
 
@@ -664,7 +672,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
 
         updateDownload(downloadId, {
           status: 'downloading',
-          progress: 72,
+          progress: 74,
           message:
             pdfMode === 'print'
               ? 'Generating a vector print PDF with FastAPI + ReportLab…'
@@ -941,98 +949,72 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
             </div>
           </TabsContent>
 
-          <TabsContent value="export" className="px-6 py-4 mt-0 space-y-5">
-            <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-2">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-muted-foreground/80">
-                Hybrid export pipeline
-              </p>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Trinity mirrors Canva’s hybrid export architecture: html2canvas delivers instant PNG/JPEG captures in the
-                browser, FastAPI streams PDFs as either flattened digital documents or vector-rich print files, and
-                python-pptx rebuilds the slide JSON for fully editable decks.
-              </p>
-            </div>
+          <TabsContent value="export" className="px-6 py-4 mt-0 space-y-4">
+            {!hasSlides && (
+              <div className="flex items-start gap-2 rounded-md border border-dashed border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">
+                <AlertCircle className="h-4 w-4 mt-0.5" />
+                <p>Add at least one slide to enable exports.</p>
+              </div>
+            )}
 
-            <div className="grid gap-3">
+            <div className="space-y-3">
               {exportOptions.map(option => {
                 const Icon = option.icon;
-                const isActive = activeDownload?.kind === option.kind;
-                const latest = (() => {
-                  for (let index = downloads.length - 1; index >= 0; index -= 1) {
-                    const entry = downloads[index];
-                    if (entry.kind === option.kind) {
-                      return entry;
-                    }
-                  }
-                  return null;
-                })();
-
+                const isBusy = activeDownload?.kind === option.kind;
                 return (
-                  <Button
+                  <div
                     key={option.kind}
-                    variant="outline"
-                    className="w-full justify-start h-auto py-4 px-4 border border-border/70 bg-card hover:bg-muted transition-colors"
-                    onClick={() => handleExportDownload(option.kind)}
-                    disabled={!hasSlides || Boolean(activeDownload)}
+                    className="rounded-lg border border-border/60 bg-background/70 p-4 transition-colors hover:bg-background"
                   >
-                    <div className="flex items-start gap-4 w-full">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                        {isActive ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon className="h-5 w-5" />}
-                      </div>
-                      <div className="flex-1 space-y-2 text-left">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-base font-semibold text-foreground">{option.title}</span>
-                          <span className="text-[10px] font-semibold uppercase tracking-[0.24em] px-2 py-0.5 rounded-full border border-border/50 text-muted-foreground/90">
-                            {option.badge}
-                          </span>
-                          {isActive && (
-                            <span className="flex items-center gap-1 text-xs text-primary">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              In progress…
-                            </span>
-                          )}
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
+                            <Icon className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-medium text-sm text-foreground">{option.title}</p>
+                              <span className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                                {option.badge}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{option.description}</p>
+                          </div>
                         </div>
-                        <p className="text-sm text-muted-foreground leading-relaxed">{option.description}</p>
-                        <p className="text-xs text-muted-foreground/80">{option.footnote}</p>
+                        <p className="text-[11px] text-muted-foreground">{option.footnote}</p>
                       </div>
-                      <div className="flex flex-col items-end gap-1 text-xs">
-                        <span className={latest ? statusAccentClass(latest.status) : 'text-muted-foreground'}>
-                          {latest ? STATUS_LABELS[latest.status] : 'Ready'}
-                        </span>
-                        {latest?.message && latest.status !== 'complete' && latest.status !== 'error' && (
-                          <span className="text-[11px] text-muted-foreground/80 max-w-[12rem] text-right">
-                            {latest.message}
-                          </span>
+                      <Button
+                        onClick={() => void handleDownload(option.kind)}
+                        disabled={isBusy || !hasSlides}
+                        variant="secondary"
+                      >
+                        {isBusy ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Working…
+                          </>
+                        ) : (
+                          <>
+                            <Download className="h-4 w-4 mr-2" />
+                            Download
+                          </>
                         )}
-                      </div>
+                      </Button>
                     </div>
-                  </Button>
+                  </div>
                 );
               })}
             </div>
-
-            {!hasSlides && (
-              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-                <AlertCircle className="h-4 w-4 mt-0.5" />
-                <span>Add at least one slide to enable exports.</span>
-              </div>
-            )}
           </TabsContent>
 
-          <TabsContent value="embed" className="px-6 py-4 mt-0">
+          <TabsContent value="embed" className="px-6 py-4 mt-0 space-y-4">
             <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">Embed this exhibition on your website.</p>
-              <div className="bg-muted p-3 rounded-lg font-mono text-xs">
-                {shareError
-                  ? 'Embed code unavailable until a share link is generated.'
-                  : embedCode || (isGenerating ? 'Generating embed code...' : 'Generate a share link to view the embed code.')}
-              </div>
-              <Button
-                variant="secondary"
-                className="w-full"
-                onClick={handleCopyEmbed}
-                disabled={!embedCode || isGenerating}
-              >
+              <p className="text-sm text-muted-foreground">
+                Embed this exhibition into dashboards, microsites, or documentation.
+              </p>
+              <Input value={embedCode} readOnly className="font-mono text-xs h-24" />
+              <Button onClick={handleCopyEmbed} disabled={!embedCode || isGenerating}>
                 {embedCopied ? (
                   <>
                     <Check className="h-4 w-4 mr-2" />

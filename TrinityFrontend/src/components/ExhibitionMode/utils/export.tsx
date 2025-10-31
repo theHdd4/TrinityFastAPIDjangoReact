@@ -1,5 +1,6 @@
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import html2canvas from 'html2canvas';
 
 import { EXHIBITION_API } from '@/lib/api';
 import {
@@ -65,17 +66,6 @@ const clonePlainObject = <T,>(value: T): T => {
 };
 
 const DATA_URL_PATTERN = /^data:image\//i;
-
-type Html2CanvasFn = (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
-
-let html2CanvasPromise: Promise<Html2CanvasFn> | null = null;
-
-const loadHtml2Canvas = async (): Promise<Html2CanvasFn> => {
-  if (!html2CanvasPromise) {
-    html2CanvasPromise = import('html2canvas').then(module => (module.default ?? module) as Html2CanvasFn);
-  }
-  return html2CanvasPromise;
-};
 
 const imageDataUrlCache = new Map<string, Promise<string>>();
 
@@ -580,8 +570,6 @@ export const prepareSlidesForExport = async (
         slideElement.style.margin = '0';
 
         try {
-          const html2canvas = await loadHtml2Canvas();
-
           while (attempt < MAX_CAPTURE_ATTEMPTS && !dataUrl) {
             attempt += 1;
 
