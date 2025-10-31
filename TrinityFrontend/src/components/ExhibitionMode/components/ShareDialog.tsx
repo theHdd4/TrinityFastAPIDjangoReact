@@ -343,7 +343,7 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareExpiresAt, setShareExpiresAt] = useState<string | null>(null);
   const generationIdRef = useRef(0);
-  const isMountedRef = useRef(true);
+  const isMountedRef = useRef(false);
   const shareLinkInputRef = useRef<HTMLInputElement | null>(null);
   const { exhibitedCards, slideObjectsByCardId } = useExhibitionStore(state => ({
     exhibitedCards: state.exhibitedCards,
@@ -408,14 +408,38 @@ export const ShareDialog: React.FC<ShareDialogProps> = ({
   useEffect(() => {
     if (open) {
       void runShareLinkGeneration();
-    } else {
-      setShareLink('');
-      setShareExpiresAt(null);
-      setShareError(null);
-      setCopied(false);
-      setEmbedCopied(false);
     }
   }, [open, runShareLinkGeneration]);
+
+  useEffect(() => {
+    if (open) {
+      return;
+    }
+
+    if (shareLink !== '') {
+      setShareLink('');
+    }
+
+    if (shareExpiresAt !== null) {
+      setShareExpiresAt(null);
+    }
+
+    if (shareError !== null) {
+      setShareError(null);
+    }
+
+    if (copied) {
+      setCopied(false);
+    }
+
+    if (embedCopied) {
+      setEmbedCopied(false);
+    }
+
+    if (isGenerating) {
+      setIsGenerating(false);
+    }
+  }, [open, shareLink, shareExpiresAt, shareError, copied, embedCopied, isGenerating]);
 
   const handleGenerateNewLink = useCallback(() => {
     void runShareLinkGeneration();
