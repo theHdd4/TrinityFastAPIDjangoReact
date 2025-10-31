@@ -1,19 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Image as ImageIcon, Loader2, Search, Trash2, Upload, X } from 'lucide-react';
+import { Check, Image as ImageIcon, Loader2, Maximize2, Trash2, Upload, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/components/ui/use-toast';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { IMAGES_API } from '@/lib/api';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
 
-const PIXABAY_API_ENDPOINT = 'https://pixabay.com/api/';
-const DEFAULT_PIXABAY_QUERY = 'business analytics';
-const FALLBACK_PIXABAY_API_KEY = '53025349-5cb3ede8add7ca256da259955';
-
-export type ImagePanelSource = 'stock' | 'upload' | 'existing' | 'pixabay';
+export type ImagePanelSource = 'stock' | 'upload' | 'existing';
 
 export interface ImageSelectionMetadata {
   title?: string | null;
@@ -33,14 +29,6 @@ interface SelectedImage {
   label?: string | null;
   title?: string | null;
   source: ImagePanelSource;
-}
-
-interface PixabayImage {
-  id: string;
-  previewUrl: string;
-  fullUrl: string;
-  title: string;
-  attribution: string | null;
 }
 
 export type ImageSelectionRequest = {
@@ -97,47 +85,6 @@ const SELECTED_CLASSES = 'border-primary ring-2 ring-primary/20';
 const buildDisplayUrl = (objectName: string): string => {
   const encoded = encodeURIComponent(objectName);
   return `${IMAGES_API}/content?object_name=${encoded}`;
-};
-
-const normalisePixabayImage = (value: any): PixabayImage | null => {
-  if (!value) {
-    return null;
-  }
-
-  const previewUrl =
-    typeof value.webformatURL === 'string'
-      ? value.webformatURL
-      : typeof value.previewURL === 'string'
-      ? value.previewURL
-      : null;
-  const fullUrl =
-    typeof value.largeImageURL === 'string'
-      ? value.largeImageURL
-      : typeof value.fullHDURL === 'string'
-      ? value.fullHDURL
-      : previewUrl;
-
-  if (!previewUrl || !fullUrl) {
-    return null;
-  }
-
-  const id = String(value.id ?? fullUrl);
-  const tags = typeof value.tags === 'string' ? value.tags : '';
-  const user = typeof value.user === 'string' && value.user.trim().length > 0 ? value.user.trim() : null;
-  const titleBase = tags
-    .split(',')
-    .map((tag: string) => tag.trim())
-    .filter(Boolean)
-    .shift();
-  const title = titleBase ? `${titleBase} (${user ?? 'Pixabay'})` : user ? `Pixabay • ${user}` : 'Pixabay image';
-
-  return {
-    id,
-    previewUrl,
-    fullUrl,
-    title,
-    attribution: user ? `Pixabay • ${user}` : 'Pixabay',
-  };
 };
 
 const normaliseStoredImage = (image: any): StoredImage | null => {
@@ -257,16 +204,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
   const [selectedUploads, setSelectedUploads] = useState<Map<string, SelectedImage>>(
     new Map<string, SelectedImage>(),
   );
-  const [pixabayQuery, setPixabayQuery] = useState(DEFAULT_PIXABAY_QUERY);
-  const [pixabayImages, setPixabayImages] = useState<PixabayImage[]>([]);
-  const [isSearchingPixabay, setIsSearchingPixabay] = useState(false);
-  const [pixabayError, setPixabayError] = useState<string | null>(null);
-  const [hasPixabaySearched, setHasPixabaySearched] = useState(false);
-  const [lastPixabayQuery, setLastPixabayQuery] = useState(DEFAULT_PIXABAY_QUERY);
-
-  const pixabayApiKey =
-    (import.meta.env.VITE_PIXABAY_API_KEY as string | undefined)?.trim() ?? FALLBACK_PIXABAY_API_KEY;
-  const isPixabayConfigured = pixabayApiKey.length > 0;
+  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
 
   useEffect(() => {
     setProjectContext(getActiveProjectContext());
@@ -368,114 +306,6 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     },
     [canEdit],
   );
-
-  const performPixabaySearch = useCallback(
-    async (query: string, signal?: AbortSignal) => {
-      if (!isPixabayConfigured) {
-        return;
-      }
-
-      const trimmedQuery = query.trim();
-      if (trimmedQuery.length === 0) {
-        setPixabayImages([]);
-        setHasPixabaySearched(false);
-        setPixabayError(null);
-        setIsSearchingPixabay(false);
-        return;
-      }
-
-      setIsSearchingPixabay(true);
-      setPixabayError(null);
-
-      try {
-        const params = new URLSearchParams({
-          key: pixabayApiKey,
-          q: trimmedQuery,
-          image_type: 'photo',
-          orientation: 'horizontal',
-          safesearch: 'true',
-          per_page: '40',
-        });
-
-        const response = await fetch(`${PIXABAY_API_ENDPOINT}?${params.toString()}`, {
-          signal,
-        });
-
-        if (!response.ok) {
-          throw new Error(`Pixabay request failed (${response.status})`);
-        }
-
-        const payload = await response.json();
-        if (signal?.aborted) {
-          return;
-        }
-
-        const mapped = Array.isArray(payload?.hits)
-          ? (payload.hits as any[])
-              .map(normalisePixabayImage)
-              .filter((value): value is PixabayImage => Boolean(value))
-          : [];
-
-        setPixabayImages(mapped);
-        setHasPixabaySearched(true);
-        setLastPixabayQuery(trimmedQuery);
-      } catch (error) {
-        if (
-          (error instanceof DOMException && error.name === 'AbortError') ||
-          (typeof error === 'object' && error !== null && 'name' in error && (error as any).name === 'AbortError')
-        ) {
-          return;
-        }
-        console.error('Unable to fetch Pixabay images', error);
-        setPixabayError(
-          error instanceof Error
-            ? error.message
-            : 'We were unable to fetch images from Pixabay at this time.',
-        );
-      } finally {
-        if (!signal?.aborted) {
-          setIsSearchingPixabay(false);
-        }
-      }
-    },
-    [isPixabayConfigured, pixabayApiKey],
-  );
-
-  const handlePixabaySubmit = useCallback(
-    (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      if (!isPixabayConfigured) {
-        return;
-      }
-
-      void performPixabaySearch(pixabayQuery);
-    },
-    [isPixabayConfigured, performPixabaySearch, pixabayQuery],
-  );
-
-  const handlePixabayRetry = useCallback(() => {
-    if (!isPixabayConfigured) {
-      return;
-    }
-
-    void performPixabaySearch(lastPixabayQuery || pixabayQuery);
-  }, [isPixabayConfigured, lastPixabayQuery, performPixabaySearch, pixabayQuery]);
-
-  useEffect(() => {
-    if (!isPixabayConfigured) {
-      setPixabayImages([]);
-      setHasPixabaySearched(false);
-      setPixabayError(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    void performPixabaySearch(DEFAULT_PIXABAY_QUERY, controller.signal);
-
-    return () => {
-      controller.abort();
-    };
-  }, [isPixabayConfigured, performPixabaySearch]);
 
   const handleFileUpload = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -659,322 +489,333 @@ const ImagePanel: React.FC<ImagePanelProps> = ({
     ? `Insert ${selectedUploadCount} images`
     : 'Insert image';
 
+  const openFullscreen = useCallback(() => setIsFullscreenOpen(true), []);
+  const closeFullscreen = useCallback(() => setIsFullscreenOpen(false), []);
+
+  const renderImageSections = useCallback(
+    (variant: 'default' | 'fullscreen' = 'default') => {
+      const paddingClasses = variant === 'fullscreen' ? 'space-y-6 px-8 py-8' : 'space-y-5 px-5 py-5';
+      const uploadsScrollClasses = cn(
+        'overflow-y-auto pr-1',
+        variant === 'fullscreen' ? 'max-h-[50vh] pr-3' : 'max-h-48',
+      );
+      const uploadsGridClasses = cn(
+        'grid gap-3',
+        variant === 'fullscreen' ? 'grid-cols-3 xl:grid-cols-4' : 'grid-cols-2',
+      );
+      const stockScrollClasses = cn(
+        'overflow-y-auto pr-1',
+        variant === 'fullscreen' ? 'max-h-[55vh] pr-3' : 'max-h-64',
+      );
+      const stockGridClasses = cn(
+        'grid gap-3',
+        variant === 'fullscreen' ? 'grid-cols-3 lg:grid-cols-4 xl:grid-cols-5' : 'grid-cols-2',
+      );
+
+      return (
+        <div className={cn('space-y-5', paddingClasses)}>
+          <section className="space-y-3">
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-foreground">Upload images</p>
+              <p className="text-xs text-muted-foreground">
+                Add images to place them anywhere on the slide.
+              </p>
+              {uploadsPath ? (
+                <p className="text-[11px] text-muted-foreground">
+                  Shared uploads for this project live at{' '}
+                  <span className="font-medium text-foreground">{uploadsPath}</span>.
+                </p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">
+                  Connect to a project to sync and reuse shared uploads.
+                </p>
+              )}
+            </div>
+            <div className="rounded-xl border-2 border-dashed border-border p-4 transition-colors hover:border-primary/50">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+                disabled={!canEdit || isProcessingUpload}
+              />
+              <Button
+                variant="outline"
+                className="flex h-20 w-full items-center justify-center"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!canEdit || isProcessingUpload}
+              >
+                {isProcessingUpload ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processing…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="mr-2 h-5 w-5" />
+                    Upload your image
+                  </>
+                )}
+              </Button>
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-medium text-foreground">Your uploads</p>
+              {isLoadingImages && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+            </div>
+
+            {isLoadingImages ? (
+              <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
+                Loading images…
+              </div>
+            ) : availableUploads.length > 0 ? (
+              <>
+                <p className="text-[11px] text-muted-foreground">
+                  Tip: Click multiple uploads to insert them together.
+                </p>
+                <div className={uploadsScrollClasses}>
+                  <div className={uploadsGridClasses}>
+                    {availableUploads.map(image => {
+                      const isSelected = selectedUploads.has(image.id);
+                      return (
+                        <button
+                          key={image.id}
+                          type="button"
+                          onClick={() => handleUploadToggle(image)}
+                          className={cn(
+                            'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                            canEdit && 'hover:scale-[1.02] hover:border-primary/40',
+                            isSelected ? SELECTED_CLASSES : 'border-border/60',
+                            !canEdit && 'cursor-not-allowed opacity-50',
+                          )}
+                          disabled={!canEdit}
+                          aria-pressed={isSelected}
+                        >
+                          <img src={image.displayUrl} alt={image.label} className="h-full w-full object-cover" />
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
+                            <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
+                          </div>
+                          {isSelected && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+                                <Check className="h-4 w-4 text-primary-foreground" />
+                              </div>
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+                Upload images to see them here during this session. Connect to a project to access shared uploads.
+              </div>
+            )}
+          </section>
+
+          <section className="space-y-3">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-foreground">Stock images</p>
+              <p className="text-xs text-muted-foreground">
+                Choose from curated royalty-free visuals.
+              </p>
+            </div>
+            <div className={stockScrollClasses}>
+              <div className={stockGridClasses}>
+                {stockImages.map((image, index) => {
+                  const isSelected = selectedImage?.url === image.url;
+                  return (
+                    <button
+                      key={`stock-${index}`}
+                      type="button"
+                      onClick={() => handleImageClick({ url: image.url, title: image.title, source: 'stock' })}
+                      className={cn(
+                        'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                        canEdit && 'hover:scale-[1.02] hover:border-primary/40',
+                        isSelected ? SELECTED_CLASSES : 'border-border/60',
+                        !canEdit && 'cursor-not-allowed opacity-50',
+                      )}
+                      disabled={!canEdit}
+                    >
+                      <img src={image.url} alt={image.title} className="h-full w-full object-cover" />
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
+                        <p className="truncate text-[11px] font-medium text-white">{image.title}</p>
+                      </div>
+                      {isSelected && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
+                            <Check className="h-4 w-4 text-primary-foreground" />
+                          </div>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    },
+    [
+      availableUploads,
+      canEdit,
+      handleFileUpload,
+      handleImageClick,
+      handleUploadToggle,
+      isLoadingImages,
+      isProcessingUpload,
+      selectedImage,
+      selectedUploads,
+      uploadsPath,
+    ],
+  );
+
+  const renderFooter = useCallback(
+    (variant: 'default' | 'fullscreen' = 'default') => (
+      <div
+        className={cn(
+          'border-t border-border/60',
+          variant === 'fullscreen' ? 'px-8 py-6' : 'px-5 py-4',
+        )}
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {onRemoveImage && currentImage ? (
+            <Button
+              variant="ghost"
+              type="button"
+              className="h-9 px-3 text-xs text-destructive"
+              onClick={handleRemove}
+              disabled={!canEdit || isProcessingUpload}
+            >
+              <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+              Remove image
+            </Button>
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2 sm:ml-auto">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={variant === 'fullscreen' ? closeFullscreen : onClose}
+              className="h-9 px-4 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => {
+                handleInsertImage();
+                if (variant === 'fullscreen') {
+                  closeFullscreen();
+                }
+              }}
+              disabled={insertDisabled}
+              className="h-9 px-4 text-xs"
+            >
+              {insertLabel}
+            </Button>
+          </div>
+        </div>
+      </div>
+    ),
+    [
+      canEdit,
+      closeFullscreen,
+      currentImage,
+      handleInsertImage,
+      handleRemove,
+      insertDisabled,
+      insertLabel,
+      isProcessingUpload,
+      onClose,
+      onRemoveImage,
+    ],
+  );
+
   return (
-    <div className="flex h-full w-full max-w-[22rem] flex-col rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
+    <>
+      <Dialog open={isFullscreenOpen} onOpenChange={state => setIsFullscreenOpen(state)}>
+        <DialogContent className="max-w-6xl w-[92vw] h-[85vh] p-0 gap-0 overflow-hidden border border-border/60 bg-background shadow-[0_20px_60px_rgba(15,23,42,0.25)]">
+          <DialogHeader className="px-8 py-6 border-b border-border/60 bg-muted/30">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center ring-1 ring-primary/20">
+                  <ImageIcon className="h-6 w-6 text-primary" />
+                </div>
+                <div>
+                  <DialogTitle className="text-2xl font-semibold text-foreground">Image library</DialogTitle>
+                  <p className="text-sm text-muted-foreground">
+                    Browse uploads and stock visuals in a spacious view for confident selections.
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 rounded-lg hover:bg-muted transition-colors"
+                onClick={closeFullscreen}
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </div>
+          </DialogHeader>
+
+          <div className="flex flex-1 flex-col overflow-hidden bg-muted/10">
+            <ScrollArea className="flex-1">
+              {renderImageSections('fullscreen')}
+            </ScrollArea>
+            {renderFooter('fullscreen')}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <div className="flex h-full w-full max-w-[22rem] flex-col rounded-3xl border border-border/70 bg-background/95 shadow-2xl">
       <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
         <div className="flex items-center gap-2">
           <ImageIcon className="h-4 w-4 text-muted-foreground" />
           <h3 className="text-lg font-semibold text-foreground">Images</h3>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          type="button"
-          className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
-          onClick={onClose}
-        >
-          <X className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+            onClick={openFullscreen}
+            aria-label="Open full screen image library"
+          >
+            <Maximize2 className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col overflow-hidden">
         <ScrollArea className="flex-1">
-          <div className="space-y-5 px-5 py-5">
-            <section className="space-y-3">
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-foreground">Upload images</p>
-                <p className="text-xs text-muted-foreground">
-                  Add images to place them anywhere on the slide.
-                </p>
-                {uploadsPath ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    Shared uploads for this project live at{' '}
-                    <span className="font-medium text-foreground">{uploadsPath}</span>.
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-muted-foreground">
-                    Connect to a project to sync and reuse shared uploads.
-                  </p>
-                )}
-              </div>
-              <div className="rounded-xl border-2 border-dashed border-border p-4 transition-colors hover:border-primary/50">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                  disabled={!canEdit || isProcessingUpload}
-                />
-                <Button
-                  variant="outline"
-                  className="flex h-20 w-full items-center justify-center"
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={!canEdit || isProcessingUpload}
-                >
-                  {isProcessingUpload ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Processing…
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="mr-2 h-5 w-5" />
-                      Upload your image
-                    </>
-                  )}
-                </Button>
-              </div>
-            </section>
-
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-foreground">Your uploads</p>
-                {isLoadingImages && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
-              </div>
-
-              {isLoadingImages ? (
-                <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
-                  Loading images…
-                </div>
-              ) : availableUploads.length > 0 ? (
-                <>
-                  <p className="text-[11px] text-muted-foreground">
-                    Tip: Click multiple uploads to insert them together.
-                  </p>
-                  <div className="max-h-48 overflow-y-auto pr-1">
-                    <div className="grid grid-cols-2 gap-3">
-                      {availableUploads.map(image => {
-                        const isSelected = selectedUploads.has(image.id);
-                        return (
-                          <button
-                            key={image.id}
-                            type="button"
-                            onClick={() => handleUploadToggle(image)}
-                            className={cn(
-                              'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
-                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                              canEdit && 'hover:scale-[1.02] hover:border-primary/40',
-                              isSelected ? SELECTED_CLASSES : 'border-border/60',
-                              !canEdit && 'cursor-not-allowed opacity-50',
-                            )}
-                            disabled={!canEdit}
-                            aria-pressed={isSelected}
-                          >
-                            <img src={image.displayUrl} alt={image.label} className="h-full w-full object-cover" />
-                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-2">
-                              <p className="truncate text-[11px] font-medium text-white">{image.label}</p>
-                            </div>
-                            {isSelected && (
-                              <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
-                                  <Check className="h-4 w-4 text-primary-foreground" />
-                                </div>
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
-                  Upload images to see them here during this session. Connect to a project to access shared uploads.
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-foreground">Pixabay free images</p>
-                <p className="text-xs text-muted-foreground">
-                  Search millions of royalty-free visuals from Pixabay.
-                </p>
-              </div>
-
-              {isPixabayConfigured ? (
-                <div className="space-y-3">
-                  <form className="flex items-center gap-2" onSubmit={handlePixabaySubmit}>
-                    <div className="relative flex-1">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        value={pixabayQuery}
-                        onChange={event => setPixabayQuery(event.target.value)}
-                        placeholder="Search Pixabay (e.g. data visualization)"
-                        className="h-9 rounded-lg border border-border/60 bg-background pl-9 text-sm"
-                        disabled={!canEdit}
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      className="h-9 px-3 text-xs"
-                      disabled={!canEdit || isSearchingPixabay}
-                    >
-                      {isSearchingPixabay ? (
-                        <>
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          Searching…
-                        </>
-                      ) : (
-                        'Search'
-                      )}
-                    </Button>
-                  </form>
-
-                  {pixabayError ? (
-                    <div className="space-y-2 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-4 text-xs text-destructive">
-                      <p>We couldn’t load Pixabay images.</p>
-                      <div className="flex flex-wrap gap-2">
-                        <Button type="button" size="sm" variant="ghost" className="h-7 px-3 text-xs" onClick={handlePixabayRetry}>
-                          Try again
-                        </Button>
-                        <p className="text-[11px] text-destructive/80">{pixabayError}</p>
-                      </div>
-                    </div>
-                  ) : isSearchingPixabay ? (
-                    <div className="flex h-32 items-center justify-center rounded-lg border border-dashed border-border/70 text-xs text-muted-foreground">
-                      Fetching images from Pixabay…
-                    </div>
-                  ) : pixabayImages.length > 0 ? (
-                    <>
-                      <div className="max-h-64 overflow-y-auto pr-1">
-                        <div className="grid grid-cols-2 gap-3">
-                          {pixabayImages.map(image => {
-                            const isSelected = selectedImage?.url === image.fullUrl;
-                            return (
-                              <button
-                                key={image.id}
-                                type="button"
-                                onClick={() =>
-                                  handleImageClick({
-                                    url: image.fullUrl,
-                                    title: image.title,
-                                    label: image.title,
-                                    source: 'pixabay',
-                                  })
-                                }
-                                className={cn(
-                                  'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
-                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                                  canEdit && 'hover:scale-[1.02] hover:border-primary/40',
-                                  isSelected ? SELECTED_CLASSES : 'border-border/60',
-                                  !canEdit && 'cursor-not-allowed opacity-75',
-                                )}
-                                disabled={!canEdit}
-                              >
-                                <img src={image.previewUrl} alt={image.title} className="h-full w-full object-cover" />
-                                <div className="absolute inset-x-0 bottom-0 space-y-0.5 bg-gradient-to-t from-black/70 to-transparent p-2">
-                                  <p className="truncate text-[11px] font-medium text-white">{image.title}</p>
-                                  {image.attribution && (
-                                    <p className="truncate text-[10px] text-white/80">{image.attribution}</p>
-                                  )}
-                                </div>
-                                {isSelected && (
-                                  <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
-                                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
-                                      <Check className="h-4 w-4 text-primary-foreground" />
-                                    </div>
-                                  </div>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </>
-                  ) : hasPixabaySearched ? (
-                    <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
-                      No Pixabay results for “{lastPixabayQuery}”. Try another search.
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground">
-                      Try searching for terms like “business intelligence”, “data analytics”, or “teamwork”.
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
-                  Add a <span className="font-medium text-foreground">VITE_PIXABAY_API_KEY</span> environment variable to enable Pixabay search.
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-foreground">Stock images</p>
-                <p className="text-xs text-muted-foreground">
-                  Choose from curated royalty-free visuals.
-                </p>
-              </div>
-              <div className="max-h-64 overflow-y-auto pr-1">
-                <div className="grid grid-cols-2 gap-3">
-                  {stockImages.map((image, index) => {
-                    const isSelected = selectedImage?.url === image.url;
-                    return (
-                      <button
-                        key={`stock-${index}`}
-                        type="button"
-                        onClick={() => handleImageClick({ url: image.url, title: image.title, source: 'stock' })}
-                        className={cn(
-                          'group relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                          canEdit && 'hover:scale-[1.02] hover:border-primary/40',
-                          isSelected ? SELECTED_CLASSES : 'border-border/60',
-                          !canEdit && 'cursor-not-allowed opacity-50',
-                        )}
-                        disabled={!canEdit}
-                      >
-                        <img src={image.url} alt={image.title} className="h-full w-full object-cover" />
-                        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-2">
-                          <p className="truncate text-[11px] font-medium text-white">{image.title}</p>
-                        </div>
-                        {isSelected && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-primary/20">
-                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary">
-                              <Check className="h-4 w-4 text-primary-foreground" />
-                            </div>
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </section>
-          </div>
+          {renderImageSections('default')}
         </ScrollArea>
-
-        <div className="border-t border-border/60 px-5 py-4">
-          <div className="flex items-center justify-between">
-            {onRemoveImage && currentImage ? (
-              <Button
-                variant="ghost"
-                type="button"
-                className="h-9 px-3 text-xs text-destructive"
-                onClick={handleRemove}
-                disabled={!canEdit || isProcessingUpload}
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                Remove image
-              </Button>
-            ) : (
-              <span />
-            )}
-            <div className="flex gap-2">
-              <Button variant="outline" type="button" onClick={onClose} className="h-9 px-4 text-xs">
-                Cancel
-              </Button>
-              <Button type="button" onClick={handleInsertImage} disabled={insertDisabled} className="h-9 px-4 text-xs">
-                {insertLabel}
-              </Button>
-            </div>
-          </div>
-        </div>
+        {renderFooter('default')}
       </div>
     </div>
+    </>
   );
 };
 
