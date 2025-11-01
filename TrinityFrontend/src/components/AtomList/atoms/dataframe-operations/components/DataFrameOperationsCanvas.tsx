@@ -53,6 +53,7 @@ import FormularBar from './FormularBar';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 interface DataFrameOperationsCanvasProps {
+  atomId: string;
   data: DataFrameData | null;
   settings: DataFrameSettings;
   onSettingsChange: (settings: Partial<DataFrameSettings>) => void;
@@ -473,6 +474,7 @@ function handleApiError(action: string, err: unknown) {
 const CONTEXT_MENU_PADDING = 8;
 
 const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
+  atomId,
   data,
   settings,
   onSettingsChange,
@@ -546,11 +548,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Debounced data update to prevent conflicts
   const debouncedDataUpdate = useCallback(
     debounce((newData: DataFrameData) => {
-      console.log('[DataFrameOperations] Debounced data update:', {
-        headers: newData.headers.length,
-        rows: newData.rows.length,
-        fileName: newData.fileName
-      });
       onDataChange(newData);
     }, 100),
     [onDataChange]
@@ -750,7 +747,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (selectedColumn && !isFormulaMode) {
         const target = e.target as HTMLElement;
         if (!target.closest(`[data-col="${selectedColumn}"]`)) {
-          console.log('[DataFrameOperations] Clearing selectedColumn due to outside click:', { selectedColumn, isFormulaMode, target: target.tagName });
           setSelectedColumn(null);
         }
       }
@@ -839,11 +835,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   useEffect(() => {
     if (data?.headers) {
       // Always update column order when data changes to ensure it's current
-      console.log('[DataFrameOperations] Updating column order:', {
-        currentColumnOrder: columnOrder,
-        newHeaders: data.headers,
-        headersMatch: JSON.stringify(columnOrder) === JSON.stringify(data.headers)
-      });
       
       // Only update if the headers are different from current column order
       if (JSON.stringify(columnOrder) !== JSON.stringify(data.headers)) {
@@ -1348,8 +1339,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // 2. Add effect to close dropdowns on outside click or right-click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      const cm = document.getElementById('df-ops-context-menu');
-      const rcm = document.getElementById('df-ops-row-context-menu');
+      // 🔧 FIX: Use unique IDs per atom instance
+      const cm = document.getElementById(`df-ops-context-menu-${atomId}`);
+      const rcm = document.getElementById(`df-ops-row-context-menu-${atomId}`);
       if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
         return;
       }
@@ -1360,8 +1352,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
        setFilterSelections({});
     };
     const handleContextMenu = (e: MouseEvent) => {
-      const cm = document.getElementById('df-ops-context-menu');
-      const rcm = document.getElementById('df-ops-row-context-menu');
+      // 🔧 FIX: Use unique IDs per atom instance
+      const cm = document.getElementById(`df-ops-context-menu-${atomId}`);
+      const rcm = document.getElementById(`df-ops-row-context-menu-${atomId}`);
       if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
         return;
       }
@@ -1423,14 +1416,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Process and filter data
   const processedData = useMemo(() => {
-    console.log('[DataFrameOperations] processedData recalculating with data:', {
-      hasData: !!data,
-      headersLength: data?.headers?.length,
-      rowsLength: data?.rows?.length,
-      searchTerm: settings.searchTerm,
-      filtersCount: Object.keys(settings.filters || {}).length
-    });
-    
     if (!data || !Array.isArray(data.headers) || !Array.isArray(data.rows)) {
       return { filteredRows: [], totalRows: 0, uniqueValues: {} };
     }
@@ -1585,11 +1570,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     });
 
     const result = { filteredRows, totalRows: filteredRows.length, uniqueValues };
-    console.log('[DataFrameOperations] processedData result:', {
-      filteredRowsCount: result.filteredRows.length,
-      totalRows: result.totalRows,
-      uniqueValuesCount: Object.keys(result.uniqueValues).length
-    });
     return result;
   }, [data, originalData, settings.searchTerm, settings.filters, duplicateMap, permanentlyDeletedRows, forceRefresh]);
 
@@ -1689,7 +1669,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     
     setSortLoading(true);
     try {
-      console.log('[DataFrameOperations] sort', column, direction);
       const resp = await apiSort(activeFileId, column, direction);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
@@ -1760,16 +1739,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   // 🔧 FIX: colIdx is the visible column index, need to map to actual column
   const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
   
-  console.log('[DataFrameOperations] commitHeaderEdit DEBUG:', {
-    colIdx,
-    visibleHeadersLength: visibleHeaders.length,
-    visibleHeaders,
-    allHeaders: data.headers,
-    hiddenColumns: data.hiddenColumns
-  });
-  
   if (colIdx < 0 || colIdx >= visibleHeaders.length) {
-    console.error('[DataFrameOperations] Invalid colIdx for header edit:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
     setEditingHeader(null);
     return;
   }
@@ -1777,19 +1747,16 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   const oldHeader = visibleHeaders[colIdx];
   
   if (!oldHeader) {
-    console.error('[DataFrameOperations] Column header is undefined for colIdx:', colIdx);
     setEditingHeader(null);
     return;
   }
   
   const newHeader = value !== undefined ? value : editingHeaderValue;
-  console.log('[DataFrameOperations] Renaming column:', oldHeader, '→', newHeader);
   
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
   
   // Check if the column has been deleted
   if (data.deletedColumns && data.deletedColumns.includes(oldHeader)) {
-    console.warn('[DataFrameOperations] Cannot rename deleted column:', oldHeader);
     setEditingHeader(null);
     return;
   }
@@ -1799,6 +1766,12 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   
   try {
     const resp = await apiRenameColumn(activeFileId, oldHeader, newHeader);
+    
+    // 🔧 SAFETY: Update selectedCell if the renamed column is the active column
+    if (selectedCell?.col === oldHeader) {
+      setSelectedCell({ row: selectedCell.row, col: newHeader });
+      console.log('[DataFrameOperations] Updated active cell column name:', oldHeader, '→', newHeader);
+    }
     
     // Create updated column order by replacing old name with new name BEFORE filtering
     const updatedColumnOrder = columnOrder.map(col => col === oldHeader ? newHeader : col);
@@ -1810,12 +1783,6 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     // Hidden columns should stay in headers array, just marked as hidden
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
-    
-    console.log('[DataFrameOperations] commitHeaderEdit - preserving columns:', {
-      backendHeaders: resp.headers,
-      hiddenColumns: currentHiddenColumns,
-      deletedColumns: currentDeletedColumns
-    });
     
     // Filter out ONLY deleted columns (keep hidden columns in headers)
     const columnsToFilter = [...currentDeletedColumns];
@@ -1832,11 +1799,6 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       const newColumns = availableHeaders.filter((header: string) => !updatedColumnOrder.includes(header));
       orderedHeaders = [...orderedHeaders, ...newColumns];
     }
-    
-    console.log('[DataFrameOperations] commitHeaderEdit - final headers:', {
-      orderedHeaders,
-      willBeVisible: orderedHeaders.filter(h => !currentHiddenColumns.includes(h))
-    });
     
     // Keep ALL columns in rows (including hidden), let rendering handle visibility
     const allRows = resp.rows;
@@ -2193,9 +2155,35 @@ const handleClearFilter = async (col: string) => {
 };
 
 const handleCellClick = (rowIndex: number, column: string) => {
+  // 🔧 CRITICAL FIX: Calculate originalRowIndex from paginated rowIndex
+  // rowIndex is the index in paginatedRows (0-14), we need the index in data.rows
+  const globalFilteredIndex = startIndex + rowIndex;
+  const originalRowIndex = data?.rows.findIndex((originalRow, idx) => {
+    if (permanentlyDeletedRows.has(idx)) return false;
+    // Check if this original row matches the current paginated row
+    return originalRow === processedData.filteredRows[globalFilteredIndex];
+  }) ?? -1;
+  
+  if (originalRowIndex === -1) {
+    console.warn('[DataFrameOperations] Could not find original row index for paginated row:', rowIndex);
+    return;
+  }
+  
+  // 🔧 Excel-like behavior: Track active cell position for visual indicator
+  setSelectedCell({ row: originalRowIndex, col: column });
+  
+  // 🔧 Excel-like: Set selectedColumn so the column header is highlighted
+  setSelectedColumn(column);
+  
   // When clicking on a cell, activate formula bar for that column (like small screen behavior)
   activateFormulaBar(column);
-  console.log('[DataFrameOperations] Column selected:', column, 'Formula bar activated');
+  
+  // 🔧 FIX: Clear row AND column multi-selections when clicking a cell
+  // Multi-selections should only persist when explicitly using Ctrl+Click
+  setMultiSelectedRows(new Set());
+  setMultiSelectedColumns(new Set());
+  
+  console.log('[DataFrameOperations] Active cell:', { row: originalRowIndex, col: column, paginatedRow: rowIndex }, 'Column header will highlight');
 };
 
 // Function to completely reset the formula bar to a clean state
@@ -2212,7 +2200,8 @@ const resetFormulaBar = () => {
 // Function to activate formula bar for a specific column
 const activateFormulaBar = (column: string) => {
   setSelectedColumn(column);
-  setSelectedCell(null);
+  // 🔧 CRITICAL FIX: Don't clear selectedCell - we need it for row number highlighting!
+  // setSelectedCell(null);  // ← REMOVED - This was clearing the active cell indicator!
   setIsFormulaMode(true);
   setIsFormulaBarFrozen(false); // Unfreeze formula bar when explicitly activated
   setFormulaInput('');
@@ -2240,7 +2229,8 @@ const insertColumnIntoFormula = (columnName: string) => {
   console.log('[DataFrameOperations] insertColumnIntoFormula called:', { columnName, selectedColumn, isFormulaMode });
   
   // Use the same logic as FormularBar's handleColumnInsert function
-  const inputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
+  // 🔧 FIX: Scope query to this atom instance only
+  const inputElement = document.querySelector(`#atom-${atomId} input[placeholder*="=SUM"]`) as HTMLInputElement;
   
   // Check if there are ColX placeholders to replace (Excel-like behavior)
   if (formulaInput.includes('Col')) {
@@ -2272,7 +2262,8 @@ const insertColumnIntoFormula = (columnName: string) => {
   }
   
   // Fallback to original behavior if no ColX placeholders found
-  const formulaInputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
+  // 🔧 FIX: Scope query to this atom instance only
+  const formulaInputElement = document.querySelector(`#atom-${atomId} input[placeholder*="=SUM"]`) as HTMLInputElement;
   if (!formulaInputElement) return;
   
   const cursorPosition = formulaInputElement.selectionStart || 0;
@@ -2306,8 +2297,16 @@ const handleHeaderClick = (header: string) => {
     return;
   }
   
+  // 🔧 Excel-like: Clear cell selection when clicking column header (select entire column)
+  setSelectedCell(null);
+  
+  // 🔧 Excel-like: Set selectedColumn for entire column highlighting
+  setSelectedColumn(header);
+  
   // Normal column selection behavior - activate formula bar
   activateFormulaBar(header);
+  
+  console.log('[DataFrameOperations] Column header clicked:', header, 'Cell selection cleared');
 };
 
   const handleFormulaSubmit = async () => {
@@ -2501,27 +2500,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // 🔧 FIX: colIdx is the visible column index, need to map to actual column
     const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
     
-    console.log('[DataFrameOperations] handleDeleteColumn DEBUG:', {
-      colIdx,
-      visibleHeadersLength: visibleHeaders.length,
-      visibleHeaders,
-      allHeaders: data.headers,
-      hiddenColumns: data.hiddenColumns,
-      multiSelectedSize: multiSelectedColumns.size
-    });
-    
     if (colIdx < 0 || colIdx >= visibleHeaders.length) {
-      console.error('[DataFrameOperations] Invalid colIdx:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
       return;
     }
     const col = visibleHeaders[colIdx];
     
     if (!col) {
-      console.error('[DataFrameOperations] Column is undefined for colIdx:', colIdx);
       return;
     }
     
-    console.log('[DataFrameOperations] Column to delete:', col);
+    // 🔧 SAFETY: Clear selectedCell if deleting the active column
+    if (selectedCell?.col === col) {
+      setSelectedCell(null);
+      console.log('[DataFrameOperations] Cleared active cell - column deleted:', col);
+    }
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -2536,7 +2528,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       });
     } else {
       // Delete single column (original behavior)
-      console.log('[DataFrameOperations] Proceeding with single column delete for:', col);
       
       // ALWAYS do frontend-only delete to avoid backend sync issues
       // The backend API is unreliable and causes 404 errors
@@ -3045,6 +3036,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleDeleteRow = async (rowIdx: number) => {
     if (!data) return;
     
+    // 🔧 SAFETY: Clear selectedCell if deleting the active row
+    if (selectedCell?.row === rowIdx) {
+      setSelectedCell(null);
+      console.log('[DataFrameOperations] Cleared active cell - row deleted:', rowIdx);
+    }
+    
     // Check if there are multiple selected rows
     if (multiSelectedRows.size > 1) {
       // Show confirmation modal for multiple rows
@@ -3188,13 +3185,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleUnhideColumn = (col: string) => {
     if (!data) return;
     
-    console.log('[DataFrameOperations] handleUnhideColumn called for:', col);
-    console.log('[DataFrameOperations] Current state:', {
-      allHeaders: data.headers,
-      hiddenColumns: data.hiddenColumns,
-      columnExists: data.headers.includes(col)
-    });
-    
     // Save current state before making changes
     saveToUndoStack(data);
     
@@ -3204,11 +3194,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       ...data,
       hiddenColumns: updatedHiddenColumns
     };
-    
-    console.log('[DataFrameOperations] After unhide:', {
-      updatedHiddenColumns,
-      shouldBeVisible: data.headers.filter(h => !updatedHiddenColumns.includes(h))
-    });
     
     onDataChange(updatedData);
     
@@ -3280,6 +3265,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } else {
       // Single select mode
       setMultiSelectedRows(new Set([originalRowIndex]));
+      
+      // 🔧 Excel-like: Also set as active cell (first visible column)
+      if (data?.headers) {
+        const firstVisibleColumn = data.headers.filter(h => !(data.hiddenColumns || []).includes(h))[0];
+        if (firstVisibleColumn) {
+          setSelectedCell({ row: originalRowIndex, col: firstVisibleColumn });
+          activateFormulaBar(firstVisibleColumn);
+        }
+      }
     }
   };
 
@@ -3359,6 +3353,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     console.log('[DataFrameOperations] Bulk delete - columns:', deleteConfirmModal.columnsToDelete);
     
+    // 🔧 SAFETY: Clear selectedCell if any deleted column is the active column
+    if (selectedCell && deleteConfirmModal.columnsToDelete.includes(selectedCell.col)) {
+      setSelectedCell(null);
+      console.log('[DataFrameOperations] Cleared active cell - column in bulk delete');
+    }
+    
     // Save current state before making changes
     saveToUndoStack(data);
     
@@ -3428,6 +3428,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     setBulkDeleteLoading(true);
     try {
+      // 🔧 SAFETY: Clear selectedCell if any deleted row is the active row
+      if (selectedCell && rowDeleteConfirmModal.rowsToDelete.includes(selectedCell.row)) {
+        setSelectedCell(null);
+        console.log('[DataFrameOperations] Cleared active cell - row in bulk delete');
+      }
+      
       // Mark rows as permanently deleted (local only)
       setPermanentlyDeletedRows(prev => {
         const newSet = new Set(prev);
@@ -3536,7 +3542,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
-      <div ref={containerRef} className="w-full h-full p-6 overflow-y-auto" style={{position: 'relative'}}>
+      <div id={`atom-${atomId}`} ref={containerRef} className="w-full h-full p-6 overflow-y-auto" style={{position: 'relative'}}>
         <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm w-full">
         {/* File name display in separate blue header section */}
         {data?.fileName && (
@@ -3837,26 +3843,40 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   )}
                   
                   <Table className="table-base w-full" maxHeight="max-h-[500px]">
-              <TableHeader className="table-header">
+              <TableHeader 
+                className="table-header"
+                style={{
+                  // 🔧 CRITICAL: thead MUST have higher z-index than tbody
+                  // This ensures ALL headers render above ALL body cells
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 1002,
+                  backgroundColor: 'transparent'
+                }}
+              >
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
                     <TableHead 
-                      className={`table-header-cell row-number-column text-center relative sticky top-0 z-10 ${
-                        data.frozenColumns > 0 ? 'frozen-column' : ''
-                      }`}
+                      className="table-header-cell row-number-column text-center relative"
                       style={{
-                        ...(data.frozenColumns > 0 ? { 
-                          position: 'sticky', 
-                          left: '0px',
-                          zIndex: 1001,
-                          marginRight: data.frozenColumns > 0 ? '2px' : '0px',
-                          backgroundColor: 'white',
-                          opacity: 1,
-                          borderLeft: '2px solid #22c55e',
-                          borderRight: '1px solid #d1d5db',
-                          borderTop: '1px solid #d1d5db',
-                          borderBottom: '1px solid #d1d5db'
-                        } : {})
+                        position: 'sticky',
+                        left: '0px',
+                        top: 0,
+                        zIndex: 3, // Relative to thead (1002), this becomes 1005 in global context
+                        // 🔧 Match color scheme: darker gray when frozen, lighter when not
+                        backgroundColor: data.frozenColumns > 0 ? '#e5e7eb' : '#f3f4f6', // gray-200 (frozen) or gray-100 (unfrozen)
+                        opacity: 1,
+                        borderLeft: '2px solid #22c55e',
+                        borderRight: '1px solid #d1d5db',
+                        borderTop: '1px solid #d1d5db',
+                        borderBottom: '1px solid #d1d5db',
+                        boxShadow: data.frozenColumns > 0 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none',
+                        // 🔧 CRITICAL: Force GPU compositing and solid rendering
+                        isolation: 'isolate',
+                        WebkitBackfaceVisibility: 'hidden',
+                        backfaceVisibility: 'hidden',
+                        willChange: 'transform',
+                        transform: 'translateZ(0)' // Force GPU layer
                       }}
                     >
                       <div className="flex items-center justify-center">
@@ -3869,15 +3889,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       </div>
                     </TableHead>
                   )}
-                  {Array.isArray(data?.headers) && (() => {
-                    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
-                    console.log('[DataFrameOperations] Rendering headers:', {
-                      allHeaders: data.headers,
-                      hiddenColumns: data.hiddenColumns,
-                      visibleHeaders
-                    });
-                    return visibleHeaders;
-                  })().map((header, colIdx) => {
+                  {Array.isArray(data?.headers) && data.headers.filter(header => !(data.hiddenColumns || []).includes(header)).map((header, colIdx) => {
                     // Get the original column index for API calls
                     const originalColIdx = data.headers.indexOf(header);
                     // Check if there are hidden columns before this one
@@ -3887,14 +3899,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
-                       className={`table-header-cell bg-white border-r border-gray-200 relative sticky top-0 z-10 ${
-                         selectedColumn === header ? 'border-2 border-blue-500 bg-blue-100' : ''
+                       className={`table-header-cell border border-gray-200 relative ${
+                         // 🔧 Excel-like: Highlight column header when column is selected (via cell click or header click)
+                         selectedColumn === header ? 'border-2 border-blue-500' : ''
                        } ${
-                         multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
+                         multiSelectedColumns.has(header) ? 'border-blue-500' : ''
                        } ${
                          filters[header] ? 'bg-yellow-50' : ''
-                       } ${
-                         data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''
                        }`}
                       style={{
                         ...(settings.columnWidths?.[header] ? { 
@@ -3906,8 +3917,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           minWidth: '50px', 
                           maxWidth: '500px' 
                         }),
+                        // 🔧 CRITICAL FIX: ALL headers must be sticky vertically (not just frozen)
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: data.frozenColumns && colIdx < data.frozenColumns ? 2 : 1, // Relative to thead (1002)
+                        // 🔧 ALL headers get backgroundColor via inline style (overrides template CSS)
+                        backgroundColor: (() => {
+                          if (selectedColumn === header || multiSelectedColumns.has(header)) {
+                            return '#dbeafe'; // blue-100 when selected
+                          }
+                          // Frozen columns: darker gray, Unfrozen: lighter gray
+                          return (data.frozenColumns && colIdx < data.frozenColumns) ? '#e5e7eb' : '#f3f4f6';
+                        })(),
                         ...(data.frozenColumns && colIdx < data.frozenColumns ? { 
-                          position: 'sticky', 
+                          // 🔧 Frozen columns: Also sticky horizontally (left positioning)
+                          // Note: position: sticky and top: 0 are already set above for all headers
                           left: (() => {
                             let leftOffset = 0;
                             // Add width of # column if it's shown and frozen
@@ -3920,14 +3944,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                             }
                             return `${leftOffset}px`;
                           })(),
-                          zIndex: 1001,
                           marginRight: colIdx === data.frozenColumns - 1 ? '2px' : '0px',
-                          backgroundColor: 'white',
                           opacity: 1,
                           borderLeft: colIdx === 0 ? '1px solid #d1d5db' : '1px solid #d1d5db',
                           borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
                           borderTop: '1px solid #d1d5db',
-                          borderBottom: '1px solid #d1d5db'
+                          borderBottom: '1px solid #d1d5db',
+                          // 🔧 Shadow on last frozen column for visual separator
+                          boxShadow: colIdx === data.frozenColumns - 1 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none'
                         } : {}),
                         textAlign: `${getColumnAlignment(header)} !important`
                       }}
@@ -3957,13 +3981,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       }}
                       onDoubleClick={() => {
                         // Always allow header editing regardless of enableEditing setting
-                        console.log('[DataFrameOperations] Double-click on header:', {
-                          header,
-                          colIdx,
-                          visibleHeaders: data.headers.filter(h => !(data.hiddenColumns || []).includes(h)),
-                          allHeaders: data.headers,
-                          hiddenColumns: data.hiddenColumns
-                        });
                         setEditingHeader(colIdx);
                         setEditingHeaderValue(header);
                       }}
@@ -4049,22 +4066,33 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     >
                       {settings.showRowNumbers && (
                         <TableCell
-                          className={`table-cell row-number-column text-center text-xs font-medium ${isRowSelected ? 'bg-blue-200' : ''} ${
-                            data.frozenColumns > 0 ? 'frozen-column' : ''
-                          }`}
+                          className="table-cell row-number-column text-center text-xs font-medium"
                           style={{
-                            ...(data.frozenColumns > 0 ? { 
-                              position: 'sticky', 
-                              left: '0px',
-                              zIndex: 1001,
-                              marginRight: data.frozenColumns > 0 ? '2px' : '0px',
-                              backgroundColor: 'white',
-                              opacity: 1,
-                              borderLeft: '2px solid #22c55e',
-                              borderRight: '1px solid #d1d5db',
-                              borderTop: '1px solid #d1d5db',
-                              borderBottom: '1px solid #d1d5db'
-                            } : {})
+                            // 🔧 Row index: ONLY sticky horizontally (left), NOT vertically
+                            // This allows row numbers to scroll UP behind the # header
+                            position: 'sticky',
+                            left: '0px',
+                            // NO top: 0 here! We want rows to scroll vertically
+                            zIndex: 1, // tbody cells are in a lower stacking context than thead (1002)
+                            // 🔧 Row index background: Darker gray base, blue when selected/active
+                            backgroundColor: (() => {
+                              const isActiveCell = selectedCell?.row === originalRowIndex && !isRowSelected && selectedCell?.col && !(data.hiddenColumns || []).includes(selectedCell.col);
+                              
+                              if (isRowSelected) return '#bfdbfe'; // blue-200 for checkbox selected
+                              if (isActiveCell) return '#dbeafe'; // blue-100 for active cell row
+                              // Match color scheme: darker gray when frozen, lighter when not
+                              return data.frozenColumns > 0 ? '#e5e7eb' : '#f3f4f6'; // gray-200 (frozen) or gray-100 (unfrozen)
+                            })(),
+                            // 🔧 Always apply fontWeight for active cell indicator
+                            fontWeight: (selectedCell?.row === originalRowIndex && !isRowSelected && selectedCell?.col && !(data.hiddenColumns || []).includes(selectedCell.col)) ? 'bold' : 'normal',
+                            opacity: 1,
+                            borderLeft: '2px solid #22c55e',
+                            borderRight: '1px solid #d1d5db',
+                            borderTop: '1px solid #d1d5db',
+                            borderBottom: '1px solid #d1d5db',
+                            // 🔧 Shadow on right side (always present since # is always frozen)
+                            boxShadow: data.frozenColumns === 0 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none'
+                            // 🔧 REMOVED isolation and willChange - they can interfere with scrolling
                           }}
                           onContextMenu={e => {
                             e.preventDefault();
@@ -4098,7 +4126,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           <TableCell
                             key={colIdx}
                             data-col={column}
-                            className={`table-cell font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''} ${data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''}`}
+                            className={`table-cell font-medium border border-gray-200 ${
+                              // 🔧 Excel-like: Four highlighting modes:
+                              // 1. Specific cell selected (active cell - stronger border + blue BG)
+                              selectedCell?.row === originalRowIndex && selectedCell?.col === column 
+                                ? 'border-2 border-blue-500' 
+                                // 2. Entire column selected via header click (no specific cell)
+                                : (!selectedCell && selectedColumn === column)
+                                  ? 'border-blue-400'
+                                  // 3. Multi-selected column (Ctrl+Click headers)
+                                  : multiSelectedColumns.has(column)
+                                    ? 'border-blue-400'
+                                    // 4. No highlighting
+                                    : ''
+                            }`}
                             style={{
                               ...(settings.columnWidths?.[column] ? { 
                                 width: settings.columnWidths[column], 
@@ -4109,7 +4150,17 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                 minWidth: '50px', 
                                 maxWidth: '500px' 
                               }),
+                              // 🔧 ALL cells get backgroundColor via inline style (overrides template CSS)
+                              backgroundColor: (() => {
+                                if (isRowSelected) return '#dbeafe'; // blue for row selection
+                                if (selectedCell?.row === originalRowIndex && selectedCell?.col === column) return '#dbeafe'; // blue for active cell
+                                if (!selectedCell && selectedColumn === column) return '#dbeafe'; // blue for column selection
+                                if (multiSelectedColumns.has(column)) return '#dbeafe'; // blue for multi-select
+                                return 'white'; // white for data cells
+                              })(),
                               ...(data.frozenColumns && colIdx < data.frozenColumns ? { 
+                                // 🔧 Frozen data cells: ONLY sticky horizontally (left), NOT vertically
+                                // This allows cells to scroll UP behind the frozen headers
                                 position: 'sticky', 
                                 left: (() => {
                                   let leftOffset = 0;
@@ -4123,18 +4174,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                   }
                                   return `${leftOffset}px`;
                                 })(),
-                                zIndex: 1001,
+                                // NO top: 0 here! We want cells to scroll vertically
+                                zIndex: 1, // tbody cells are in a lower stacking context than thead (1002)
                                 marginRight: colIdx === data.frozenColumns - 1 ? '2px' : '0px',
-                                backgroundColor: 'white',
                                 opacity: 1,
                                 borderLeft: colIdx === 0 ? '1px solid #d1d5db' : '1px solid #d1d5db',
                                 borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
                                 borderTop: '1px solid #d1d5db',
-                                borderBottom: '1px solid #d1d5db'
+                                borderBottom: '1px solid #d1d5db',
+                                // 🔧 Shadow on last frozen column for visual separator
+                                boxShadow: colIdx === data.frozenColumns - 1 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none'
+                                // 🔧 REMOVED isolation and willChange - they can interfere with scrolling
                               } : {}),
                               textAlign: `${getColumnAlignment(column)} !important`
                             }}
-                            onClick={() => handleCellClick(rowIndex, column)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent row selection when clicking cell
+                              handleCellClick(rowIndex, column);
+                            }}
                             onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
                             setEditingCell({ row: rowIndex, col: column });
@@ -4264,7 +4321,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         createPortal(
           <div
             ref={contextMenuRef}
-            id="df-ops-context-menu"
+            id={`df-ops-context-menu-${atomId}`}
             style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}
           >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200 flex items-center justify-between" style={{color:'#222'}}>
@@ -4701,7 +4758,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         createPortal(
           <div
             ref={rowContextMenuRef}
-            id="df-ops-row-context-menu"
+            id={`df-ops-row-context-menu-${atomId}`}
             style={{ position: 'fixed', top: rowContextMenu.y, left: rowContextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 140 }}
           >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Row: {rowContextMenu.rowIdx + 1}</div>
@@ -4715,7 +4772,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Describe Modal */}
       {describeModal.isOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
           onClick={() => setDescribeModal({ isOpen: false, column: '', data: null })}
         >
           <div 
@@ -4846,7 +4903,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Delete Confirmation Modal */}
       {deleteConfirmModal.isOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
           onClick={() => setDeleteConfirmModal({ isOpen: false, columnsToDelete: [] })}
         >
           <div 
@@ -4895,7 +4952,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Row Delete Confirmation Modal */}
       {rowDeleteConfirmModal.isOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
           onClick={() => setRowDeleteConfirmModal({ isOpen: false, rowsToDelete: [] })}
         >
           <div 
@@ -4948,7 +5005,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Find and Replace Modal */}
       {findReplaceModalOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
           onClick={() => setFindReplaceModalOpen(false)}
         >
           <div 
@@ -5101,7 +5158,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* History Panel */}
 
       {historyPanelOpen && (
-        <div className="fixed inset-0 z-50 pointer-events-none">
+        <div className="fixed inset-0 z-[9999] pointer-events-none">
           <div 
             className={`absolute right-0 top-0 h-full bg-white shadow-2xl border-l border-gray-200 transition-all duration-300 ${
               historyPanelMinimized ? 'w-16' : 'w-96'
