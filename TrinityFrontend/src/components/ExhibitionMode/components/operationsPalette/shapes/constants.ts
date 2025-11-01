@@ -237,13 +237,24 @@ export const SHAPE_DEFINITIONS: readonly ShapeDefinition[] = [
     defaultProps: { stroke: 'transparent', strokeWidth: 0, fill: '#111827' },
   },
   {
-    id: 'arrow-up-down',
-    label: 'Up-down arrow',
+    id: 'arrow-up',
+    label: 'Up arrow',
     categoryId: 'arrows',
-    keywords: ['arrow', 'up', 'down'],
+    keywords: ['arrow', 'up'],
     geometry: {
       kind: 'polygon',
-      points: polygon([44, 10], [56, 10], [56, 36], [70, 36], [50, 60], [30, 36], [44, 36], [44, 10], [44, 64], [30, 64], [50, 90], [70, 64], [56, 64], [56, 90], [44, 90]),
+      points: polygon([50, 12], [78, 40], [66, 40], [66, 88], [34, 88], [34, 40], [22, 40]),
+    },
+    defaultProps: { stroke: 'transparent', strokeWidth: 0, fill: '#111827' },
+  },
+  {
+    id: 'arrow-down',
+    label: 'Down arrow',
+    categoryId: 'arrows',
+    keywords: ['arrow', 'down'],
+    geometry: {
+      kind: 'polygon',
+      points: polygon([34, 12], [66, 12], [66, 60], [78, 60], [50, 88], [22, 60], [34, 60]),
     },
     defaultProps: { stroke: 'transparent', strokeWidth: 0, fill: '#111827' },
   },

@@ -143,6 +143,8 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       form.append('identifiers', JSON.stringify(savedIdentifiers));
       form.append('measures', JSON.stringify(savedMeasures));
       form.append('unclassified', JSON.stringify(savedUnclassified));
+      // Force fresh read from MinIO to pick up new columns (do not remove caching globally)
+      form.append('bypass_cache', 'true');
       console.log('📤 Sending to classify_columns:', {
         dataframe: savedId,
         identifiers: savedIdentifiers,

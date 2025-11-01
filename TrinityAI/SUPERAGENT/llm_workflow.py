@@ -26,6 +26,15 @@ if str(CURRENT_DIR) not in sys.path:
 
 from file_loader import FileLoader
 
+# Import FileHandler for @filename mention support
+try:
+    from File_handler.available_minio_files import FileHandler, get_file_handler
+    FILE_HANDLER_AVAILABLE = True
+except ImportError as e:
+    FILE_HANDLER_AVAILABLE = False
+    logger_temp = logging.getLogger("smart.workflow")
+    logger_temp.warning(f"⚠️ FileHandler not available: {e}")
+
 # Import from same directory
 try:
     from ai_logic_workflow import build_workflow_prompt, call_workflow_llm, extract_workflow_json
@@ -61,6 +70,22 @@ class SmartWorkflowAgent:
             minio_bucket=bucket,
             object_prefix=prefix
         )
+        
+        # Initialize FileHandler for @filename mention support
+        self.file_handler = None
+        if FILE_HANDLER_AVAILABLE:
+            try:
+                self.file_handler = get_file_handler(
+                    minio_endpoint=minio_endpoint,
+                    minio_access_key=access_key,
+                    minio_secret_key=secret_key,
+                    minio_bucket=bucket,
+                    object_prefix=prefix
+                )
+                logger.info("✅ FileHandler initialized for @filename mention support")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize FileHandler: {e}")
+                self.file_handler = None
         
         # Files with columns info
         self.files_with_columns = {}
@@ -125,7 +150,8 @@ class SmartWorkflowAgent:
         return self.sessions[session_id]
     
     def process_request(self, prompt: str, session_id: Optional[str] = None,
-                       client_name: str = "", app_name: str = "", project_name: str = "") -> Dict[str, Any]:
+                       client_name: str = "", app_name: str = "", project_name: str = "",
+                       file_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Process workflow generation request with file awareness and memory
         
@@ -163,6 +189,17 @@ class SmartWorkflowAgent:
             logger.info(f"📚 Session has {len(conversation_history)} previous messages")
             logger.info(f"📁 Available files: {len(self.files_with_columns)}")
             
+            # Parse for @filename mentions if file_context not provided
+            if file_context is None and self.file_handler:
+                try:
+                    _, file_context = self.file_handler.enrich_prompt_with_file_context(prompt)
+                    logger.info(f"✅ Parsed @filename mentions: {len(file_context)} file(s)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to parse @filename mentions: {e}")
+                    file_context = {}
+            elif file_context is None:
+                file_context = {}
+            
             # Build prompt with file context and history
             logger.info("-"*80)
             logger.info("STEP 1: Building Prompt with File Context")
@@ -171,7 +208,8 @@ class SmartWorkflowAgent:
             llm_prompt = build_workflow_prompt(
                 user_prompt=prompt,
                 files_with_columns=self.files_with_columns,
-                conversation_history=conversation_history
+                conversation_history=conversation_history,
+                file_context=file_context  # Pass file context
             )
             
             logger.info(f"✅ Prompt built ({len(llm_prompt)} characters)")

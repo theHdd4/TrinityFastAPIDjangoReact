@@ -170,6 +170,7 @@ interface Props {
   initialShowDataLabels?: boolean; // Default state for data labels
   showGrid?: boolean; // External control for grid visibility
   chartsPerRow?: number; // For multi pie chart layouts
+  captureId?: string;
 }
 
 // Excel-like color themes
@@ -495,7 +496,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showDataLabels: propShowDataLabels, // External control for data labels visibility
   initialShowDataLabels,
   showGrid: propShowGrid, // External control for grid visibility
-  chartsPerRow
+  chartsPerRow,
+  captureId,
 }) => {
 
   // State for color theme - simplified approach
@@ -537,6 +539,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [axisLabelSubmenuPos, setAxisLabelSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
+  const rootAttributes = captureId
+    ? { 'data-exhibition-chart-root': 'true', 'data-exhibition-chart-id': captureId }
+    : {};
 
   // State for custom axis labels - use localStorage to persist across component recreations
   // Create a unique key based on chart props to make it chart-specific (excluding type for persistence across chart types)
@@ -1863,27 +1868,53 @@ const RechartsChartRenderer: React.FC<Props> = ({
           xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
           yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
     } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
-          xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
-          yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          // CRITICAL FIX: Use case-insensitive matching to find actual field names first
+          if (xField) {
+            const matchedXKey = availableKeys.find(k => k.toLowerCase() === xField.toLowerCase());
+            xKey = matchedXKey || (availableKeys.includes('x') ? 'x' : availableKeys.find(k => k.toLowerCase() === 'date') || availableKeys[0]);
+          } else {
+            xKey = availableKeys.includes('x') ? 'x' : availableKeys.find(k => k.toLowerCase() === 'date') || availableKeys[0];
+          }
+          if (yField) {
+            const matchedYKey = availableKeys.find(k => k.toLowerCase() === yField.toLowerCase());
+            yKey = matchedYKey || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
+          } else {
+            yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          }
         }
         
       }
     } else {
       // If xKey and yKey are provided but don't exist in the data, try to auto-detect
-      if (firstItem && (!firstItem[xKey] || !firstItem[yKey])) {
+      // CRITICAL FIX: Use case-insensitive matching to check if keys exist
+      if (firstItem) {
         const availableKeys = Object.keys(firstItem);
+        const xKeyExists = xKey && availableKeys.some(k => k.toLowerCase() === xKey.toLowerCase());
+        const yKeyExists = yKey && availableKeys.some(k => k.toLowerCase() === yKey.toLowerCase());
         
-        if (type === 'pie_chart') {
-          xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
-          yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
-        } else if (type === 'bar_chart') {
-          xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
-          yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
-        } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
-          xKey = availableKeys.includes('x') ? 'x' : availableKeys.includes('date') ? 'date' : availableKeys[0];
-          yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+        if (!xKeyExists || !yKeyExists) {
+          if (type === 'pie_chart') {
+            xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
+            yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+          } else if (type === 'bar_chart') {
+            xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
+            yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
+          } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
+            // CRITICAL FIX: For line/area/scatter, prioritize actual field names with case-insensitive matching
+            if (xField) {
+              const matchedXKey = availableKeys.find(k => k.toLowerCase() === xField.toLowerCase());
+              xKey = matchedXKey || (availableKeys.includes('x') ? 'x' : availableKeys.find(k => k.toLowerCase() === 'date') || availableKeys[0]);
+            } else {
+              xKey = availableKeys.includes('x') ? 'x' : availableKeys.find(k => k.toLowerCase() === 'date') || availableKeys[0];
+            }
+            if (yField) {
+              const matchedYKey = availableKeys.find(k => k.toLowerCase() === yField.toLowerCase());
+              yKey = matchedYKey || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
+            } else {
+              yKey = availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
+            }
+          }
         }
-        
       }
     }
     
@@ -2048,29 +2079,44 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Final validation for dual Y-axes
     const hasDualYAxes = yKeys.length > 1 || (yFields && yFields.length > 1);
 
-    // CRITICAL FIX: Transform data for bar charts and line charts when data has generic keys
+    // CRITICAL FIX: Transform data for bar charts, line charts, area charts, and scatter charts when data has generic keys
     // Now also supports dual Y-axes by mapping both Y fields when available
     let transformedChartData = chartDataForRendering;
-    if ((type === 'bar_chart' || type === 'line_chart') && xField && yField && chartDataForRendering.length > 0) {
+    if ((type === 'bar_chart' || type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
 
       // Check if data has generic keys OR if the field names don't match what we expect
+      // Use case-insensitive matching to check if actual field names exist
+      const hasXField = xField && availableKeys.some(k => k.toLowerCase() === xField.toLowerCase());
+      const hasYField = yField && availableKeys.some(k => k.toLowerCase() === yField.toLowerCase());
       const needsTransformation =
         availableKeys.includes('x') ||
         availableKeys.includes('y') ||
         availableKeys.includes('name') ||
         availableKeys.includes('value') ||
-        (xField && !availableKeys.includes(xField)) ||
-        (yField && !availableKeys.includes(yField)) ||
-        (yFields && yFields.length > 1 && !yFields.every(f => availableKeys.includes(f)));
+        (xField && !hasXField) ||
+        (yField && !hasYField) ||
+        (yFields && yFields.length > 1 && !yFields.every(f => availableKeys.some(k => k.toLowerCase() === f.toLowerCase())));
 
       if (needsTransformation) {
         transformedChartData = Array.isArray(chartDataForRendering) ? chartDataForRendering.map((item: any) => {
           const transformed: any = {};
+          const availableKeys = Object.keys(item);
+
+          // CRITICAL FIX: First check if the actual field names exist in the item (case-insensitive)
+          // This ensures that when xField and yField are explicitly provided, we use them correctly
+          // even when data structure changes (e.g., with single filter selection)
+          const actualXKey = availableKeys.find(k => k.toLowerCase() === xField.toLowerCase()) || 
+                           (item[xField] !== undefined ? xField : null);
+          const actualYKey = availableKeys.find(k => k.toLowerCase() === yField.toLowerCase()) || 
+                           (item[yField] !== undefined ? yField : null);
 
           // Map keys to actual field names for X-axis
-          if (item.x !== undefined) {
+          // Priority: actual field name > generic 'x' > other fallbacks
+          if (actualXKey) {
+            transformed[xField] = item[actualXKey];
+          } else if (item.x !== undefined) {
             transformed[xField] = item.x;
           } else if (item.name !== undefined) {
             transformed[xField] = item.name;
@@ -2081,11 +2127,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
           } else if (item.year !== undefined) {
             transformed[xField] = item.year;
           } else {
-            transformed[xField] = item[Object.keys(item)[0]];
+            // Last resort: use first key, but ensure it's not the yField
+            const firstKey = availableKeys.find(k => k.toLowerCase() !== yField.toLowerCase()) || availableKeys[0];
+            transformed[xField] = firstKey ? item[firstKey] : item[Object.keys(item)[0]];
           }
 
           // Map primary Y field
-          if (item.y !== undefined) {
+          // Priority: actual field name > generic 'y' > other fallbacks
+          if (actualYKey) {
+            transformed[yField] = item[actualYKey];
+          } else if (item.y !== undefined) {
             transformed[yField] = item.y;
           } else if (item.value !== undefined) {
             transformed[yField] = item.value;
@@ -2094,7 +2145,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
           } else if (item.volume !== undefined) {
             transformed[yField] = item.volume;
           } else {
-            transformed[yField] = item[Object.keys(item)[1]] || item[Object.keys(item)[0]];
+            // Last resort: find a key that's not the xField
+            const nonXKeys = availableKeys.filter(k => 
+              k.toLowerCase() !== xField.toLowerCase() && 
+              k.toLowerCase() !== 'x' && 
+              k.toLowerCase() !== 'name' && 
+              k.toLowerCase() !== 'category'
+            );
+            transformed[yField] = nonXKeys.length > 0 
+              ? item[nonXKeys[0]] 
+              : (availableKeys.length > 1 ? item[availableKeys[1]] : item[availableKeys[0]]);
           }
 
           // Map secondary Y field when present
@@ -2119,7 +2179,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return transformed;
         }) : [];
 
-        // Ensure yKeys reflect the provided fields after transformation
+        // CRITICAL FIX: Ensure xKey and yKey use the actual field names after transformation
+        // This fixes the issue where xKey/yKey were set incorrectly before transformation
+        xKey = xField;
+        yKey = yField;
         if (yFields && yFields.length > 0) {
           yKey = yFields[0];
           yKeys = yFields;
@@ -2709,7 +2772,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           );
         }
         return (
-          <AreaChart data={chartDataForRendering} margin={getChartMargins()}>
+          <AreaChart data={transformedChartData} margin={getChartMargins()}>
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
@@ -2718,7 +2781,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
               {...(() => {
-                const firstValue = chartDataForRendering[0]?.[xKey];
+                const firstValue = transformedChartData[0]?.[xKey];
                 const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
                 return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
               })()}
@@ -2804,7 +2867,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               allowDuplicatedCategory={false}
               tickFormatter={isDateAxisScatter ? (value) => formatDateTickScatter(new Date(value)) : xAxisTickFormatter}
               {...(() => {
-                const firstValue = chartDataForRendering[0]?.[xKeyForScatter];
+                const firstValue = transformedChartData[0]?.[xKeyForScatter];
                 const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
                 return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
               })()}
@@ -2881,7 +2944,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               })
             ) : (
               <>
-                <Scatter data={chartDataForRendering} dataKey={yKey} fill={palette[0]} yAxisId={0}>
+                <Scatter data={transformedChartData} dataKey={yKey} fill={palette[0]} yAxisId={0}>
                   {currentShowDataLabels && (
                     <LabelList 
                       dataKey={yKey} 
@@ -2892,7 +2955,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   )}
                 </Scatter>
                 {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                  <Scatter data={chartDataForRendering} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={1}>
+                  <Scatter data={transformedChartData} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={1}>
                     {currentShowDataLabels && (
                       <LabelList 
                         dataKey={yKeys[1] || yFields[1]} 
@@ -3211,7 +3274,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
 
   return (
-    <div className="w-full h-full flex flex-col">
+    <div className="w-full h-full flex flex-col" {...rootAttributes}>
       {/* <div className="mb-6 flex justify-center">
         <div className="relative w-full max-w-3xl">
           {(((isTitleFocused ? titleEditableRef.current?.textContent : resolvedTitle) ?? '').trim().length === 0) && (

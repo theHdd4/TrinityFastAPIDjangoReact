@@ -461,7 +461,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }));
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
-  const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
   const [canvasDimensions, setCanvasDimensions] = useState({
@@ -743,6 +742,20 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       foreground: activeTheme.colors.foreground,
     };
   }, [activeTheme]);
+
+  const shouldApplyThemeBackground = useMemo(() => {
+    const mode = settings.backgroundMode ?? 'preset';
+    if (mode !== 'preset') {
+      return false;
+    }
+
+    const backgroundColor =
+      settings.backgroundColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
+
+    return backgroundColor === 'default' || backgroundColor === DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
+  }, [settings.backgroundMode, settings.backgroundColor]);
+
+  const themeBackgroundStyle = shouldApplyThemeBackground ? themeContext.backgroundStyle : undefined;
 
   const accentButtonStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (!themeContext.accent) {
@@ -1252,33 +1265,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     });
   };
 
-  const handleAccentImageChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      if (!canEdit) {
-        return;
-      }
-
-      const file = event.target.files?.[0];
-      event.target.value = '';
-
-      if (!file) {
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result !== 'string' || reader.result.length === 0) {
-          return;
-        }
-
-        updateSettings({ accentImage: reader.result, accentImageName: file.name });
-      };
-
-      reader.readAsDataURL(file);
-    },
-    [canEdit, updateSettings],
-  );
-
   const handleCloseFormatPanel = useCallback(() => {
     setShowFormatPanel(false);
   }, []);
@@ -1327,15 +1313,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         canEdit={canEdit}
         onUpdateSettings={updateSettings}
         onReset={resetSettings}
-        onAccentImageChange={handleAccentImageChange}
-        accentImageInputRef={accentImageInputRef}
         onClose={handleCloseFormatPanel}
       />
     );
   }, [
-    accentImageInputRef,
     canEdit,
-    handleAccentImageChange,
     handleCloseFormatPanel,
     resetSettings,
     settings,
@@ -1459,11 +1441,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                     !canEdit && !presentationMode && 'opacity-90'
                   )}
+                  data-exhibition-slide="true"
+                  data-exhibition-slide-id={card.id}
                 style={
                   presentationMode
                     ? {
+                        ...(themeBackgroundStyle ?? {}),
                         ...slideBackgroundStyle,
-                        ...(themeContext.backgroundStyle ?? {}),
                         ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
                         ...(!settings.fullBleed && themeContext.borderRadius
                           ? { borderRadius: themeContext.borderRadius }
@@ -1481,8 +1465,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       }
                     : {
                         height: CANVAS_STAGE_HEIGHT,
+                        ...(themeBackgroundStyle ?? {}),
                         ...slideBackgroundStyle,
-                        ...(themeContext.backgroundStyle ?? {}),
                         ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
                         ...(!settings.fullBleed && themeContext.borderRadius
                           ? { borderRadius: themeContext.borderRadius }
@@ -1666,9 +1650,9 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
   };
 };
 
-const CANVAS_STAGE_HEIGHT = 520;
-const DEFAULT_PRESENTATION_WIDTH = 960;
-const PRESENTATION_PADDING = 160;
+export const CANVAS_STAGE_HEIGHT = 520;
+export const DEFAULT_PRESENTATION_WIDTH = 960;
+export const PRESENTATION_PADDING = 160;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
@@ -2112,10 +2096,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             return;
           }
 
-          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
-            return;
-          }
-
           onRemoveObject(object.id);
         });
 
@@ -2202,10 +2182,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           if (object.type === 'accent-image') {
-            return;
-          }
-
-          if (object.type === 'text-box' && titleObjectId && object.id === titleObjectId) {
             return;
           }
 
@@ -3011,10 +2987,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (!canEdit) {
           return;
         }
+
+        if (editingTextState?.type === 'text-box' && editingTextState.id === objectId) {
+          return;
+        }
+
         const object = objectsMap.get(objectId);
         if (!object || object.type !== 'text-box') {
           return;
         }
+
         const formatting = extractTextBoxFormatting(object.props as Record<string, unknown> | undefined);
         onInteract();
         focusCanvas();
@@ -3026,7 +3008,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           original: formatting.text,
         });
       },
-      [canEdit, focusCanvas, objectsMap, onInteract],
+      [canEdit, editingTextState, focusCanvas, objectsMap, onInteract],
     );
 
     const handleEditingValueChange = useCallback(
@@ -4025,27 +4007,25 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
             const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
-          const renderObject = () => (
-            <div
-              className="absolute group"
-              style={{
-                left: object.x,
-                top: object.y,
-                width: object.width,
-                height: object.height,
-                zIndex: isSelected ? zIndex + 100 : zIndex,
-              }}
-              onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
-              onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
-            >
+          const renderObject = () => {
+            return (
+              <div
+                className="absolute group"
+                style={{
+                  left: object.x,
+                  top: object.y,
+                  width: object.width,
+                  height: object.height,
+                  zIndex: isSelected ? zIndex + 100 : zIndex,
+                }}
+                data-exhibition-object-id={object.id}
+                data-exhibition-object-type={object.type}
+                onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
+                onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
+              >
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
-                  className={cn(
-                    'pointer-events-none absolute inset-0 z-40 border border-dotted border-yellow-400 transition-all duration-200',
-                    suppressCardChrome || isShapeObject || isTextBoxObject || isTableObject || isChartObject
-                      ? 'rounded-[22px]'
-                      : 'rounded-[32px]'
-                  )}
+                  className="pointer-events-none absolute inset-0 z-40 border-2 border-yellow-400 transition-all duration-200"
                   aria-hidden="true"
                 />
               )}
@@ -4189,6 +4169,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       data={chartProps.chartData}
                       config={chartProps.chartConfig}
                       className="h-full w-full"
+                      captureId={object.id}
                     />
                   ) : (
                     <div
@@ -4246,7 +4227,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   />
                 ))}
             </div>
-          );
+            );
+          };
 
           if (isTableObject) {
             return React.cloneElement(renderObject(), { key: object.id });

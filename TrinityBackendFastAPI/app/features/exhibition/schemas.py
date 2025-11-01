@@ -138,3 +138,93 @@ class ExhibitionLayoutConfigurationOut(ExhibitionLayoutConfigurationBase):
     """Response payload when loading the exhibition layout."""
 
     updated_at: Optional[datetime] = Field(default=None)
+
+
+class DocumentStylesPayload(BaseModel):
+    inline: List[str] = Field(default_factory=list)
+    external: List[str] = Field(default_factory=list)
+    base_url: Optional[str] = Field(default=None, alias="baseUrl")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SlideScreenshotPayload(BaseModel):
+    """Screenshot metadata accompanying an exported slide."""
+
+    data_url: str = Field(..., alias="dataUrl")
+    width: int
+    height: int
+    css_width: Optional[float] = Field(default=None, alias="cssWidth")
+    css_height: Optional[float] = Field(default=None, alias="cssHeight")
+    pixel_ratio: Optional[float] = Field(default=None, alias="pixelRatio")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SlideScreenshotResponse(SlideScreenshotPayload):
+    """Screenshot payload returned to clients requesting rendered slides."""
+
+    id: str = Field(..., min_length=1)
+    index: int = Field(..., ge=0)
+
+
+class SlideDomSnapshotPayload(BaseModel):
+    """Serialised DOM snapshot used for server-side rendering."""
+
+    html: str
+    width: float
+    height: float
+    pixel_ratio: Optional[float] = Field(default=None, alias="pixelRatio")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SlideExportObjectPayload(BaseModel):
+    """Object placed on a slide during export generation."""
+
+    id: str = Field(..., min_length=1)
+    type: str = Field(..., min_length=1)
+    x: float
+    y: float
+    width: Optional[float] = None
+    height: Optional[float] = None
+    rotation: Optional[float] = None
+    z_index: Optional[int] = Field(default=None, alias="zIndex")
+    group_id: Optional[str] = Field(default=None, alias="groupId")
+    props: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SlideExportPayload(BaseModel):
+    """Structured slide definition used for export rendering."""
+
+    id: str = Field(..., min_length=1)
+    index: int = Field(..., ge=0)
+    title: Optional[str] = None
+    base_width: float = Field(..., alias="baseWidth")
+    base_height: float = Field(..., alias="baseHeight")
+    presentation_settings: Optional[Dict[str, Any]] = Field(
+        default=None, alias="presentationSettings"
+    )
+    objects: List[SlideExportObjectPayload] = Field(default_factory=list)
+    screenshot: Optional[SlideScreenshotPayload] = None
+    dom_snapshot: Optional[SlideDomSnapshotPayload] = Field(default=None, alias="domSnapshot")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ExhibitionExportRequest(BaseModel):
+    """Payload accepted by the presentation export endpoints."""
+
+    title: Optional[str] = None
+    slides: List[SlideExportPayload] = Field(default_factory=list)
+    document_styles: Optional[DocumentStylesPayload] = Field(
+        default=None, alias="documentStyles"
+    )
+
+
+class SlideScreenshotsResponse(BaseModel):
+    """Response returned when generating slide screenshots."""
+
+    slides: List[SlideScreenshotResponse] = Field(default_factory=list)

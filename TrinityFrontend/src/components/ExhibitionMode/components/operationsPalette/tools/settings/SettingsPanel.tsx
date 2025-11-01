@@ -469,10 +469,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         <ColorTray
                           sections={SOLID_COLOR_SECTIONS}
                           selectedId={solidColorOption?.id ?? solidColorToken}
-                          onSelect={option => {
-                            handleSolidColorSelect(option);
-                            setSolidColorPopoverOpen(false);
-                          }}
+                          onSelect={handleSolidColorSelect}
                           defaultSectionId={DEFAULT_SOLID_SECTION.id}
                         />
                         <div className="flex items-center gap-2">
@@ -540,10 +537,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                             <ColorTray
                               sections={SOLID_COLOR_SECTIONS}
                               selectedId={gradientStartOption?.id ?? gradientStartToken}
-                              onSelect={option => {
-                                handleGradientColorSelect('backgroundGradientStart', option);
-                                setGradientStartPopoverOpen(false);
-                              }}
+                              onSelect={option =>
+                                handleGradientColorSelect('backgroundGradientStart', option)
+                              }
                               defaultSectionId={DEFAULT_SOLID_SECTION.id}
                             />
                             <div className="flex items-center gap-2">
@@ -595,10 +591,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                             <ColorTray
                               sections={SOLID_COLOR_SECTIONS}
                               selectedId={gradientEndOption?.id ?? gradientEndToken}
-                              onSelect={option => {
-                                handleGradientColorSelect('backgroundGradientEnd', option);
-                                setGradientEndPopoverOpen(false);
-                              }}
+                              onSelect={option =>
+                                handleGradientColorSelect('backgroundGradientEnd', option)
+                              }
                               defaultSectionId={DEFAULT_SOLID_SECTION.id}
                             />
                             <div className="flex items-center gap-2">

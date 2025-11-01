@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { LayoutCard } from '../store/exhibitionStore';
+import SlidePreview from './SlidePreview';
 
 interface SlideThumbnailsProps {
   cards: LayoutCard[];
@@ -72,16 +73,7 @@ export const SlideThumbnails: React.FC<SlideThumbnailsProps> = ({
                 </div>
               </div>
 
-              <div className="mt-2 aspect-video bg-background rounded border border-border overflow-hidden">
-                <div className="p-2 grid grid-cols-2 gap-1">
-                  {card.atoms.slice(0, 4).map(atom => (
-                    <div key={atom.id} className="flex items-center gap-1 p-1 bg-muted rounded text-[10px]">
-                      <div className={`w-2 h-2 ${atom.color} rounded-full flex-shrink-0`} />
-                      <span className="truncate">{atom.title}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <SlidePreview card={card} index={index} totalSlides={cards.length} className="mt-3" />
             </button>
           ))}
         </div>

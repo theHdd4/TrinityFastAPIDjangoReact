@@ -27,6 +27,15 @@ try:
 except ImportError:
     FILE_LOADER_AVAILABLE = False
 
+# Import FileHandler for @filename mention support
+try:
+    from File_handler.available_minio_files import FileHandler, get_file_handler
+    FILE_HANDLER_AVAILABLE = True
+    logger.info("✅ FileHandler imported successfully")
+except ImportError as e:
+    FILE_HANDLER_AVAILABLE = False
+    logger.warning(f"⚠️ FileHandler not available: {e}")
+
 # Import the smart workflow agent (like other agents)
 try:
     from SUPERAGENT.llm_workflow import SmartWorkflowAgent
@@ -92,6 +101,22 @@ class SuperAgentLLMClient:
             except Exception as e:
                 logger.warning(f"Failed to initialize FileLoader: {e}")
                 self.file_loader = None
+        
+        # Initialize FileHandler for @filename mention support
+        self.file_handler = None
+        if FILE_HANDLER_AVAILABLE:
+            try:
+                self.file_handler = get_file_handler(
+                    minio_endpoint=os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                    minio_access_key=os.getenv("MINIO_ACCESS_KEY", "minio"),
+                    minio_secret_key=os.getenv("MINIO_SECRET_KEY", "minio123"),
+                    minio_bucket=os.getenv("MINIO_BUCKET", "trinity"),
+                    object_prefix=""
+                )
+                logger.info("✅ FileHandler initialized for @filename mention support")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize FileHandler: {e}")
+                self.file_handler = None
         
         # FastAPI base URL for Laboratory Card Generation API
         self.fastapi_base_url = os.getenv("FASTAPI_BASE_URL", "http://localhost:8001")
@@ -1153,9 +1178,24 @@ async def chat_with_superagent(request: ChatRequest):
     Smart chat with Super Agent AI
     - Detects workflow requests and generates JSON workflow
     - Returns smart_response for display + workflow JSON for backend processing
+    - Supports @filename mentions for file-aware context
     """
     try:
         logger.info(f"SuperAgent chat request: {request.message[:100]}...")
+        
+        # Parse for @filename mentions and enrich context
+        file_context = {}
+        enriched_message = request.message
+        if llm_client.file_handler:
+            try:
+                original_prompt, file_context = llm_client.file_handler.enrich_prompt_with_file_context(request.message)
+                if file_context:
+                    # Add file context to message for LLM
+                    file_context_str = llm_client.file_handler.format_file_context_for_llm(file_context)
+                    enriched_message = original_prompt + file_context_str
+                    logger.info(f"✅ Enriched prompt with {len(file_context)} file(s) context")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to enrich with file context: {e}")
         
         # Check if this is a workflow request (data science operation)
         message_lower = request.message.lower()
@@ -1170,12 +1210,14 @@ async def chat_with_superagent(request: ChatRequest):
             
             # Generate workflow using SmartWorkflowAgent
             if workflow_agent:
+                # Pass enriched message with file context to workflow agent
                 result = workflow_agent.process_request(
-                    prompt=request.message,
+                    prompt=enriched_message,
                     session_id=request.session_id or "chat_session",
                     client_name=request.client_name or "",
                     app_name=request.app_name or "",
-                    project_name=request.project_name or ""
+                    project_name=request.project_name or "",
+                    file_context=file_context  # Pass file context
                 )
                 
                 workflow_json = result.get("workflow_json", {})
@@ -1212,7 +1254,8 @@ async def chat_with_superagent(request: ChatRequest):
         else:
             # Regular conversational request
             logger.info("💬 Regular chat request")
-            ai_response = llm_client.get_ai_response(request.message)
+            # Use enriched message for regular chat too
+            ai_response = llm_client.get_ai_response(enriched_message)
             return ChatResponse(response=ai_response)
         
     except Exception as e:
@@ -1229,19 +1272,35 @@ async def generate_workflow(request: ChatRequest):
     """
     Generate structured JSON workflow from user prompt
     Uses Smart Workflow Agent with file loading, memory, and proper AI logic (like merge/concat/explore agents)
+    Supports @filename mentions for file-aware context
     """
     try:
         logger.info(f"SuperAgent workflow generation request: {request.message[:100]}...")
+        
+        # Parse for @filename mentions and enrich context
+        file_context = {}
+        enriched_message = request.message
+        if llm_client.file_handler:
+            try:
+                original_prompt, file_context = llm_client.file_handler.enrich_prompt_with_file_context(request.message)
+                if file_context:
+                    # Add file context to message for LLM
+                    file_context_str = llm_client.file_handler.format_file_context_for_llm(file_context)
+                    enriched_message = original_prompt + file_context_str
+                    logger.info(f"✅ Enriched workflow prompt with {len(file_context)} file(s) context")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to enrich with file context: {e}")
         
         # Use Smart Workflow Agent (follows same pattern as merge, concat, explore agents)
         if workflow_agent:
             logger.info("✅ Using SmartWorkflowAgent (with file loading, memory, and AI logic)")
             result = workflow_agent.process_request(
-                prompt=request.message,
+                prompt=enriched_message,
                 session_id=request.session_id or "default_session",
                 client_name=request.client_name or "",
                 app_name=request.app_name or "",
-                project_name=request.project_name or ""
+                project_name=request.project_name or "",
+                file_context=file_context  # Pass file context
             )
             
             # Extract workflow JSON from result

@@ -13,5 +13,6 @@ export interface OperationFactoryDeps {
   onCreateTable?: () => void;
   onOpenShapesPanel?: () => void;
   onOpenImagesPanel?: () => void;
+  onOpenTemplatesPanel?: () => void;
   canEdit?: boolean;
 }

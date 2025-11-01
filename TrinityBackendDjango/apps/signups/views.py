@@ -1,9 +1,19 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
+from rest_framework.authentication import SessionAuthentication
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 from .models import SignupList
 from .serializers import SignupListSerializer
 
 
+class CsrfExemptSessionAuthentication(SessionAuthentication):
+    """Session authentication that bypasses CSRF checks."""
+    def enforce_csrf(self, request):
+        return  # Ignore CSRF for API views
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class SignupListViewSet(viewsets.ModelViewSet):
     """
     API endpoint for landing page signups.
@@ -12,6 +22,7 @@ class SignupListViewSet(viewsets.ModelViewSet):
     """
     queryset = SignupList.objects.all()
     serializer_class = SignupListSerializer
+    authentication_classes = [CsrfExemptSessionAuthentication]
 
     def get_permissions(self):
         # Allow anyone to create a signup (POST)
