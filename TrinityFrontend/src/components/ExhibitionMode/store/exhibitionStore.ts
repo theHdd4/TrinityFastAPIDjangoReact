@@ -1189,7 +1189,19 @@ const normaliseLayoutSlideObjects = (
       .map(entry => normaliseSavedSlideObject(entry))
       .filter((entry): entry is SlideObject => entry !== null);
 
-    acc[cardId] = objects;
+    const sorted = objects
+      .map((object, index) => ({ object, index }))
+      .sort((a, b) => {
+        const aZ = typeof a.object.zIndex === 'number' ? a.object.zIndex : Number.MAX_SAFE_INTEGER;
+        const bZ = typeof b.object.zIndex === 'number' ? b.object.zIndex : Number.MAX_SAFE_INTEGER;
+        if (aZ !== bZ) {
+          return aZ - bZ;
+        }
+        return a.index - b.index;
+      })
+      .map(entry => entry.object);
+
+    acc[cardId] = normaliseZIndices(sorted);
     return acc;
   }, {} as Record<string, SlideObject[]>);
 };
