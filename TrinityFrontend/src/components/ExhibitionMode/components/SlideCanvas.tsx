@@ -2243,17 +2243,35 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     }, [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects]);
 
     const handleLayerAction = useCallback(
-      (action: 'front' | 'forward' | 'backward' | 'back') => {
-        const targets = unlockedSelectedObjects.length > 0 ? unlockedSelectedObjects : selectedObjects;
+      (action: 'front' | 'forward' | 'backward' | 'back', explicitIds?: string[]) => {
+        const explicitTargets = Array.isArray(explicitIds) && explicitIds.length > 0
+          ? explicitIds
+              .map(id => objectsMap.get(id))
+              .filter((object): object is SlideObject => Boolean(object))
+          : null;
+
+        const unlockedExplicitTargets = explicitTargets?.filter(object => !isSlideObjectLocked(object)) ?? [];
+
+        const targets = unlockedExplicitTargets.length > 0
+          ? unlockedExplicitTargets
+          : explicitTargets && explicitTargets.length > 0
+            ? []
+            : unlockedSelectedObjects.length > 0
+              ? unlockedSelectedObjects
+              : selectedObjects;
+
         if (targets.length === 0) {
           toast({
-            title: 'No objects selected',
-            description: 'Select an object to change its layer order.',
+            title: explicitTargets && explicitTargets.length > 0 ? 'Selection locked' : 'No objects selected',
+            description:
+              explicitTargets && explicitTargets.length > 0
+                ? 'Unlock the selected objects to change their layer order.'
+                : 'Select an object to change its layer order.',
           });
           return;
         }
 
-        const ids = targets.map(object => object.id);
+        const ids = Array.from(new Set(targets.map(object => object.id))).filter(Boolean);
         if (ids.length === 0) {
           return;
         }
@@ -2277,6 +2295,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
       },
       [
+        objectsMap,
         onBringForward,
         onBringToFront,
         onInteract,
@@ -4259,10 +4278,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onDuplicate={() => handleDuplicateSelection(contextTargetIds)}
               onDelete={() => handleDeleteSelection(contextTargetIds)}
               onToggleLock={handleToggleLock}
-              onBringToFront={() => handleLayerAction('front')}
-              onBringForward={() => handleLayerAction('forward')}
-              onSendBackward={() => handleLayerAction('backward')}
-              onSendToBack={() => handleLayerAction('back')}
+              onBringToFront={() => handleLayerAction('front', contextTargetIds)}
+              onBringForward={() => handleLayerAction('forward', contextTargetIds)}
+              onSendBackward={() => handleLayerAction('backward', contextTargetIds)}
+              onSendToBack={() => handleLayerAction('back', contextTargetIds)}
               onAlign={handleAlignSelection}
               onLink={handleLinkSelection}
               onComment={handleCommentSelection}
