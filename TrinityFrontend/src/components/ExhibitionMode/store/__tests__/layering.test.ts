@@ -74,6 +74,16 @@ describe('exhibitionStore layering actions', () => {
     expect(result?.map(entry => entry.zIndex)).toEqual([1, 2, 3, 4]);
   });
 
+  it('moves non-contiguous selections forward independently', () => {
+    useExhibitionStore
+      .getState()
+      .bringSlideObjectsForward(CARD_ID, ['obj-a', 'obj-c']);
+
+    const result = readOrder();
+    expect(result?.map(entry => entry.id)).toEqual(['obj-b', 'obj-a', 'obj-d', 'obj-c']);
+    expect(result?.map(entry => entry.zIndex)).toEqual([1, 2, 3, 4]);
+  });
+
   it('sends objects backward by a single layer', () => {
     useExhibitionStore.getState().sendSlideObjectsBackward(CARD_ID, ['obj-c']);
 
@@ -82,11 +92,41 @@ describe('exhibitionStore layering actions', () => {
     expect(result?.map(entry => entry.zIndex)).toEqual([1, 2, 3, 4]);
   });
 
+  it('sends multiple objects backward as a unit', () => {
+    useExhibitionStore
+      .getState()
+      .sendSlideObjectsBackward(CARD_ID, ['obj-b', 'obj-d']);
+
+    const result = readOrder();
+    expect(result?.map(entry => entry.id)).toEqual(['obj-b', 'obj-a', 'obj-d', 'obj-c']);
+    expect(result?.map(entry => entry.zIndex)).toEqual([1, 2, 3, 4]);
+  });
+
   it('sends objects to the back of the stack', () => {
     useExhibitionStore.getState().sendSlideObjectsToBack(CARD_ID, ['obj-d']);
 
     const result = readOrder();
     expect(result?.map(entry => entry.id)).toEqual(['obj-d', 'obj-a', 'obj-b', 'obj-c']);
+    expect(result?.map(entry => entry.zIndex)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('sends multiple objects to the back while preserving order', () => {
+    useExhibitionStore
+      .getState()
+      .sendSlideObjectsToBack(CARD_ID, ['obj-b', 'obj-d']);
+
+    const result = readOrder();
+    expect(result?.map(entry => entry.id)).toEqual(['obj-b', 'obj-d', 'obj-a', 'obj-c']);
+    expect(result?.map(entry => entry.zIndex)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('brings multiple objects to the front preserving their order', () => {
+    useExhibitionStore
+      .getState()
+      .bringSlideObjectsToFront(CARD_ID, ['obj-b', 'obj-d']);
+
+    const result = readOrder();
+    expect(result?.map(entry => entry.id)).toEqual(['obj-a', 'obj-c', 'obj-b', 'obj-d']);
     expect(result?.map(entry => entry.zIndex)).toEqual([1, 2, 3, 4]);
   });
 
