@@ -40,7 +40,9 @@ interface ChartStateMetadata {
   chartType?: string;
   theme?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   xAxisField?: string;
@@ -69,7 +71,9 @@ interface ChartRendererConfig {
   xAxisLabel?: string;
   yAxisLabel?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   sortOrder?: 'asc' | 'desc' | null;
@@ -93,7 +97,9 @@ interface ChartTemplateConfigLike extends Record<string, unknown> {
   tooltip?: unknown;
   theme?: unknown;
   showLegend?: unknown;
-  showAxisLabels?: unknown;
+  // showAxisLabels?: unknown;
+  showXAxisLabels?: unknown;
+  showYAxisLabels?: unknown;
   showDataLabels?: unknown;
   showGrid?: unknown;
   legendField?: unknown;
@@ -611,9 +617,19 @@ const extractDirectChartRendererConfig = (
     config.showLegend = showLegend;
   }
 
-  const showAxisLabels = asBoolean(chartConfig.showAxisLabels);
-  if (showAxisLabels !== undefined) {
-    config.showAxisLabels = showAxisLabels;
+  // const showAxisLabels = asBoolean(chartConfig.showAxisLabels);
+  // if (showAxisLabels !== undefined) {
+  //   config.showAxisLabels = showAxisLabels;
+  // }
+
+  const showXAxisLabels = asBoolean(chartConfig.showXAxisLabels);
+  if (showXAxisLabels !== undefined) {
+    config.showXAxisLabels = showXAxisLabels;
+  }
+
+  const showYAxisLabels = asBoolean(chartConfig.showYAxisLabels);
+  if (showYAxisLabels !== undefined) {
+    config.showYAxisLabels = showYAxisLabels;
   }
 
   const showDataLabels = asBoolean(chartConfig.showDataLabels);
@@ -655,9 +671,9 @@ const extractDirectChartRendererConfig = (
     if (chartState.showLegend !== undefined) {
       config.showLegend = chartState.showLegend;
     }
-    if (chartState.showAxisLabels !== undefined) {
-      config.showAxisLabels = chartState.showAxisLabels;
-    }
+    // if (chartState.showAxisLabels !== undefined) {
+    //   config.showAxisLabels = chartState.showAxisLabels;
+    // }
     if (chartState.showDataLabels !== undefined) {
       config.showDataLabels = chartState.showDataLabels;
     }
@@ -692,7 +708,9 @@ const extractChartState = (metadata: AtomMetadata): ChartStateMetadata | undefin
     chartType: asString(candidate['chartType'] ?? candidate['chart_type']),
     theme: asString(candidate['theme']),
     showLegend: asBoolean(candidate['showLegend'] ?? candidate['show_legend']),
-    showAxisLabels: asBoolean(candidate['showAxisLabels'] ?? candidate['show_axis_labels']),
+    // showAxisLabels: asBoolean(candidate['showAxisLabels'] ?? candidate['show_axis_labels']),
+    showXAxisLabels: asBoolean(candidate['showXAxisLabels'] ?? candidate['show_x_axis_labels']),
+    showYAxisLabels: asBoolean(candidate['showYAxisLabels'] ?? candidate['show_y_axis_labels']),
     showDataLabels: asBoolean(candidate['showDataLabels'] ?? candidate['show_data_labels']),
     showGrid: asBoolean(candidate['showGrid'] ?? candidate['show_grid']),
     xAxisField: asString(candidate['xAxisField'] ?? candidate['x_axis_field'] ?? candidate['xAxis']),
@@ -790,8 +808,14 @@ const createChartRendererConfig = (
   base.xAxisLabel = chartState?.xAxisLabel ?? metadataXAxis;
   base.yAxisLabel = chartState?.yAxisLabel ?? metadataYAxis;
 
-  if (chartState?.showAxisLabels !== undefined) {
-    base.showAxisLabels = chartState.showAxisLabels;
+  // if (chartState?.showAxisLabels !== undefined) {
+  //   base.showAxisLabels = chartState.showAxisLabels;
+  // }
+  if (chartState?.showXAxisLabels !== undefined) {
+    base.showXAxisLabels = chartState.showXAxisLabels;
+  }
+  if (chartState?.showYAxisLabels !== undefined) {
+    base.showYAxisLabels = chartState.showYAxisLabels;
   }
   if (chartState?.showDataLabels !== undefined) {
     base.showDataLabels = chartState.showDataLabels;

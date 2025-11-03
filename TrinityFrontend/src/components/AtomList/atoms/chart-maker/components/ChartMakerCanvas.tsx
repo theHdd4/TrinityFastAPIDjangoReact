@@ -734,7 +734,9 @@ const renderChart = (
     colors: [colors.primary, colors.secondary, colors.tertiary],
     theme: chart.chartConfig?.theme,
     showLegend: chart.chartConfig?.showLegend,
-    showAxisLabels: chart.chartConfig?.showAxisLabels,
+    // showAxisLabels: chart.chartConfig?.showAxisLabels,
+    showXAxisLabels: chart.chartConfig?.showXAxisLabels,
+    showYAxisLabels: chart.chartConfig?.showYAxisLabels,
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
     height: chartHeightValue,
@@ -765,10 +767,26 @@ const renderChart = (
       );
       updateSettings(atomId, { charts: updatedCharts });
     },
-    onAxisLabelsToggle: (enabled: boolean) => {
+    // onAxisLabelsToggle: (enabled: boolean) => {
+    //   const updatedCharts = charts.map(c => 
+    //     c.id === chart.id 
+    //       ? { ...c, chartConfig: { ...c.chartConfig, showAxisLabels: enabled } }
+    //       : c
+    //   );
+    //   updateSettings(atomId, { charts: updatedCharts });
+    // },
+    onXAxisLabelsToggle: (enabled: boolean) => {
       const updatedCharts = charts.map(c => 
         c.id === chart.id 
-          ? { ...c, chartConfig: { ...c.chartConfig, showAxisLabels: enabled } }
+          ? { ...c, chartConfig: { ...c.chartConfig, showXAxisLabels: enabled } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onYAxisLabelsToggle: (enabled: boolean) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, showYAxisLabels: enabled } }
           : c
       );
       updateSettings(atomId, { charts: updatedCharts });

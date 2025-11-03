@@ -57,7 +57,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip as RechartsTooltip, ScatterChart, Scatter } from 'recharts';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import SCurveChartRenderer from '@/templates/charts/SCurveChartRenderer';
@@ -347,6 +347,19 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const [isLoadingApplicationType, setIsLoadingApplicationType] = useState(false);
   const [averagesData, setAveragesData] = useState<{[key: string]: any}>({});
   const [isLoadingAveragesData, setIsLoadingAveragesData] = useState(false);
+  
+  // Dialog open states for expander functionality
+  const [waterfallDialogOpen, setWaterfallDialogOpen] = useState(false);
+  const [contributionDialogOpen, setContributionDialogOpen] = useState(false);
+  const [roiDialogOpen, setRoiDialogOpen] = useState(false);
+  const [actualVsPredictedDialogOpen, setActualVsPredictedDialogOpen] = useState(false);
+  const [betaDialogOpen, setBetaDialogOpen] = useState(false);
+  const [elasticityDialogOpen, setElasticityDialogOpen] = useState(false);
+  const [averagesDialogOpen, setAveragesDialogOpen] = useState(false);
+  const [sCurveDialogOpen, setSCurveDialogOpen] = useState(false);
+  
+  // Track which sections were auto-expanded (originally collapsed but expanded to show dialog)
+  const [autoExpandedSections, setAutoExpandedSections] = useState<{[key: string]: boolean}>({});
   
   // Cardinality view state
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
@@ -1401,6 +1414,48 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
   };
 
+  // Handler for expander buttons - expands section first if collapsed, then opens dialog
+  const handleExpanderClick = (graphType: string, setDialogOpen: (open: boolean) => void) => {
+    // Check if section is collapsed
+    if (collapsedGraphs[graphType]) {
+      // Mark as auto-expanded (so we can collapse it again when dialog closes)
+      setAutoExpandedSections(prev => ({
+        ...prev,
+        [graphType]: true
+      }));
+      // First, expand the section
+      setCollapsedGraphs(prev => ({
+        ...prev,
+        [graphType]: false
+      }));
+      // Wait for animation to complete, then open dialog
+      setTimeout(() => {
+        setDialogOpen(true);
+      }, 50);
+    } else {
+      // Section is already expanded, open dialog immediately
+      setDialogOpen(true);
+    }
+  };
+
+  // Handler for dialog close - collapses sections that were auto-expanded
+  const handleDialogClose = (graphType: string, setDialogOpen: (open: boolean) => void, open: boolean) => {
+    setDialogOpen(open);
+    // If dialog is closing and this section was auto-expanded, collapse it again
+    if (!open && autoExpandedSections[graphType]) {
+      setCollapsedGraphs(prev => ({
+        ...prev,
+        [graphType]: true
+      }));
+      // Clear the auto-expanded flag
+      setAutoExpandedSections(prev => {
+        const updated = { ...prev };
+        delete updated[graphType];
+        return updated;
+      });
+    }
+  };
+
   // Handle contribution chart type change
   const handleContributionChartTypeChange = (combinationName: string, newType: string) => {
     setContributionChartTypes(prev => ({
@@ -1933,7 +1988,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       yAxisLabel: 'Value',
       theme: chartTheme,
       enableScroll: false,
-      width: isExpanded ? 400 : 500,
+      width: 0,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
       showLegend: showLegend,
@@ -2052,7 +2107,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       yAxisLabel: 'Contribution',
       theme: chartTheme,
       enableScroll: false,
-      width: isExpanded ? 400 : 500,
+      width: 0,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
       showLegend: showLegend,
@@ -2164,7 +2219,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       yAxisLabel: 'ROI',
       theme: chartTheme,
       enableScroll: false,
-      width: isExpanded ? 400 : 500,
+      width: 0,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
       showLegend: showLegend,
@@ -2290,7 +2345,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       yAxisLabel: 'Value',
       theme: chartTheme,
       enableScroll: false,
-      width: isExpanded ? 400 : 500,
+      width: 0,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
       showLegend: showLegend,
@@ -2403,7 +2458,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       yAxisLabel: 'Beta Coefficient',
       theme: chartTheme,
       enableScroll: false,
-      width: isExpanded ? 400 : 500,
+      width: 0,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
       showLegend: showLegend,
@@ -2511,7 +2566,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       yAxisLabel: 'Elasticity',
       theme: chartTheme,
       enableScroll: false,
-      width: isExpanded ? 400 : 500,
+      width: 0,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
       showLegend: showLegend,
@@ -2700,6 +2755,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     yAxisLabel="Volume"
                     theme={chartTheme}
                     enableScroll={false}
+                    width={0}
                     height={400}
                     showDataLabels={false}
                     showLegend={showLegend}
@@ -2780,7 +2836,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       yAxisLabel: 'Average',
       theme: chartTheme,
       enableScroll: false,
-      width: isExpanded ? 400 : 500,
+      width: 0,
       height: isExpanded ? 350 : 400,
       showDataLabels: showDataLabels,
       showLegend: showLegend,
@@ -3415,17 +3471,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">Waterfall chart</h3>
               <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      aria-label="Expand waterfall charts"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
+                <Dialog open={waterfallDialogOpen} onOpenChange={(open) => handleDialogClose('waterfall', setWaterfallDialogOpen, open)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label="Expand waterfall charts"
+                    onClick={() => handleExpanderClick('waterfall', setWaterfallDialogOpen)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
                     <div className="space-y-6">
                       <h2 className="text-xl font-semibold">Waterfall Charts - Expanded View</h2>
@@ -3468,17 +3523,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">Contribution Chart</h3>
               <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      aria-label="Expand contribution charts"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
+                <Dialog open={contributionDialogOpen} onOpenChange={(open) => handleDialogClose('contribution', setContributionDialogOpen, open)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label="Expand contribution charts"
+                    onClick={() => handleExpanderClick('contribution', setContributionDialogOpen)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
                     <div className="space-y-6">
                       <h2 className="text-xl font-semibold">Contribution Charts - Expanded View</h2>
@@ -3521,17 +3575,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">ROI Chart</h3>
               <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      aria-label="Expand ROI charts"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
+                <Dialog open={roiDialogOpen} onOpenChange={(open) => handleDialogClose('roi', setRoiDialogOpen, open)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label="Expand ROI charts"
+                    onClick={() => handleExpanderClick('roi', setRoiDialogOpen)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
                     <div className="space-y-6">
                       <h2 className="text-xl font-semibold">ROI Charts - Expanded View</h2>
@@ -3574,17 +3627,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">Actual vs Predicted</h3>
               <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      aria-label="Expand actual vs predicted charts"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
+                <Dialog open={actualVsPredictedDialogOpen} onOpenChange={(open) => handleDialogClose('actual-vs-predicted', setActualVsPredictedDialogOpen, open)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label="Expand actual vs predicted charts"
+                    onClick={() => handleExpanderClick('actual-vs-predicted', setActualVsPredictedDialogOpen)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
                     <div className="space-y-6">
                       <h2 className="text-xl font-semibold">Actual vs Predicted Charts - Expanded View</h2>
@@ -3627,17 +3679,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">Beta Coefficients</h3>
               <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      aria-label="Expand beta charts"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
+                <Dialog open={betaDialogOpen} onOpenChange={(open) => handleDialogClose('beta', setBetaDialogOpen, open)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label="Expand beta charts"
+                    onClick={() => handleExpanderClick('beta', setBetaDialogOpen)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
                     <div className="space-y-6">
                       <h2 className="text-xl font-semibold">Beta Charts - Expanded View</h2>
@@ -3680,17 +3731,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">Elasticity</h3>
               <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      aria-label="Expand elasticity charts"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
+                <Dialog open={elasticityDialogOpen} onOpenChange={(open) => handleDialogClose('elasticity', setElasticityDialogOpen, open)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label="Expand elasticity charts"
+                    onClick={() => handleExpanderClick('elasticity', setElasticityDialogOpen)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
                     <div className="space-y-6">
                       <h2 className="text-xl font-semibold">Elasticity Charts - Expanded View</h2>
@@ -3733,17 +3783,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">Averages</h3>
               <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      aria-label="Expand averages charts"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
+                <Dialog open={averagesDialogOpen} onOpenChange={(open) => handleDialogClose('averages', setAveragesDialogOpen, open)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label="Expand averages charts"
+                    onClick={() => handleExpanderClick('averages', setAveragesDialogOpen)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
                     <div className="space-y-6">
                       <h2 className="text-xl font-semibold">Averages Charts - Expanded View</h2>
@@ -3786,17 +3835,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium">S-Curve Analysis</h3>
               <div className="flex items-center gap-2">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      aria-label="Expand S-curve charts"
-                    >
-                      <Maximize2 className="h-4 w-4" />
-                    </Button>
-                  </DialogTrigger>
+                <Dialog open={sCurveDialogOpen} onOpenChange={(open) => handleDialogClose('s-curve', setSCurveDialogOpen, open)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 w-8 p-0"
+                    aria-label="Expand S-curve charts"
+                    onClick={() => handleExpanderClick('s-curve', setSCurveDialogOpen)}
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
                     <div className="space-y-6">
                       <h2 className="text-xl font-semibold">S-Curve Charts - Expanded View</h2>

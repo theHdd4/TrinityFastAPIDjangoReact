@@ -572,7 +572,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   
   // Chart display options state
   const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
-  const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
+  // const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
+  const [showXAxisLabels, setShowXAxisLabels] = useState<boolean>(true);
+  const [showYAxisLabels, setShowYAxisLabels] = useState<boolean>(true);
   const [showGrid, setShowGrid] = useState<boolean>(true);
   const [showLegend, setShowLegend] = useState<boolean>(true);
 
@@ -923,47 +925,59 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const handleChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
     setChartType(newType);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { chartType: newType });
+    onUpdateSettings({ chartType: newType });
   };
 
   // Handle chart theme change
   const handleChartThemeChange = (newTheme: string) => {
     setChartTheme(newTheme);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { chartTheme: newTheme });
+    onUpdateSettings({ chartTheme: newTheme });
   };
 
   // Handle chart sort order change
   const handleChartSortOrderChange = (order: 'asc' | 'desc' | null) => {
     setChartSortOrder(order);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { chartSortOrder: order });
+    onUpdateSettings({ chartSortOrder: order });
   };
 
   // Handle data labels toggle
   const handleDataLabelsToggle = (show: boolean) => {
     setShowDataLabels(show);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { showDataLabels: show });
+    onUpdateSettings({ showDataLabels: show });
   };
 
   // Handle axis labels toggle
-  const handleAxisLabelsToggle = (show: boolean) => {
-    setShowAxisLabels(show);
+  // const handleAxisLabelsToggle = (show: boolean) => {
+  //   setShowAxisLabels(show);
+  //   // Save to global settings to persist configuration
+  //   onUpdateSettings({ showAxisLabels: show });
+  // };
+
+  const handleXAxisLabelsToggle = (show: boolean) => {
+    setShowXAxisLabels(show);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { showAxisLabels: show });
+    onUpdateSettings({ showXAxisLabels: show });
+  };
+
+  const handleYAxisLabelsToggle = (show: boolean) => {
+    setShowYAxisLabels(show);
+    // Save to global settings to persist configuration
+    onUpdateSettings({ showYAxisLabels: show });
   };
 
   const handleGridToggle = (show: boolean) => {
     setShowGrid(show);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { showGrid: show });
+    onUpdateSettings({ showGrid: show });
   };
 
   const handleLegendToggle = (show: boolean) => {
     setShowLegend(show);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { showLegend: show });
+    onUpdateSettings({ showLegend: show });
   };
 
   // Handle metric graph expansion
@@ -1192,7 +1206,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 type: chartState.chartType,
                 theme: chartState.theme,
                 showLegend: chartState.showLegend,
-                showAxisLabels: chartState.showAxisLabels,
+                // showAxisLabels: chartState.showAxisLabels,
+                showXAxisLabels: chartState.showXAxisLabels,
+                showYAxisLabels: chartState.showYAxisLabels,
                 showDataLabels: chartState.showDataLabels,
                 showGrid: chartState.showGrid,
                 xField: chartState.xAxisField,
@@ -1274,7 +1290,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 chartType,
                 theme: chartTheme,
                 showDataLabels,
-                showAxisLabels,
+                // showAxisLabels,
+                showXAxisLabels,
+                showYAxisLabels,
                 showGrid,
                 showLegend,
                 xAxisField,
@@ -1356,7 +1374,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       dimensionMap,
       exhibitionSelections,
       onUpdateSettings,
-      showAxisLabels,
+      showXAxisLabels,
+      showYAxisLabels,
       showDataLabels,
       statDataMap,
       xAxisField,
@@ -2362,14 +2381,18 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                                     xAxisLabel={settings.xAxis || "Date"}
                                                                     yAxisLabel={m || "Value"}
                                                                     showDataLabels={showDataLabels}
-                                                                    showAxisLabels={showAxisLabels}
+                                                                    // showAxisLabels={showAxisLabels}
+                                                                    showXAxisLabels={showXAxisLabels}
+                                                                    showYAxisLabels={showYAxisLabels}
                                                                     showGrid={showGrid}
                                                                     showLegend={showLegend}
                                                                     theme={chartTheme}
                                                                     onChartTypeChange={handleChartTypeChange}
                                                                     onThemeChange={handleChartThemeChange}
                                                                     onDataLabelsToggle={handleDataLabelsToggle}
-                                                                    onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                                    // onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                                    onXAxisLabelsToggle={handleXAxisLabelsToggle}
+                                                                    onYAxisLabelsToggle={handleYAxisLabelsToggle}
                                                                     onGridToggle={handleGridToggle}
                                                                     onLegendToggle={handleLegendToggle}
                                                                     sortOrder={chartSortOrder}
@@ -2402,14 +2425,18 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                               xAxisLabel={settings.xAxis || "Date"}
                                                               yAxisLabel={m || "Value"}
                                                               showDataLabels={showDataLabels}
-                                                              showAxisLabels={showAxisLabels}
+                                                              // showAxisLabels={showAxisLabels}
+                                                              showXAxisLabels={showXAxisLabels}
+                                                              showYAxisLabels={showYAxisLabels}
                                                               showGrid={showGrid}
                                                               showLegend={showLegend}
                                                               theme={chartTheme}
                                                               onChartTypeChange={handleChartTypeChange}
                                                               onThemeChange={handleChartThemeChange}
                                                               onDataLabelsToggle={handleDataLabelsToggle}
-                                                              onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                              // onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                              onXAxisLabelsToggle={handleXAxisLabelsToggle}
+                                                              onYAxisLabelsToggle={handleYAxisLabelsToggle}
                                                               onGridToggle={handleGridToggle}
                                                               onLegendToggle={handleLegendToggle}
                                                               sortOrder={chartSortOrder}
