@@ -16,7 +16,7 @@ import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
-import { useLaboratoryStore } from './store/laboratoryStore';
+import { useLaboratoryStore, LayoutCard } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
 import { getActiveProjectContext } from '@/utils/projectEnv';
@@ -239,6 +239,65 @@ const LaboratoryMode = () => {
     setAuxActive(prev => (prev === 'help' ? null : 'help'));
   };
 
+  // Function to sort cards in workflow order (same as unified rendering logic)
+  const sortCardsInWorkflowOrder = (cardsToSort: LayoutCard[], workflowMolecules: any[]): LayoutCard[] => {
+    if (!workflowMolecules || workflowMolecules.length === 0) {
+      // No workflow molecules - return cards as-is (or sort by position if available)
+      return [...cardsToSort].sort((a, b) => {
+        const posA = typeof a.position === 'number' ? a.position : Infinity;
+        const posB = typeof b.position === 'number' ? b.position : Infinity;
+        return posA - posB;
+      });
+    }
+
+    const sortedCards: LayoutCard[] = [];
+    
+    // Separate cards into workflow and standalone
+    const workflowCards = cardsToSort.filter(card => card.moleculeId);
+    const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
+    
+    // Add standalone cards that should appear before the first molecule
+    const standaloneBefore = standaloneCards.filter(card => 
+      typeof card.position === 'number' && card.position < 0
+    );
+    sortedCards.push(...standaloneBefore);
+    
+    // Process molecules and their associated standalone cards
+    // Position logic: position in range [i, i+1) means "before molecule at index i"
+    // So position 1 appears before molecule at index 1, which is BETWEEN molecule 0 and molecule 1
+    workflowMolecules.forEach((molecule, moleculeIndex) => {
+      // Add standalone cards that should appear before this molecule (between previous molecule and this one)
+      // Cards with position in range [moleculeIndex, moleculeIndex + 1) appear before molecule at moleculeIndex
+      const standaloneBeforeMolecule = standaloneCards.filter(card => {
+        const pos = card.position;
+        return typeof pos === 'number' &&
+               pos >= moleculeIndex && 
+               pos < moleculeIndex + 1;
+      });
+      sortedCards.push(...standaloneBeforeMolecule);
+      
+      // Add all workflow cards for this molecule (maintain their relative order)
+      const moleculeCards = workflowCards.filter(card => card.moleculeId === molecule.moleculeId);
+      sortedCards.push(...moleculeCards);
+    });
+    
+    // Add standalone cards that should appear after the last molecule
+    const standaloneAfter = standaloneCards.filter(card => {
+      const pos = card.position;
+      return pos === undefined || 
+             pos === null || 
+             (typeof pos === 'number' && pos >= workflowMolecules.length);
+    });
+    sortedCards.push(...standaloneAfter);
+    
+    // Add any remaining cards that weren't categorized
+    const allProcessedIds = new Set(sortedCards.map(c => c.id));
+    const remaining = cardsToSort.filter(c => !allProcessedIds.has(c.id));
+    sortedCards.push(...remaining);
+    
+    return sortedCards;
+  };
+
   const handleSave = async () => {
     if (!canEdit) return;
     try {
@@ -246,9 +305,38 @@ const LaboratoryMode = () => {
 
       setExhibitionCards(cards);
 
-      // Save the current laboratory configuration
+      // Get workflow molecules to sort cards correctly
+      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      let workflowMolecules: any[] = [];
+      if (storedWorkflowMolecules) {
+        try {
+          workflowMolecules = JSON.parse(storedWorkflowMolecules);
+        } catch (e) {
+          console.warn('Failed to parse workflow molecules for sorting', e);
+        }
+      }
+
+      // Sort cards in workflow order before saving (ensures canvas_position reflects actual workflow position)
+      const sortedCards = workflowMolecules.length > 0 
+        ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
+        : cards || [];
+
+      console.info('[Laboratory API] Sorting cards in workflow order before save:', {
+        originalCount: cards?.length || 0,
+        sortedCount: sortedCards.length,
+        workflowMoleculesCount: workflowMolecules.length,
+        sortedCards: sortedCards.map((c, i) => ({
+          index: i,
+          id: c.id,
+          atomId: c.atoms[0]?.atomId,
+          moleculeId: c.moleculeId,
+          position: c.position
+        }))
+      });
+
+      // Save the current laboratory configuration with sorted cards
       const labConfig = {
-        cards,
+        cards: sortedCards,
         exhibitedCards,
         timestamp: new Date().toISOString(),
       };
@@ -257,13 +345,13 @@ const LaboratoryMode = () => {
       const projectContext = getActiveProjectContext();
       if (projectContext) {
         const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
-        const payload = {
-          client_name: projectContext.client_name,
-          app_name: projectContext.app_name,
-          project_name: projectContext.project_name,
-          cards: sanitized.cards || [],
-          mode: 'laboratory',
-        };
+          const payload = {
+            client_name: projectContext.client_name,
+            app_name: projectContext.app_name,
+            project_name: projectContext.project_name,
+            cards: sanitized.cards || [],
+            mode: 'laboratory',
+          };
 
         const requestInit: RequestInit = {
           method: 'POST',

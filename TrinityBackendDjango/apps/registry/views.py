@@ -395,7 +395,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
 
             state = data.get("state") or {}
             for field, mode in [
-                ("laboratory_config", "lab"),
+                ("laboratory_config", "laboratory"),
                 ("workflow_config", "workflow"),
                 ("exhibition_config", "exhibition"),
             ]:
@@ -428,7 +428,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if isinstance(state_data, dict):
             if "laboratory_config" in state_data:
                 cards = state_data["laboratory_config"].get("cards", [])
-                save_atom_list_configuration(project, "lab", cards)
+                save_atom_list_configuration(project, "laboratory", cards)
             if "workflow_config" in state_data:
                 cards = state_data["workflow_config"].get("cards", [])
                 save_atom_list_configuration(project, "workflow", cards)
@@ -464,7 +464,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             base_template=source.base_template,
         )
 
-        for mode in ["lab", "workflow", "exhibition"]:
+        for mode in ["laboratory", "workflow", "exhibition"]:
             cfg = load_atom_list_configuration(source, mode)
             if cfg and cfg.get("cards"):
                 save_atom_list_configuration(new_project, mode, cfg["cards"])
@@ -539,7 +539,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             project.save()
             state = template.state or {}
             for field, mode in [
-                ("laboratory_config", "lab"),
+                ("laboratory_config", "laboratory"),
                 ("workflow_config", "workflow"),
                 ("exhibition_config", "exhibition"),
             ]:
@@ -567,7 +567,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         serialized = ProjectSerializer(project).data
         state = project.state or {}
         for field, mode in [
-            ("laboratory_config", "lab"),
+            ("laboratory_config", "laboratory"),
             ("workflow_config", "workflow"),
             ("exhibition_config", "exhibition"),
         ]:
@@ -668,7 +668,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         state = template.state or {}
         for field, mode in [
-            ("laboratory_config", "lab"),
+            ("laboratory_config", "laboratory"),
             ("workflow_config", "workflow"),
             ("exhibition_config", "exhibition"),
         ]:

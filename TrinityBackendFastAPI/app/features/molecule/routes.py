@@ -53,6 +53,8 @@ class SaveWorkflowRequest(BaseModel):
     """Request model for saving workflow mode configuration"""
     canvas_molecules: List[Dict[str, Any]]
     custom_molecules: List[Dict[str, Any]]
+    standalone_cards: Optional[List[Dict[str, Any]]] = []
+    workflow_name: Optional[str] = None
     user_id: str = ""
     client_name: str = ""
     app_name: str = ""
@@ -330,6 +332,8 @@ async def save_workflow_configuration(request: SaveWorkflowRequest):
         result = save_workflow_to_mongo(
             canvas_molecules=request.canvas_molecules,
             custom_molecules=request.custom_molecules,
+            standalone_cards=request.standalone_cards or [],
+            workflow_name=request.workflow_name,
             user_id=request.user_id,
             client_name=request.client_name,
             app_name=request.app_name,

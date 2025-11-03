@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, Bot, User, Sparkles, Plus, Trash2, MessageCircle, RotateCcw, Clock, Settings, Paperclip, Mic, Minus } from 'lucide-react';
+import { Send, X, Bot, User, Sparkles, Plus, Trash2, MessageCircle, RotateCcw, Clock, Settings, Paperclip, Mic, Minus, Square, File } from 'lucide-react';
+import { VALIDATE_API } from '@/lib/api';
 
 // Workflow Mode AI Panel - Completely separate from SuperAgent
 // Does NOT execute - only suggests molecule compositions
@@ -107,7 +109,9 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showChatHistory, setShowChatHistory] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [panelWidth, setPanelWidth] = useState(384); // Default 384px (w-96)
+  const [isPanelFrozen, setIsPanelFrozen] = useState(true); // Default to frozen
   const [isResizing, setIsResizing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
@@ -121,6 +125,11 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
 
   // Session ID management - one session per chat
   const [chatSessionIds, setChatSessionIds] = useState<Record<string, string>>({});
+  
+  // File attachment state
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [availableFiles, setAvailableFiles] = useState<Array<{object_name: string; csv_name?: string; arrow_name?: string}>>([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -285,6 +294,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   }, [isResizing]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (isPanelFrozen) return; // Don't allow resizing when frozen
     e.preventDefault();
     setIsResizing(true);
   };
@@ -588,11 +598,55 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
     }
+  };
+
+  // Auto-resize textarea
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  }, [inputValue]);
+
+  // Handle stop/cancel request
+  const handleStopRequest = () => {
+    console.log('🛑 User requested to stop the ongoing workflow request');
+    
+    // Close WebSocket connection if active
+    if (wsConnection && wsConnected) {
+      console.log('🔌 Closing Workflow WebSocket connection');
+      wsConnection.close();
+      setWsConnected(false);
+      setWsConnection(null);
+    }
+    
+    // Reset loading state
+    setIsLoading(false);
+    
+    // Add a cancellation message to the chat
+    const cancelMessage: Message = {
+      id: `cancel_${Date.now()}`,
+      content: '⚠️ Request cancelled by user.',
+      sender: 'ai',
+      timestamp: new Date()
+    };
+    
+    setChats(prevChats => {
+      return prevChats.map(chat => {
+        if (chat.id === currentChatId) {
+          return { ...chat, messages: [...chat.messages, cancelMessage] };
+        }
+        return chat;
+      });
+    });
+    
+    console.log('✅ Workflow request stopped successfully');
   };
 
   // Handle creating workflow molecules on canvas
@@ -740,6 +794,58 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     }
   };
 
+  // Fetch saved dataframes when attach button is clicked
+  const handleAttachClick = async () => {
+    setShowFilePicker(!showFilePicker);
+    
+    if (!showFilePicker && availableFiles.length === 0) {
+      setLoadingFiles(true);
+      try {
+        let query = '';
+        const envStr = localStorage.getItem('env');
+        if (envStr) {
+          try {
+            const env = JSON.parse(envStr);
+            query = '?' + new URLSearchParams({
+              client_id: env.CLIENT_ID || '',
+              app_id: env.APP_ID || '',
+              project_id: env.PROJECT_ID || '',
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            }).toString();
+          } catch (e) {
+            console.error('Error parsing env:', e);
+          }
+        }
+        
+        const response = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
+        const data = await response.json();
+        
+        // Filter to only show Arrow files
+        const arrowFiles = Array.isArray(data.files) 
+          ? data.files.filter((f: any) => f.object_name && f.object_name.endsWith('.arrow'))
+          : [];
+        
+        setAvailableFiles(arrowFiles);
+      } catch (error) {
+        console.error('Error fetching files:', error);
+        setAvailableFiles([]);
+      } finally {
+        setLoadingFiles(false);
+      }
+    }
+  };
+
+  // Attach file to input
+  const handleFileSelect = (fileName: string) => {
+    const displayName = fileName.split('/').pop() || fileName;
+    const currentValue = inputValue;
+    const newValue = currentValue ? `${currentValue} @${displayName}` : `@${displayName}`;
+    setInputValue(newValue);
+    setShowFilePicker(false);
+  };
+
   // Don't unmount when collapsed - keep WebSocket connections and requests alive
   return (
     <div className={isCollapsed ? 'hidden' : ''} style={{ height: '100%' }}>
@@ -748,8 +854,13 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
       <div
         ref={resizeRef}
         onMouseDown={handleMouseDown}
-        className="absolute left-0 top-0 w-1 h-full bg-gray-300 hover:bg-gray-400 cursor-col-resize transition-colors duration-200 z-50"
+        className={`absolute left-0 top-0 w-1 h-full transition-colors duration-200 z-50 ${
+          isPanelFrozen 
+            ? 'bg-gray-200 cursor-not-allowed' 
+            : 'bg-gray-300 hover:bg-gray-400 cursor-col-resize'
+        }`}
         style={{ marginLeft: '-2px' }}
+        title={isPanelFrozen ? "Panel is frozen (resize disabled)" : "Drag to resize panel"}
       />
       {/* Chat History Sidebar */}
       {showChatHistory && (
@@ -790,6 +901,107 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                   </div>
                 </div>
               ))}
+            </div>
+          </ScrollArea>
+        </div>
+      )}
+
+      {/* Settings Sidebar */}
+      {showSettings && (
+        <div className="absolute left-0 top-0 w-80 h-full bg-white backdrop-blur-xl border-r-2 border-gray-200 z-50 flex flex-col shadow-xl">
+          <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Settings</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowSettings(false)}
+                className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+          <ScrollArea className="flex-1 p-4 bg-gray-50/50">
+            {/* Session ID Section */}
+            <div className="mb-6 p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
+              <h4 className="font-semibold text-gray-700 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Session Information</h4>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-gray-600 font-inter" style={{ fontSize: `${smallFontSize}px` }}>Chat ID:</span>
+                </div>
+                <div className="p-2 bg-gray-50 rounded-lg border border-gray-200 font-mono text-xs text-gray-800 break-all">
+                  {currentChatId || 'No active chat'}
+                </div>
+              </div>
+            </div>
+
+            {/* Panel Settings */}
+            <div className="space-y-3">
+              <h4 className="font-semibold text-gray-700 mb-3 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Panel Settings</h4>
+              
+              {/* Freeze Panel Toggle */}
+              <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <h5 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Freeze Panel Size</h5>
+                    <p className="text-gray-600 mt-1 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
+                      Lock panel width and prevent resizing
+                    </p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer ml-3">
+                    <input
+                      type="checkbox"
+                      checked={isPanelFrozen}
+                      onChange={(e) => setIsPanelFrozen(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-[#41C185]/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#41C185]"></div>
+                  </label>
+                </div>
+              </div>
+
+              {/* WebSocket Status */}
+              <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
+                <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Connection Status</h5>
+                <div className="flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full ${wsConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                  <span className="text-gray-600 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
+                    {wsConnected ? 'Connected' : 'Disconnected'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Clear Chat History */}
+              <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Data Management</h5>
+                <Button
+                  onClick={() => {
+                    if (confirm('Are you sure you want to clear all chat history? This cannot be undone.')) {
+                      localStorage.removeItem('workflow-ai-chats');
+                      localStorage.removeItem('workflow-ai-current-chat-id');
+                      localStorage.removeItem('workflow-ai-session-ids');
+                      createNewChat();
+                      setShowSettings(false);
+                    }
+                  }}
+                  className="w-full bg-red-500 hover:bg-red-600 text-white font-inter"
+                  style={{ fontSize: `${smallFontSize}px` }}
+                >
+                  Clear All Chat History
+                </Button>
+              </div>
+
+              {/* Panel Width Info */}
+              <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
+                <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Panel Width</h5>
+                <div className="text-gray-600 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
+                  Current: {panelWidth}px
+                </div>
+                <p className="text-gray-500 mt-1 font-inter text-xs">
+                  Drag the left edge to resize
+                </p>
+              </div>
             </div>
           </ScrollArea>
         </div>
@@ -998,7 +1210,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
       </ScrollArea>
 
       {/* Input Area */}
-      <div className="border-t-2 border-gray-200 bg-gradient-to-b from-white to-gray-50 p-5 backdrop-blur-sm">
+      <div className="border-t-2 border-gray-200 bg-gradient-to-b from-white to-gray-50 p-5 backdrop-blur-sm relative">
         <div className="flex items-center gap-2 mb-4">
           <Button 
             variant="ghost" 
@@ -1009,14 +1221,72 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           >
             <RotateCcw className="w-4 h-4" />
           </Button>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
-            title="Attach"
-          >
-            <Paperclip className="w-4 h-4" />
-          </Button>
+          <div className="relative">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className={`h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md ${showFilePicker ? 'bg-gray-100' : ''}`}
+              onClick={handleAttachClick}
+              title="Attach Saved DataFrames"
+            >
+              <Paperclip className="w-4 h-4" />
+            </Button>
+            
+            {/* File Picker Dropdown */}
+            {showFilePicker && (
+              <div className="absolute bottom-full left-0 mb-2 w-96 bg-white rounded-xl shadow-xl border-2 border-gray-200 max-h-96 z-50 animate-fade-in flex flex-col">
+                <div className="p-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-gray-800 text-sm font-inter flex items-center gap-2">
+                      <File className="w-4 h-4" />
+                      Saved DataFrames
+                    </h4>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowFilePicker(false)}
+                      className="h-6 w-6 p-0 hover:bg-gray-100 rounded-lg"
+                    >
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="overflow-auto max-h-80 p-2" style={{ overflowX: 'auto', overflowY: 'auto' }}>
+                  {loadingFiles ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+                      <div className="w-6 h-6 border-2 border-gray-300 border-t-[#41C185] rounded-full animate-spin mb-2" />
+                      <p className="text-xs">Loading files...</p>
+                    </div>
+                  ) : availableFiles.length === 0 ? (
+                    <div className="text-center py-8 text-gray-500">
+                      <File className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p className="text-xs">No saved dataframes found</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {availableFiles.map((file, index) => {
+                        const displayName = file.object_name.split('/').pop() || file.object_name;
+                        return (
+                          <button
+                            key={index}
+                            onClick={() => handleFileSelect(file.object_name)}
+                            className="w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors duration-150 group border border-transparent hover:border-[#41C185]/20 min-w-max"
+                          >
+                            <div className="flex items-center gap-2">
+                              <File className="w-4 h-4 text-[#41C185] flex-shrink-0" />
+                              <span className="text-sm font-medium text-gray-800 font-inter group-hover:text-[#41C185] whitespace-nowrap">
+                                {displayName}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           <Button 
             variant="ghost" 
             size="sm" 
@@ -1029,24 +1299,41 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
             variant="ghost" 
             size="sm" 
             className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
+            onClick={() => setShowSettings(!showSettings)}
             title="Settings"
           >
             <Settings className="w-4 h-4" />
           </Button>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-end gap-3">
           <div className="relative flex-1">
-            <Input
+            <Textarea
+              ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               placeholder="Type your message..."
-              className="h-12 bg-white backdrop-blur-sm border-2 border-gray-200 hover:border-gray-300 focus:border-[#41C185] focus-visible:ring-2 focus-visible:ring-[#41C185]/20 rounded-2xl px-4 font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter"
-              style={{ fontSize: `${baseFontSize}px` }}
+              className="min-h-[48px] max-h-[200px] bg-white backdrop-blur-sm border-2 border-gray-200 hover:border-gray-300 focus:border-[#41C185] focus-visible:ring-2 focus-visible:ring-[#41C185]/20 rounded-2xl px-4 py-3 font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter resize-none overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
+              style={{ 
+                fontSize: `${baseFontSize}px`,
+                scrollbarWidth: 'thin',
+                scrollbarColor: '#d1d5db transparent'
+              }}
               disabled={isLoading}
+              rows={1}
             />
           </div>
+          {isLoading && (
+            <Button
+              onClick={handleStopRequest}
+              className="h-12 w-12 bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/30 hover:shadow-xl hover:shadow-red-500/40 transition-all duration-300 hover:scale-110 rounded-2xl animate-fade-in"
+              size="icon"
+              title="Stop Request"
+            >
+              <Square className="w-5 h-5 fill-current" />
+            </Button>
+          )}
           <Button
             onClick={handleSendMessage}
             disabled={!inputValue.trim() || isLoading}

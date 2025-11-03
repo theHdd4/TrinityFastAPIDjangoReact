@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorCollection
 from pydantic import BaseModel, Field
 
-from app.features.build_model_feature_based.mongodb_saver import (
+# Use Django's save_atom_list_configuration logic (async wrapper)
+from app.features.project_state.atom_config_sync import (
     save_atom_list_configuration,
     get_atom_list_configuration,
 )

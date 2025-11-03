@@ -103,9 +103,17 @@ def save_atom_list_configuration(
                         "notes": atom_settings.get("notes", ""),
                         "last_edited": timestamp,
                         "version_hash": version_hash,
+                        # Molecule information as top-level fields for easier querying (matching FastAPI version)
+                        "molecule_id": card.get("moleculeId"),
+                        "molecule_title": card.get("moleculeTitle"),
+                        # Position for standalone cards (cards without moleculeId)
+                        "standalone_position": card.get("position") if not card.get("moleculeId") else None,
                         "mode_meta": {
                             "card_id": card.get("id"),
                             "atom_id": atom.get("id"),
+                            "molecule_id": card.get("moleculeId"),
+                            "molecule_title": card.get("moleculeTitle"),
+                            "standalone_position": card.get("position") if not card.get("moleculeId") else None,
                         },
                         "isDeleted": False,
                     }

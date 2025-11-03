@@ -827,7 +827,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
               </div>
             </>
           ) : (
-            // Show empty container state (ready to be replaced)
+            // Show empty container state (ready to be replaced) - compact size to match atoms state
             <>
               <div className="flex items-center justify-between mb-1.5">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide bg-gradient-to-r from-muted-foreground to-muted-foreground/70 bg-clip-text text-transparent">
@@ -837,10 +837,9 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                   Empty
                 </span>
               </div>
-              <div className="text-center py-2">
-                <p className="text-xs text-muted-foreground mb-1.5">Drag molecules or select atoms</p>
+              <div className="text-center py-1">
                 <div 
-                  className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-3 min-h-[50px] transition-colors hover:border-primary/50 flex items-center justify-center"
+                  className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-2.5 min-h-[56px] transition-colors hover:border-primary/50 flex items-center justify-center"
                   onDragOver={(e) => {
                     e.preventDefault();
                     e.currentTarget.classList.add('border-primary/70', 'bg-primary/5');
@@ -868,7 +867,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                     }
                   }}
                 >
-                  <p className="text-sm text-muted-foreground/60 font-medium">Drag QM or custom molecule</p>
+                  <p className="text-xs text-muted-foreground/60 font-medium">Drag molecules or select atoms</p>
                 </div>
               </div>
             </>

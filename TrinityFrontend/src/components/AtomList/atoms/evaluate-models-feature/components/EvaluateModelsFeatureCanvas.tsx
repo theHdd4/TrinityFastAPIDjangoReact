@@ -87,6 +87,37 @@ import {
 import Table from '@/templates/tables/table';
 import evaluateModelsFeature from '../index';
 
+// Normalizes various date-like inputs (Date, timestamp, ISO/string) to YYYY-MM-DD
+function normalizeToDateString(input: any): string {
+  if (input === null || input === undefined) {
+    return '';
+  }
+  try {
+    if (input instanceof Date) {
+      return input.toISOString().slice(0, 10);
+    }
+    if (typeof input === 'number') {
+      const fromNumber = new Date(input);
+      if (!isNaN(fromNumber.getTime())) {
+        return fromNumber.toISOString().slice(0, 10);
+      }
+    }
+    if (typeof input === 'string') {
+      // If it's already a YYYY-MM-DD string, keep it
+      if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+        return input;
+      }
+      const fromString = new Date(input);
+      if (!isNaN(fromString.getTime())) {
+        return fromString.toISOString().slice(0, 10);
+      }
+    }
+  } catch (e) {
+    // Fall through to default return
+  }
+  return String(input);
+}
+
 // Dynamic color palette function (same as select atom)
 const getColor = (index: number) => {
   const colors = [
