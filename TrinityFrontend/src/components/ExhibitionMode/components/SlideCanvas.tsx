@@ -1385,8 +1385,27 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     settings.reducedMotion && 'transition-none motion-reduce:transition-none',
   );
 
+  const slideThemeStyle: React.CSSProperties = useMemo(() => {
+    return {
+      ...(themeContext.containerStyle ?? {}),
+      ...(themeBackgroundStyle ?? {}),
+      ...slideBackgroundStyle,
+      ...(!settings.fullBleed && themeContext.borderRadius
+        ? { borderRadius: themeContext.borderRadius }
+        : {}),
+      ...(themeContext.foreground ? { color: themeContext.foreground } : {}),
+    };
+  }, [
+    slideBackgroundStyle,
+    themeBackgroundStyle,
+    themeContext.borderRadius,
+    themeContext.containerStyle,
+    themeContext.foreground,
+    settings.fullBleed,
+  ]);
+
   return (
-    <div className={containerClassName} style={{ ...themeContext.containerStyle, ...accessibilityStyle }}>
+    <div className={containerClassName} style={accessibilityStyle}>
       <div
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
@@ -1446,13 +1465,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 style={
                   presentationMode
                     ? {
-                        ...(themeBackgroundStyle ?? {}),
-                        ...slideBackgroundStyle,
-                        ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
-                        ...(!settings.fullBleed && themeContext.borderRadius
-                          ? { borderRadius: themeContext.borderRadius }
-                          : {}),
-                        ...(themeContext.foreground ? { color: themeContext.foreground } : {}),
+                        ...slideThemeStyle,
                         height:
                           (presentationBaseDimensionsRef.current?.height ?? canvasDimensions.height) ||
                           CANVAS_STAGE_HEIGHT,
@@ -1464,14 +1477,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                         margin: '0 auto',
                       }
                     : {
+                        ...slideThemeStyle,
                         height: CANVAS_STAGE_HEIGHT,
-                        ...(themeBackgroundStyle ?? {}),
-                        ...slideBackgroundStyle,
-                        ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
-                        ...(!settings.fullBleed && themeContext.borderRadius
-                          ? { borderRadius: themeContext.borderRadius }
-                          : {}),
-                        ...(themeContext.foreground ? { color: themeContext.foreground } : {}),
                       }
                 }
                 onDragOver={presentationMode ? undefined : handleDragOver}
