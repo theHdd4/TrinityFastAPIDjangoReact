@@ -92,6 +92,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = React.memo(
               draggedAtom={null}
               canEdit={false}
               presentationMode
+              presentationPadding={0}
               viewMode="horizontal"
             />
           </div>

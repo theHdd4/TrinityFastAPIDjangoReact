@@ -433,6 +433,7 @@ interface SlideCanvasProps {
   onPositionPanelChange?: (panel: ReactNode | null) => void;
   onUndo?: () => void;
   presentationMode?: boolean;
+  presentationPadding?: number;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -452,6 +453,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onPositionPanelChange,
   onUndo,
   presentationMode = false,
+  presentationPadding = PRESENTATION_PADDING,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -625,8 +627,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         return;
       }
 
-      const availableWidth = Math.max(container.clientWidth - PRESENTATION_PADDING, 0);
-      const availableHeight = Math.max(container.clientHeight - PRESENTATION_PADDING, 0);
+      const constrainedPadding = Math.max(0, Math.min(presentationPadding, container.clientWidth, container.clientHeight));
+      const availableWidth = Math.max(container.clientWidth - constrainedPadding, 0);
+      const availableHeight = Math.max(container.clientHeight - constrainedPadding, 0);
       if (availableWidth === 0 || availableHeight === 0) {
         setPresentationScale(1);
         return;
