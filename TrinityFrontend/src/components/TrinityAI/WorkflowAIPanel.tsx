@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, Bot, User, Sparkles, Plus, Trash2, MessageCircle, RotateCcw, Clock, Settings, Paperclip, Mic, Minus, Square, File } from 'lucide-react';
+import { Send, X, Bot, User, Sparkles, Plus, Trash2, MessageCircle, RotateCcw, Clock, Settings, Paperclip, Mic, Minus, Square, File, Play } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
+import WorkflowOverwriteDialog from '@/components/WorkflowMode/components/WorkflowOverwriteDialog';
 
 // Workflow Mode AI Panel - Completely separate from SuperAgent
 // Does NOT execute - only suggests molecule compositions
@@ -94,13 +95,23 @@ interface WorkflowAIPanelProps {
     customMolecules?: any[];
   };
   onMoleculeAdd?: (molecule: any) => void; // Callback to create molecules on canvas
+  onRenderWorkflow?: () => void; // Callback to render workflow
+  onCheckCanvasHasMolecules?: () => boolean; // Check if canvas has molecules
+  onGetAICreatedMolecules?: () => string[]; // Get AI-created molecule IDs
+  onClearAIMolecules?: () => void; // Clear AI-created molecules
+  onGetRightmostPosition?: () => number; // Get rightmost molecule position
 }
 
 const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({ 
   isCollapsed, 
   onToggle,
   workflowContext,
-  onMoleculeAdd
+  onMoleculeAdd,
+  onRenderWorkflow,
+  onCheckCanvasHasMolecules,
+  onGetAICreatedMolecules,
+  onClearAIMolecules,
+  onGetRightmostPosition
 }) => {
   // Chat management state
   const [chats, setChats] = useState<Chat[]>([]);
@@ -122,6 +133,11 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   
   // Suggested molecules from AI
   const [suggestedMolecules, setSuggestedMolecules] = useState<any[]>([]);
+  
+  // Dialog state for overwrite/append confirmation
+  const [showOverwriteDialog, setShowOverwriteDialog] = useState(false);
+  const [pendingMolecules, setPendingMolecules] = useState<any[]>([]);
+  const [pendingAction, setPendingAction] = useState<'create' | 'render' | null>(null);
 
   // Session ID management - one session per chat
   const [chatSessionIds, setChatSessionIds] = useState<Record<string, string>>({});
@@ -391,11 +407,36 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           setChatSessionIds(prev => ({ ...prev, [currentChatId]: sessionId }));
         }
 
-        // Send request to Workflow Agent with persistent session ID
+        // Get environment context for dynamic path resolution (SAME AS SUPERAGENT)
+        let envContext = {
+          client_name: '',
+          app_name: '',
+          project_name: ''
+        };
+        
+        try {
+          const envStr = localStorage.getItem('env');
+          if (envStr) {
+            const env = JSON.parse(envStr);
+            envContext = {
+              client_name: env.CLIENT_NAME || '',
+              app_name: env.APP_NAME || '',
+              project_name: env.PROJECT_NAME || ''
+            };
+            console.log('🔍 Environment context loaded for workflow:', envContext);
+          }
+        } catch (error) {
+          console.warn('Failed to load environment context:', error);
+        }
+
+        // Send request to Workflow Agent with persistent session ID and project context
         ws.send(JSON.stringify({
           message: currentInput,
           session_id: sessionId,
-          workflow_context: workflowContext
+          workflow_context: workflowContext,
+          client_name: envContext.client_name,
+          app_name: envContext.app_name,
+          project_name: envContext.project_name
         }));
       };
 
@@ -433,8 +474,10 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                 suggestions: data.suggestions
               });
               
-              // If success is FALSE, show guidance message
+              // If success is FALSE, show guidance message and clear suggested molecules
               if (data.success === false) {
+                setSuggestedMolecules([]); // Clear suggested molecules on failure
+                
                 let content = '';
                 
                 // Show answer first (direct response to the question), then smart_response (workflow guidance)
@@ -481,6 +524,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
               else if (data.success === true) {
                 const molecules = data.workflow_composition?.molecules || [];
                 
+                // Update suggested molecules state for persistent buttons
                 if (molecules.length > 0) {
                   setSuggestedMolecules(molecules);
                 }
@@ -649,17 +693,30 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     console.log('✅ Workflow request stopped successfully');
   };
 
-  // Handle creating workflow molecules on canvas
-  const handleCreateWorkflowMolecules = (molecules: any[]) => {
+  // Helper function to actually create molecules on canvas
+  const createMoleculesOnCanvas = (molecules: any[], mode: 'overwrite' | 'append') => {
     if (!molecules || molecules.length === 0 || !onMoleculeAdd) return;
 
-    console.log('🎨 Creating molecules on canvas:', molecules);
+    console.log(`🎨 Creating molecules on canvas in ${mode} mode:`, molecules);
 
     // Calculate positions for molecules
     const moleculeWidth = 280;
     const moleculeHeight = 220;
     const padding = 60;
     const horizontalSpacing = 100;
+
+    // Determine starting X position based on mode
+    let startX = padding;
+    if (mode === 'append' && onGetRightmostPosition) {
+      const rightmostX = onGetRightmostPosition();
+      startX = rightmostX > 0 ? rightmostX + horizontalSpacing : padding;
+      console.log(`📍 Append mode: Starting at x=${startX} (rightmost was ${rightmostX})`);
+    } else if (mode === 'overwrite') {
+      console.log('🗑️ Overwrite mode: Clearing AI-created molecules first');
+      if (onClearAIMolecules) {
+        onClearAIMolecules();
+      }
+    }
 
     molecules.forEach((mol, index) => {
       const moleculeData = {
@@ -675,7 +732,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           return acc;
         }, {}) || {},
         position: {
-          x: padding + (index * (moleculeWidth + horizontalSpacing)),
+          x: startX + (index * (moleculeWidth + horizontalSpacing)),
           y: padding
         },
         connections: index < molecules.length - 1 ? [
@@ -683,7 +740,8 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
             source: `ai-molecule-${Date.now()}-${index}`,
             target: `ai-molecule-${Date.now()}-${index + 1}`
           }
-        ] : []
+        ] : [],
+        isAICreated: true // Mark as AI-created
       };
 
       console.log(`Creating molecule ${index + 1}:`, moleculeData);
@@ -693,7 +751,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     // Show success message
     const successMessage: Message = {
       id: Date.now().toString(),
-      content: `✅ Successfully created ${molecules.length} molecules on the canvas! You can now:\n- Adjust their positions\n- Modify atom selections\n- Connect them in different ways\n- Click "Render Workflow" when ready`,
+      content: `✅ Successfully ${mode === 'overwrite' ? 'replaced AI molecules with' : 'added'} ${molecules.length} molecules on the canvas! You can now:\n- Adjust their positions\n- Modify atom selections\n- Connect them in different ways\n- Click "Render Workflow" when ready`,
       sender: 'ai',
       timestamp: new Date()
     };
@@ -709,15 +767,118 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     });
   };
 
+  // Handle creating workflow molecules on canvas
+  const handleCreateWorkflowMolecules = (molecules: any[]) => {
+    if (!molecules || molecules.length === 0 || !onMoleculeAdd) return;
+
+    // Check if canvas has any molecules
+    const hasExistingMolecules = onCheckCanvasHasMolecules ? onCheckCanvasHasMolecules() : false;
+
+    if (hasExistingMolecules) {
+      // Show dialog to ask user
+      console.log('⚠️ Canvas has existing molecules, showing dialog');
+      setPendingMolecules(molecules);
+      setPendingAction('create');
+      setShowOverwriteDialog(true);
+    } else {
+      // No existing molecules, create directly
+      console.log('✅ Canvas is empty, creating molecules directly');
+      createMoleculesOnCanvas(molecules, 'append');
+    }
+  };
+
+  // Handle create and render workflow - creates molecules first, then renders
+  const handleCreateAndRenderWorkflow = (molecules: any[]) => {
+    if (!molecules || molecules.length === 0 || !onMoleculeAdd || !onRenderWorkflow) return;
+
+    // Check if canvas has any molecules
+    const hasExistingMolecules = onCheckCanvasHasMolecules ? onCheckCanvasHasMolecules() : false;
+
+    if (hasExistingMolecules) {
+      // Show dialog to ask user
+      console.log('⚠️ Canvas has existing molecules, showing dialog');
+      setPendingMolecules(molecules);
+      setPendingAction('render');
+      setShowOverwriteDialog(true);
+    } else {
+      // No existing molecules, create and render directly
+      console.log('✅ Canvas is empty, creating and rendering workflow directly');
+      createAndRenderMolecules(molecules, 'append');
+    }
+  };
+
+  // Helper function to create molecules and then render
+  const createAndRenderMolecules = (molecules: any[], mode: 'overwrite' | 'append') => {
+    console.log(`🎨 Creating and rendering workflow in ${mode} mode with`, molecules.length, 'molecules');
+    
+    // First create the molecules
+    createMoleculesOnCanvas(molecules, mode);
+    
+    // Wait a bit for molecules to be added to canvas, then render workflow
+    setTimeout(() => {
+      console.log('🚀 Rendering workflow and navigating to Laboratory mode');
+      if (onRenderWorkflow) {
+        onRenderWorkflow();
+      }
+    }, 500); // 500ms delay to ensure molecules are created on canvas
+  };
+
+  // Dialog handlers
+  const handleDialogOverwrite = () => {
+    console.log('✅ User selected: Overwrite');
+    setShowOverwriteDialog(false);
+    
+    if (pendingAction === 'create') {
+      createMoleculesOnCanvas(pendingMolecules, 'overwrite');
+    } else if (pendingAction === 'render') {
+      createAndRenderMolecules(pendingMolecules, 'overwrite');
+    }
+    
+    setPendingMolecules([]);
+    setPendingAction(null);
+  };
+
+  const handleDialogAppend = () => {
+    console.log('✅ User selected: Append');
+    setShowOverwriteDialog(false);
+    
+    if (pendingAction === 'create') {
+      createMoleculesOnCanvas(pendingMolecules, 'append');
+    } else if (pendingAction === 'render') {
+      createAndRenderMolecules(pendingMolecules, 'append');
+    }
+    
+    setPendingMolecules([]);
+    setPendingAction(null);
+  };
+
+  const handleDialogCancel = () => {
+    console.log('❌ User cancelled');
+    setShowOverwriteDialog(false);
+    setPendingMolecules([]);
+    setPendingAction(null);
+  };
+
   // Execute workflow plan step by step
   const executeWorkflowPlan = (executionPlan: any[]) => {
     if (!executionPlan || executionPlan.length === 0 || !onMoleculeAdd) return;
 
     console.log('📋 Executing workflow plan with', executionPlan.length, 'steps');
 
+    // Check if canvas has any molecules
+    const hasExistingMolecules = onCheckCanvasHasMolecules ? onCheckCanvasHasMolecules() : false;
+    
     const moleculeWidth = 280;
     const padding = 60;
     const horizontalSpacing = 100;
+    
+    // Determine starting X position
+    let startX = padding;
+    if (hasExistingMolecules && onGetRightmostPosition) {
+      const rightmostX = onGetRightmostPosition();
+      startX = rightmostX > 0 ? rightmostX + horizontalSpacing : padding;
+      console.log(`📍 Appending to existing molecules: Starting at x=${startX}`);
+    }
     
     const moleculeInstances = new Map<number, any>();
     
@@ -735,10 +896,11 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
             atomOrder: [],
             selectedAtoms: {},
             position: {
-              x: padding + ((molNum - 1) * (moleculeWidth + horizontalSpacing)),
+              x: startX + ((molNum - 1) * (moleculeWidth + horizontalSpacing)),
               y: padding
             },
-            connections: []
+            connections: [],
+            isAICreated: true // Mark as AI-created
           };
           
           moleculeInstances.set(molNum, moleculeData);
@@ -1130,20 +1292,13 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                     />
                        )}
                     
-                    {/* Show molecules with Create button if present */}
+                    {/* Show molecules without buttons - buttons are now at bottom */}
                     {message.molecules && message.molecules.length > 0 && (
                          <div className={`space-y-3 p-4 bg-white/10 rounded-lg border-2 border-white/30 backdrop-blur-sm ${message.content ? 'mt-4' : ''}`}>
                         <div className="flex items-center justify-between">
                           <p className="text-xs font-semibold text-white font-inter">
                             💡 Suggested Molecules ({message.molecules.length})
                           </p>
-                          <Button
-                            onClick={() => handleCreateWorkflowMolecules(message.molecules)}
-                            className="bg-[#FEEB99] hover:bg-[#FFBD59] text-gray-800 text-xs px-3 py-1 h-7 shadow-md"
-                            size="sm"
-                          >
-                            ✨ Create
-                          </Button>
                         </div>
                         
                         {message.molecules.map((mol: any, idx: number) => (
@@ -1208,6 +1363,39 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
+
+      {/* Workflow Action Buttons - Shown when molecules are suggested */}
+      {suggestedMolecules.length > 0 && (
+        <div className="border-t-2 border-gray-200 bg-gradient-to-r from-[#FEEB99]/10 to-[#FFBD59]/10 p-4 backdrop-blur-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-[#FFBD59]" />
+              <span className="text-sm font-semibold text-gray-800 font-inter">
+                💡 {suggestedMolecules.length} Molecule{suggestedMolecules.length > 1 ? 's' : ''} Ready
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => handleCreateWorkflowMolecules(suggestedMolecules)}
+                className="bg-[#FEEB99] hover:bg-[#FFBD59] text-gray-800 text-sm px-4 py-2 h-9 shadow-md font-semibold transition-all duration-200 hover:scale-105"
+                size="sm"
+              >
+                ✨ Create
+              </Button>
+              {onRenderWorkflow && (
+                <Button
+                  onClick={() => handleCreateAndRenderWorkflow(suggestedMolecules)}
+                  className="bg-[#FEEB99] hover:bg-[#FFBD59] text-gray-800 text-sm px-4 py-2 h-9 shadow-md font-semibold transition-all duration-200 hover:scale-105"
+                  size="sm"
+                >
+                  <Play className="w-4 h-4 mr-1" />
+                  Render
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Input Area */}
       <div className="border-t-2 border-gray-200 bg-gradient-to-b from-white to-gray-50 p-5 backdrop-blur-sm relative">
@@ -1349,6 +1537,14 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
         </div>
       </div>
     </Card>
+    
+    {/* Overwrite/Append Dialog */}
+    <WorkflowOverwriteDialog
+      isOpen={showOverwriteDialog}
+      onOverwrite={handleDialogOverwrite}
+      onAppend={handleDialogAppend}
+      onCancel={handleDialogCancel}
+    />
     </div>
   );
 };

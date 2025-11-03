@@ -2,6 +2,7 @@ import base64
 import importlib.util
 import io
 import sys
+import json
 import types
 from pathlib import Path
 
@@ -44,9 +45,13 @@ DocumentStylesPayload = schemas_module.DocumentStylesPayload
 ExhibitionExportRequest = schemas_module.ExhibitionExportRequest
 ExportGenerationError = export_module.ExportGenerationError
 SlideDomSnapshotPayload = schemas_module.SlideDomSnapshotPayload
+SlideExportObjectPayload = schemas_module.SlideExportObjectPayload
+SlideScreenshotPayload = schemas_module.SlideScreenshotPayload
 build_export_filename = export_module.build_export_filename
 build_pdf_bytes = export_module.build_pdf_bytes
 build_pptx_bytes = export_module.build_pptx_bytes
+render_slide_screenshots = export_module.render_slide_screenshots
+_decode_data_url = export_module._decode_data_url
 _px_to_emu = export_module._px_to_emu
 
 
@@ -54,6 +59,13 @@ _px_to_emu = export_module._px_to_emu
 def _png_data_url() -> str:
     buffer = io.BytesIO()
     Image.new("RGB", (10, 10), color="#3366FF").save(buffer, format="PNG")
+    pixel = base64.b64encode(buffer.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{pixel}"
+
+
+def _solid_png_data_url(color: str, width: int, height: int) -> str:
+    buffer = io.BytesIO()
+    Image.new("RGBA", (width, height), color=color).save(buffer, format="PNG")
     pixel = base64.b64encode(buffer.getvalue()).decode("ascii")
     return f"data:image/png;base64,{pixel}"
 
@@ -85,6 +97,7 @@ def _build_payload(include_screenshot: bool = True):
                     "y": 140,
                     "width": 400,
                     "height": 160,
+                    "groupId": "group-01",
                     "props": {
                         "text": "<strong>Hello</strong> world!",
                         "fontFamily": "Arial",
@@ -166,6 +179,196 @@ def test_build_pptx_bytes_includes_shape() -> None:
     ]
 
     assert any(fill == RGBColor(0x7C, 0x3A, 0xED) for fill in shape_fills)
+
+
+def test_build_pptx_bytes_renders_atom_component() -> None:
+    payload = _build_payload()
+
+    atom_object = SlideExportObjectPayload.model_validate(
+        {
+            'id': 'atom-001',
+            'type': 'atom',
+            'x': 320,
+            'y': 320,
+            'width': 360,
+            'height': 220,
+            'props': {
+                'atom': {
+                    'id': 'component-001',
+                    'atomId': 'chart-maker',
+                    'title': 'Sales by Region',
+                    'category': 'Revenue Overview',
+                    'color': '#2563EB',
+                    'metadata': {
+                        'chartData': [
+                            {'label': 'North', 'value': 120},
+                            {'label': 'South', 'value': 90},
+                            {'label': 'West', 'value': 60},
+                        ],
+                        'chartType': 'bar',
+                        'summary': ['Revenue continues to grow across key regions.'],
+                    },
+                }
+            },
+        }
+    )
+
+    payload.slides[0].objects.append(atom_object)
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    slide = presentation.slides[0]
+
+    charts = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.CHART]
+    assert charts, 'Expected atom component to render as a chart'
+
+    text_shapes = [getattr(shape, 'text', '') for shape in slide.shapes if hasattr(shape, 'text')]
+    assert any('Sales by Region' in text for text in text_shapes)
+
+
+def test_render_chart_prefers_post_animation_png() -> None:
+    payload = _build_payload()
+
+    chart_object = SlideExportObjectPayload.model_validate(
+        {
+            'id': 'chart-override',
+            'type': 'chart',
+            'x': 160,
+            'y': 180,
+            'width': 320,
+            'height': 240,
+            'props': {
+                'chartData': {
+                    'type': 'column',
+                    'categories': ['A', 'B'],
+                    'series': [{'name': 'Series 1', 'values': [10, 12]}],
+                },
+                'chartConfig': {'type': 'column'},
+                'postAnimationPng': _png_data_url(),
+            },
+        }
+    )
+
+    payload.slides[0].objects.append(chart_object)
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    slide = presentation.slides[0]
+
+    chart_shapes = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.CHART]
+    assert not chart_shapes, 'Expected chart metadata to be replaced by image'
+
+    pictures = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert pictures, 'Expected chart render to add a picture shape'
+    assert any(abs(picture.width - _px_to_emu(320)) <= 1 for picture in pictures)
+
+
+def test_atom_renders_chart_image_without_preview_metadata() -> None:
+    payload = _build_payload()
+
+    atom_object = SlideExportObjectPayload.model_validate(
+        {
+            'id': 'atom-no-chart-preview',
+            'type': 'atom',
+            'x': 80,
+            'y': 120,
+            'width': 480,
+            'height': 320,
+            'props': {
+                'atom': {
+                    'title': 'Animated Chart',
+                    'subtitle': 'Post-animation snapshot only',
+                    'metadata': {
+                        'postAnimationPng': _png_data_url(),
+                        'summary': ['Uses captured chart snapshot when data is absent.'],
+                    },
+                }
+            },
+        }
+    )
+
+    payload.slides[0].objects.append(atom_object)
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    slide = presentation.slides[0]
+
+    pictures = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert pictures, 'Expected atom without chart metadata to still render post-animation image'
+    assert any('Animated Chart' in getattr(shape, 'text', '') for shape in slide.shapes if hasattr(shape, 'text'))
+
+
+def test_render_slide_screenshots_overlays_post_animation_png() -> None:
+    payload = _build_payload()
+
+    slide = payload.slides[0]
+    slide.base_width = 100
+    slide.base_height = 100
+    slide.screenshot = SlideScreenshotPayload.model_validate(
+        {
+            'dataUrl': _solid_png_data_url('#FFFFFF', 100, 100),
+            'width': 100,
+            'height': 100,
+            'cssWidth': 100,
+            'cssHeight': 100,
+            'pixelRatio': 1,
+        }
+    )
+
+    slide.objects.append(
+        SlideExportObjectPayload.model_validate(
+            {
+                'id': 'chart-overlay',
+                'type': 'chart',
+                'x': 20,
+                'y': 24,
+                'width': 60,
+                'height': 48,
+                'props': {
+                    'postAnimationPng': _solid_png_data_url('#FF0000', 60, 48),
+                },
+            }
+        )
+    )
+
+    screenshots = render_slide_screenshots(payload)
+    assert screenshots, 'Expected slide screenshots to be returned'
+    first = screenshots[0]
+    data_url = first['dataUrl']
+    image_bytes = _decode_data_url(data_url)
+    image = Image.open(io.BytesIO(image_bytes))
+    pixel = image.convert('RGB').getpixel((30, 30))
+    assert pixel[0] > 200 and pixel[1] < 32 and pixel[2] < 32
+
+
+def test_build_pptx_bytes_embeds_background_and_metadata() -> None:
+    payload = _build_payload()
+
+    pptx_bytes = build_pptx_bytes(payload)
+    from pptx import Presentation
+
+    presentation = Presentation(io.BytesIO(pptx_bytes))
+    slide = presentation.slides[0]
+
+    background_width = _px_to_emu(payload.slides[0].base_width)
+    pictures = [shape for shape in slide.shapes if shape.shape_type == MSO_SHAPE_TYPE.PICTURE]
+    assert pictures, 'Expected inline images to render on the slide'
+    assert not any(abs(picture.width - background_width) <= 1 for picture in pictures)
+
+    paragraphs = [para.text for para in slide.notes_slide.notes_text_frame.paragraphs if para.text]
+    assert paragraphs and paragraphs[0] == export_module.METADATA_MARKER
+    assert len(paragraphs) >= 2
+
+    metadata = json.loads(paragraphs[1])
+    assert metadata["objects"], "Expected slide metadata to include objects"
+    assert metadata["objects"][0]["groupId"] == "group-01"
+    assert "dataUrl" not in metadata.get("screenshot", {})
 
 
 def test_build_pptx_bytes_uses_max_dimensions() -> None:

@@ -1,0 +1,31 @@
+# Enabling Pixabay Search in Exhibition Mode
+
+Follow these steps to provide the `VITE_PIXABAY_API_KEY` required by the exhibition images panel:
+
+1. **Obtain an API key**  
+   - Create or log into your Pixabay account at https://pixabay.com/.  
+   - Navigate to the *API* section and generate an API key. Save it for later.
+
+2. **Add the key to your local environment**  
+   - Create (or open) `TrinityFrontend/.env.local`.  
+   - Add the line:
+     ```bash
+     VITE_PIXABAY_API_KEY="<your_pixabay_key>"
+     ```
+   - Replace `<your_pixabay_key>` with the value from step 1.  
+   - Restart the frontend development server so Vite picks up the new variable.
+
+3. **Expose the key for containerized or shared environments**  
+   - If you use Docker or another orchestrator, add `VITE_PIXABAY_API_KEY` to the environment section of the relevant `docker-compose` service (usually the frontend).  
+   - Rebuild or restart the container to propagate the variable.
+
+4. **Configure production deployment secrets**  
+   - Update your deployment platform's secret or environment variable settings (e.g., GitHub Actions, Vercel, Netlify).  
+   - Define `VITE_PIXABAY_API_KEY` with the same key used locally.  
+   - Trigger a new deployment so the application bundles the value.
+
+5. **Verify integration**  
+   - Reload the exhibition image panel.  
+   - Use the Pixabay search input to look up an image; results should display without a configuration warning.  
+   - Confirm that attribution and selection work as expected.
+

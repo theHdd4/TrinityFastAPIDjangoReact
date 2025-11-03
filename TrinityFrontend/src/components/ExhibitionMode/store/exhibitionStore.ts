@@ -21,6 +21,7 @@ import {
 import {
   DEFAULT_EXHIBITION_THEME,
   type ExhibitionTheme,
+  resolveThemePresentationDefaults,
 } from '../themes';
 
 export type CardColor = GradientColorId | SolidColorToken;
@@ -724,13 +725,14 @@ const applyThemePresentation = (base: PresentationSettings, theme: ExhibitionThe
     themeId: theme.id,
   };
 
-  const presentation = theme.presentation;
-  if (!presentation) {
-    return next;
-  }
+  const presentation = resolveThemePresentationDefaults(theme);
 
   if (typeof presentation.cardColor === 'string') {
     next.cardColor = presentation.cardColor as PresentationSettings['cardColor'];
+  }
+
+  if (typeof presentation.cardLayout === 'string') {
+    next.cardLayout = ensureCardLayout(presentation.cardLayout);
   }
 
   if (typeof presentation.cardWidth === 'string') {
@@ -746,10 +748,10 @@ const applyThemePresentation = (base: PresentationSettings, theme: ExhibitionThe
   }
 
   if (typeof presentation.backgroundMode === 'string') {
-    next.backgroundMode = presentation.backgroundMode;
+    next.backgroundMode = presentation.backgroundMode as PresentationSettings['backgroundMode'];
   }
 
-  if (typeof presentation.backgroundColor === 'string') {
+  if (typeof presentation.backgroundColor === 'string' && isValidBackgroundColor(presentation.backgroundColor)) {
     next.backgroundColor = presentation.backgroundColor as PresentationSettings['backgroundColor'];
   }
 
@@ -828,6 +830,155 @@ const mergeCatalogueAtoms = (
 
 const normaliseZIndices = (objects: SlideObject[]): SlideObject[] =>
   objects.map((object, index) => ({ ...object, zIndex: index + 1 }));
+
+const sortSlideObjectsByZIndex = (objects: SlideObject[]): SlideObject[] =>
+  objects
+    .map((object, index) => ({ object, index }))
+    .sort((a, b) => {
+      const aZ = typeof a.object.zIndex === 'number' ? a.object.zIndex : a.index + 1;
+      const bZ = typeof b.object.zIndex === 'number' ? b.object.zIndex : b.index + 1;
+      if (aZ !== bZ) {
+        return aZ - bZ;
+      }
+      return a.index - b.index;
+    })
+    .map(entry => entry.object);
+
+const hasOrderingChanged = (previous: SlideObject[], next: SlideObject[]): boolean => {
+  if (previous.length !== next.length) {
+    return true;
+  }
+
+  for (let index = 0; index < previous.length; index += 1) {
+    if (previous[index]?.id !== next[index]?.id) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+type LayerMutation = (ordered: SlideObject[], targets: Set<string>) => SlideObject[];
+
+const applyLayerMutation = (
+  existing: SlideObject[],
+  objectIds: string[],
+  mutate: LayerMutation,
+): SlideObject[] | null => {
+  if (!Array.isArray(existing) || existing.length === 0) {
+    return null;
+  }
+
+  const filteredIds = objectIds
+    .filter(id => typeof id === 'string' && id.trim().length > 0)
+    .map(id => id.trim());
+
+  if (filteredIds.length === 0) {
+    return null;
+  }
+
+  const targetSet = new Set(filteredIds);
+  const ordered = sortSlideObjectsByZIndex(existing);
+
+  if (!ordered.some(object => targetSet.has(object.id))) {
+    return null;
+  }
+
+  const mutated = mutate(ordered, targetSet);
+
+  if (!hasOrderingChanged(ordered, mutated)) {
+    return null;
+  }
+
+  return normaliseZIndices(mutated);
+};
+
+const moveTargetsToFront: LayerMutation = (ordered, targetSet) => {
+  const trailing = ordered.filter(object => targetSet.has(object.id));
+  if (trailing.length === 0) {
+    return [...ordered];
+  }
+  const leading = ordered.filter(object => !targetSet.has(object.id));
+  return [...leading, ...trailing];
+};
+
+const moveTargetsToBack: LayerMutation = (ordered, targetSet) => {
+  const leading = ordered.filter(object => targetSet.has(object.id));
+  if (leading.length === 0) {
+    return [...ordered];
+  }
+  const trailing = ordered.filter(object => !targetSet.has(object.id));
+  return [...leading, ...trailing];
+};
+
+const moveTargetsForward: LayerMutation = (ordered, targetSet) => {
+  const next = [...ordered];
+  let index = next.length - 1;
+
+  while (index >= 0) {
+    if (!targetSet.has(next[index].id)) {
+      index -= 1;
+      continue;
+    }
+
+    let blockStart = index;
+    while (blockStart > 0 && targetSet.has(next[blockStart - 1].id)) {
+      blockStart -= 1;
+    }
+
+    let blockEnd = index;
+    while (blockEnd + 1 < next.length && targetSet.has(next[blockEnd + 1].id)) {
+      blockEnd += 1;
+    }
+
+    const swapIndex = blockEnd + 1;
+    if (swapIndex >= next.length) {
+      index = blockStart - 1;
+      continue;
+    }
+
+    const blockLength = blockEnd - blockStart + 1;
+    const block = next.splice(blockStart, blockLength);
+    const insertIndex = swapIndex - blockLength + 1;
+    next.splice(insertIndex, 0, ...block);
+
+    index = blockStart - 1;
+  }
+
+  return next;
+};
+
+const moveTargetsBackward: LayerMutation = (ordered, targetSet) => {
+  const next = [...ordered];
+  let index = 0;
+
+  while (index < next.length) {
+    if (!targetSet.has(next[index].id)) {
+      index += 1;
+      continue;
+    }
+
+    let blockStart = index;
+    let blockEnd = index;
+    while (blockEnd + 1 < next.length && targetSet.has(next[blockEnd + 1].id)) {
+      blockEnd += 1;
+    }
+
+    const swapIndex = blockStart - 1;
+    if (swapIndex < 0) {
+      index = blockEnd + 1;
+      continue;
+    }
+
+    const blockLength = blockEnd - blockStart + 1;
+    const block = next.splice(blockStart, blockLength);
+    next.splice(swapIndex, 0, ...block);
+
+    index = swapIndex + blockLength;
+  }
+
+  return next;
+};
 
 export const resolveCardTitle = (card: LayoutCard, fallbackAtoms: DroppedAtom[] = []): string => {
   if (typeof card.title === 'string' && card.title.trim().length > 0) {
@@ -1189,7 +1340,19 @@ const normaliseLayoutSlideObjects = (
       .map(entry => normaliseSavedSlideObject(entry))
       .filter((entry): entry is SlideObject => entry !== null);
 
-    acc[cardId] = objects;
+    const sorted = objects
+      .map((object, index) => ({ object, index }))
+      .sort((a, b) => {
+        const aZ = typeof a.object.zIndex === 'number' ? a.object.zIndex : Number.MAX_SAFE_INTEGER;
+        const bZ = typeof b.object.zIndex === 'number' ? b.object.zIndex : Number.MAX_SAFE_INTEGER;
+        if (aZ !== bZ) {
+          return aZ - bZ;
+        }
+        return a.index - b.index;
+      })
+      .map(entry => entry.object);
+
+    acc[cardId] = normaliseZIndices(sorted);
     return acc;
   }, {} as Record<string, SlideObject[]>);
 };
@@ -1721,19 +1884,15 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   bringSlideObjectsToFront: (cardId: string, objectIds: string[]) => {
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
-      if (existing.length === 0 || objectIds.length === 0) {
+      const reordered = applyLayerMutation(existing, objectIds, moveTargetsToFront);
+      if (!reordered) {
         return {};
       }
-
-      const targetSet = new Set(objectIds);
-      const next = existing.filter(object => !targetSet.has(object.id)).concat(
-        existing.filter(object => targetSet.has(object.id)),
-      );
 
       return {
         slideObjectsByCardId: {
           ...state.slideObjectsByCardId,
-          [cardId]: normaliseZIndices(next),
+          [cardId]: reordered,
         },
       };
     });
@@ -1741,33 +1900,15 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   bringSlideObjectsForward: (cardId: string, objectIds: string[]) => {
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
-      if (existing.length === 0 || objectIds.length === 0) {
+      const reordered = applyLayerMutation(existing, objectIds, moveTargetsForward);
+      if (!reordered) {
         return {};
-      }
-
-      const targetSet = new Set(objectIds);
-      const next = [...existing];
-
-      for (let index = next.length - 1; index > 0; index -= 1) {
-        const previous = next[index - 1];
-        const current = next[index];
-
-        if (!targetSet.has(previous.id)) {
-          continue;
-        }
-
-        if (targetSet.has(current.id)) {
-          continue;
-        }
-
-        next[index - 1] = current;
-        next[index] = previous;
       }
 
       return {
         slideObjectsByCardId: {
           ...state.slideObjectsByCardId,
-          [cardId]: normaliseZIndices(next),
+          [cardId]: reordered,
         },
       };
     });
@@ -1775,19 +1916,15 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => {
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
-      if (existing.length === 0 || objectIds.length === 0) {
+      const reordered = applyLayerMutation(existing, objectIds, moveTargetsToBack);
+      if (!reordered) {
         return {};
       }
-
-      const targetSet = new Set(objectIds);
-      const next = existing
-        .filter(object => targetSet.has(object.id))
-        .concat(existing.filter(object => !targetSet.has(object.id)));
 
       return {
         slideObjectsByCardId: {
           ...state.slideObjectsByCardId,
-          [cardId]: normaliseZIndices(next),
+          [cardId]: reordered,
         },
       };
     });
@@ -1795,33 +1932,15 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   sendSlideObjectsBackward: (cardId: string, objectIds: string[]) => {
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
-      if (existing.length === 0 || objectIds.length === 0) {
+      const reordered = applyLayerMutation(existing, objectIds, moveTargetsBackward);
+      if (!reordered) {
         return {};
-      }
-
-      const targetSet = new Set(objectIds);
-      const next = [...existing];
-
-      for (let index = 0; index < next.length - 1; index += 1) {
-        const current = next[index + 1];
-        const previous = next[index];
-
-        if (!targetSet.has(current.id)) {
-          continue;
-        }
-
-        if (targetSet.has(previous.id)) {
-          continue;
-        }
-
-        next[index] = current;
-        next[index + 1] = previous;
       }
 
       return {
         slideObjectsByCardId: {
           ...state.slideObjectsByCardId,
-          [cardId]: normaliseZIndices(next),
+          [cardId]: reordered,
         },
       };
     });

@@ -195,6 +195,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           <>
             {viewMode === 'table' && (
               <DataFrameOperationsCanvas
+                atomId={atomId}
                 data={data}
                 settings={settings}
                 onSettingsChange={handleSettingsChange}

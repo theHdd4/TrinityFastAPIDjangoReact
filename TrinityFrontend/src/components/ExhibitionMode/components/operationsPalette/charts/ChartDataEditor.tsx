@@ -429,7 +429,10 @@ const ChartDataEditor: React.FC<ChartDataEditorProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={state => { if (!state) onClose(); }}>
-      <DialogContent className="max-w-7xl h-[90vh] p-0 gap-0 bg-background border border-border/60 shadow-[0_8px_30px_rgba(0,0,0,0.12)] overflow-hidden">
+      <DialogContent
+        hideCloseButton
+        className="max-w-7xl h-[90vh] p-0 gap-0 bg-background border border-border/60 shadow-[0_8px_30px_rgba(0,0,0,0.12)] overflow-hidden"
+      >
         <DialogHeader className="px-8 pt-8 pb-6 border-b border-border/40 bg-muted/30">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-5">

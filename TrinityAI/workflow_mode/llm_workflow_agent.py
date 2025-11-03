@@ -20,6 +20,13 @@ if str(PARENT_DIR) not in sys.path:
 from workflow_mode.ai_logic_workflow import build_workflow_prompt, call_workflow_llm, extract_json
 from workflow_mode.retrieval.rag_engine import get_rag_engine
 
+# Import FileHandler for @filename mention support
+try:
+    from File_handler.available_minio_files import FileHandler, get_file_handler
+    FILE_HANDLER_AVAILABLE = True
+except ImportError as e:
+    FILE_HANDLER_AVAILABLE = False
+
 logger = logging.getLogger("smart.workflow.agent")
 
 
@@ -44,6 +51,23 @@ class WorkflowCompositionAgent:
         
         # Available atoms organized by category
         self.available_atoms = self._load_available_atoms()
+        
+        # Initialize FileHandler for @filename mention support
+        self.file_handler = None
+        if FILE_HANDLER_AVAILABLE:
+            try:
+                # Get MinIO config from environment
+                self.file_handler = get_file_handler(
+                    minio_endpoint=os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                    minio_access_key=os.getenv("MINIO_ACCESS_KEY", "minio"),
+                    minio_secret_key=os.getenv("MINIO_SECRET_KEY", "minio123"),
+                    minio_bucket=os.getenv("MINIO_BUCKET", "trinity"),
+                    object_prefix=""
+                )
+                logger.info("✅ FileHandler initialized for @filename mention support")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize FileHandler: {e}")
+                self.file_handler = None
         
         logger.info(f"✅ Workflow Composition Agent initialized")
         logger.info(f"Available atoms loaded: {sum(len(atoms) for atoms in self.available_atoms.values())} atoms across {len(self.available_atoms)} categories")
@@ -92,7 +116,8 @@ class WorkflowCompositionAgent:
         self, 
         user_prompt: str, 
         session_id: str = None,
-        workflow_context: Dict = None
+        workflow_context: Dict = None,
+        file_context: Dict[str, Any] = None
     ) -> Dict[str, Any]:
         """
         Main entry point - follows exact pattern as merge/concat agents
@@ -101,6 +126,7 @@ class WorkflowCompositionAgent:
             user_prompt: User's workflow request
             session_id: Session ID for conversation continuity
             workflow_context: Current workflow state (molecules, name, etc.)
+            file_context: File details from @filename mentions
         
         Returns:
             Dictionary with molecule composition suggestions
@@ -120,6 +146,17 @@ class WorkflowCompositionAgent:
         # Build conversation context from history (like merge/concat)
         conversation_context = self._build_context(session_id)
         
+        # Parse for @filename mentions if file_context not provided
+        if file_context is None and self.file_handler:
+            try:
+                _, file_context = self.file_handler.enrich_prompt_with_file_context(user_prompt)
+                logger.info(f"✅ Parsed @filename mentions: {len(file_context)} file(s)")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to parse @filename mentions: {e}")
+                file_context = {}
+        elif file_context is None:
+            file_context = {}
+        
         # Build RAG knowledge context
         rag_knowledge = self._build_rag_knowledge_context(user_prompt)
         
@@ -129,7 +166,8 @@ class WorkflowCompositionAgent:
             available_atoms=self.available_atoms,
             workflow_context=workflow_context or {},
             rag_knowledge=rag_knowledge,
-            conversation_context=conversation_context
+            conversation_context=conversation_context,
+            file_context=file_context  # Pass file context
         )
         
         logger.info("Sending prompt to LLM...")
@@ -169,20 +207,16 @@ class WorkflowCompositionAgent:
         
         if not result:
             logger.error("❌ Failed to extract JSON from LLM response after all retries")
-            logger.error(f"❌ This indicates the LLM is not following JSON format instructions")
-            logger.error(f"❌ Please check the model configuration or try a different model")
-            return self._create_fallback_response(session_id, f"Could not parse LLM response - LLM returned plain text instead of JSON after {max_retries} attempts", user_prompt)
+            return self._create_fallback_response(session_id, f"Could not parse LLM response", user_prompt)
         
         # Add session ID if not present
         result["session_id"] = session_id
         
         # If LLM returned success=false but no smart_response, generate one
         if not result.get('success') and not result.get('smart_response'):
-            logger.info("LLM returned success=false without smart_response, generating fallback")
             fallback = self._create_fallback_response(session_id, "LLM could not create workflow", user_prompt)
             result['smart_response'] = fallback['smart_response']
             result['suggestions'] = fallback.get('suggestions', [])
-            result['available_use_cases'] = fallback.get('available_use_cases', [])
         
         # Add auto_create flag if workflow composition is successful
         if result.get('success') and result.get('workflow_composition'):
@@ -205,15 +239,23 @@ class WorkflowCompositionAgent:
                 
                 # Steps 2+: Add each atom to the molecule
                 for atom in molecule.get('atoms', []):
+                    # Handle both string and dict atoms (simple fix for string atoms)
+                    if isinstance(atom, str):
+                        atom_id = atom
+                        atom_title = atom
+                    else:
+                        atom_id = atom.get('id', '')
+                        atom_title = atom.get('title', atom_id)
+                    
                     execution_plan.append({
                         'step': step,
                         'action': 'add_atom',
                         'molecule_number': molecule.get('molecule_number'),
-                        'atom_id': atom.get('id'),
-                        'atom_title': atom.get('title'),
-                        'order': atom.get('order'),
-                        'purpose': atom.get('purpose'),
-                        'required': atom.get('required', True)
+                        'atom_id': atom_id,
+                        'atom_title': atom_title,
+                        'order': atom.get('order', step) if isinstance(atom, dict) else step,
+                        'purpose': atom.get('purpose', '') if isinstance(atom, dict) else '',
+                        'required': atom.get('required', True) if isinstance(atom, dict) else True
                     })
                     step += 1
             
@@ -252,10 +294,7 @@ class WorkflowCompositionAgent:
     
     def _build_rag_knowledge_context(self, user_prompt: str) -> str:
         """
-        Provide HIGH-LEVEL guidance only. We intentionally avoid injecting
-        concrete workflow templates from RAG to prevent biasing the LLM.
-        The goal is to nudge the model toward creating custom, atom-driven
-        workflows tailored to the user's prompt.
+        Provide HIGH-LEVEL guidance only
         """
         guidance = (
             "\nRAG GUIDANCE (high-level, non-prescriptive):\n"
@@ -381,4 +420,3 @@ if __name__ == "__main__":
     )
     print(f"Success: {result.get('success')}")
     print(f"Smart Response: {result.get('smart_response', '')[:200]}...")
-

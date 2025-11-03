@@ -2300,6 +2300,7 @@ const ExhibitionMode = () => {
                   ref={element => {
                     verticalSlideRefs.current[card.id] = element;
                   }}
+                  onDoubleClick={() => handleSlideSelection(index)}
                 >
                   <SlideCanvas
                     card={card}

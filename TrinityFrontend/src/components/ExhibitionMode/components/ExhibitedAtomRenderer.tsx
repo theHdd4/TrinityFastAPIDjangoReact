@@ -1003,7 +1003,7 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   }
 
   if (chartConfig) {
-    return <RechartsChartRenderer {...chartConfig} readOnly />;
+    return <RechartsChartRenderer {...chartConfig} readOnly captureId={atom.id} />;
   }
 
   if (htmlPreview) {

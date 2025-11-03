@@ -27,6 +27,11 @@ interface WorkflowRightPanelProps {
   onAtomLibraryVisibilityChange?: (isVisible: boolean) => void;
   onRightPanelToolVisibilityChange?: (isVisible: boolean) => void;
   onMoleculeAdd?: (molecule: any) => void;
+  onRenderWorkflow?: () => void;
+  onCheckCanvasHasMolecules?: () => boolean;
+  onGetAICreatedMolecules?: () => string[];
+  onClearAIMolecules?: () => void;
+  onGetRightmostPosition?: () => number;
 }
 
 interface Atom {
@@ -54,7 +59,12 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   assignedAtoms = [],
   onAtomLibraryVisibilityChange,
   onRightPanelToolVisibilityChange,
-  onMoleculeAdd
+  onMoleculeAdd,
+  onRenderWorkflow,
+  onCheckCanvasHasMolecules,
+  onGetAICreatedMolecules,
+  onClearAIMolecules,
+  onGetRightmostPosition
 }) => {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [selectedAtomForAssignment, setSelectedAtomForAssignment] = useState<string | null>(null);
@@ -222,6 +232,11 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
             customMolecules: JSON.parse(localStorage.getItem('workflow-custom-molecules') || '[]')
           }}
           onMoleculeAdd={onMoleculeAdd}
+          onRenderWorkflow={onRenderWorkflow}
+          onCheckCanvasHasMolecules={onCheckCanvasHasMolecules}
+          onGetAICreatedMolecules={onGetAICreatedMolecules}
+          onClearAIMolecules={onClearAIMolecules}
+          onGetRightmostPosition={onGetRightmostPosition}
         />
       </div>
       

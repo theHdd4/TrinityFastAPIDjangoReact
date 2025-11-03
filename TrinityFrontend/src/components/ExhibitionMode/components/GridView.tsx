@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { LayoutCard } from '../store/exhibitionStore';
+import SlidePreview from './SlidePreview';
 
 interface GridViewProps {
   cards: LayoutCard[];
@@ -56,19 +57,7 @@ export const GridView: React.FC<GridViewProps> = ({
                     : 'border-border hover:border-primary/50'
                 )}
               >
-                <div className="aspect-video bg-muted/30 p-4">
-                  <div className="grid grid-cols-2 gap-2 h-full">
-                    {card.atoms.slice(0, 4).map(atom => (
-                      <div
-                        key={atom.id}
-                        className="flex items-center gap-2 p-2 bg-background rounded border border-border"
-                      >
-                        <div className={`w-3 h-3 ${atom.color} rounded-full flex-shrink-0`} />
-                        <span className="text-xs truncate">{atom.title}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <SlidePreview card={card} index={index} totalSlides={cards.length} className="m-4" />
 
                 <div className="p-3 bg-muted/50 border-t border-border">
                   <div className="flex items-center justify-between">

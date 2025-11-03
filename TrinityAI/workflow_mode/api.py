@@ -164,7 +164,57 @@ async def compose_workflow_websocket(websocket: WebSocket):
         session_id = request_data.get("session_id", None)
         workflow_context = request_data.get("workflow_context", None)
         
+        # Extract project context for MinIO path resolution
+        client_name = request_data.get("client_name", "")
+        app_name = request_data.get("app_name", "")
+        project_name = request_data.get("project_name", "")
+        
+        # If context is empty, use get_minio_config() (SIMPLER, SAME AS CONCAT ACTUALLY USES)
+        if not client_name and not app_name and not project_name:
+            logger.info("🔍 No context in request, using get_minio_config() to get current path...")
+            try:
+                from main_api import get_minio_config
+                minio_config = get_minio_config()
+                prefix = minio_config.get('prefix', '')
+                
+                logger.info(f"✅ MinIO config prefix: {prefix}")
+                
+                # Extract client/app/project from prefix
+                if prefix and prefix != "":
+                    parts = prefix.rstrip('/').split('/')
+                    if len(parts) >= 3:
+                        client_name = parts[0]
+                        app_name = parts[1]
+                        project_name = parts[2]
+                        logger.info(f"✅ Extracted from prefix: {client_name}/{app_name}/{project_name}")
+                    else:
+                        logger.warning(f"⚠️ Prefix format unexpected: {prefix}")
+                else:
+                    logger.warning(f"⚠️ Empty prefix from get_minio_config()")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to get minio config: {e}")
+                import traceback
+                traceback.print_exc()
+        
         logger.info(f"📨 WS Workflow request: {message[:100]}...")
+        logger.info(f"🔧 Project context FINAL: {client_name}/{app_name}/{project_name}")
+        
+        # Set context on FileHandler before processing (if available)
+        if hasattr(workflow_agent, 'file_handler') and workflow_agent.file_handler:
+            try:
+                logger.info(f"🔧 Setting FileHandler context with: {client_name}/{app_name}/{project_name}")
+                workflow_agent.file_handler.set_context(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
+                )
+                logger.info("✅ Set FileHandler context for workflow agent")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to set FileHandler context: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Send connection confirmation
         await websocket.send_json({
@@ -207,12 +257,12 @@ async def compose_workflow_websocket(websocket: WebSocket):
             "timestamp": request_data.get("timestamp", "")
         })
         
-        # Send final response with all data
-        await websocket.send_json({
+        # Send final response with all data - ensure all keys are present
+        response_data = {
             "type": "response",
             "success": result.get('success', False),
-            "session_id": result.get('session_id'),
-            "workflow_composition": result.get('workflow_composition'),
+            "session_id": result.get('session_id', ''),
+            "workflow_composition": result.get('workflow_composition', None),
             "smart_response": result.get('smart_response', ''),
             "reasoning": result.get('reasoning', ''),
             "suggestions": result.get('suggestions', []),
@@ -220,7 +270,17 @@ async def compose_workflow_websocket(websocket: WebSocket):
             "auto_create": result.get('auto_create', False),  # Flag to automatically create molecules
             "execution_plan": result.get('execution_plan', []),  # Step-by-step execution plan
             "mode": "workflow_composition"
-        })
+        }
+        
+        # Add 'answer' field if present (for direct answers to questions when success=false)
+        if 'answer' in result:
+            response_data['answer'] = result['answer']
+        
+        # Add 'error' field if present (for error cases)
+        if 'error' in result:
+            response_data['error'] = result['error']
+        
+        await websocket.send_json(response_data)
         
         # Send completion
         await websocket.send_json({

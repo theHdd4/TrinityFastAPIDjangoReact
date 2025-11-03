@@ -461,7 +461,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }));
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
-  const accentImageInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
   const [canvasDimensions, setCanvasDimensions] = useState({
@@ -743,6 +742,20 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       foreground: activeTheme.colors.foreground,
     };
   }, [activeTheme]);
+
+  const shouldApplyThemeBackground = useMemo(() => {
+    const mode = settings.backgroundMode ?? 'preset';
+    if (mode !== 'preset') {
+      return false;
+    }
+
+    const backgroundColor =
+      settings.backgroundColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
+
+    return backgroundColor === 'default' || backgroundColor === DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
+  }, [settings.backgroundMode, settings.backgroundColor]);
+
+  const themeBackgroundStyle = shouldApplyThemeBackground ? themeContext.backgroundStyle : undefined;
 
   const accentButtonStyle = useMemo<React.CSSProperties | undefined>(() => {
     if (!themeContext.accent) {
@@ -1252,33 +1265,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     });
   };
 
-  const handleAccentImageChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      if (!canEdit) {
-        return;
-      }
-
-      const file = event.target.files?.[0];
-      event.target.value = '';
-
-      if (!file) {
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result !== 'string' || reader.result.length === 0) {
-          return;
-        }
-
-        updateSettings({ accentImage: reader.result, accentImageName: file.name });
-      };
-
-      reader.readAsDataURL(file);
-    },
-    [canEdit, updateSettings],
-  );
-
   const handleCloseFormatPanel = useCallback(() => {
     setShowFormatPanel(false);
   }, []);
@@ -1327,15 +1313,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         canEdit={canEdit}
         onUpdateSettings={updateSettings}
         onReset={resetSettings}
-        onAccentImageChange={handleAccentImageChange}
-        accentImageInputRef={accentImageInputRef}
         onClose={handleCloseFormatPanel}
       />
     );
   }, [
-    accentImageInputRef,
     canEdit,
-    handleAccentImageChange,
     handleCloseFormatPanel,
     resetSettings,
     settings,
@@ -1403,8 +1385,27 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     settings.reducedMotion && 'transition-none motion-reduce:transition-none',
   );
 
+  const slideThemeStyle: React.CSSProperties = useMemo(() => {
+    return {
+      ...(themeContext.containerStyle ?? {}),
+      ...(themeBackgroundStyle ?? {}),
+      ...slideBackgroundStyle,
+      ...(!settings.fullBleed && themeContext.borderRadius
+        ? { borderRadius: themeContext.borderRadius }
+        : {}),
+      ...(themeContext.foreground ? { color: themeContext.foreground } : {}),
+    };
+  }, [
+    slideBackgroundStyle,
+    themeBackgroundStyle,
+    themeContext.borderRadius,
+    themeContext.containerStyle,
+    themeContext.foreground,
+    settings.fullBleed,
+  ]);
+
   return (
-    <div className={containerClassName} style={{ ...themeContext.containerStyle, ...accessibilityStyle }}>
+    <div className={containerClassName} style={accessibilityStyle}>
       <div
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
@@ -1464,13 +1465,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                 style={
                   presentationMode
                     ? {
-                        ...slideBackgroundStyle,
-                        ...(themeContext.backgroundStyle ?? {}),
-                        ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
-                        ...(!settings.fullBleed && themeContext.borderRadius
-                          ? { borderRadius: themeContext.borderRadius }
-                          : {}),
-                        ...(themeContext.foreground ? { color: themeContext.foreground } : {}),
+                        ...slideThemeStyle,
                         height:
                           (presentationBaseDimensionsRef.current?.height ?? canvasDimensions.height) ||
                           CANVAS_STAGE_HEIGHT,
@@ -1482,14 +1477,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                         margin: '0 auto',
                       }
                     : {
+                        ...slideThemeStyle,
                         height: CANVAS_STAGE_HEIGHT,
-                        ...slideBackgroundStyle,
-                        ...(themeContext.backgroundStyle ?? {}),
-                        ...(themeContext.shadow ? { boxShadow: themeContext.shadow } : {}),
-                        ...(!settings.fullBleed && themeContext.borderRadius
-                          ? { borderRadius: themeContext.borderRadius }
-                          : {}),
-                        ...(themeContext.foreground ? { color: themeContext.foreground } : {}),
                       }
                 }
                 onDragOver={presentationMode ? undefined : handleDragOver}
@@ -1668,9 +1657,9 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
   };
 };
 
-const CANVAS_STAGE_HEIGHT = 520;
-const DEFAULT_PRESENTATION_WIDTH = 960;
-const PRESENTATION_PADDING = 160;
+export const CANVAS_STAGE_HEIGHT = 520;
+export const DEFAULT_PRESENTATION_WIDTH = 960;
+export const PRESENTATION_PADDING = 160;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
@@ -2261,17 +2250,35 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     }, [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects]);
 
     const handleLayerAction = useCallback(
-      (action: 'front' | 'forward' | 'backward' | 'back') => {
-        const targets = unlockedSelectedObjects.length > 0 ? unlockedSelectedObjects : selectedObjects;
+      (action: 'front' | 'forward' | 'backward' | 'back', explicitIds?: string[]) => {
+        const explicitTargets = Array.isArray(explicitIds) && explicitIds.length > 0
+          ? explicitIds
+              .map(id => objectsMap.get(id))
+              .filter((object): object is SlideObject => Boolean(object))
+          : null;
+
+        const unlockedExplicitTargets = explicitTargets?.filter(object => !isSlideObjectLocked(object)) ?? [];
+
+        const targets = unlockedExplicitTargets.length > 0
+          ? unlockedExplicitTargets
+          : explicitTargets && explicitTargets.length > 0
+            ? []
+            : unlockedSelectedObjects.length > 0
+              ? unlockedSelectedObjects
+              : selectedObjects;
+
         if (targets.length === 0) {
           toast({
-            title: 'No objects selected',
-            description: 'Select an object to change its layer order.',
+            title: explicitTargets && explicitTargets.length > 0 ? 'Selection locked' : 'No objects selected',
+            description:
+              explicitTargets && explicitTargets.length > 0
+                ? 'Unlock the selected objects to change their layer order.'
+                : 'Select an object to change its layer order.',
           });
           return;
         }
 
-        const ids = targets.map(object => object.id);
+        const ids = Array.from(new Set(targets.map(object => object.id))).filter(Boolean);
         if (ids.length === 0) {
           return;
         }
@@ -2295,6 +2302,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
       },
       [
+        objectsMap,
         onBringForward,
         onBringToFront,
         onInteract,
@@ -4036,23 +4044,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   height: object.height,
                   zIndex: isSelected ? zIndex + 100 : zIndex,
                 }}
+                data-exhibition-object-id={object.id}
+                data-exhibition-object-type={object.type}
                 onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
                 onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
               >
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
-                  className={cn(
-                    'pointer-events-none absolute -inset-1 z-40 border-2 border-dotted border-yellow-400 transition-all duration-200',
-                    (() => {
-                      if (isShapeObject) {
-                        return 'rounded-[12px]';
-                      }
-                      if (suppressCardChrome || isTextBoxObject || isTableObject || isChartObject) {
-                        return 'rounded-[22px]';
-                      }
-                      return 'rounded-[32px]';
-                    })(),
-                  )}
+                  className="pointer-events-none absolute inset-0 z-40 border-2 border-yellow-400 transition-all duration-200"
                   aria-hidden="true"
                 />
               )}
@@ -4196,6 +4195,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       data={chartProps.chartData}
                       config={chartProps.chartConfig}
                       className="h-full w-full"
+                      captureId={object.id}
                     />
                   ) : (
                     <div
@@ -4285,10 +4285,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               onDuplicate={() => handleDuplicateSelection(contextTargetIds)}
               onDelete={() => handleDeleteSelection(contextTargetIds)}
               onToggleLock={handleToggleLock}
-              onBringToFront={() => handleLayerAction('front')}
-              onBringForward={() => handleLayerAction('forward')}
-              onSendBackward={() => handleLayerAction('backward')}
-              onSendToBack={() => handleLayerAction('back')}
+              onBringToFront={() => handleLayerAction('front', contextTargetIds)}
+              onBringForward={() => handleLayerAction('forward', contextTargetIds)}
+              onSendBackward={() => handleLayerAction('backward', contextTargetIds)}
+              onSendToBack={() => handleLayerAction('back', contextTargetIds)}
               onAlign={handleAlignSelection}
               onLink={handleLinkSelection}
               onComment={handleCommentSelection}
