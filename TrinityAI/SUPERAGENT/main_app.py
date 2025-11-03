@@ -17,6 +17,13 @@ from main_api import get_llm_config
 from text_cleaner import clean_ai_response
 from agent_orchestrator import orchestrate_workflow
 
+# Add SUPERAGENT directory to sys.path for local imports
+SUPERAGENT_DIR = Path(__file__).resolve().parent
+if str(SUPERAGENT_DIR) not in sys.path:
+    sys.path.append(str(SUPERAGENT_DIR))
+
+from atom_mapping import detect_atom_from_prompt, get_atom_info, ATOM_MAPPING
+
 # Set up logger first (before any logging calls)
 logger = logging.getLogger("trinity.superagent")
 
@@ -126,38 +133,48 @@ class SuperAgentLLMClient:
         # No need to initialize here anymore
         
         # Agent capabilities mapping (from enhanced SuperAgent)
+        # Note: These are internal names for routing logic
+        # Actual atomIds use kebab-case (handled by atom_mapping.py)
         self.agent_capabilities = {
-            "Agent_chartmaker": {
+            "Agent_chart-maker": {
                 "keywords": ["chart", "graph", "visualization", "plot", "dashboard", "chart maker", "bar chart", "line chart", "pie chart", "histogram", "heatmap", "interactive chart", "business dashboard", "analytics chart"],
-                "description": "Creates interactive charts and visualizations using FastAPI, pandas, and Plotly. Supports bar, line, area, pie, histogram, heatmap, waterfall charts with data filtering and business dashboards."
+                "description": "Creates interactive charts and visualizations using FastAPI, pandas, and Plotly. Supports bar, line, area, pie, histogram, heatmap, waterfall charts with data filtering and business dashboards.",
+                "atomId": "chart-maker"
             },
             "Agent_concat": {
                 "keywords": ["concat", "concatenate", "combine", "merge", "join", "stack", "append", "vertical merge", "horizontal merge", "row-wise", "column-wise", "combine datasets"],
-                "description": "Combines datasets vertically (row-wise) or horizontally (column-wise) for data stacking and extending operations."
+                "description": "Combines datasets vertically (row-wise) or horizontally (column-wise) for data stacking and extending operations.",
+                "atomId": "concat"
             },
-            "Agent_create_transform": {
+            "Agent_create-and-transform-features": {
                 "keywords": ["transform", "create", "feature engineering", "new columns", "calculated fields", "add", "subtract", "multiply", "divide", "dummy variable", "residual", "trend", "RPI", "column operations"],
-                "description": "Generates new columns through various operations and transformations including mathematical operations, dummy conversion, trend detection, and feature engineering."
+                "description": "Generates new columns through various operations and transformations including mathematical operations, dummy conversion, trend detection, and feature engineering.",
+                "atomId": "create-and-transform-features"
             },
-            "Agent_dataframe_operations": {
+            "Agent_dataframe-operations": {
                 "keywords": ["dataframe", "data operations", "pandas", "data manipulation", "data processing", "data analysis", "data cleaning", "data transformation", "data filtering"],
-                "description": "Performs comprehensive DataFrame operations and data manipulation including cleaning, transformation, filtering, and analysis tasks."
+                "description": "Performs comprehensive DataFrame operations and data manipulation including cleaning, transformation, filtering, and analysis tasks.",
+                "atomId": "dataframe-operations"
             },
             "Agent_explore": {
                 "keywords": ["explore", "exploration", "EDA", "data browsing", "summary statistics", "missing values", "data distribution", "column profiling", "interactive browsing", "data overview"],
-                "description": "Interactive data browsing and exploratory data analysis including missing value analysis, column profiling, and data distribution analysis."
+                "description": "Interactive data browsing and exploratory data analysis including missing value analysis, column profiling, and data distribution analysis.",
+                "atomId": "explore"
             },
             "Agent_fetch_atom": {
                 "keywords": ["fetch", "atom", "tool selection", "routing", "recommendation", "AI routing", "intelligent routing", "atom detection", "tool matching"],
-                "description": "AI-powered query processor that analyzes user requests and determines the most suitable atom/tool for data analytics tasks with intelligent recommendations."
+                "description": "AI-powered query processor that analyzes user requests and determines the most suitable atom/tool for data analytics tasks with intelligent recommendations.",
+                "atomId": "fetch_atom"
             },
-            "Agent_groupby": {
+            "Agent_groupby-wtg-avg": {
                 "keywords": ["groupby", "aggregate", "group", "summarize", "aggregation", "pivot", "weighted average", "dimension analysis", "KPIs", "business intelligence", "segment analysis"],
-                "description": "Performs data aggregation and grouping operations across dimensions using statistical functions like sum, mean, weighted average, and rank percentile for business KPIs."
+                "description": "Performs data aggregation and grouping operations across dimensions using statistical functions like sum, mean, weighted average, and rank percentile for business KPIs.",
+                "atomId": "groupby-wtg-avg"
             },
-            "Agent_Merge": {
+            "Agent_merge": {
                 "keywords": ["merge", "join", "combine", "VLOOKUP", "SQL join", "data integration", "inner join", "left join", "outer join", "right join", "link data", "match files"],
-                "description": "Joins datasets on common columns with various join types (inner, left, right, outer) similar to VLOOKUP or SQL JOIN for data integration."
+                "description": "Joins datasets on common columns with various join types (inner, left, right, outer) similar to VLOOKUP or SQL JOIN for data integration.",
+                "atomId": "merge"
             }
         }
         
@@ -1040,47 +1057,12 @@ Your response MUST be parseable by json.loads() in Python."""
         logger.info("Generating fallback workflow based on keywords...")
         print("\n🔍 Analyzing prompt for agent detection...")
         
-        prompt_lower = user_prompt.lower()
+        # Use the atom_mapping module to detect the correct atom
+        atom_info = detect_atom_from_prompt(user_prompt)
         
-        # Determine agent based on keywords
-        agent = "merge"  # default
-        endpoint = "/trinityai/merge"
-        task_desc = "Process the data"
-        
-        print(f"📝 Prompt (lowercase): {prompt_lower}")
-        
-        if any(word in prompt_lower for word in ["merge", "join", "combine", "vlookup"]):
-            agent = "merge"
-            endpoint = "/trinityai/merge"
-            task_desc = "Merge the datasets by common columns"
-            print("✅ Detected keywords: merge, join, combine, or vlookup")
-        elif any(word in prompt_lower for word in ["concat", "concatenate", "stack", "append"]):
-            agent = "concat"
-            endpoint = "/trinityai/concat"
-            task_desc = "Concatenate the datasets"
-            print("✅ Detected keywords: concat, concatenate, stack, or append")
-        elif any(word in prompt_lower for word in ["chart", "graph", "visualiz", "plot"]):
-            agent = "chartmaker"
-            endpoint = "/trinityai/chart"
-            task_desc = "Create a chart or visualization"
-            print("✅ Detected keywords: chart, graph, visualiz, or plot")
-        elif any(word in prompt_lower for word in ["group", "aggregate", "pivot"]):
-            agent = "groupby"
-            endpoint = "/trinityai/groupby"
-            task_desc = "Group and aggregate the data"
-            print("✅ Detected keywords: group, aggregate, or pivot")
-        elif any(word in prompt_lower for word in ["explore", "analyze", "eda"]):
-            agent = "explore"
-            endpoint = "/trinityai/explore"
-            task_desc = "Explore and analyze the dataset"
-            print("✅ Detected keywords: explore, analyze, or eda")
-        elif any(word in prompt_lower for word in ["transform", "create column", "feature"]):
-            agent = "create_transform"
-            endpoint = "/trinityai/create-transform"
-            task_desc = "Create or transform columns"
-            print("✅ Detected keywords: transform, create column, or feature")
-        else:
-            print("⚠️ No specific keywords detected, using default agent")
+        agent = atom_info["atomId"]
+        endpoint = atom_info["endpoint"]
+        task_desc = atom_info["task_desc"]
         
         print(f"\n🎯 Selected Agent: {agent}")
         print(f"🌐 Endpoint: {endpoint}")
@@ -1092,12 +1074,10 @@ Your response MUST be parseable by json.loads() in Python."""
                 {
                     "step": 1,
                     "action": "CARD_CREATION",
-                    "agent": agent,
-                    "prompt": f"Create laboratory card with {agent} atom",
+                    "prompt": "Create empty laboratory card",
                     "endpoint": "/api/laboratory/cards",
                     "depends_on": None,
                     "payload": {
-                        "atomId": agent,
                         "source": "ai",
                         "llm": "deepseek-r1:32b"
                     }
@@ -1106,7 +1086,7 @@ Your response MUST be parseable by json.loads() in Python."""
                     "step": 2,
                     "action": "FETCH_ATOM",
                     "agent": "fetch_atom",
-                    "prompt": f"fetch {agent} atom",
+                    "prompt": user_prompt,  # Use original prompt to detect atom
                     "endpoint": "/trinityai/chat",
                     "depends_on": 1
                 },
@@ -1114,7 +1094,7 @@ Your response MUST be parseable by json.loads() in Python."""
                     "step": 3,
                     "action": "AGENT_EXECUTION",
                     "agent": agent,
-                    "prompt": f"Original user prompt: {user_prompt}. Task: {task_desc}",
+                    "prompt": user_prompt,  # Clean prompt - agent will load files
                     "endpoint": endpoint,
                     "depends_on": 2
                 }
@@ -1210,14 +1190,15 @@ async def chat_with_superagent(request: ChatRequest):
             
             # Generate workflow using SmartWorkflowAgent
             if workflow_agent:
-                # Pass enriched message with file context to workflow agent
+                # Pass ORIGINAL message (not enriched) - agent will use file_context for planning
+                # but keep Step 3 prompt clean
                 result = workflow_agent.process_request(
-                    prompt=enriched_message,
+                    prompt=request.message,  # Use original message for Step 3
                     session_id=request.session_id or "chat_session",
                     client_name=request.client_name or "",
                     app_name=request.app_name or "",
                     project_name=request.project_name or "",
-                    file_context=file_context  # Pass file context
+                    file_context=file_context  # Pass file context separately for planning
                 )
                 
                 workflow_json = result.get("workflow_json", {})
@@ -1295,12 +1276,12 @@ async def generate_workflow(request: ChatRequest):
         if workflow_agent:
             logger.info("✅ Using SmartWorkflowAgent (with file loading, memory, and AI logic)")
             result = workflow_agent.process_request(
-                prompt=enriched_message,
+                prompt=request.message,  # Use original message for Step 3
                 session_id=request.session_id or "default_session",
                 client_name=request.client_name or "",
                 app_name=request.app_name or "",
                 project_name=request.project_name or "",
-                file_context=file_context  # Pass file context
+                file_context=file_context  # Pass file context separately for planning
             )
             
             # Extract workflow JSON from result
@@ -1650,9 +1631,14 @@ async def orchestrate_agents_websocket(websocket: WebSocket):
                 payload=step_data.get("payload")
             ))
         
+        # Calculate total_steps from workflow array if not provided or is 0
+        total_steps = workflow_json.get("total_steps", len(workflow_steps))
+        if total_steps == 0:
+            total_steps = len(workflow_steps)
+        
         workflow_plan = WorkflowPlan(
             workflow=workflow_steps,
-            total_steps=workflow_json.get("total_steps", 0),
+            total_steps=total_steps,
             is_data_science=workflow_json.get("is_data_science", True),
             original_prompt=message
         )
@@ -1711,7 +1697,7 @@ async def _execute_workflow_with_websocket(
         "workflow": [
             {
                 "step": step.step,
-                "agent": step.agent,
+                "agent": step.agent or getattr(step, 'action', 'unknown'),
                 "action": getattr(step, 'action', None)
             }
             for step in workflow_plan.workflow
@@ -1727,14 +1713,32 @@ async def _execute_workflow_with_websocket(
     sorted_workflow = sorted(workflow_plan.workflow, key=lambda x: x.step)
     
     for step in sorted_workflow:
-        step_id = f"step_{step.step}_{step.agent}"
         step_action = getattr(step, 'action', 'UNKNOWN')
+        step_agent = step.agent or step_action or "unknown"
+        step_id = f"step_{step.step}_{step_agent}"
+        
+        # ============================================================================
+        # TERMINAL: Print step details
+        # ============================================================================
+        print("\n" + "="*100)
+        print(f"🚀 STEP {step.step}/{workflow_plan.total_steps}: {step_action}")
+        print("="*100)
+        print(f"📌 Action:    {step_action}")
+        print(f"🤖 Agent:     {step.agent or 'N/A'}")
+        print(f"🌐 Endpoint:  {step.endpoint}")
+        print(f"💬 Prompt:    {step.prompt[:100] if step.prompt else 'N/A'}{'...' if step.prompt and len(step.prompt) > 100 else ''}")
+        if step.depends_on:
+            print(f"🔗 Depends:   Step {step.depends_on}")
+        if step.payload:
+            import json as json_module
+            print(f"📦 Payload:   {json_module.dumps(step.payload, indent=2)}")
+        print("-"*100)
         
         # Send step started event
         await websocket.send_json({
             "type": "step_started",
             "step": step.step,
-            "agent": step.agent,
+            "agent": step.agent or "card_creation",
             "action": step_action,
             "total_steps": workflow_plan.total_steps
         })
@@ -1742,19 +1746,37 @@ async def _execute_workflow_with_websocket(
         # Build context from dependencies
         step_context = {}
         if step.depends_on:
-            dep_key = f"step_{step.depends_on}"
-            if dep_key in results and results[dep_key]["success"]:
-                step_context["previous_result"] = results[dep_key]["result"]
+            # Find the dependent step to get its agent name
+            dep_step = None
+            for s in sorted_workflow:
+                if s.step == step.depends_on:
+                    dep_step = s
+                    break
+            
+            if dep_step:
+                dep_agent = dep_step.agent or getattr(dep_step, 'action', 'unknown') or "unknown"
+                dep_key = f"step_{step.depends_on}_{dep_agent}"
+                if dep_key in results and results[dep_key]["success"]:
+                    step_context["previous_result"] = results[dep_key]["result"]
+                    logger.info(f"   ✅ Found dependency result from step {step.depends_on}")
+                else:
+                    logger.warning(f"   ⚠️ Dependency step {step.depends_on} not found in results or failed")
         
         # Execute agent
+        print(f"⏳ Executing endpoint: {step.endpoint}")
+        print(f"📨 Sending request...")
+        
         result = await agent_executor.execute_agent(
             endpoint=step.endpoint,
-            prompt=step.prompt,
+            prompt=step.prompt or "",
             session_id=f"{session_id}_{step_id}",
             context=step_context,
             action=getattr(step, 'action', None),
             payload_data=getattr(step, 'payload', None)
         )
+        
+        print(f"📥 Response received")
+        print(f"✅ Success: {result.get('success', False)}")
         
         results[step_id] = result
         
@@ -1762,11 +1784,75 @@ async def _execute_workflow_with_websocket(
             steps_completed += 1
             context[f"step_{step.step}"] = result["result"]
             
+            # Print success details
+            print(f"🎉 Step {step.step} completed successfully!")
+            
+            # Print result summary based on action type
+            result_data = result.get("result", {})
+            if step_action == "CARD_CREATION":
+                card_id = result_data.get("id", "N/A")
+                print(f"   📋 Card ID: {card_id}")
+                print(f"   🔢 Atoms: {len(result_data.get('atoms', []))}")
+            elif step_action == "FETCH_ATOM":
+                atom_name = result_data.get("atom_name", "N/A")
+                atom_status = result_data.get("atom_status", False)
+                match_type = result_data.get("match_type", "N/A")
+                print(f"   🎯 Detected Atom: {atom_name}")
+                print(f"   ✅ Status: {atom_status}")
+                print(f"   🔍 Match Type: {match_type}")
+            elif step_action == "AGENT_EXECUTION":
+                if isinstance(result_data, dict):
+                    print(f"   📊 Configuration Keys: {list(result_data.keys())[:5]}")
+                    if 'concat_json' in result_data:
+                        print(f"   🔗 Concat configured")
+                    elif 'merge_json' in result_data:
+                        print(f"   🔗 Merge configured")
+            
+            print("-"*100)
+            
+            # If this was Step 2 (FETCH_ATOM), update Step 3's endpoint based on detection
+            if step_action == "FETCH_ATOM":
+                result_data = result.get("result", {})
+                detected_atom_name = result_data.get("atom_name", "")
+                
+                if detected_atom_name:
+                    try:
+                        from atom_mapping import fetch_atom_name_to_atomid, get_atom_info
+                        
+                        # Convert to correct atomId
+                        correct_atomid = fetch_atom_name_to_atomid(detected_atom_name)
+                        atom_info = get_atom_info(correct_atomid)
+                        
+                        # Find Step 3 and update its endpoint
+                        for next_step in sorted_workflow:
+                            if getattr(next_step, 'action', None) == "AGENT_EXECUTION":
+                                original_endpoint = next_step.endpoint
+                                next_step.endpoint = atom_info["endpoint"]
+                                next_step.agent = correct_atomid
+                                
+                                print("\n" + "🔄 "*50)
+                                print("🔄 UPDATING STEP 3 BASED ON FETCH_ATOM DETECTION")
+                                print("🔄 "*50)
+                                print(f"   🎯 Detected: {detected_atom_name}")
+                                print(f"   ✅ Corrected to: {correct_atomid}")
+                                print(f"   🌐 Old endpoint: {original_endpoint}")
+                                print(f"   🌐 New endpoint: {atom_info['endpoint']}")
+                                print("🔄 "*50 + "\n")
+                                
+                                logger.info(f"🔄 Updated Step 3 based on fetch_atom detection:")
+                                logger.info(f"   Detected: {detected_atom_name} → {correct_atomid}")
+                                logger.info(f"   Old endpoint: {original_endpoint}")
+                                logger.info(f"   New endpoint: {atom_info['endpoint']}")
+                                break
+                    except Exception as e:
+                        print(f"⚠️ Could not update Step 3 from fetch results: {e}")
+                        logger.warning(f"⚠️ Could not update Step 3 from fetch results: {e}")
+            
             # Send step completed event
             step_result_data = {
                 "type": "step_completed",
                 "step": step.step,
-                "agent": step.agent,
+                "agent": step.agent or "card_creation",
                 "action": step_action,
                 "success": True,
                 "result": result.get("result", {}),
@@ -1775,8 +1861,10 @@ async def _execute_workflow_with_websocket(
             
             await websocket.send_json(step_result_data)
             
-            # Check if card was created
+            # Send specific events based on action type
             result_data = result.get("result", {})
+            
+            # Step 1: Card Creation - send card_created event
             if (step_action == "CARD_CREATION" and result_data.get("id")):
                 card_id = result_data["id"]
                 await websocket.send_json({
@@ -1785,14 +1873,82 @@ async def _execute_workflow_with_websocket(
                     "card_data": result_data,  # Include full card data for frontend
                     "step": step.step
                 })
+            
+            # Step 2: Fetch Atom - send atom_fetched event with fetch results
+            elif (step_action == "FETCH_ATOM" and result_data):
+                # Find the created card ID from previous steps
+                created_card_id = None
+                for prev_step in sorted_workflow[:step.step]:
+                    if getattr(prev_step, 'action', None) == "CARD_CREATION":
+                        prev_agent = prev_step.agent or getattr(prev_step, 'action', 'card_creation') or "card_creation"
+                        prev_step_id = f"step_{prev_step.step}_{prev_agent}"
+                        if prev_step_id in results and results[prev_step_id]["success"]:
+                            prev_result = results[prev_step_id]["result"]
+                            created_card_id = prev_result.get("id")
+                            break
+                
+                # Get the detected atom name from fetch results
+                detected_atom_name = result_data.get("atom_name", "")
+                correct_atomid = None
+                
+                if detected_atom_name:
+                    try:
+                        from atom_mapping import fetch_atom_name_to_atomid
+                        correct_atomid = fetch_atom_name_to_atomid(detected_atom_name)
+                        logger.info(f"🔍 Fetch atom detected: {detected_atom_name} → {correct_atomid}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not convert atom name: {e}")
+                
+                atom_fetched_event = {
+                    "type": "atom_fetched",
+                    "step": step.step,
+                    "card_id": created_card_id,
+                    "fetch_results": result_data,  # Atom detection results
+                    "atom_status": result_data.get("atom_status", False),
+                    "match_type": result_data.get("match_type", "none"),
+                    "detected_atom_name": detected_atom_name,
+                    "correct_atomid": correct_atomid  # Corrected atomId for Step 3
+                }
+                logger.info(f"📤 Sending atom_fetched event: card_id={created_card_id}, atom={correct_atomid}")
+                await websocket.send_json(atom_fetched_event)
+                logger.info(f"✅ atom_fetched event sent successfully")
+            
+            # Step 3: Agent Execution - send atom_configured event with agent results
+            elif (step_action == "AGENT_EXECUTION" and result_data):
+                # Find the created card ID from previous steps
+                created_card_id = None
+                for prev_step in sorted_workflow[:step.step]:
+                    if getattr(prev_step, 'action', None) == "CARD_CREATION":
+                        prev_agent = prev_step.agent or "card_creation"
+                        prev_step_id = f"step_{prev_step.step}_{prev_agent}"
+                        if prev_step_id in results and results[prev_step_id]["success"]:
+                            prev_result = results[prev_step_id]["result"]
+                            created_card_id = prev_result.get("id")
+                            break
+                
+                atom_configured_event = {
+                    "type": "atom_configured",
+                    "step": step.step,
+                    "card_id": created_card_id,
+                    "agent": step.agent or "unknown",
+                    "configuration": result_data  # Full agent configuration
+                }
+                logger.info(f"📤 Sending atom_configured event: card_id={created_card_id}, agent={step.agent}")
+                await websocket.send_json(atom_configured_event)
+                logger.info(f"✅ atom_configured event sent successfully")
         else:
-            errors.append(f"Step {step.step} ({step.agent}) failed: {result.get('error')}")
+            errors.append(f"Step {step.step} ({step.agent or 'unknown'}) failed: {result.get('error')}")
+            
+            # Print failure details
+            print(f"❌ Step {step.step} FAILED!")
+            print(f"   Error: {result.get('error', 'Unknown error')}")
+            print("-"*100)
             
             # Send step failed event
             await websocket.send_json({
                 "type": "step_failed",
                 "step": step.step,
-                "agent": step.agent,
+                "agent": step.agent or "unknown",
                 "action": step_action,
                 "error": result.get("error"),
                 "success": False
@@ -1801,6 +1957,19 @@ async def _execute_workflow_with_websocket(
     # Workflow completed
     workflow_completed = steps_completed == workflow_plan.total_steps
     execution_time = time.time() - start_time
+    
+    # Print final summary
+    print("\n" + "🎉 "*50)
+    print("WORKFLOW EXECUTION COMPLETE")
+    print("🎉 "*50)
+    print(f"✅ Completed: {workflow_completed}")
+    print(f"📊 Steps executed: {steps_completed}/{workflow_plan.total_steps}")
+    print(f"⏱️  Execution time: {execution_time:.2f}s")
+    if errors:
+        print(f"❌ Errors: {len(errors)}")
+        for error in errors:
+            print(f"   - {error}")
+    print("="*100 + "\n")
     
     # Build final response
     from agent_orchestrator import WorkflowOrchestrator
@@ -1815,12 +1984,14 @@ async def _execute_workflow_with_websocket(
     # Convert results to steps_results format
     steps_results = []
     for step in sorted_workflow:
-        step_id = f"step_{step.step}_{step.agent}"
+        step_action_temp = getattr(step, 'action', 'UNKNOWN')
+        step_agent = step.agent or step_action_temp or "unknown"
+        step_id = f"step_{step.step}_{step_agent}"
         if step_id in results:
             step_result = results[step_id]
             steps_results.append({
                 "step": step.step,
-                "agent": step.agent,
+                "agent": step.agent or "card_creation",
                 "action": getattr(step, 'action', None),
                 "success": step_result["success"],
                 "result": step_result.get("result", {}),

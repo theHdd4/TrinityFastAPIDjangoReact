@@ -9,6 +9,7 @@ import logging
 import requests
 import re
 from typing import Dict, Any, List
+from atom_mapping import detect_atom_from_prompt, get_atom_info, ATOM_MAPPING
 
 logger = logging.getLogger("smart.workflow.ai")
 
@@ -99,36 +100,40 @@ USER REQUEST: "{user_prompt}"{mentioned_files_context}{available_files_context}{
 WORKFLOW STRUCTURE (exactly 3 steps):
 
 Step 1 - CARD_CREATION:
-- Create laboratory card for the agent
+- Create EMPTY laboratory card (no atom yet - will be added in Step 2)
 - endpoint: /api/laboratory/cards
-- payload: {{"atomId": "<agent>", "source": "ai", "llm": "deepseek-r1:32b"}}
+- payload: {{"source": "ai", "llm": "deepseek-r1:32b"}}
+- NOTE: Do NOT include atomId - card should be empty
 
 Step 2 - FETCH_ATOM:
 - Fetch the atom using chat endpoint
-- endpoint: /trinityai/chat
-- prompt: "fetch <agent> atom"
+- endpoint: /trinityai/chat (MUST BE /trinityai/chat, NOT /api/chat)
+- prompt: "Original user prompt here"
+- agent: "fetch_atom"
 
 Step 3 - AGENT_EXECUTION:
 - Execute the specific agent
 - endpoint: /trinityai/<agent_endpoint>
-- prompt: "Original user prompt: {user_prompt}. Task: <specific_task>"
+- prompt: ONLY "Original user prompt: {user_prompt}. Task: <specific_task>"
+- IMPORTANT: Do NOT include file details, column names, or available files list in this prompt
+- The agent will load files automatically, keep the prompt clean and concise
 
 AVAILABLE AGENTS:
 • merge → /trinityai/merge (join datasets on common columns)
 • concat → /trinityai/concat (stack datasets vertically/horizontally)
-• chartmaker → /trinityai/chart (create charts and visualizations)
-• groupby → /trinityai/groupby (group and aggregate data)
+• chart-maker → /trinityai/chart-maker (create charts and visualizations)
+• groupby-wtg-avg → /trinityai/groupby (group and aggregate data)
 • explore → /trinityai/explore (explore and analyze datasets)
-• dataframe_operations → /trinityai/dataframe-operations (DataFrame operations)
-• create_transform → /trinityai/create-transform (transform data columns)
+• dataframe-operations → /trinityai/dataframe-operations (DataFrame operations)
+• create-and-transform-features → /trinityai/create-transform (transform data columns)
 
 EXAMPLES:
 
 USER: "merge files uk_mayo and uk_beans"
-WORKFLOW: {{"workflow": [{{"step": 1, "action": "CARD_CREATION", "agent": "merge", "prompt": "Create laboratory card with merge atom", "endpoint": "/api/laboratory/cards", "depends_on": null, "payload": {{"atomId": "merge", "source": "ai", "llm": "deepseek-r1:32b"}}}}, {{"step": 2, "action": "FETCH_ATOM", "agent": "fetch_atom", "prompt": "fetch merge atom", "endpoint": "/trinityai/chat", "depends_on": 1}}, {{"step": 3, "action": "AGENT_EXECUTION", "agent": "merge", "prompt": "Original user prompt: merge files uk_mayo and uk_beans. Task: Merge uk_mayo and uk_beans files by common columns", "endpoint": "/trinityai/merge", "depends_on": 2}}], "is_data_science": true, "total_steps": 3, "original_prompt": "merge files uk_mayo and uk_beans"}}
+WORKFLOW: {{"workflow": [{{"step": 1, "action": "CARD_CREATION", "prompt": "Create empty laboratory card", "endpoint": "/api/laboratory/cards", "depends_on": null, "payload": {{"source": "ai", "llm": "deepseek-r1:32b"}}}}, {{"step": 2, "action": "FETCH_ATOM", "agent": "fetch_atom", "prompt": "merge files uk_mayo and uk_beans", "endpoint": "/trinityai/chat", "depends_on": 1}}, {{"step": 3, "action": "AGENT_EXECUTION", "agent": "merge", "prompt": "merge files uk_mayo and uk_beans", "endpoint": "/trinityai/merge", "depends_on": 2}}], "is_data_science": true, "total_steps": 3, "original_prompt": "merge files uk_mayo and uk_beans"}}
 
 USER: "create a chart from sales data"
-WORKFLOW: {{"workflow": [{{"step": 1, "action": "CARD_CREATION", "agent": "chartmaker", "prompt": "Create laboratory card with chartmaker atom", "endpoint": "/api/laboratory/cards", "depends_on": null, "payload": {{"atomId": "chartmaker", "source": "ai", "llm": "deepseek-r1:32b"}}}}, {{"step": 2, "action": "FETCH_ATOM", "agent": "fetch_atom", "prompt": "fetch chartmaker atom", "endpoint": "/trinityai/chat", "depends_on": 1}}, {{"step": 3, "action": "AGENT_EXECUTION", "agent": "chartmaker", "prompt": "Original user prompt: create a chart from sales data. Task: Create interactive chart from sales data", "endpoint": "/trinityai/chart", "depends_on": 2}}], "is_data_science": true, "total_steps": 3, "original_prompt": "create a chart from sales data"}}
+WORKFLOW: {{"workflow": [{{"step": 1, "action": "CARD_CREATION", "prompt": "Create empty laboratory card", "endpoint": "/api/laboratory/cards", "depends_on": null, "payload": {{"source": "ai", "llm": "deepseek-r1:32b"}}}}, {{"step": 2, "action": "FETCH_ATOM", "agent": "fetch_atom", "prompt": "create a chart from sales data", "endpoint": "/trinityai/chat", "depends_on": 1}}, {{"step": 3, "action": "AGENT_EXECUTION", "agent": "chart-maker", "prompt": "create a chart from sales data", "endpoint": "/trinityai/chart-maker", "depends_on": 2}}], "is_data_science": true, "total_steps": 3, "original_prompt": "create a chart from sales data"}}
 
 Now generate ONLY the JSON for: "{user_prompt}"
 
@@ -306,51 +311,26 @@ def _generate_fallback_workflow(user_prompt: str) -> Dict[str, Any]:
     
     logger.info("🔄 Generating fallback workflow...")
     
-    prompt_lower = user_prompt.lower()
+    # Use the atom_mapping module to detect the correct atom
+    atom_info = detect_atom_from_prompt(user_prompt)
     
-    # Determine agent from keywords
-    agent = "merge"
-    endpoint = "/trinityai/merge"
-    task_desc = "Process the data"
-    
-    if any(word in prompt_lower for word in ["merge", "join", "combine", "vlookup"]):
-        agent = "merge"
-        endpoint = "/trinityai/merge"
-        task_desc = "Merge datasets by common columns"
-    elif any(word in prompt_lower for word in ["concat", "concatenate", "stack", "append"]):
-        agent = "concat"
-        endpoint = "/trinityai/concat"
-        task_desc = "Concatenate datasets"
-    elif any(word in prompt_lower for word in ["chart", "graph", "visualiz", "plot"]):
-        agent = "chartmaker"
-        endpoint = "/trinityai/chart"
-        task_desc = "Create chart visualization"
-    elif any(word in prompt_lower for word in ["group", "aggregate", "pivot"]):
-        agent = "groupby"
-        endpoint = "/trinityai/groupby"
-        task_desc = "Group and aggregate data"
-    elif any(word in prompt_lower for word in ["explore", "analyze", "eda"]):
-        agent = "explore"
-        endpoint = "/trinityai/explore"
-        task_desc = "Explore and analyze dataset"
-    elif any(word in prompt_lower for word in ["transform", "create column", "feature"]):
-        agent = "create_transform"
-        endpoint = "/trinityai/create-transform"
-        task_desc = "Transform data columns"
+    agent = atom_info["atomId"]
+    endpoint = atom_info["endpoint"]
+    task_desc = atom_info["task_desc"]
     
     logger.info(f"📊 Detected agent: {agent}")
+    logger.info(f"🌐 Endpoint: {endpoint}")
+    logger.info(f"📝 Task: {task_desc}")
     
     workflow_json = {
         "workflow": [
             {
                 "step": 1,
                 "action": "CARD_CREATION",
-                "agent": agent,
-                "prompt": f"Create laboratory card with {agent} atom",
+                "prompt": "Create empty laboratory card",
                 "endpoint": "/api/laboratory/cards",
                 "depends_on": None,
                 "payload": {
-                    "atomId": agent,
                     "source": "ai",
                     "llm": "deepseek-r1:32b"
                 }
@@ -359,18 +339,18 @@ def _generate_fallback_workflow(user_prompt: str) -> Dict[str, Any]:
                 "step": 2,
                 "action": "FETCH_ATOM",
                 "agent": "fetch_atom",
-                "prompt": f"fetch {agent} atom",
+                "prompt": user_prompt,  # Use original prompt to detect atom
                 "endpoint": "/trinityai/chat",
                 "depends_on": 1
             },
-            {
-                "step": 3,
-                "action": "AGENT_EXECUTION",
-                "agent": agent,
-                "prompt": f"Original user prompt: {user_prompt}. Task: {task_desc}",
-                "endpoint": endpoint,
-                "depends_on": 2
-            }
+                {
+                    "step": 3,
+                    "action": "AGENT_EXECUTION",
+                    "agent": agent,
+                    "prompt": user_prompt,  # Clean prompt without file details
+                    "endpoint": endpoint,
+                    "depends_on": 2
+                }
         ],
         "is_data_science": True,
         "total_steps": 3,

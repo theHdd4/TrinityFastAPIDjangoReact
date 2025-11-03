@@ -13,6 +13,121 @@ import { getAtomHandler, hasAtomHandler } from './handlers';
 // FastAPI base URL for laboratory card creation
 const FAST_API_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || 'http://localhost:8001';
 
+// ============================================================================
+// HANDLER: Process atom_fetched event (Step 2 results)
+// ============================================================================
+const handleAtomFetched = async (data: any): Promise<{ success: boolean; error?: string }> => {
+  try {
+    console.log('🎯 ===== ATOM_FETCHED HANDLER =====');
+    console.log(`🔍 Card ID: ${data.card_id}`);
+    console.log('📦 Fetch results:', data.fetch_results);
+    console.log('🎯 Detected atom:', data.detected_atom_name, '→', data.correct_atomid);
+    
+    // 🔧 FIX: More detailed error handling for missing data
+    if (!data.card_id) {
+      console.error('❌ Missing card_id in atom_fetched event');
+      console.log('📊 Available data:', Object.keys(data));
+      return { success: false, error: 'Missing card_id' };
+    }
+    
+    if (!data.correct_atomid) {
+      console.error('❌ Missing correct_atomid in atom_fetched event');
+      console.log('📊 Fetch results keys:', Object.keys(data.fetch_results || {}));
+      console.log('📊 detected_atom_name:', data.detected_atom_name);
+      console.log('📊 atom_status:', data.atom_status);
+      console.log('📊 match_type:', data.match_type);
+      
+      // 🔧 FIX: Try to infer atomId from enhanced_query or match_type
+      const fetchResults = data.fetch_results || {};
+      const enhancedQuery = (fetchResults.enhanced_query || fetchResults.raw_query || '').toLowerCase();
+      
+      // Check if we can infer the atom from the query
+      let inferredAtomId = null;
+      if (enhancedQuery.includes('concat')) {
+        inferredAtomId = 'concat';
+        console.log('💡 Inferred atomId from query: concat');
+      } else if (enhancedQuery.includes('merge') || enhancedQuery.includes('join')) {
+        inferredAtomId = 'merge';
+        console.log('💡 Inferred atomId from query: merge');
+      } else if (enhancedQuery.includes('chart') || enhancedQuery.includes('visualiz')) {
+        inferredAtomId = 'chart-maker';
+        console.log('💡 Inferred atomId from query: chart-maker');
+      }
+      
+      if (inferredAtomId) {
+        console.log(`🔧 Using inferred atomId: ${inferredAtomId}`);
+        data.correct_atomid = inferredAtomId;
+        data.detected_atom_name = inferredAtomId;
+      } else {
+        console.error('❌ Could not infer atomId from query');
+        return { success: false, error: 'Missing correct_atomid and could not infer from query' };
+      }
+    }
+    
+    // Get store instance directly (no closure issues)
+    const store = useLaboratoryStore.getState();
+    const { cards, updateCard } = store;
+    
+    console.log('🔍 Current cards in store:', cards.map(c => ({ id: c.id, atoms: c.atoms.length })));
+    
+    // Find the card
+    const card = cards.find(c => c.id === data.card_id);
+    if (!card) {
+      console.warn(`⚠️ Card not found: ${data.card_id}`);
+      return { success: false, error: 'Card not found' };
+    }
+    
+    // Import atom metadata
+    const { atoms: allAtoms } = await import('@/components/AtomList/data');
+    const atomInfo = allAtoms.find((a: any) => a.id === data.correct_atomid);
+    
+    if (!atomInfo) {
+      console.warn(`⚠️ Atom info not found for: ${data.correct_atomid}`);
+      return { success: false, error: 'Atom info not found' };
+    }
+    
+    // Create new atom with fetch results
+    const newAtom = {
+      id: `${data.correct_atomid}-${Date.now()}`,
+      atomId: data.correct_atomid,
+      title: atomInfo.title || data.correct_atomid,
+      category: atomInfo.category || 'Atom',
+      color: atomInfo.color || 'bg-gray-400',
+      source: 'ai',
+      llm: 'deepseek-r1:32b',
+      settings: {
+        fetchResults: data.fetch_results,
+        atomStatus: data.atom_status,
+        matchType: data.match_type
+      }
+    };
+    
+    console.log('✅ Creating atom:', newAtom);
+    
+    // Add atom to the empty card
+    updateCard(data.card_id, {
+      atoms: [newAtom]
+    });
+    
+    console.log('✅ Atom added to card');
+    
+    // Update localStorage to persist
+    const STORAGE_KEY = 'laboratory-layout';
+    const updatedCards = useLaboratoryStore.getState().cards;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedCards));
+    console.log('💾 Saved to localStorage');
+    
+    // Force canvas refresh
+    useLaboratoryStore.getState().setCards([...updatedCards]);
+    console.log('🔄 Triggered canvas refresh');
+    
+    return { success: true };
+  } catch (err) {
+    console.error('❌ Failed to handle atom_fetched:', err);
+    return { success: false, error: String(err) };
+  }
+};
+
 // Add CSS for fade-in animation and slow pulse
 const fadeInStyle = `
   @keyframes fade-in {
@@ -714,6 +829,151 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
                     updateProgressMessage(progressMessageId, progressContent);
                     break;
                     
+                  case 'atom_fetched':
+                    // Step 2: Use dedicated handler to add atom to card
+                    const atomDisplay = data.correct_atomid || data.detected_atom_name || 'atom';
+                    progressContent += `\n   🔍 Atom detected: ${atomDisplay}`;
+                    updateProgressMessage(progressMessageId, progressContent);
+                    
+                    // Call the handler (no closure issues!)
+                    const fetchResult = await handleAtomFetched(data);
+                    
+                    if (fetchResult.success) {
+                      progressContent += ` - Added to card`;
+                      updateProgressMessage(progressMessageId, progressContent);
+                    } else {
+                      console.error('❌ Handler failed:', fetchResult.error);
+                      progressContent += ` - Failed to add`;
+                      updateProgressMessage(progressMessageId, progressContent);
+                    }
+                    break;
+                  
+                  case 'atom_configured':
+                    // Step 3: Agent configuration results - use handlers to process properly!
+                    console.log('🎨 ===== ATOM_CONFIGURED EVENT RECEIVED =====');
+                    console.log(`🎨 Card ID: ${data.card_id}`);
+                    console.log('📦 Configuration:', data.configuration);
+                    progressContent += `\n   🎨 Configuring atom...`;
+                    updateProgressMessage(progressMessageId, progressContent);
+                    
+                    // 🔧 FIX: Use createdCards as fallback if card_id is null
+                    const effectiveCardId = data.card_id || (createdCards.length > 0 ? createdCards[createdCards.length - 1] : null);
+                    console.log(`🔧 Effective card ID: ${effectiveCardId} (original: ${data.card_id}, fallback: ${createdCards[createdCards.length - 1]})`);
+                    
+                    // Use handlers to process agent results (same as individual atom AI)
+                    if (effectiveCardId && data.configuration) {
+                      try {
+                        const { cards, updateCard } = useLaboratoryStore.getState();
+                        const card = cards.find(c => c.id === effectiveCardId);
+                        
+                        if (card && card.atoms.length > 0) {
+                          const atomId = card.atoms[0].id;
+                          const atomType = card.atoms[0].atomId;
+                          const agentResult = data.configuration;
+                          
+                          console.log(`🔧 Processing ${atomType} results with handler...`);
+                          
+                          // Get the appropriate handler
+                          const handler = getAtomHandler(atomType);
+                          
+                          if (handler) {
+                            // 🔧 FIX: Route to handleSuccess or handleFailure based on configuration.success
+                            const isSuccess = agentResult.success === true;
+                            const handlerMethod = isSuccess ? 'handleSuccess' : 'handleFailure';
+                            console.log(`✅ Using ${atomType} handler.${handlerMethod} to process results (success=${isSuccess})`);
+                            
+                            // Create handler context (same as individual atom AI uses)
+                            const updateAtomSettings = (atomId: string, newSettings: any) => {
+                              const { cards, updateCard } = useLaboratoryStore.getState();
+                              const card = cards.find(c => c.atoms.some(a => a.id === atomId));
+                              if (card) {
+                                const updatedAtoms = card.atoms.map(atom => 
+                                  atom.id === atomId 
+                                    ? { ...atom, settings: { ...atom.settings, ...newSettings } }
+                                    : atom
+                                );
+                                updateCard(card.id, { atoms: updatedAtoms });
+                              }
+                            };
+                            
+                            const dummyMessages: any[] = [];
+                            const handlerContext = {
+                              atomId,
+                              atomType,
+                              atomTitle: card.atoms[0].title || atomType,
+                              updateAtomSettings,
+                              setMessages: (setter: any) => {
+                                if (typeof setter === 'function') {
+                                  const newMsgs = setter(dummyMessages);
+                                  console.log('Handler generated messages:', newMsgs);
+                                }
+                              },
+                              sessionId: `session_${Date.now()}`
+                            };
+                            
+                            // 🔧 FIX: Call appropriate handler method based on success status
+                            const handlerResult = isSuccess 
+                              ? await handler.handleSuccess(agentResult, handlerContext)
+                              : await handler.handleFailure(agentResult, handlerContext);
+                            
+                            if (handlerResult.success) {
+                              console.log('✅ Handler processed results successfully');
+                              
+                              // 🔧 FIX: Different messages for success vs suggestions
+                              if (isSuccess) {
+                                // Success case - show file info
+                                let configInfo = '';
+                                if (atomType === 'concat' && agentResult.concat_json) {
+                                  const cfg = agentResult.concat_json;
+                                  const file1 = Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1;
+                                  const file2 = Array.isArray(cfg.file2) ? cfg.file2[0] : cfg.file2;
+                                  const f1Name = file1 ? file1.split('/').pop() : '';
+                                  const f2Name = file2 ? file2.split('/').pop() : '';
+                                  configInfo = ` (${f1Name} + ${f2Name})`;
+                                } else if (atomType === 'merge' && agentResult.merge_json) {
+                                  const cfg = agentResult.merge_json;
+                                  const file1 = Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1;
+                                  const file2 = Array.isArray(cfg.file2) ? cfg.file2[0] : cfg.file2;
+                                  const f1Name = file1 ? file1.split('/').pop() : '';
+                                  const f2Name = file2 ? file2.split('/').pop() : '';
+                                  configInfo = ` (${f1Name} + ${f2Name})`;
+                                }
+                                progressContent += ` Done${configInfo}`;
+                              } else {
+                                // Failure case - show suggestions provided
+                                progressContent += ` AI provided suggestions`;
+                              }
+                              updateProgressMessage(progressMessageId, progressContent);
+                              
+                              // Update localStorage and trigger refresh
+                              const STORAGE_KEY = 'laboratory-layout';
+                              const updatedCards = useLaboratoryStore.getState().cards;
+                              localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedCards));
+                              console.log('💾 Saved to localStorage');
+                              
+                              // Force a refresh of the laboratory canvas
+                              useLaboratoryStore.getState().setCards([...updatedCards]);
+                              console.log('🔄 Triggered canvas refresh');
+                            } else {
+                              console.warn('⚠️ Handler returned failure:', handlerResult.error);
+                              progressContent += ` Failed`;
+                              updateProgressMessage(progressMessageId, progressContent);
+                            }
+                          } else {
+                            console.warn(`⚠️ No handler found for atom type: ${atomType}`);
+                            console.log('💡 Available data keys:', Object.keys(agentResult));
+                            progressContent += ` (no handler)`;
+                            updateProgressMessage(progressMessageId, progressContent);
+                          }
+                        }
+                      } catch (err) {
+                        console.error('❌ Failed to process atom configuration:', err);
+                        progressContent += ` Error`;
+                        updateProgressMessage(progressMessageId, progressContent);
+                      }
+                    }
+                    break;
+                  
                   case 'card_created':
                     console.log(`🎉 Card created: ${data.card_id}`);
                     createdCards.push(data.card_id);

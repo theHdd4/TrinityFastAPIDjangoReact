@@ -21,8 +21,8 @@ class WorkflowStep(BaseModel):
     """Single step in agent workflow"""
     step: int
     action: Optional[str] = None  # CARD_CREATION, FETCH_ATOM, AGENT_EXECUTION
-    agent: str
-    prompt: str
+    agent: Optional[str] = None  # Optional - Step 1 (CARD_CREATION) may not have agent yet
+    prompt: Optional[str] = None  # Optional for some steps
     endpoint: str
     depends_on: Optional[int] = None
     context_keys: Optional[List[str]] = None
@@ -301,18 +301,18 @@ class AgentExecutor:
                     "base": "TrinityAI-Internal"
                 }
             
-            # Handle /trinityai/chart endpoint
-            elif endpoint == "/trinityai/chart":
+            # Handle /trinityai/chart and /trinityai/chart-maker endpoints
+            elif endpoint == "/trinityai/chart" or endpoint == "/trinityai/chart-maker":
                 from Agent_chartmaker.main_app import agent as chartmaker_agent
                 
-                logger.info("📞 Calling /chart agent internally")
+                logger.info(f"📞 Calling {endpoint} agent internally")
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
                 result = chartmaker_agent.process_request(
                     user_prompt=prompt,
                     session_id=session_id
                 )
-                logger.info(f"✅ INTERNAL /chart completed successfully")
+                logger.info(f"✅ INTERNAL {endpoint} completed successfully")
                 
                 return {
                     "success": True,
@@ -351,11 +351,11 @@ class AgentExecutor:
                     "base": "TrinityAI-Internal"
                 }
             
-            # Handle /trinityai/create endpoint
-            elif endpoint == "/trinityai/create":
+            # Handle /trinityai/create and /trinityai/create-transform endpoints
+            elif endpoint == "/trinityai/create" or endpoint == "/trinityai/create-transform":
                 from Agent_create_transform.main_app import agent as create_agent
                 
-                logger.info("📞 Calling /create agent internally")
+                logger.info(f"📞 Calling {endpoint} agent internally")
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
                 # Extract client context
@@ -370,7 +370,7 @@ class AgentExecutor:
                     app_name=app_name,
                     project_name=project_name
                 )
-                logger.info(f"✅ INTERNAL /create completed successfully")
+                logger.info(f"✅ INTERNAL {endpoint} completed successfully")
                 
                 return {
                     "success": True,
@@ -425,7 +425,7 @@ class AgentExecutor:
             # Add more agents as needed
             else:
                 logger.error(f"Internal execution not implemented for: {endpoint}")
-                logger.info(f"Available endpoints: /trinityai/chat, /trinityai/merge, /trinityai/concat, /trinityai/chart, /trinityai/explore, /trinityai/create, /trinityai/groupby, /trinityai/dataframe-operations")
+                logger.info(f"Available endpoints: /trinityai/chat, /trinityai/merge, /trinityai/concat, /trinityai/chart, /trinityai/chart-maker, /trinityai/explore, /trinityai/create, /trinityai/create-transform, /trinityai/groupby, /trinityai/dataframe-operations")
                 return {
                     "success": False,
                     "error": f"Internal execution not implemented for: {endpoint}",
@@ -474,32 +474,39 @@ class WorkflowOrchestrator:
         sorted_workflow = sorted(workflow_plan.workflow, key=lambda x: x.step)
         
         for step in sorted_workflow:
-            step_id = f"step_{step.step}_{step.agent}"
             step_action = getattr(step, 'action', 'UNKNOWN')
+            step_agent = step.agent or step_action or "unknown"
+            step_id = f"step_{step.step}_{step_agent}"
             
             logger.info("="*80)
-            logger.info(f"📍 Executing Step {step.step}/{workflow_plan.total_steps}: {step.agent}")
+            logger.info(f"📍 Executing Step {step.step}/{workflow_plan.total_steps}: {step_agent}")
             logger.info(f"   Action: {step_action}")
             logger.info(f"   Endpoint: {step.endpoint}")
-            logger.info(f"   Prompt: {step.prompt[:100]}..." if len(step.prompt) > 100 else f"   Prompt: {step.prompt}")
+            if step.prompt:
+                logger.info(f"   Prompt: {step.prompt[:100]}..." if len(step.prompt) > 100 else f"   Prompt: {step.prompt}")
+            else:
+                logger.info(f"   Prompt: (none)")
             
             # Build context from dependencies
             step_context = {}
             if step.depends_on:
-                dep_key = f"step_{step.depends_on}_{self._find_agent_name(sorted_workflow, step.depends_on)}"
+                dep_agent = self._find_agent_name(sorted_workflow, step.depends_on) or "unknown"
+                dep_key = f"step_{step.depends_on}_{dep_agent}"
                 if dep_key in results and results[dep_key]["success"]:
                     step_context["previous_result"] = results[dep_key]["result"]
                     logger.info(f"   Dependency: Using result from step {step.depends_on}")
             
             # Execute agent
-            print(f"\n📍 Executing Step {step.step}/{workflow_plan.total_steps}: {step.agent}")
+            print(f"\n📍 Executing Step {step.step}/{workflow_plan.total_steps}: {step_agent}")
             print(f"   Action: {step_action}")
             if step.prompt:
                 print(f"   Prompt: {step.prompt[:80]}..." if len(step.prompt) > 80 else f"   Prompt: {step.prompt}")
+            else:
+                print(f"   Prompt: (none)")
             
             result = await self.agent_executor.execute_agent(
                 endpoint=step.endpoint,
-                prompt=step.prompt,
+                prompt=step.prompt or "",
                 session_id=f"{session_id}_{step_id}",
                 context=step_context,
                 action=getattr(step, 'action', None),
@@ -540,7 +547,7 @@ class WorkflowOrchestrator:
                     result["_trigger_refresh"] = True
                     result["_card_id"] = card_id
             else:
-                errors.append(f"Step {step.step} ({step.agent}) failed: {result.get('error')}")
+                errors.append(f"Step {step.step} ({step_agent}) failed: {result.get('error')}")
                 logger.error(f"❌ Step {step.step} failed: {result.get('error')}")
                 print(f"   ❌ Step {step.step} failed: {result.get('error')}")
                 # Continue or break based on criticality
@@ -607,7 +614,7 @@ class WorkflowOrchestrator:
         """Find agent name for given step number"""
         for step in workflow:
             if step.step == step_num:
-                return step.agent
+                return step.agent or getattr(step, 'action', 'unknown') or "unknown"
         return "unknown"
     
     def _summarize_result(self, result: Dict[str, Any]) -> str:

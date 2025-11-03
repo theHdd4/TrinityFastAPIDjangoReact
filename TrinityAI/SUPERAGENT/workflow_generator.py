@@ -10,6 +10,7 @@ import logging
 import requests
 import re
 from typing import Dict, Any, List, Optional
+from atom_mapping import detect_atom_from_prompt, get_atom_info, ATOM_MAPPING
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -111,11 +112,11 @@ class WorkflowGenerator:
         # Use few-shot examples to teach the model the pattern
         prompt = f"""USER: merge files file1 and file2
 
-ASSISTANT: {{"workflow": [{{"step": 1, "action": "CARD_CREATION", "agent": "merge", "prompt": "Create laboratory card with merge atom", "endpoint": "/api/laboratory/cards", "depends_on": null, "payload": {{"atomId": "merge", "source": "ai", "llm": "deepseek-r1:32b"}}}}, {{"step": 2, "action": "FETCH_ATOM", "agent": "fetch_atom", "prompt": "fetch merge atom", "endpoint": "/trinityai/chat", "depends_on": 1}}, {{"step": 3, "action": "AGENT_EXECUTION", "agent": "merge", "prompt": "Original user prompt: merge files file1 and file2. Task: Merge datasets", "endpoint": "/trinityai/merge", "depends_on": 2}}], "is_data_science": true, "total_steps": 3, "original_prompt": "merge files file1 and file2"}}
+ASSISTANT: {{"workflow": [{{"step": 1, "action": "CARD_CREATION", "prompt": "Create empty laboratory card", "endpoint": "/api/laboratory/cards", "depends_on": null, "payload": {{"source": "ai", "llm": "deepseek-r1:32b"}}}}, {{"step": 2, "action": "FETCH_ATOM", "agent": "fetch_atom", "prompt": "merge files file1 and file2", "endpoint": "/trinityai/chat", "depends_on": 1}}, {{"step": 3, "action": "AGENT_EXECUTION", "agent": "merge", "prompt": "merge files file1 and file2", "endpoint": "/trinityai/merge", "depends_on": 2}}], "is_data_science": true, "total_steps": 3, "original_prompt": "merge files file1 and file2"}}
 
 USER: create a chart from sales data
 
-ASSISTANT: {{"workflow": [{{"step": 1, "action": "CARD_CREATION", "agent": "chartmaker", "prompt": "Create laboratory card with chartmaker atom", "endpoint": "/api/laboratory/cards", "depends_on": null, "payload": {{"atomId": "chartmaker", "source": "ai", "llm": "deepseek-r1:32b"}}}}, {{"step": 2, "action": "FETCH_ATOM", "agent": "fetch_atom", "prompt": "fetch chartmaker atom", "endpoint": "/trinityai/chat", "depends_on": 1}}, {{"step": 3, "action": "AGENT_EXECUTION", "agent": "chartmaker", "prompt": "Original user prompt: create a chart from sales data. Task: Create visualization", "endpoint": "/trinityai/chart", "depends_on": 2}}], "is_data_science": true, "total_steps": 3, "original_prompt": "create a chart from sales data"}}
+ASSISTANT: {{"workflow": [{{"step": 1, "action": "CARD_CREATION", "prompt": "Create empty laboratory card", "endpoint": "/api/laboratory/cards", "depends_on": null, "payload": {{"source": "ai", "llm": "deepseek-r1:32b"}}}}, {{"step": 2, "action": "FETCH_ATOM", "agent": "fetch_atom", "prompt": "create a chart from sales data", "endpoint": "/trinityai/chat", "depends_on": 1}}, {{"step": 3, "action": "AGENT_EXECUTION", "agent": "chart-maker", "prompt": "create a chart from sales data", "endpoint": "/trinityai/chart-maker", "depends_on": 2}}], "is_data_science": true, "total_steps": 3, "original_prompt": "create a chart from sales data"}}
 
 USER: {user_prompt}
 
@@ -349,37 +350,12 @@ ASSISTANT:"""
         print("GENERATING FALLBACK WORKFLOW")
         print("🔄 "*40)
         
-        prompt_lower = user_prompt.lower()
+        # Use the atom_mapping module to detect the correct atom
+        atom_info = detect_atom_from_prompt(user_prompt)
         
-        # Determine agent
-        agent = "merge"
-        endpoint = "/trinityai/merge"
-        task_desc = "Process the data"
-        
-        if any(word in prompt_lower for word in ["merge", "join", "combine", "vlookup"]):
-            agent = "merge"
-            endpoint = "/trinityai/merge"
-            task_desc = "Merge datasets by common columns"
-        elif any(word in prompt_lower for word in ["concat", "concatenate", "stack", "append"]):
-            agent = "concat"
-            endpoint = "/trinityai/concat"
-            task_desc = "Concatenate datasets"
-        elif any(word in prompt_lower for word in ["chart", "graph", "visualiz", "plot"]):
-            agent = "chartmaker"
-            endpoint = "/trinityai/chart"
-            task_desc = "Create chart visualization"
-        elif any(word in prompt_lower for word in ["group", "aggregate", "pivot"]):
-            agent = "groupby"
-            endpoint = "/trinityai/groupby"
-            task_desc = "Group and aggregate data"
-        elif any(word in prompt_lower for word in ["explore", "analyze", "eda"]):
-            agent = "explore"
-            endpoint = "/trinityai/explore"
-            task_desc = "Explore and analyze dataset"
-        elif any(word in prompt_lower for word in ["transform", "create column", "feature"]):
-            agent = "create_transform"
-            endpoint = "/trinityai/create-transform"
-            task_desc = "Transform data columns"
+        agent = atom_info["atomId"]
+        endpoint = atom_info["endpoint"]
+        task_desc = atom_info["task_desc"]
         
         print(f"📊 Detected agent: {agent}")
         print(f"🎯 Endpoint: {endpoint}")
@@ -390,12 +366,10 @@ ASSISTANT:"""
                 {
                     "step": 1,
                     "action": "CARD_CREATION",
-                    "agent": agent,
-                    "prompt": f"Create laboratory card with {agent} atom",
+                    "prompt": "Create empty laboratory card",
                     "endpoint": "/api/laboratory/cards",
                     "depends_on": None,
                     "payload": {
-                        "atomId": agent,
                         "source": "ai",
                         "llm": "deepseek-r1:32b"
                     }
@@ -404,7 +378,7 @@ ASSISTANT:"""
                     "step": 2,
                     "action": "FETCH_ATOM",
                     "agent": "fetch_atom",
-                    "prompt": f"fetch {agent} atom",
+                    "prompt": user_prompt,  # Use original prompt to detect atom
                     "endpoint": "/trinityai/chat",
                     "depends_on": 1
                 },
@@ -412,7 +386,7 @@ ASSISTANT:"""
                     "step": 3,
                     "action": "AGENT_EXECUTION",
                     "agent": agent,
-                    "prompt": f"Original user prompt: {user_prompt}. Task: {task_desc}",
+                    "prompt": user_prompt,  # Clean prompt - agent will load files
                     "endpoint": endpoint,
                     "depends_on": 2
                 }
