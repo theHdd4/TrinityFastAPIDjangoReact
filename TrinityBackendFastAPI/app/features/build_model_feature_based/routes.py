@@ -11,6 +11,7 @@ from .models import CustomConstrainedRidge, ConstrainedLinearRegression
 # Database imports - Enhanced versions only
 from .database import (
     scopes_collection, 
+    scopeselector_configs_collection,
     minio_client,
     build_collection,
     file_exists, 
@@ -143,69 +144,284 @@ async def health():
         api=settings.app_name,
     )
 
-@router.get("/scopes/{scope_id}", response_model=ScopeDetail, tags=["Scopes"])
-async def get_scope_by_id(
-    scope_id: str = Path(..., description="Scope ID from MongoDB")
+
+@router.get("/build-atom/scopes", tags=["Build Atom"])
+async def get_build_atom_scopes(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
 ):
     """
-    Get scope details and combinations by scope ID.
-    The scope_id can be either the MongoDB _id or the scope_id field.
+    Get scopes and combinations for the build-model feature-based atom.
+    Returns data in the format expected by the frontend.
+    Uses client_name/app_name/project_name to find the specific scope document.
     """
-    if scopes_collection is None:
+    logger.info("🔍 Starting get_build_atom_scopes endpoint")
+    logger.info(f"📋 Parameters: client_name={client_name}, app_name={app_name}, project_name={project_name}")
+    
+    if scopeselector_configs_collection is None:
+        logger.error("❌ MongoDB scopeselector_configs_collection is None")
+        raise HTTPException(
+            status_code=503,
+            detail="MongoDB connection not available"
+        )
+    
+    logger.info("✅ MongoDB scopeselector_configs_collection is available")
+    
+    try:
+        scopes = []
+        
+        # Create the MongoDB _id using client_name/app_name/project_name pattern
+        scope_id = f"{client_name}/{app_name}/{project_name}"
+        logger.info(f"🔍 Looking for scope with _id: {scope_id}")
+        
+        # Query MongoDB using the specific _id
+        scope_doc = await scopeselector_configs_collection.find_one({"_id": scope_id})
+        
+        if scope_doc is None:
+            logger.warning(f"⚠️ No scope document found with _id: {scope_id}")
+            # Try alternative query patterns
+            logger.info("🔍 Trying alternative query patterns...")
+            
+            # Try with scope_id field instead of _id
+            scope_doc = await scopeselector_configs_collection.find_one({"scope_id": scope_id})
+            if scope_doc:
+                logger.info(f"✅ Found scope using scope_id field: {scope_id}")
+            else:
+                logger.warning(f"⚠️ No scope found with scope_id field either: {scope_id}")
+                
+                # Try partial matches
+                partial_matches = []
+                async for doc in scopeselector_configs_collection.find({}).limit(10):
+                    doc_id = str(doc.get("_id", ""))
+                    if client_name in doc_id or app_name in doc_id or project_name in doc_id:
+                        partial_matches.append(doc_id)
+                
+                logger.info(f"🔍 Found {len(partial_matches)} partial matches: {partial_matches}")
+                
+                return {
+                    "success": False,
+                    "message": f"No scope found with _id: {scope_id}",
+                    "scopes": [],
+                    "total_scopes": 0,
+                    "debug_info": {
+                        "requested_id": scope_id,
+                        "partial_matches": partial_matches,
+                        "total_documents": await scopeselector_configs_collection.count_documents({})
+                    }
+                }
+        else:
+            logger.info(f"✅ Found scope document with _id: {scope_id}")
+        
+        # Process the found scope document
+        logger.info(f"📄 Processing scope document: {scope_doc.get('_id', 'No ID')}")
+        
+        scope_id_str = str(scope_doc.get("_id", scope_doc.get("scope_id", "")))
+        scope_name = scope_doc.get("name", f"Scope {scope_id_str}")
+        
+        logger.info(f"  📋 Scope ID: {scope_id_str}, Name: {scope_name}")
+        
+        # Extract scope numbers from filter_set_results
+        scope_numbers = set()
+        combinations_by_scope = {}
+        
+        filter_set_results = scope_doc.get("filter_set_results", [])
+        logger.info(f"  🔍 Found {len(filter_set_results)} filter_set_results")
+        
+        for i, fset in enumerate(filter_set_results):
+            set_name = fset.get("set_name", "")
+            logger.info(f"    📁 Filter set {i}: set_name = '{set_name}'")
+            
+            if set_name.startswith("Scope_"):
+                logger.info(f"    ✅ Found scope set: {set_name}")
+                
+                # Extract scope number from set_name like "Scope_1", "Scope_2", etc.
+                scope_match = set_name.split("_")
+                if len(scope_match) >= 2:
+                    scope_num = scope_match[1]
+                    scope_numbers.add(scope_num)
+                    logger.info(f"    🔢 Extracted scope number: {scope_num}")
+                    
+                    # Extract combinations for this scope
+                    scope_combinations = []
+                    combination_files = fset.get("combination_files", [])
+                    logger.info(f"    📊 Found {len(combination_files)} combination files")
+                    
+                    for j, cfile in enumerate(combination_files):
+                        combo = cfile.get("combination", {})
+                        logger.info(f"      🔗 Combination {j}: {combo}")
+                        
+                        # Create combination string from the combination object
+                        combo_parts = []
+                        for key, value in combo.items():
+                            if value:  # Only include non-empty values
+                                # Normalize value to match file_key format: replace spaces with underscores
+                                normalized_value = str(value).replace(' ', '_')
+                                combo_parts.append(normalized_value)
+                        
+                        if combo_parts:
+                            combination_string = "_".join(combo_parts)
+                            logger.info(f"      ✅ Created combination string: {combination_string}")
+                            
+                            scope_combinations.append({
+                                "value": combination_string,
+                                "label": combination_string,  # Same as value for clean display
+                                "file_key": cfile.get("file_key", ""),
+                                "record_count": cfile.get("record_count", 0)
+                            })
+                        else:
+                            logger.warning(f"      ⚠️ Empty combination parts for combo: {combo}")
+                    
+                    combinations_by_scope[scope_num] = scope_combinations
+                    logger.info(f"    📈 Scope {scope_num} has {len(scope_combinations)} combinations")
+                else:
+                    logger.warning(f"    ⚠️ Invalid scope format: {set_name}")
+            else:
+                logger.info(f"    ❌ Skipping non-scope set: {set_name}")
+        
+        logger.info(f"  🎯 Found scope numbers: {sorted(scope_numbers)}")
+        
+        # Create scope options for each scope number
+        for scope_num in sorted(scope_numbers, key=int):
+            scope_option = {
+                "scope_id": scope_id_str,
+                "scope_number": scope_num,
+                "scope_name": f"Scope {scope_num}",  # Simplified name
+                "combinations": combinations_by_scope.get(scope_num, [])
+            }
+            scopes.append(scope_option)
+            logger.info(f"  ✅ Added scope option: {scope_option['scope_name']} with {len(scope_option['combinations'])} combinations")
+        
+        logger.info(f"🎉 Final result: {len(scopes)} scopes found")
+        for i, scope in enumerate(scopes):
+            logger.info(f"  📋 Scope {i+1}: {scope['scope_name']} ({len(scope['combinations'])} combinations)")
+        
+        return {
+            "success": True,
+            "scopes": scopes,
+            "total_scopes": len(scopes),
+            "debug_info": {
+                "requested_id": scope_id,
+                "found_document": scope_doc is not None,
+                "scope_numbers_found": sorted(scope_numbers)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching build atom scopes: {e}")
+        logger.error(f"❌ Error type: {type(e)}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching scopes: {str(e)}"
+        )
+
+@router.get("/build-atom/scopes/{scope_number}/combinations", tags=["Build Atom"])
+async def get_build_atom_combinations(
+    scope_number: str = Path(..., description="Scope number (e.g., '1', '2', '3')"),
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name")
+):
+    """
+    Get combinations for a specific scope number for the build-model feature-based atom.
+    Uses client_name/app_name/project_name to find the specific scope document.
+    """
+    if scopeselector_configs_collection is None:
         raise HTTPException(
             status_code=503,
             detail="MongoDB connection not available"
         )
     
     try:
-        scope_data = await get_scope_combinations(scope_id)
+        combinations = []
         
-        if scope_data is None:
+        # Create the MongoDB _id using client_name/app_name/project_name pattern
+        scope_id = f"{client_name}/{app_name}/{project_name}"
+        logger.info(f"🔍 Looking for scope with _id: {scope_id}")
+        
+        # Query MongoDB using the specific _id
+        scope_doc = await scopeselector_configs_collection.find_one({"_id": scope_id})
+        
+        if scope_doc is None:
+            logger.warning(f"⚠️ No scope document found with _id: {scope_id}")
+            # Try alternative query patterns
+            logger.info("🔍 Trying alternative query patterns...")
+            
+            # Try with scope_id field instead of _id
+            scope_doc = await scopeselector_configs_collection.find_one({"scope_id": scope_id})
+            if scope_doc:
+                logger.info(f"✅ Found scope using scope_id field: {scope_id}")
+            else:
+                logger.warning(f"⚠️ No scope found with scope_id field either: {scope_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No scope found with _id: {scope_id}"
+                )
+        else:
+            logger.info(f"✅ Found scope document with _id: {scope_id}")
+        
+        # Process the found scope document
+        logger.info(f"📄 Processing scope document: {scope_doc.get('_id', 'No ID')}")
+        
+        # Look for the specific scope number in filter_set_results
+        for fset in scope_doc.get("filter_set_results", []):
+            set_name = fset.get("set_name", "")
+            logger.info(f"📁 Checking filter set: {set_name}")
+            
+            if set_name == f"Scope_{scope_number}":
+                logger.info(f"✅ Found matching scope set: {set_name}")
+                # Extract combinations for this scope
+                for cfile in fset.get("combination_files", []):
+                    combo = cfile.get("combination", {})
+                    logger.info(f"🔗 Processing combination: {combo}")
+                    
+                    # Create combination string from the combination object
+                    combo_parts = []
+                    for key, value in combo.items():
+                        if value:  # Only include non-empty values
+                            # Normalize value to match file_key format: replace spaces with underscores
+                            normalized_value = str(value).replace(' ', '_')
+                            combo_parts.append(normalized_value)
+                    if combo_parts:
+                        combination_string = "_".join(combo_parts)
+                        logger.info(f"✅ Created combination string: {combination_string}")
+                        
+                        combinations.append({
+                            "value": combination_string,
+                            "label": combination_string,  # Same as value for clean display
+                            "file_key": cfile.get("file_key", ""),
+                            "record_count": cfile.get("record_count", 0),
+                            "scope_id": str(scope_doc.get("_id", scope_doc.get("scope_id", "")))
+                        })
+        
+        if not combinations:
             raise HTTPException(
                 status_code=404,
-                detail=f"Scope with ID '{scope_id}' not found"
+                detail=f"No combinations found for Scope_{scope_number} in document {scope_id}"
             )
         
-        return scope_data
+        logger.info(f"🎉 Found {len(combinations)} combinations for Scope_{scope_number}")
+        
+        return {
+            "success": True,
+            "scope_number": scope_number,
+            "combinations": combinations,
+            "total_combinations": len(combinations),
+            "debug_info": {
+                "requested_id": scope_id,
+                "found_document": scope_doc is not None
+            }
+        }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching scope {scope_id}: {e}")
+        logger.error(f"Error fetching combinations for scope {scope_number}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error fetching scope: {str(e)}"
-        )
-
-@router.get("/scopes", response_model=List[ScopeDetail], tags=["Scopes"])
-async def list_all_scopes(
-    limit: int = Query(10, ge=1, le=100, description="Maximum number of scopes"),
-    skip: int = Query(0, ge=0, description="Number of scopes to skip")
-):
-    """List all available scopes with their combinations."""
-    if scopes_collection is None:
-        raise HTTPException(
-            status_code=503,
-            detail="MongoDB connection not available"
-        )
-    
-    try:
-        scopes = []
-        cursor = scopes_collection.find({}).skip(skip).limit(limit)
-        
-        async for scope_doc in cursor:
-            scope_id = str(scope_doc.get("_id", scope_doc.get("scope_id", "")))
-            scope_data = await get_scope_combinations(scope_id)
-            if scope_data:
-                scopes.append(scope_data)
-        
-        return scopes
-        
-    except Exception as e:
-        logger.error(f"Error listing scopes: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error listing scopes: {str(e)}"
+            detail=f"Error fetching combinations: {str(e)}"
         )
 
 @router.get("/", tags=["Info"])
@@ -220,7 +436,9 @@ async def root():
             "get_scope": "/api/v1/scopes/{scope_id}",
             "list_scopes": "/api/v1/scopes",
             "get_scope_set": "/api/v1/scopes/{scope_id}/sets/{set_name}",
-            "list_scope_sets": "/api/v1/scopes/{scope_id}/sets"
+            "list_scope_sets": "/api/v1/scopes/{scope_id}/sets",
+            "build_atom_scopes": "/api/v1/build-atom/scopes?client_name={client}&app_name={app}&project_name={project}",
+            "build_atom_combinations": "/api/v1/build-atom/scopes/{scope_number}/combinations?client_name={client}&app_name={app}&project_name={project}"
         }
     }
 
@@ -473,11 +691,7 @@ async def train_models_direct(request: dict):
                     status_code=400,
                     detail="stack_models_to_run is required when stack_modeling is enabled"
                 )
-            if not pool_by_identifiers:
-                raise HTTPException(
-                    status_code=400,
-                    detail="pool_by_identifiers is required when stack_modeling is enabled"
-                )
+            # pool_by_identifiers is optional - can be empty list for individual modeling
             if apply_clustering and not numerical_columns_for_clustering:
                 raise HTTPException(
                     status_code=400,
@@ -1005,11 +1219,11 @@ async def train_models_direct(request: dict):
             # Get the standard prefix using get_object_prefix
             prefix = await get_object_prefix()
             
-            # Create timestamp for file naming
+            # Create timestamp for data (not for filename - filename stays consistent to enable overwriting)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Generate filename for model results
-            model_results_filename = f"model_results_scope_{scope_number}_{timestamp}.arrow"
+            # Generate filename for model results (without timestamp to enable overwriting)
+            model_results_filename = f"model_results_scope_{scope_number}.arrow"
             
             # Construct the full path with the standard structure
             model_results_file_key = f"{prefix}model-results/{model_results_filename}"
@@ -1235,31 +1449,48 @@ async def train_models_direct(request: dict):
             combination_file_keys = []
             model_coefficients = {}
             
+            # Build combination_file_keys from current cleaned_combination_results
+            # Use combination_id directly from result (which matches the original combination from request)
             for i, combo_result in enumerate(cleaned_combination_results):
-                if 'file_key' in combo_result:
-                    # Use the original combination from the combinations list
+                # Use combination_id from the result if available, otherwise fall back to index
+                if 'combination_id' in combo_result:
+                    combination_name = combo_result['combination_id']
+                elif 'combination' in combo_result:
+                    combination_name = combo_result['combination']
+                else:
+                    # Fallback: use index if no combination_id found
                     combination_name = combinations[i] if i < len(combinations) else f"combination_{i}"
+                    logger.warning(f"⚠️ No combination_id found in combo_result {i}, using fallback: {combination_name}")
+                
+                # Verify this combination matches one from the request
+                if combination_name not in combinations:
+                    logger.warning(f"⚠️ combination_name '{combination_name}' not found in request combinations list")
+                
+                if 'file_key' in combo_result:
+                    logger.info(f"📝 Adding combination_file_key: {combination_name} -> {combo_result['file_key']}")
                     combination_file_keys.append({
                         "combination": combination_name,
                         "file_key": combo_result['file_key']
                     })
+                else:
+                    logger.warning(f"⚠️ No file_key found for combination {combination_name}")
                     
-                    # Extract model coefficients for this combination
-                    if 'model_results' in combo_result:
-                        combination_coefficients = {}
-                        for model_result in combo_result['model_results']:
-                            model_name = model_result.get('model_name', 'unknown')
-                            coefficients = model_result.get('coefficients', {})
-                            intercept = model_result.get('intercept', 0)
-                            
-                            combination_coefficients[model_name] = {
-                                "intercept": intercept,
-                                "coefficients": coefficients,
-                                "x_variables": x_variables,
-                                "y_variable": y_variable
-                            }
+                # Extract model coefficients for this combination
+                if 'model_results' in combo_result:
+                    combination_coefficients = {}
+                    for model_result in combo_result['model_results']:
+                        model_name = model_result.get('model_name', 'unknown')
+                        coefficients = model_result.get('coefficients', {})
+                        intercept = model_result.get('intercept', 0)
                         
-                        model_coefficients[combination_name] = combination_coefficients
+                        combination_coefficients[model_name] = {
+                            "intercept": intercept,
+                            "coefficients": coefficients,
+                            "x_variables": x_variables,
+                            "y_variable": y_variable
+                        }
+                    
+                    model_coefficients[combination_name] = combination_coefficients
             
             # Prepare comprehensive build configuration data
             build_config_data = {
@@ -2167,8 +2398,7 @@ async def prepare_stack_model_data(request: dict):
             raise HTTPException(status_code=400, detail="scope_number is required")
         if not combinations:
             raise HTTPException(status_code=400, detail="combinations list is required")
-        if not pool_by_identifiers:
-            raise HTTPException(status_code=400, detail="pool_by_identifiers list is required")
+        # pool_by_identifiers is optional - can be empty list
         if not x_variables:
             raise HTTPException(status_code=400, detail="x_variables list is required")
         if not y_variable:
@@ -2318,8 +2548,7 @@ async def train_models_for_stacked_data(request: dict):
             raise HTTPException(status_code=400, detail="scope_number is required")
         if not combinations:
             raise HTTPException(status_code=400, detail="combinations list is required")
-        if not pool_by_identifiers:
-            raise HTTPException(status_code=400, detail="pool_by_identifiers list is required")
+        # pool_by_identifiers is optional - can be empty list
         if not x_variables:
             raise HTTPException(status_code=400, detail="x_variables list is required")
         if not y_variable:
@@ -2738,11 +2967,7 @@ async def train_mmm_models(request: dict):
                     status_code=400,
                     detail="stack_models_to_run is required when stack_modeling is enabled"
                 )
-            if not pool_by_identifiers:
-                raise HTTPException(
-                    status_code=400,
-                    detail="pool_by_identifiers is required when stack_modeling is enabled"
-                )
+            # pool_by_identifiers is optional - can be empty list for individual modeling
             if apply_clustering and not numerical_columns_for_clustering:
                 raise HTTPException(
                     status_code=400,
@@ -3384,12 +3609,12 @@ async def train_mmm_models(request: dict):
             # Get the standard prefix using get_object_prefix
             prefix = await get_object_prefix()
             
-            # Create timestamp for file naming
+            # Create timestamp for data (not for filename - filename stays consistent to enable overwriting)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Generate filenames for both ensemble and individual results
-            ensemble_results_filename = f"mmm_ensemble_results_scope_{scope_number}_{timestamp}.arrow"
-            individual_results_filename = f"mmm_individual_results_scope_{scope_number}_{timestamp}.arrow"
+            # Generate filenames for both ensemble and individual results (without timestamp to enable overwriting)
+            ensemble_results_filename = f"mmm_ensemble_results_scope_{scope_number}.arrow"
+            individual_results_filename = f"mmm_individual_results_scope_{scope_number}.arrow"
             
             # Construct the full paths with the standard structure
             ensemble_results_file_key = f"{prefix}model-results/{ensemble_results_filename}"
@@ -3715,10 +3940,16 @@ async def train_mmm_models(request: dict):
                     "result_type": "individual_parameters"
                 })
             
+            # Build combination_file_keys from current combination_results
+            # Use the exact combination_id from results (which matches the request combinations)
             for i, combo_result in enumerate(combination_results):
-                # Use combination_id (same as train-models-direct)
+                # Use combination_id from the result (which should match the original combination from request)
                 if 'combination_id' in combo_result:
                     combination_name = combo_result['combination_id']
+                    
+                    # Verify this combination matches one from the request
+                    if combination_name not in combinations:
+                        logger.warning(f"⚠️ combination_id '{combination_name}' not found in request combinations list")
                     
                     # Add original file key if available (skip for stack models)
                     if 'file_key' in combo_result:
@@ -3734,11 +3965,16 @@ async def train_mmm_models(request: dict):
                             # Don't set file_key = None, keep the original source file key
                         
                         if file_key:  # Only add if file_key is not None
+                            logger.info(f"📝 Adding combination_file_key: {combination_name} -> {file_key}")
                             combination_file_keys.append({
                                 "combination": combination_name,
                                 "file_key": file_key,
                                 "result_type": "source_data"
                             })
+                        else:
+                            logger.warning(f"⚠️ No file_key found for combination {combination_name}")
+                    else:
+                        logger.warning(f"⚠️ No file_key in combo_result for combination {combination_name}")
                     
                     # Extract model coefficients for this combination
                     if 'model_results' in combo_result:
@@ -3845,95 +4081,9 @@ async def train_mmm_models(request: dict):
             else:
                 logger.info("✅ No None values found in build_config_data")
             
-            # Check for existing build configuration and override ensemble/individual results file keys
-            try:
-                from .database import mongo_client
-                if mongo_client is None:
-                    raise Exception("MongoDB client not available")
-                db = mongo_client["trinity_db"]
-                document_id = f"{client_name}/{app_name}/{project_name}"
-                
-                existing_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
-                
-                if existing_config:
-                    logger.info(f"🔄 Found existing build configuration for {document_id}, updating ensemble/individual results file keys")
-                    
-                    # Update existing combination_file_keys to override ONLY ensemble and individual results
-                    existing_combination_file_keys = existing_config.get("combination_file_keys", [])
-                    
-                    # Create updated list by replacing specific result types
-                    updated_combination_file_keys = []
-                    
-                    # Process existing entries and replace only the specific result types
-                    ensemble_updated = False
-                    individual_updated = False
-                    
-                    for entry in existing_combination_file_keys:
-                        result_type = entry.get("result_type")
-                        
-                        if result_type == "ensemble":
-                            # Skip old ensemble entry - will be replaced with new one
-                            if 'ensemble_results_file_key' in locals():
-                                ensemble_updated = True
-                                logger.info(f"🔄 Replacing old ensemble file key: {entry.get('file_key')}")
-                                logger.info(f"✅ With new ensemble_results_file_key: {ensemble_results_file_key}")
-                            else:
-                                # Keep existing if no new one available
-                                updated_combination_file_keys.append(entry)
-                                
-                        elif result_type == "individual_parameters":
-                            # Skip old individual parameters entry - will be replaced with new one
-                            if 'individual_results_file_key' in locals():
-                                individual_updated = True
-                                logger.info(f"🔄 Replacing old individual parameters file key: {entry.get('file_key')}")
-                                logger.info(f"✅ With new individual_results_file_key: {individual_results_file_key}")
-                            else:
-                                # Keep existing if no new one available
-                                updated_combination_file_keys.append(entry)
-                        else:
-                            # Keep all other entries unchanged (source_data, etc.)
-                            updated_combination_file_keys.append(entry)
-                    
-                    # Always add new ensemble and individual results entries (replacing old ones)
-                    if 'ensemble_results_file_key' in locals():
-                        updated_combination_file_keys.append({
-                            "combination": "ensemble_results",
-                            "file_key": ensemble_results_file_key,
-                            "result_type": "ensemble"
-                        })
-                        if ensemble_updated:
-                            logger.info(f"✅ Replaced with new ensemble_results_file_key: {ensemble_results_file_key}")
-                        else:
-                            logger.info(f"✅ Added new ensemble_results_file_key: {ensemble_results_file_key}")
-                    
-                    if 'individual_results_file_key' in locals():
-                        updated_combination_file_keys.append({
-                            "combination": "individual_parameter_results", 
-                            "file_key": individual_results_file_key,
-                            "result_type": "individual_parameters"
-                        })
-                        if individual_updated:
-                            logger.info(f"✅ Replaced with new individual_results_file_key: {individual_results_file_key}")
-                        else:
-                            logger.info(f"✅ Added new individual_results_file_key: {individual_results_file_key}")
-                    
-                    # Update the build_config_data with the updated combination_file_keys
-                    build_config_data["combination_file_keys"] = updated_combination_file_keys
-                    
-                    # Also update the model_coefficients if they exist in the existing config
-                    existing_model_coefficients = existing_config.get("model_coefficients", {})
-                    # Merge new model_coefficients with existing ones (new ones take precedence)
-                    merged_model_coefficients = {**existing_model_coefficients, **build_config_data.get("model_coefficients", {})}
-                    build_config_data["model_coefficients"] = merged_model_coefficients
-                    
-                    logger.info(f"🔄 Updated existing configuration with new file keys and merged model coefficients")
-                else:
-                    logger.info(f"📝 No existing build configuration found for {document_id}, creating new one")
-                    
-            except Exception as override_error:
-                logger.warning(f"⚠️ Error during override logic: {str(override_error)}, proceeding with normal save")
-                import traceback
-                logger.warning(f"   Override error traceback: {traceback.format_exc()}")
+            # Note: Since save_build_config now always overwrites the entire document,
+            # we don't need to merge with existing data - just use the new combination_file_keys directly
+            logger.info(f"📝 Using new combination_file_keys directly (MongoDB will overwrite entire document)")
 
             # Save to MongoDB with detailed error handling
             try:

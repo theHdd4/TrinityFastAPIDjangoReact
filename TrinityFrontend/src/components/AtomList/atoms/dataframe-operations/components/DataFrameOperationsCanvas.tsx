@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { 
   Pagination,
   PaginationContent,
@@ -52,6 +53,7 @@ import FormularBar from './FormularBar';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 interface DataFrameOperationsCanvasProps {
+  atomId: string;
   data: DataFrameData | null;
   settings: DataFrameSettings;
   onSettingsChange: (settings: Partial<DataFrameSettings>) => void;
@@ -100,7 +102,24 @@ const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
       .map(row => Number(row[column]))
       .filter(v => !isNaN(v))
       .sort((a, b) => a - b);
-    return [...new Set(values)].map(v => v.toString());
+    
+    const stringValues = [...new Set(values)].map(v => v.toString());
+    
+    // Check if there are any blank/NaN values
+    const hasBlank = data.rows.some(row => {
+      const val = row[column];
+      return val === null || val === undefined || val === '' ||
+             (typeof val === 'string' && val.trim() === '') ||
+             (typeof val === 'number' && Number.isNaN(val)) ||
+             isNaN(Number(val));
+    });
+    
+    // Add "(blank)" option if there are blanks
+    if (hasBlank) {
+      return ['(blank)', ...stringValues];
+    }
+    
+    return stringValues;
   }, [data.rows, column]);
 
   // Get statistics for this column
@@ -455,6 +474,7 @@ function handleApiError(action: string, err: unknown) {
 const CONTEXT_MENU_PADDING = 8;
 
 const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
+  atomId,
   data,
   settings,
   onSettingsChange,
@@ -528,11 +548,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // Debounced data update to prevent conflicts
   const debouncedDataUpdate = useCallback(
     debounce((newData: DataFrameData) => {
-      console.log('[DataFrameOperations] Debounced data update:', {
-        headers: newData.headers.length,
-        rows: newData.rows.length,
-        fileName: newData.fileName
-      });
       onDataChange(newData);
     }, 100),
     [onDataChange]
@@ -732,7 +747,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (selectedColumn && !isFormulaMode) {
         const target = e.target as HTMLElement;
         if (!target.closest(`[data-col="${selectedColumn}"]`)) {
-          console.log('[DataFrameOperations] Clearing selectedColumn due to outside click:', { selectedColumn, isFormulaMode, target: target.tagName });
           setSelectedColumn(null);
         }
       }
@@ -821,11 +835,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   useEffect(() => {
     if (data?.headers) {
       // Always update column order when data changes to ensure it's current
-      console.log('[DataFrameOperations] Updating column order:', {
-        currentColumnOrder: columnOrder,
-        newHeaders: data.headers,
-        headersMatch: JSON.stringify(columnOrder) === JSON.stringify(data.headers)
-      });
       
       // Only update if the headers are different from current column order
       if (JSON.stringify(columnOrder) !== JSON.stringify(data.headers)) {
@@ -875,6 +884,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const saveSuccessTimeout = useRef<number | null>(null);
   const [savedFiles, setSavedFiles] = useState<any[]>([]);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFileName, setSaveFileName] = useState('');
 
   // Add local state for editing value
   const [editingCellValue, setEditingCellValue] = useState<string>('');
@@ -1038,14 +1049,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     fetchSavedDataFrames();
   }, []);
 
-  const handleSaveDataFrame = async () => {
-    setSaveLoading(true);
-    setSaveError(null);
-    setSaveSuccess(false);
-    try {
-      if (!data) throw new Error('No DataFrame loaded');
-
-      const csv_data = toCSV();
+  // Open save modal with default filename
+  const handleSaveDataFrame = () => {
+    if (!data) return;
 
       // Determine next serial number for DF_OPS files
       const maxSerial = savedFiles.reduce((max, f) => {
@@ -1056,21 +1062,45 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
       // Base name from current file without extension
       const baseName = data.fileName ? data.fileName.replace(/\.[^/.]+$/, '') : `dataframe_${Date.now()}`;
-      const filename = `DF_OPS_${nextSerial}_${baseName}.arrow`;
+    const defaultFilename = `DF_OPS_${nextSerial}_${baseName}`;
+    
+    setSaveFileName(defaultFilename);
+    setShowSaveModal(true);
+  };
 
-      // Always use CSV data to ensure processed state is saved
-      const payload: Record<string, unknown> = { csv_data, filename };
-      // Don't include df_id to force backend to use the CSV data instead of original DataFrame
+  // Actually save the DataFrame with the chosen filename
+  const confirmSaveDataFrame = async () => {
+    if (!data) return;
+    
+    setSaveLoading(true);
+    setSaveError(null);
+    setSaveSuccess(false);
+    try {
+      const csv_data = toCSV();
+
+      const filename = saveFileName.trim() ? `${saveFileName.trim()}.arrow` : `dataframe_${Date.now()}.arrow`;
+
+      // 🔧 REVERTED TO ORIGINAL APPROACH: Always use CSV
+      // This ensures all UI changes (deletions, filters, search) are captured
+      // Backend has enhanced CSV parsing that preserves dtypes
+      const payload: Record<string, unknown> = { 
+        filename,
+        csv_data: csv_data  // Always send CSV (captures all UI state)
+      };
+      
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      
       if (!response.ok) {
-        throw new Error(`Save failed: ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`Save failed: ${response.statusText} - ${errorText}`);
       }
       const result = await response.json();
       setSaveSuccess(true);
+      setShowSaveModal(false);
       if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
       saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
       
@@ -1088,6 +1118,63 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       toast({
         title: 'DataFrame Saved',
         description: result?.message ?? `${filename} saved successfully with ${processedData.filteredRows.length} filtered rows.`,
+        variant: 'default',
+      });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save DataFrame');
+      toast({
+        title: 'Save Error',
+        description: err instanceof Error ? err.message : 'Failed to save DataFrame',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  // Save to original file (update the input file)
+  const handleSaveToOriginalFile = async () => {
+    if (!data) return;
+    if (!settings.selectedFile) {
+      toast({ title: 'Error', description: 'No input file found', variant: 'destructive' });
+      return;
+    }
+    
+    setSaveLoading(true);
+    setSaveError(null);
+    setSaveSuccess(false);
+    try {
+      const csv_data = toCSV();
+      
+      // Use the original file path
+      let filename = settings.selectedFile;
+      // Remove .arrow extension if present (backend will add it back)
+      if (filename.endsWith('.arrow')) {
+        filename = filename.replace('.arrow', '');
+      }
+
+      const payload: Record<string, unknown> = { 
+        csv_data, 
+        filename,
+        overwrite_original: true 
+      };
+      
+      const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        throw new Error(`Save failed: ${response.statusText}`);
+      }
+      const result = await response.json();
+      setSaveSuccess(true);
+      if (saveSuccessTimeout.current) clearTimeout(saveSuccessTimeout.current);
+      saveSuccessTimeout.current = setTimeout(() => setSaveSuccess(false), 2000);
+      
+      toast({
+        title: 'File Updated',
+        description: result?.message ?? 'Original file updated successfully.',
         variant: 'default',
       });
     } catch (err) {
@@ -1252,8 +1339,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   // 2. Add effect to close dropdowns on outside click or right-click
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      const cm = document.getElementById('df-ops-context-menu');
-      const rcm = document.getElementById('df-ops-row-context-menu');
+      // 🔧 FIX: Use unique IDs per atom instance
+      const cm = document.getElementById(`df-ops-context-menu-${atomId}`);
+      const rcm = document.getElementById(`df-ops-row-context-menu-${atomId}`);
       if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
         return;
       }
@@ -1264,8 +1352,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
        setFilterSelections({});
     };
     const handleContextMenu = (e: MouseEvent) => {
-      const cm = document.getElementById('df-ops-context-menu');
-      const rcm = document.getElementById('df-ops-row-context-menu');
+      // 🔧 FIX: Use unique IDs per atom instance
+      const cm = document.getElementById(`df-ops-context-menu-${atomId}`);
+      const rcm = document.getElementById(`df-ops-row-context-menu-${atomId}`);
       if (cm?.contains(e.target as Node) || rcm?.contains(e.target as Node)) {
         return;
       }
@@ -1327,14 +1416,6 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Process and filter data
   const processedData = useMemo(() => {
-    console.log('[DataFrameOperations] processedData recalculating with data:', {
-      hasData: !!data,
-      headersLength: data?.headers?.length,
-      rowsLength: data?.rows?.length,
-      searchTerm: settings.searchTerm,
-      filtersCount: Object.keys(settings.filters || {}).length
-    });
-    
     if (!data || !Array.isArray(data.headers) || !Array.isArray(data.rows)) {
       return { filteredRows: [], totalRows: 0, uniqueValues: {} };
     }
@@ -1395,7 +1476,18 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
             }
           } else {
             // Multi-select filter for strings
-            return filterValue.includes(safeToString(cellValue));
+            const cellStr = safeToString(cellValue);
+            
+            // Check if filter includes "(blank)" and cell is blank
+            if (filterValue.includes('(blank)')) {
+              const isBlank = cellValue === null || cellValue === undefined || 
+                             cellValue === '' || 
+                             (typeof cellValue === 'string' && cellValue.trim() === '') ||
+                             (typeof cellValue === 'number' && Number.isNaN(cellValue));
+              if (isBlank) return true;
+            }
+            
+            return filterValue.includes(cellStr);
           }
         } else if (filterValue && typeof filterValue === 'object' && 'min' in filterValue && 'max' in filterValue) {
           // Range filter object
@@ -1429,22 +1521,23 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     data.headers.forEach(header => {
       const sourceCol = duplicateMap[header] || header;
       const filtersToApply = Object.entries(appliedFilters).filter(([col]) => col !== header);
-      const needsCurrentRows =
-        !originalHeaders.has(sourceCol) ||
-        filtersToApply.some(([col]) => {
-          const filterCol = duplicateMap[col] || col;
-          return !originalHeaders.has(filterCol);
-        });
-
-      let rowsForHeader = needsCurrentRows
-        ? [...currentRows]
-        : [...(originalData?.rows.filter((_, index) => !permanentlyDeletedRows.has(index)) || currentRows)];
+      
+      // 🔧 FIX: Always use currentRows to reflect latest cell edits
+      // Previously used originalData when needsCurrentRows was false, causing stale filter values
+      let rowsForHeader = [...currentRows];
 
       filtersToApply.forEach(([col, val]) => {
         const filterCol = duplicateMap[col] || col;
         rowsForHeader = rowsForHeader.filter(row => {
           const cell = row[filterCol];
           if (Array.isArray(val)) {
+            // Special handling for "(blank)" filter
+            if (val.includes('(blank)')) {
+              const isBlank = cell === null || cell === undefined || cell === '' || 
+                             (typeof cell === 'string' && cell.trim() === '') ||
+                             (typeof cell === 'number' && Number.isNaN(cell));
+              if (isBlank) return true;
+            }
             return val.includes(safeToString(cell));
           }
           if (val && typeof val === 'object' && 'min' in val && 'max' in val) {
@@ -1457,25 +1550,26 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         });
       });
 
-      let values = Array.from(new Set(rowsForHeader.map(row => safeToString(row[sourceCol]))))
-        .filter((v): v is string => v !== '')
-        .sort();
-
-      if (values.length === 0 && !needsCurrentRows) {
-        values = Array.from(new Set(currentRows.map(row => safeToString(row[sourceCol]))))
-          .filter((v): v is string => v !== '')
-          .sort();
-      }
+      // Get unique values including detection of blanks
+      const allRowValues = rowsForHeader.map(row => {
+        const val = row[sourceCol];
+        // Check if value is blank (NULL, empty string, whitespace, NaN)
+        if (val === null || val === undefined || val === '' || 
+            (typeof val === 'string' && val.trim() === '') ||
+            (typeof val === 'number' && Number.isNaN(val))) {
+          return '(blank)';
+        }
+        return safeToString(val);
+      });
+      
+      // 🔧 FIX: Removed unnecessary fallback that used originalData
+      // Now we always work with currentRows, so no fallback needed
+      let values = Array.from(new Set(allRowValues)).sort() as string[];
 
       uniqueValues[header] = values.slice(0, 50);
     });
 
     const result = { filteredRows, totalRows: filteredRows.length, uniqueValues };
-    console.log('[DataFrameOperations] processedData result:', {
-      filteredRowsCount: result.filteredRows.length,
-      totalRows: result.totalRows,
-      uniqueValuesCount: Object.keys(result.uniqueValues).length
-    });
     return result;
   }, [data, originalData, settings.searchTerm, settings.filters, duplicateMap, permanentlyDeletedRows, forceRefresh]);
 
@@ -1566,15 +1660,16 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, []);
 
   const handleSort = async (column: string, direction: 'asc' | 'desc') => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
     
     setSortLoading(true);
     try {
-      console.log('[DataFrameOperations] sort', column, direction);
-      const resp = await apiSort(fileId, column, direction);
+      const resp = await apiSort(activeFileId, column, direction);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1637,14 +1732,31 @@ const commitCellEdit = (rowIndex: number, column: string) => {
 
 // Helper to commit a header edit
 const commitHeaderEdit = async (colIdx: number, value?: string) => {
-  if (!data || !fileId) { setEditingHeader(null); return; }
+  // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+  const activeFileId = settings.fileId || fileId;
+  if (!data || !activeFileId) { setEditingHeader(null); return; }
+  
+  // 🔧 FIX: colIdx is the visible column index, need to map to actual column
+  const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+  
+  if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+    setEditingHeader(null);
+    return;
+  }
+  
+  const oldHeader = visibleHeaders[colIdx];
+  
+  if (!oldHeader) {
+    setEditingHeader(null);
+    return;
+  }
+  
   const newHeader = value !== undefined ? value : editingHeaderValue;
-  const oldHeader = data.headers[colIdx];
+  
   if (newHeader === oldHeader) { setEditingHeader(null); return; }
   
   // Check if the column has been deleted
   if (data.deletedColumns && data.deletedColumns.includes(oldHeader)) {
-    console.warn('[DataFrameOperations] Cannot rename deleted column:', oldHeader);
     setEditingHeader(null);
     return;
   }
@@ -1653,36 +1765,27 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   saveToUndoStack(data);
   
   try {
-    console.log('[DataFrameOperations] Renaming column:', { oldHeader, newHeader, currentHeaders: data.headers });
+    const resp = await apiRenameColumn(activeFileId, oldHeader, newHeader);
     
-    const resp = await apiRenameColumn(fileId, oldHeader, newHeader);
-    
-    console.log('[DataFrameOperations] Backend response after rename:', {
-      headers: resp.headers,
-      oldHeader,
-      newHeader
-    });
+    // 🔧 SAFETY: Update selectedCell if the renamed column is the active column
+    if (selectedCell?.col === oldHeader) {
+      setSelectedCell({ row: selectedCell.row, col: newHeader });
+      console.log('[DataFrameOperations] Updated active cell column name:', oldHeader, '→', newHeader);
+    }
     
     // Create updated column order by replacing old name with new name BEFORE filtering
     const updatedColumnOrder = columnOrder.map(col => col === oldHeader ? newHeader : col);
     
-    console.log('[DataFrameOperations] Column order mapping:', {
-      oldColumnOrder: columnOrder,
-      updatedColumnOrder,
-      oldHeader,
-      newHeader
-    });
-    
     // Update the columnOrder state
     setColumnOrder(updatedColumnOrder);
     
-    // Now manually preserve the column order instead of using filterBackendResponse
-    // which relies on the OLD columnOrder state (React state updates are async)
+    // 🔧 FIX: Preserve ALL columns (including hidden) in data.headers
+    // Hidden columns should stay in headers array, just marked as hidden
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
     
-    // Filter out hidden and deleted columns from backend response
-    const columnsToFilter = [...currentHiddenColumns, ...currentDeletedColumns];
+    // Filter out ONLY deleted columns (keep hidden columns in headers)
+    const columnsToFilter = [...currentDeletedColumns];
     const availableHeaders = resp.headers.filter((header: string) => !columnsToFilter.includes(header));
     
     // Use the UPDATED column order (not the state which is async)
@@ -1697,37 +1800,17 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       orderedHeaders = [...orderedHeaders, ...newColumns];
     }
     
-    console.log('[DataFrameOperations] Final ordered headers:', {
-      availableHeaders,
-      orderedHeaders,
-      updatedColumnOrder
-    });
+    // Keep ALL columns in rows (including hidden), let rendering handle visibility
+    const allRows = resp.rows;
     
-    // Filter rows to match ordered headers
-    const filteredRows = resp.rows.map((row: any) => {
-      const filteredRow: any = {};
-      orderedHeaders.forEach((header: string) => {
-        if (row.hasOwnProperty(header)) {
-          filteredRow[header] = row[header];
-        }
-      });
-      return filteredRow;
-    });
-    
-    // Normalize column types
+    // Normalize column types for ALL columns
     const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
-    const filteredColumnTypes: any = {};
-    orderedHeaders.forEach((header: string) => {
-      if (columnTypes[header]) {
-        filteredColumnTypes[header] = columnTypes[header];
-      }
-    });
     
     onDataChange({
       headers: orderedHeaders,
-      rows: filteredRows,
+      rows: allRows,
       fileName: data.fileName,
-      columnTypes: filteredColumnTypes,
+      columnTypes: columnTypes,
       pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)).map(p => p === oldHeader ? newHeader : p),
       frozenColumns: data.frozenColumns,
       cellColors: data.cellColors,
@@ -1764,10 +1847,12 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 // Original immediate update util (kept for programmatic usage)
   const handleCellEdit = async (rowIndex: number, column: string, newValue: string) => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     const globalRowIndex = startIndex + rowIndex;
     try {
-      const resp = await apiEditCell(fileId, globalRowIndex, column, newValue);
+      const resp = await apiEditCell(activeFileId, globalRowIndex, column, newValue);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1785,6 +1870,14 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
        });
+       
+       // Close any open filter dropdowns to force refresh when reopened
+       setContextMenu(null);
+       
+       // Force refresh to update filters with new values (delayed to ensure state update)
+       setTimeout(() => {
+         setForceRefresh(prev => prev + 1);
+       }, 50);
     } catch (err) {
       handleApiError('Edit cell failed', err);
     }
@@ -1792,7 +1885,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
   const handleAddRow = async () => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -1800,7 +1895,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const idx = data.rows.length > 0 ? data.rows.length - 1 : 0;
     const dir: 'above' | 'below' = data.rows.length > 0 ? 'below' : 'above';
     try {
-      const resp = await apiInsertRow(fileId, idx, dir);
+      const resp = await apiInsertRow(activeFileId, idx, dir);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1818,6 +1913,14 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
        });
+       
+       // Close any open filter dropdowns to force refresh when reopened
+       setContextMenu(null);
+       
+       // Force refresh to update filters (delayed to ensure state update)
+       setTimeout(() => {
+         setForceRefresh(prev => prev + 1);
+       }, 50);
     } catch (err) {
       handleApiError('Insert row failed', err);
     }
@@ -1825,7 +1928,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
   const handleAddColumn = async () => {
     resetSaveSuccess();
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -1837,7 +1942,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const backendEndIndex = getBackendColumnIndex(frontendEndIndex);
     
     try {
-      const resp = await apiInsertColumn(fileId, backendEndIndex, newColumnName, '');
+      const resp = await apiInsertColumn(activeFileId, backendEndIndex, newColumnName, '');
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -1876,6 +1981,14 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const newRows = [...data.rows];
     if (newRows[idx]) newRows[idx][col] = '';
     onDataChange({ ...data, rows: newRows });
+    
+    // Close any open filter dropdowns to force refresh when reopened
+    setContextMenu(null);
+    
+    // Force refresh to update filters with blank values (delayed to ensure state update)
+    setTimeout(() => {
+      setForceRefresh(prev => prev + 1);
+    }, 50);
   };
 
   const handleDragStart = (col: string) => {
@@ -1902,7 +2015,9 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
   };
 
   const handleDragEnd = async () => {
-    if (draggedCol && data && fileId && targetPosition !== null) {
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (draggedCol && data && activeFileId && targetPosition !== null) {
       // Save current state before making changes
       saveToUndoStack(data);
       
@@ -1920,7 +2035,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       
       try {
         // Call the backend API to update the column order
-        const resp = await apiMoveColumn(fileId, draggedCol, backendToIndex);
+        const resp = await apiMoveColumn(activeFileId, draggedCol, backendToIndex);
         
         console.log('[DataFrameOperations] Move column API response:', {
           responseHeaders: resp.headers,
@@ -1979,7 +2094,10 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
 
 const handleSortAsc = (colIdx: number) => {
   if (!data) return;
-  const col = data.headers[colIdx];
+  // 🔧 FIX: colIdx is the visible column index, map to actual column
+  const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+  const col = visibleHeaders[colIdx];
+  if (!col) return;
   handleSort(col, 'asc');
   addToHistory('Sort', `Sorted column "${col}" in ascending order`);
   setContextMenu(null);
@@ -1988,7 +2106,10 @@ const handleSortAsc = (colIdx: number) => {
 
 const handleSortDesc = (colIdx: number) => {
   if (!data) return;
-  const col = data.headers[colIdx];
+  // 🔧 FIX: colIdx is the visible column index, map to actual column
+  const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+  const col = visibleHeaders[colIdx];
+  if (!col) return;
   handleSort(col, 'desc');
   addToHistory('Sort', `Sorted column "${col}" in descending order`);
   setContextMenu(null);
@@ -2034,9 +2155,35 @@ const handleClearFilter = async (col: string) => {
 };
 
 const handleCellClick = (rowIndex: number, column: string) => {
+  // 🔧 CRITICAL FIX: Calculate originalRowIndex from paginated rowIndex
+  // rowIndex is the index in paginatedRows (0-14), we need the index in data.rows
+  const globalFilteredIndex = startIndex + rowIndex;
+  const originalRowIndex = data?.rows.findIndex((originalRow, idx) => {
+    if (permanentlyDeletedRows.has(idx)) return false;
+    // Check if this original row matches the current paginated row
+    return originalRow === processedData.filteredRows[globalFilteredIndex];
+  }) ?? -1;
+  
+  if (originalRowIndex === -1) {
+    console.warn('[DataFrameOperations] Could not find original row index for paginated row:', rowIndex);
+    return;
+  }
+  
+  // 🔧 Excel-like behavior: Track active cell position for visual indicator
+  setSelectedCell({ row: originalRowIndex, col: column });
+  
+  // 🔧 Excel-like: Set selectedColumn so the column header is highlighted
+  setSelectedColumn(column);
+  
   // When clicking on a cell, activate formula bar for that column (like small screen behavior)
   activateFormulaBar(column);
-  console.log('[DataFrameOperations] Column selected:', column, 'Formula bar activated');
+  
+  // 🔧 FIX: Clear row AND column multi-selections when clicking a cell
+  // Multi-selections should only persist when explicitly using Ctrl+Click
+  setMultiSelectedRows(new Set());
+  setMultiSelectedColumns(new Set());
+  
+  console.log('[DataFrameOperations] Active cell:', { row: originalRowIndex, col: column, paginatedRow: rowIndex }, 'Column header will highlight');
 };
 
 // Function to completely reset the formula bar to a clean state
@@ -2053,7 +2200,8 @@ const resetFormulaBar = () => {
 // Function to activate formula bar for a specific column
 const activateFormulaBar = (column: string) => {
   setSelectedColumn(column);
-  setSelectedCell(null);
+  // 🔧 CRITICAL FIX: Don't clear selectedCell - we need it for row number highlighting!
+  // setSelectedCell(null);  // ← REMOVED - This was clearing the active cell indicator!
   setIsFormulaMode(true);
   setIsFormulaBarFrozen(false); // Unfreeze formula bar when explicitly activated
   setFormulaInput('');
@@ -2081,7 +2229,8 @@ const insertColumnIntoFormula = (columnName: string) => {
   console.log('[DataFrameOperations] insertColumnIntoFormula called:', { columnName, selectedColumn, isFormulaMode });
   
   // Use the same logic as FormularBar's handleColumnInsert function
-  const inputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
+  // 🔧 FIX: Scope query to this atom instance only
+  const inputElement = document.querySelector(`#atom-${atomId} input[placeholder*="=SUM"]`) as HTMLInputElement;
   
   // Check if there are ColX placeholders to replace (Excel-like behavior)
   if (formulaInput.includes('Col')) {
@@ -2113,7 +2262,8 @@ const insertColumnIntoFormula = (columnName: string) => {
   }
   
   // Fallback to original behavior if no ColX placeholders found
-  const formulaInputElement = document.querySelector('input[placeholder*="=SUM"]') as HTMLInputElement;
+  // 🔧 FIX: Scope query to this atom instance only
+  const formulaInputElement = document.querySelector(`#atom-${atomId} input[placeholder*="=SUM"]`) as HTMLInputElement;
   if (!formulaInputElement) return;
   
   const cursorPosition = formulaInputElement.selectionStart || 0;
@@ -2147,40 +2297,34 @@ const handleHeaderClick = (header: string) => {
     return;
   }
   
+  // 🔧 Excel-like: Clear cell selection when clicking column header (select entire column)
+  setSelectedCell(null);
+  
+  // 🔧 Excel-like: Set selectedColumn for entire column highlighting
+  setSelectedColumn(header);
+  
   // Normal column selection behavior - activate formula bar
   activateFormulaBar(header);
+  
+  console.log('[DataFrameOperations] Column header clicked:', header, 'Cell selection cleared');
 };
 
   const handleFormulaSubmit = async () => {
-    console.log('[DataFrameOperations] handleFormulaSubmit called');
     resetSaveSuccess();
-    if (!data || !selectedColumn || !fileId) {
-      console.log('[DataFrameOperations] Missing required data:', { data: !!data, selectedColumn, fileId });
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !selectedColumn || !activeFileId) {
       showValidationError('Please select a target column first');
       return;
     }
     const trimmedFormula = formulaInput.trim();
     if (!trimmedFormula) {
-      console.log('[DataFrameOperations] No formula provided');
       showValidationError('Please enter a formula');
       return;
     }
   
-  // Debug logging
-  console.log('[DataFrameOperations] Applying formula:', {
-    selectedColumn,
-    formula: trimmedFormula,
-    fileId,
-    currentHeaders: data.headers,
-    hasFilters: Object.keys(settings.filters || {}).length > 0,
-    hasSearchTerm: !!settings.searchTerm,
-    currentDataRows: data.rows.length,
-    processedDataRows: processedData.filteredRows.length,
-    isProcessingOperation
-  });
   
   // Apply formula directly without queuing to test
-  console.log('[DataFrameOperations] Starting formula application');
   setFormulaLoading(true);
   setIsProcessingOperation(false); // Reset processing state
   try {
@@ -2191,42 +2335,14 @@ const handleHeaderClick = (header: string) => {
       const currentFilters = settings.filters || {};
       const currentSearchTerm = settings.searchTerm || '';
       
-      console.log('[DataFrameOperations] Current data state:', {
-        hasActiveFilters,
-        currentFilters,
-        currentSearchTerm,
-        originalDataRows: data.rows.length,
-        filteredDataRows: processedData.filteredRows.length
-      });
-      
       // Apply the formula to the original data (backend requirement)
       // But we'll ensure the filtered view reflects the changes
-      console.log('[DataFrameOperations] Calling apiApplyFormula with:', {
-        fileId,
-        selectedColumn,
-        formula: trimmedFormula
-      });
-      
-      const resp = await apiApplyFormula(fileId, selectedColumn, trimmedFormula);
-    
-    console.log('[DataFrameOperations] Formula applied successfully:', {
-      selectedColumn,
-      responseHeaders: resp.headers,
-      responseRowsCount: resp.rows?.length,
-      responseTypes: resp.types
-    });
+      const resp = await apiApplyFormula(activeFileId, selectedColumn, trimmedFormula);
     
     // Preserve deleted columns by filtering out columns that were previously deleted
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
     const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
-    
-    console.log('[DataFrameOperations] Updating data with:', {
-      headers: filtered.headers.length,
-      rows: filtered.rows.length,
-      fileName: data.fileName,
-      columnTypes: Object.keys(filtered.columnTypes || {}).length
-    });
     
     onDataChange({
       headers: filtered.headers,
@@ -2240,29 +2356,22 @@ const handleHeaderClick = (header: string) => {
       deletedColumns: currentDeletedColumns,
     });
     
-    console.log('[DataFrameOperations] Data updated successfully');
+    // Close any open filter dropdowns to force refresh when reopened
+    setContextMenu(null);
     
-    // Force a refresh to ensure the UI updates with the new data
+    // Force a refresh AFTER data updates (delay to ensure state is updated)
+    setTimeout(() => {
     setForceRefresh(prev => prev + 1);
+    }, 100);
     
     // Don't re-apply filters - let the data update naturally
     // The processedData will automatically reflect the new data with existing filters
-    console.log('[DataFrameOperations] Formula applied to original data, filtered view will update automatically');
-    
-    console.log('[DataFrameOperations] Data updated after formula:', {
-      selectedColumn,
-      newHeaders: filtered.headers,
-      newRowsCount: filtered.rows?.length,
-      columnStillExists: filtered.headers.includes(selectedColumn),
-      firstRowSample: filtered.rows?.[0] ? Object.keys(filtered.rows[0]) : []
-    });
     
     setColumnFormulas(prev => {
       if (prev[selectedColumn] === trimmedFormula) {
         return prev;
       }
       const next = { ...prev, [selectedColumn]: trimmedFormula };
-      console.log('[DataFrameOperations] Updating column formulas:', next);
       onSettingsChange({ columnFormulas: next });
       return next;
     });
@@ -2273,17 +2382,7 @@ const handleHeaderClick = (header: string) => {
     // Force a complete reset to ensure the new column is usable for future operations
     setTimeout(() => {
       resetFormulaBar();
-      console.log('[DataFrameOperations] Formula bar completely reset - new column ready for future operations');
     }, 200);
-    
-    console.log('[DataFrameOperations] Formula application completed successfully');
-    
-    console.log('[DataFrameOperations] Formula state updated:', {
-      selectedColumn,
-      formulaApplied: trimmedFormula,
-      formulaBarReset: true,
-      columnFormulasUpdated: true
-    });
     
     // Add to history
     addToHistory('Apply Formula', `Applied formula "${trimmedFormula}" to column "${selectedColumn}"`);
@@ -2294,13 +2393,11 @@ const handleHeaderClick = (header: string) => {
       description: `Formula applied to column "${selectedColumn}". Click on formula bar to edit this column again.`,
     });
     
-    console.log('[DataFrameOperations] Formula application process completed');
   } catch (err) {
     console.error('[DataFrameOperations] Formula application failed:', err);
     handleApiError('Apply formula failed', err);
     addToHistory('Apply Formula', `Failed to apply formula "${trimmedFormula}" to column "${selectedColumn}"`, 'error');
   } finally {
-    console.log('[DataFrameOperations] Formula application finally block - setting loading to false');
     setFormulaLoading(false);
   }
 };
@@ -2331,7 +2428,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   // Simple and direct insert column implementation
   const handleInsertColumn = async (colIdx: number) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     console.log('[DataFrameOperations] Insert column called with colIdx:', colIdx);
     console.log('[DataFrameOperations] Current headers:', data.headers);
@@ -2359,7 +2458,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     setInsertLoading(true);
     try {
       // Call the backend API with the exact position
-      const resp = await apiInsertColumn(fileId, insertPosition, newColumnName, '');
+      const resp = await apiInsertColumn(activeFileId, insertPosition, newColumnName, '');
       
       // Update the data with the response
       onDataChange({
@@ -2397,7 +2496,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleDeleteColumn = async (colIdx: number) => {
     resetSaveSuccess();
     if (!data || !fileId) return;
-    if (colIdx < 0 || colIdx >= data.headers.length) return;
+    
+    // 🔧 FIX: colIdx is the visible column index, need to map to actual column
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    
+    if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+      return;
+    }
+    const col = visibleHeaders[colIdx];
+    
+    if (!col) {
+      return;
+    }
+    
+    // 🔧 SAFETY: Clear selectedCell if deleting the active column
+    if (selectedCell?.col === col) {
+      setSelectedCell(null);
+      console.log('[DataFrameOperations] Cleared active cell - column deleted:', col);
+    }
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -2412,15 +2528,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       });
     } else {
       // Delete single column (original behavior)
-      const col = data.headers[colIdx];
-      
-      console.log('[DataFrameOperations] Deleting single column:', col);
-      console.log('[DataFrameOperations] fileId:', fileId);
-      console.log('[DataFrameOperations] data.hiddenColumns:', data.hiddenColumns);
-      console.log('[DataFrameOperations] data.headers:', data.headers);
-      
-      // Save current state before making changes
-      saveToUndoStack(data);
       
       // ALWAYS do frontend-only delete to avoid backend sync issues
       // The backend API is unreliable and causes 404 errors
@@ -2468,7 +2575,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   // Completely rewritten duplicate column functionality
   const handleDuplicateColumn = async (colIdx: number) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     console.log('[DataFrameOperations] Duplicate column called with colIdx:', colIdx);
     console.log('[DataFrameOperations] Current headers:', data.headers);
@@ -2503,7 +2612,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     try {
       // Call the backend API to duplicate the column
-      const resp = await apiDuplicateColumn(fileId, originalColumn, newColumnName);
+      const resp = await apiDuplicateColumn(activeFileId, originalColumn, newColumnName);
       
       console.log('[DataFrameOperations] Duplicate response:', resp);
       
@@ -2542,14 +2651,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
   // Row insert / delete handlers
   const handleInsertRow = async (position: 'above' | 'below', rowIdx: number) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
     
     setInsertLoading(true);
     try {
-      const resp = await apiInsertRow(fileId, rowIdx, position);
+      const resp = await apiInsertRow(activeFileId, rowIdx, position);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -2579,14 +2690,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleDuplicateRow = async (rowIdx: number) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
     
     setDuplicateLoading(true);
     try {
-      const resp = await apiDuplicateRow(fileId, rowIdx);
+      const resp = await apiDuplicateRow(activeFileId, rowIdx);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
        const currentHiddenColumns = data.hiddenColumns || [];
@@ -2616,7 +2729,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleRetypeColumn = async (col: string, newType: 'number' | 'text' | 'date') => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     
     // Save current state before making changes
     saveToUndoStack(data);
@@ -2624,7 +2739,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     setConvertLoading(true);
     try {
       console.log('[DataFrameOperations] Retype column:', col, 'to', newType);
-      const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
+      const resp = await apiRetypeColumn(activeFileId, col, newType === 'text' ? 'string' : newType);
       console.log('[DataFrameOperations] Retype response:', resp);
       
        // Preserve deleted columns by filtering out columns that were previously deleted
@@ -2921,6 +3036,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleDeleteRow = async (rowIdx: number) => {
     if (!data) return;
     
+    // 🔧 SAFETY: Clear selectedCell if deleting the active row
+    if (selectedCell?.row === rowIdx) {
+      setSelectedCell(null);
+      console.log('[DataFrameOperations] Cleared active cell - row deleted:', rowIdx);
+    }
+    
     // Check if there are multiple selected rows
     if (multiSelectedRows.size > 1) {
       // Show confirmation modal for multiple rows
@@ -2943,9 +3064,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   };
 
   const handleDescribeColumn = async (column: string) => {
-    if (!data || !fileId) return;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
     try {
-      const describeData = await apiDescribeColumn(fileId, column);
+      const describeData = await apiDescribeColumn(activeFileId, column);
       setDescribeModal({
         isOpen: true,
         column,
@@ -2962,6 +3085,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Save current state before making changes
     saveToUndoStack(data);
     
+    // 📝 NOTE: colIdx here is the visible column index, which is correct for freeze pane
+    // We want to freeze the first N visible columns (colIdx + 1)
     // Set frozen columns to the index + 1 (since we want to freeze up to and including this column)
     // The # column is always included when freeze pane is active
     const newFrozenColumns = colIdx + 1;
@@ -3064,9 +3189,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     saveToUndoStack(data);
     
     // Remove column from hidden columns list
+    const updatedHiddenColumns = (data.hiddenColumns || []).filter(c => c !== col);
     const updatedData = {
       ...data,
-      hiddenColumns: (data.hiddenColumns || []).filter(c => c !== col)
+      hiddenColumns: updatedHiddenColumns
     };
     
     onDataChange(updatedData);
@@ -3139,6 +3265,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } else {
       // Single select mode
       setMultiSelectedRows(new Set([originalRowIndex]));
+      
+      // 🔧 Excel-like: Also set as active cell (first visible column)
+      if (data?.headers) {
+        const firstVisibleColumn = data.headers.filter(h => !(data.hiddenColumns || []).includes(h))[0];
+        if (firstVisibleColumn) {
+          setSelectedCell({ row: originalRowIndex, col: firstVisibleColumn });
+          activateFormulaBar(firstVisibleColumn);
+        }
+      }
     }
   };
 
@@ -3218,6 +3353,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     console.log('[DataFrameOperations] Bulk delete - columns:', deleteConfirmModal.columnsToDelete);
     
+    // 🔧 SAFETY: Clear selectedCell if any deleted column is the active column
+    if (selectedCell && deleteConfirmModal.columnsToDelete.includes(selectedCell.col)) {
+      setSelectedCell(null);
+      console.log('[DataFrameOperations] Cleared active cell - column in bulk delete');
+    }
+    
     // Save current state before making changes
     saveToUndoStack(data);
     
@@ -3287,6 +3428,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     setBulkDeleteLoading(true);
     try {
+      // 🔧 SAFETY: Clear selectedCell if any deleted row is the active row
+      if (selectedCell && rowDeleteConfirmModal.rowsToDelete.includes(selectedCell.row)) {
+        setSelectedCell(null);
+        console.log('[DataFrameOperations] Cleared active cell - row in bulk delete');
+      }
+      
       // Mark rows as permanently deleted (local only)
       setPermanentlyDeletedRows(prev => {
         const newSet = new Set(prev);
@@ -3395,7 +3542,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         className="hidden"
       />
 
-      <div ref={containerRef} className="w-full h-full p-6 overflow-y-auto" style={{position: 'relative'}}>
+      <div id={`atom-${atomId}`} ref={containerRef} className="w-full h-full p-6 overflow-y-auto" style={{position: 'relative'}}>
         <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm w-full">
         {/* File name display in separate blue header section */}
         {data?.fileName && (
@@ -3543,6 +3690,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
             <div className="relative flex items-center gap-2">
               <Button
+                onClick={handleSaveToOriginalFile}
+                disabled={saveLoading}
+                className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2"
+              >
+                {saveLoading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save</span>
+                  </>
+                )}
+              </Button>
+              <Button
                 onClick={handleSaveDataFrame}
                 disabled={saveLoading}
                 className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2"
@@ -3555,7 +3719,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 ) : (
                   <>
                     <Save className="w-4 h-4" />
-                    <span>Save DataFrame</span>
+                    <span>Save As</span>
                   </>
                 )}
               </Button>
@@ -3679,26 +3843,40 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   )}
                   
                   <Table className="table-base w-full" maxHeight="max-h-[500px]">
-              <TableHeader className="table-header">
+              <TableHeader 
+                className="table-header"
+                style={{
+                  // 🔧 CRITICAL: thead MUST have higher z-index than tbody
+                  // This ensures ALL headers render above ALL body cells
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 1002,
+                  backgroundColor: 'transparent'
+                }}
+              >
                 <TableRow className="table-header-row">
                   {settings.showRowNumbers && (
                     <TableHead 
-                      className={`table-header-cell row-number-column text-center relative sticky top-0 z-10 ${
-                        data.frozenColumns > 0 ? 'frozen-column' : ''
-                      }`}
+                      className="table-header-cell row-number-column text-center relative"
                       style={{
-                        ...(data.frozenColumns > 0 ? { 
-                          position: 'sticky', 
-                          left: '0px',
-                          zIndex: 1001,
-                          marginRight: data.frozenColumns > 0 ? '2px' : '0px',
-                          backgroundColor: 'white',
-                          opacity: 1,
-                          borderLeft: '2px solid #22c55e',
-                          borderRight: '1px solid #d1d5db',
-                          borderTop: '1px solid #d1d5db',
-                          borderBottom: '1px solid #d1d5db'
-                        } : {})
+                        position: 'sticky',
+                        left: '0px',
+                        top: 0,
+                        zIndex: 3, // Relative to thead (1002), this becomes 1005 in global context
+                        // 🔧 Match color scheme: darker gray when frozen, lighter when not
+                        backgroundColor: data.frozenColumns > 0 ? '#e5e7eb' : '#f3f4f6', // gray-200 (frozen) or gray-100 (unfrozen)
+                        opacity: 1,
+                        borderLeft: '2px solid #22c55e',
+                        borderRight: '1px solid #d1d5db',
+                        borderTop: '1px solid #d1d5db',
+                        borderBottom: '1px solid #d1d5db',
+                        boxShadow: data.frozenColumns > 0 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none',
+                        // 🔧 CRITICAL: Force GPU compositing and solid rendering
+                        isolation: 'isolate',
+                        WebkitBackfaceVisibility: 'hidden',
+                        backfaceVisibility: 'hidden',
+                        willChange: 'transform',
+                        transform: 'translateZ(0)' // Force GPU layer
                       }}
                     >
                       <div className="flex items-center justify-center">
@@ -3721,14 +3899,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <TableHead
                       key={header + '-' + colIdx}
                       data-col={header}
-                       className={`table-header-cell bg-white border-r border-gray-200 relative sticky top-0 z-10 ${
-                         selectedColumn === header ? 'border-2 border-blue-500 bg-blue-100' : ''
+                       className={`table-header-cell border border-gray-200 relative ${
+                         // 🔧 Excel-like: Highlight column header when column is selected (via cell click or header click)
+                         selectedColumn === header ? 'border-2 border-blue-500' : ''
                        } ${
-                         multiSelectedColumns.has(header) ? 'bg-blue-100 border-blue-500' : ''
+                         multiSelectedColumns.has(header) ? 'border-blue-500' : ''
                        } ${
                          filters[header] ? 'bg-yellow-50' : ''
-                       } ${
-                         data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''
                        }`}
                       style={{
                         ...(settings.columnWidths?.[header] ? { 
@@ -3740,8 +3917,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           minWidth: '50px', 
                           maxWidth: '500px' 
                         }),
+                        // 🔧 CRITICAL FIX: ALL headers must be sticky vertically (not just frozen)
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: data.frozenColumns && colIdx < data.frozenColumns ? 2 : 1, // Relative to thead (1002)
+                        // 🔧 ALL headers get backgroundColor via inline style (overrides template CSS)
+                        backgroundColor: (() => {
+                          if (selectedColumn === header || multiSelectedColumns.has(header)) {
+                            return '#dbeafe'; // blue-100 when selected
+                          }
+                          // Frozen columns: darker gray, Unfrozen: lighter gray
+                          return (data.frozenColumns && colIdx < data.frozenColumns) ? '#e5e7eb' : '#f3f4f6';
+                        })(),
                         ...(data.frozenColumns && colIdx < data.frozenColumns ? { 
-                          position: 'sticky', 
+                          // 🔧 Frozen columns: Also sticky horizontally (left positioning)
+                          // Note: position: sticky and top: 0 are already set above for all headers
                           left: (() => {
                             let leftOffset = 0;
                             // Add width of # column if it's shown and frozen
@@ -3754,14 +3944,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                             }
                             return `${leftOffset}px`;
                           })(),
-                          zIndex: 1001,
                           marginRight: colIdx === data.frozenColumns - 1 ? '2px' : '0px',
-                          backgroundColor: 'white',
                           opacity: 1,
                           borderLeft: colIdx === 0 ? '1px solid #d1d5db' : '1px solid #d1d5db',
                           borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
                           borderTop: '1px solid #d1d5db',
-                          borderBottom: '1px solid #d1d5db'
+                          borderBottom: '1px solid #d1d5db',
+                          // 🔧 Shadow on last frozen column for visual separator
+                          boxShadow: colIdx === data.frozenColumns - 1 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none'
                         } : {}),
                         textAlign: `${getColumnAlignment(header)} !important`
                       }}
@@ -3876,22 +4066,33 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     >
                       {settings.showRowNumbers && (
                         <TableCell
-                          className={`table-cell row-number-column text-center text-xs font-medium ${isRowSelected ? 'bg-blue-200' : ''} ${
-                            data.frozenColumns > 0 ? 'frozen-column' : ''
-                          }`}
+                          className="table-cell row-number-column text-center text-xs font-medium"
                           style={{
-                            ...(data.frozenColumns > 0 ? { 
-                              position: 'sticky', 
-                              left: '0px',
-                              zIndex: 1001,
-                              marginRight: data.frozenColumns > 0 ? '2px' : '0px',
-                              backgroundColor: 'white',
-                              opacity: 1,
-                              borderLeft: '2px solid #22c55e',
-                              borderRight: '1px solid #d1d5db',
-                              borderTop: '1px solid #d1d5db',
-                              borderBottom: '1px solid #d1d5db'
-                            } : {})
+                            // 🔧 Row index: ONLY sticky horizontally (left), NOT vertically
+                            // This allows row numbers to scroll UP behind the # header
+                            position: 'sticky',
+                            left: '0px',
+                            // NO top: 0 here! We want rows to scroll vertically
+                            zIndex: 1, // tbody cells are in a lower stacking context than thead (1002)
+                            // 🔧 Row index background: Darker gray base, blue when selected/active
+                            backgroundColor: (() => {
+                              const isActiveCell = selectedCell?.row === originalRowIndex && !isRowSelected && selectedCell?.col && !(data.hiddenColumns || []).includes(selectedCell.col);
+                              
+                              if (isRowSelected) return '#bfdbfe'; // blue-200 for checkbox selected
+                              if (isActiveCell) return '#dbeafe'; // blue-100 for active cell row
+                              // Match color scheme: darker gray when frozen, lighter when not
+                              return data.frozenColumns > 0 ? '#e5e7eb' : '#f3f4f6'; // gray-200 (frozen) or gray-100 (unfrozen)
+                            })(),
+                            // 🔧 Always apply fontWeight for active cell indicator
+                            fontWeight: (selectedCell?.row === originalRowIndex && !isRowSelected && selectedCell?.col && !(data.hiddenColumns || []).includes(selectedCell.col)) ? 'bold' : 'normal',
+                            opacity: 1,
+                            borderLeft: '2px solid #22c55e',
+                            borderRight: '1px solid #d1d5db',
+                            borderTop: '1px solid #d1d5db',
+                            borderBottom: '1px solid #d1d5db',
+                            // 🔧 Shadow on right side (always present since # is always frozen)
+                            boxShadow: data.frozenColumns === 0 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none'
+                            // 🔧 REMOVED isolation and willChange - they can interfere with scrolling
                           }}
                           onContextMenu={e => {
                             e.preventDefault();
@@ -3925,7 +4126,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           <TableCell
                             key={colIdx}
                             data-col={column}
-                            className={`table-cell font-medium ${selectedCell?.row === rowIndex && selectedCell?.col === column ? 'border border-blue-500 bg-blue-50' : selectedColumn === column ? 'border border-blue-500 bg-blue-50' : ''} ${isRowSelected ? 'bg-blue-100' : ''} ${data.frozenColumns && colIdx < data.frozenColumns ? 'frozen-column' : ''}`}
+                            className={`table-cell font-medium border border-gray-200 ${
+                              // 🔧 Excel-like: Four highlighting modes:
+                              // 1. Specific cell selected (active cell - stronger border + blue BG)
+                              selectedCell?.row === originalRowIndex && selectedCell?.col === column 
+                                ? 'border-2 border-blue-500' 
+                                // 2. Entire column selected via header click (no specific cell)
+                                : (!selectedCell && selectedColumn === column)
+                                  ? 'border-blue-400'
+                                  // 3. Multi-selected column (Ctrl+Click headers)
+                                  : multiSelectedColumns.has(column)
+                                    ? 'border-blue-400'
+                                    // 4. No highlighting
+                                    : ''
+                            }`}
                             style={{
                               ...(settings.columnWidths?.[column] ? { 
                                 width: settings.columnWidths[column], 
@@ -3936,7 +4150,17 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                 minWidth: '50px', 
                                 maxWidth: '500px' 
                               }),
+                              // 🔧 ALL cells get backgroundColor via inline style (overrides template CSS)
+                              backgroundColor: (() => {
+                                if (isRowSelected) return '#dbeafe'; // blue for row selection
+                                if (selectedCell?.row === originalRowIndex && selectedCell?.col === column) return '#dbeafe'; // blue for active cell
+                                if (!selectedCell && selectedColumn === column) return '#dbeafe'; // blue for column selection
+                                if (multiSelectedColumns.has(column)) return '#dbeafe'; // blue for multi-select
+                                return 'white'; // white for data cells
+                              })(),
                               ...(data.frozenColumns && colIdx < data.frozenColumns ? { 
+                                // 🔧 Frozen data cells: ONLY sticky horizontally (left), NOT vertically
+                                // This allows cells to scroll UP behind the frozen headers
                                 position: 'sticky', 
                                 left: (() => {
                                   let leftOffset = 0;
@@ -3950,18 +4174,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                   }
                                   return `${leftOffset}px`;
                                 })(),
-                                zIndex: 1001,
+                                // NO top: 0 here! We want cells to scroll vertically
+                                zIndex: 1, // tbody cells are in a lower stacking context than thead (1002)
                                 marginRight: colIdx === data.frozenColumns - 1 ? '2px' : '0px',
-                                backgroundColor: 'white',
                                 opacity: 1,
                                 borderLeft: colIdx === 0 ? '1px solid #d1d5db' : '1px solid #d1d5db',
                                 borderRight: colIdx === data.frozenColumns - 1 ? '2px solid #22c55e' : '1px solid #d1d5db',
                                 borderTop: '1px solid #d1d5db',
-                                borderBottom: '1px solid #d1d5db'
+                                borderBottom: '1px solid #d1d5db',
+                                // 🔧 Shadow on last frozen column for visual separator
+                                boxShadow: colIdx === data.frozenColumns - 1 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none'
+                                // 🔧 REMOVED isolation and willChange - they can interfere with scrolling
                               } : {}),
                               textAlign: `${getColumnAlignment(column)} !important`
                             }}
-                            onClick={() => handleCellClick(rowIndex, column)}
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent row selection when clicking cell
+                              handleCellClick(rowIndex, column);
+                            }}
                             onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
                             setEditingCell({ row: rowIndex, col: column });
@@ -4091,7 +4321,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         createPortal(
           <div
             ref={contextMenuRef}
-            id="df-ops-context-menu"
+            id={`df-ops-context-menu-${atomId}`}
             style={{ position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 200 }}
           >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200 flex items-center justify-between" style={{color:'#222'}}>
@@ -4528,7 +4758,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         createPortal(
           <div
             ref={rowContextMenuRef}
-            id="df-ops-row-context-menu"
+            id={`df-ops-row-context-menu-${atomId}`}
             style={{ position: 'fixed', top: rowContextMenu.y, left: rowContextMenu.x, zIndex: 1000, background: 'white', border: '1px solid #ddd', borderRadius: 6, boxShadow: '0 2px 8px #0001', minWidth: 140 }}
           >
           <div className="px-3 py-2 text-xs font-semibold border-b border-gray-200" style={{color:'#222'}}>Row: {rowContextMenu.rowIdx + 1}</div>
@@ -4542,7 +4772,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Describe Modal */}
       {describeModal.isOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
           onClick={() => setDescribeModal({ isOpen: false, column: '', data: null })}
         >
           <div 
@@ -4673,7 +4903,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Delete Confirmation Modal */}
       {deleteConfirmModal.isOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
           onClick={() => setDeleteConfirmModal({ isOpen: false, columnsToDelete: [] })}
         >
           <div 
@@ -4722,7 +4952,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Row Delete Confirmation Modal */}
       {rowDeleteConfirmModal.isOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
           onClick={() => setRowDeleteConfirmModal({ isOpen: false, rowsToDelete: [] })}
         >
           <div 
@@ -4775,7 +5005,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* Find and Replace Modal */}
       {findReplaceModalOpen && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
           onClick={() => setFindReplaceModalOpen(false)}
         >
           <div 
@@ -4928,7 +5158,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       {/* History Panel */}
 
       {historyPanelOpen && (
-        <div className="fixed inset-0 z-50 pointer-events-none">
+        <div className="fixed inset-0 z-[9999] pointer-events-none">
           <div 
             className={`absolute right-0 top-0 h-full bg-white shadow-2xl border-l border-gray-200 transition-all duration-300 ${
               historyPanelMinimized ? 'w-16' : 'w-96'
@@ -5053,6 +5283,47 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
         </div>
       )}
+
+      {/* Save DataFrame Modal */}
+      <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save DataFrame</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveFileName.trim()) {
+                  confirmSaveDataFrame();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveModal(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveDataFrame}
+              disabled={saveLoading || !saveFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

@@ -5,6 +5,8 @@ import { CONCAT_API } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import {
   Table as UITable,
   TableBody,
@@ -79,6 +81,8 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFileName, setSaveFileName] = useState('');
   
   // Sorting and filtering state
   const [sortColumn, setSortColumn] = useState<string | null>(null);
@@ -628,15 +632,27 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
     fetchData(page);
   };
 
-  // Save DataFrame handler
-  const handleSaveDataFrame = async () => {
+  // Open save modal with default filename
+  const handleSaveDataFrame = () => {
+    const csvToSave = fullCsv || rawCSV;
+    if (!csvToSave) return;
+    
+    // Generate default filename
+    const defaultFilename = `concat_${file1?.split('/')?.pop() || 'file1'}_${file2?.split('/')?.pop() || 'file2'}_${Date.now()}`;
+    setSaveFileName(defaultFilename);
+    setShowSaveModal(true);
+  };
+
+  // Actually save the DataFrame with the chosen filename
+  const confirmSaveDataFrame = async () => {
+    const csvToSave = fullCsv || rawCSV;
+    if (!csvToSave) return;
+    
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      // Use the current rawCSV, and generate a filename
-      const filename = `concat_${file1?.split('/')?.pop() || 'file1'}_${file2?.split('/')?.pop() || 'file2'}_${Date.now()}`;
-      const csvToSave = fullCsv || rawCSV;
+      const filename = saveFileName.trim() || `concat_${file1?.split('/')?.pop() || 'file1'}_${file2?.split('/')?.pop() || 'file2'}_${Date.now()}`;
       const response = await fetch(`${CONCAT_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -648,6 +664,7 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
       const result = await response.json();
       setSaveSuccess(true);
       setIsSaved(true);
+      setShowSaveModal(false);
       // Refetch data from the saved file
       if (result.result_file) {
         fetchData(1);
@@ -1064,7 +1081,7 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
                     disabled={saveLoading}
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                   >
-                    {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                    {saveLoading ? 'Saving...' : 'Save As'}
                   </Button>
                   {saveError && <span className="text-red-600 text-sm">{saveError}</span>}
                   {saveSuccess && <span className="text-green-600 text-sm">Saved!</span>}
@@ -1140,6 +1157,47 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
           </CardContent>
         </Card>
       )}
+
+      {/* Save DataFrame Modal */}
+      <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save DataFrame</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveFileName.trim()) {
+                  confirmSaveDataFrame();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveModal(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveDataFrame}
+              disabled={saveLoading || !saveFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

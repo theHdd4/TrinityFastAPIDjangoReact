@@ -47,6 +47,7 @@ interface ColumnClassifierCanvasProps {
   filterUnique: boolean;
   onFilterToggle: (val: boolean) => void;
   atomId?: string;
+  hideDimensionInstructions?: boolean;
 }
 
 const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
@@ -57,6 +58,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   filterUnique,
   onFilterToggle,
   atomId,
+  hideDimensionInstructions = false,
 }) => {
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number }>({ visible: false, x: 0, y: 0 });
@@ -727,7 +729,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
         </div>
         
         {/* Instructional Text - Show only if no dimensions are configured */}
-        {(!settings.dimensions || settings.dimensions.length === 0) && (
+        {!hideDimensionInstructions && (!settings.dimensions || settings.dimensions.length === 0) && (
           <div className="w-full mt-6">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-start space-x-3">

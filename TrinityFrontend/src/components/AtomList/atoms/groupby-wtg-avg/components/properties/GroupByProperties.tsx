@@ -51,45 +51,98 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   const fallbackMeasures = measures.length === 0 ? numericalColumns : measures;
 
   // ------------------------------
-  // Local draggable lists
+  // Get draggable lists from global store
   // ------------------------------
-  const [identifierList, setIdentifierList] = useState<string[]>(fallbackIdentifiers);
-  const [measureList, setMeasureList] = useState<string[]>(fallbackMeasures);
+  const identifierList = settings.identifierList || fallbackIdentifiers;
+  const measureList = settings.measureList || fallbackMeasures;
 
-  // Keep local lists in sync when fallback arrays change (e.g. after data fetch)
+  // Keep global lists in sync when fallback arrays change (e.g. after data fetch)
   useEffect(() => {
-    setIdentifierList(fallbackIdentifiers);
-  }, [fallbackIdentifiers]);
-
-  useEffect(() => {
-    setMeasureList(fallbackMeasures);
-  }, [fallbackMeasures]);
-
-  // Use local state for selectedMeasures to ensure checkboxes are ticked on first render
-  // Initialise localSelectedMeasures so all measures are ticked by default
-  const [localSelectedMeasures, setLocalSelectedMeasures] = useState<string[]>(() => {
-    if (Array.isArray(settings.selectedMeasures) && settings.selectedMeasures.length > 0) {
-      return typeof settings.selectedMeasures[0] === 'string'
-        ? settings.selectedMeasures as string[]
-        : (settings.selectedMeasures as any[]).map(m => m.field).filter(Boolean);
+    if (fallbackIdentifiers.length > 0) {
+      // Always update when data source changes, or if lists are empty
+      const shouldUpdate = !settings.identifierList || 
+                          settings.identifierList.length === 0 || 
+                          JSON.stringify(settings.identifierList) !== JSON.stringify(fallbackIdentifiers);
+      
+      if (shouldUpdate) {
+        updateSettings(atomId, { 
+          identifierList: fallbackIdentifiers,
+          identifiers: fallbackIdentifiers 
+        });
+      }
     }
-    // If no selection yet, default to every available measure
-    return fallbackMeasures;
-  });
+  }, [fallbackIdentifiers, settings.identifierList, atomId, updateSettings]);
 
-  // Ensure local selection includes all measures once they are available
+  useEffect(() => {
+    if (fallbackMeasures.length > 0) {
+      // Always update when data source changes, or if lists are empty
+      const shouldUpdate = !settings.measureList || 
+                          settings.measureList.length === 0 || 
+                          JSON.stringify(settings.measureList) !== JSON.stringify(fallbackMeasures);
+      
+      if (shouldUpdate) {
+        updateSettings(atomId, { 
+          measureList: fallbackMeasures,
+          measures: fallbackMeasures 
+        });
+      }
+    }
+  }, [fallbackMeasures, settings.measureList, atomId, updateSettings]);
+
+  // Get selectedMeasures from global store
+  const localSelectedMeasures = Array.isArray(settings.selectedMeasureNames) && settings.selectedMeasureNames.length > 0
+    ? settings.selectedMeasureNames
+    : (Array.isArray(settings.selectedMeasures) && settings.selectedMeasures.length > 0
+        ? (typeof settings.selectedMeasures[0] === 'string'
+            ? settings.selectedMeasures as string[]
+            : (settings.selectedMeasures as any[]).map(m => m.field).filter(Boolean))
+        : fallbackMeasures);
+
+  // Ensure global selection includes all measures once they are available
   useEffect(() => {
     if (localSelectedMeasures.length === 0 && fallbackMeasures.length > 0) {
-      setLocalSelectedMeasures(fallbackMeasures);
+      updateSettings(atomId, { selectedMeasureNames: fallbackMeasures });
     }
-  }, [fallbackMeasures]);
+  }, [fallbackMeasures, localSelectedMeasures.length, atomId, updateSettings]);
 
-  // Keep local state in sync with external updates coming **from the Settings tab only**
+  // Update selected identifiers when data source changes
   useEffect(() => {
-    if (Array.isArray(settings.selectedMeasureNames)) {
-      setLocalSelectedMeasures(settings.selectedMeasureNames);
+    if (fallbackIdentifiers.length > 0) {
+      // Filter selected identifiers to only include those that exist in the new data
+      const validSelectedIdentifiers = selectedIdentifiers.filter(id => 
+        fallbackIdentifiers.includes(id)
+      );
+      
+      // If no valid identifiers or data source changed, select identifiers with unique_count > 1
+      if (validSelectedIdentifiers.length === 0 || 
+          JSON.stringify(validSelectedIdentifiers) !== JSON.stringify(selectedIdentifiers)) {
+        const uniqueIdentifiers = fallbackIdentifiers.filter(identifier => {
+          const colInfo = (settings.allColumns || []).find((col: any) => col.column === identifier);
+          return colInfo && colInfo.unique_count > 1;
+        });
+        const defaultIdentifiers = uniqueIdentifiers.length > 0 ? uniqueIdentifiers : fallbackIdentifiers;
+        updateSettings(atomId, { selectedIdentifiers: defaultIdentifiers });
+      }
     }
-  }, [settings.selectedMeasureNames]);
+  }, [fallbackIdentifiers, selectedIdentifiers, settings.allColumns, atomId, updateSettings]);
+
+  // Update selected measures when data source changes
+  useEffect(() => {
+    if (fallbackMeasures.length > 0) {
+      // Filter selected measures to only include those that exist in the new data
+      const validSelectedMeasures = localSelectedMeasures.filter(measure => 
+        fallbackMeasures.includes(measure)
+      );
+      
+      // If no valid measures or data source changed, select all available measures for the settings panel
+      if (validSelectedMeasures.length === 0 || 
+          JSON.stringify(validSelectedMeasures) !== JSON.stringify(localSelectedMeasures)) {
+        updateSettings(atomId, { 
+          selectedMeasureNames: fallbackMeasures
+        });
+      }
+    }
+  }, [fallbackMeasures, localSelectedMeasures, atomId, updateSettings]);
 
   // 🔧 CRITICAL FIX: Automatically switch to Exhibition tab when AI results are available
   // useEffect(() => {
@@ -127,26 +180,34 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     if (source === 'identifiers' && destination === 'measures') {
       const newIdentifiers = identifierList.filter(i => i !== item);
       const newMeasures = [...measureList, item];
-      setIdentifierList(newIdentifiers);
-      setMeasureList(newMeasures);
       // If the item was selected in identifiers, move its selection to measures
       if (selectedIdentifiers.includes(item)) {
         updateSettings(atomId, {
           selectedIdentifiers: selectedIdentifiers.filter(id => id !== item),
+          selectedMeasureNames: [...localSelectedMeasures, item]
         });
-        setLocalSelectedMeasures(prev => [...prev, item]);
       }
-      updateSettings(atomId, { identifiers: newIdentifiers, measures: newMeasures });
+      updateSettings(atomId, { 
+        identifiers: newIdentifiers, 
+        measures: newMeasures,
+        identifierList: newIdentifiers,
+        measureList: newMeasures
+      });
     } else if (source === 'measures' && destination === 'identifiers') {
       const newMeasures = measureList.filter(m => m !== item);
       const newIdentifiers = [...identifierList, item];
-      setIdentifierList(newIdentifiers);
-      setMeasureList(newMeasures);
       // If the item was selected in measures, move its selection to identifiers
       if (localSelectedMeasures.includes(item)) {
-        setLocalSelectedMeasures(localSelectedMeasures.filter(m => m !== item));
+        updateSettings(atomId, {
+          selectedMeasureNames: localSelectedMeasures.filter(m => m !== item)
+        });
       }
-      updateSettings(atomId, { identifiers: newIdentifiers, measures: newMeasures });
+      updateSettings(atomId, { 
+        identifiers: newIdentifiers, 
+        measures: newMeasures,
+        identifierList: newIdentifiers,
+        measureList: newMeasures
+      });
     }
   };
 
@@ -165,10 +226,9 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     const newSelected = isSelected
       ? localSelectedMeasures.filter(m => m !== measure)
       : [...localSelectedMeasures, measure];
-    setLocalSelectedMeasures(newSelected);
     // Persist selected measure names in settings so canvas dropdown updates but without altering measure rows
     updateSettings(atomId, { selectedMeasureNames: newSelected });
-  }, [localSelectedMeasures, atomId, updateSettings, selectedIdentifiers]);
+  }, [localSelectedMeasures, atomId, updateSettings]);
 
   const selectedAggregationMethods = Array.isArray(settings.selectedAggregationMethods) && settings.selectedAggregationMethods.length > 0
     ? settings.selectedAggregationMethods
@@ -202,8 +262,8 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
       const defaultIdentifiers = uniqueIdentifiers.length > 0 ? uniqueIdentifiers : fallbackIdentifiers;
       updateSettings(atomId, { selectedIdentifiers: defaultIdentifiers });
     }
-    if (fallbackMeasures.length > 0 && (!Array.isArray(settings.selectedMeasures) || settings.selectedMeasures.length === 0)) {
-      updateSettings(atomId, { selectedMeasures: fallbackMeasures });
+    if (fallbackMeasures.length > 0 && (!Array.isArray(settings.selectedMeasureNames) || settings.selectedMeasureNames.length === 0)) {
+      updateSettings(atomId, { selectedMeasureNames: fallbackMeasures });
     }
     const allAggs = ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'];
     if ((!Array.isArray(settings.selectedAggregationMethods) || settings.selectedAggregationMethods.length === 0)) {
@@ -261,6 +321,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                         label={identifier}
                         checked={isSelected}
                         onCheckedChange={() => toggleIdentifier(identifier)}
+                        labelClassName="text-ms cursor-pointer capitalize truncate max-w-full"
                       />
                     </div>
                   );
@@ -292,6 +353,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                         label={measure}
                         checked={isSelected}
                         onCheckedChange={() => toggleMeasure(measure)}
+                        labelClassName="text-ms cursor-pointer capitalize truncate max-w-full"
                       />
                     </div>
                   );
@@ -316,6 +378,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                         label={agg}
                         checked={isSelected}
                         onCheckedChange={() => toggleAggregationMethod(agg)}
+                        labelClassName="text-ms cursor-pointer capitalize truncate max-w-full"
                       />
                     </div>
                   );

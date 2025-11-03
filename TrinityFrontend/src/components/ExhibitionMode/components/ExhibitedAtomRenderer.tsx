@@ -6,6 +6,8 @@ import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import TableTemplate from '@/templates/tables/table';
 import type { DroppedAtom } from '../store/exhibitionStore';
 import FeatureOverview from './atoms/FeatureOverview';
+import ChartMaker from './atoms/ChartMaker';
+import EvaluateModelsFeature from './atoms/EvaluateModelsFeature';
 
 interface ExhibitedAtomRendererProps {
   atom: DroppedAtom;
@@ -919,6 +921,10 @@ const DefaultExhibitedAtom: React.FC<
 };
 
 const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, variant = 'full' }) => {
+  console.log('🔍 ExhibitedAtomRenderer - atom:', atom);
+  console.log('🔍 ExhibitedAtomRenderer - atom.atomId:', atom.atomId);
+  console.log('🔍 ExhibitedAtomRenderer - atom.metadata:', atom.metadata);
+  
   const metadata = useMemo<AtomMetadata>(
     () => (isRecord(atom.metadata) ? atom.metadata : undefined),
     [atom.metadata],
@@ -946,6 +952,14 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
     return <FeatureOverview metadata={atom.metadata} variant={variant} />;
   }
 
+  if (atom.atomId === 'chart-maker') {
+    return <ChartMaker metadata={atom.metadata} variant={variant} />;
+  }
+
+  if (atom.atomId === 'evaluate-models-feature') {
+    return <EvaluateModelsFeature metadata={atom.metadata} variant={variant} />;
+  }
+
   const previewImage = typeof metadata?.['previewImage'] === 'string' ? (metadata['previewImage'] as string) : undefined;
 
   if (previewImage && previewImage.length > 0) {
@@ -965,7 +979,7 @@ const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, var
   }
 
   if (chartConfig) {
-    return <RechartsChartRenderer {...chartConfig} readOnly />;
+    return <RechartsChartRenderer {...chartConfig} readOnly captureId={atom.id} />;
   }
 
   if (htmlPreview) {

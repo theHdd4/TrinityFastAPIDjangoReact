@@ -132,17 +132,55 @@ async def perform_create(
     identifiers: str = Form(None),
 ):
     try:
+        import logging
+        logger = logging.getLogger("createcolumn.perform")
+        
+        logger.info(f"🔵 [CREATE-PERFORM] Starting perform operation")
+        logger.info(f"📂 [CREATE-PERFORM] Input file: {object_names}")
+        
         # 🔧 CRITICAL FIX: Resolve the full MinIO object path
         prefix = await get_object_prefix()
         full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
         
-        print(f"🔧 File path resolution: original={object_names}, prefix={prefix}, full_path={full_object_path}")
+        logger.info(f"🔧 [CREATE-PERFORM] File path resolution: original={object_names}, prefix={prefix}, full_path={full_object_path}")
         
+        # Load DataFrame from MinIO
         df = get_minio_df(bucket_name, full_object_path)
+        
+        logger.info(f"📊 [CREATE-PERFORM] INITIAL LOAD - DataFrame info:")
+        logger.info(f"   - Shape: {df.shape}")
+        logger.info(f"   - Columns: {list(df.columns)}")
+        logger.info(f"   - Dtypes BEFORE any processing: {df.dtypes.to_dict()}")
+        
+        # Identify date columns before any processing
+        date_columns = []
+        for col in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                date_columns.append(col)
+                logger.info(f"   ✅ Found date column: '{col}' with dtype: {df[col].dtype}")
+        
+        logger.info(f"📅 [CREATE-PERFORM] Date columns detected: {date_columns}")
+        
+        # Lowercase column names
         df.columns = df.columns.str.strip().str.lower()
+        
+        logger.info(f"📊 [CREATE-PERFORM] AFTER lowercasing columns - Dtypes: {df.dtypes.to_dict()}")
+        
+        # ⚠️ CRITICAL: Only clean TEXT columns, preserve dates!
         # Only clean string columns, not all columns
+        object_columns_before = df.select_dtypes(include='object').columns.tolist()
+        logger.info(f"🔍 [CREATE-PERFORM] Object columns to clean: {object_columns_before}")
+        
         for col in df.select_dtypes(include='object').columns:
+            # Check if this is actually a date column that got converted to object
+            if col in [c.lower() for c in date_columns]:
+                logger.warning(f"⚠️ [CREATE-PERFORM] Skipping '{col}' - it's a date column!")
+                continue
+            
+            logger.info(f"🧹 [CREATE-PERFORM] Cleaning text column: '{col}'")
             df[col] = df[col].astype(str).str.strip().str.lower()
+        
+        logger.info(f"📊 [CREATE-PERFORM] AFTER cleaning text - Dtypes: {df.dtypes.to_dict()}")
         form_data = await request.form()
 
         # Parse identifiers from form data
@@ -557,12 +595,36 @@ async def perform_create(
             raise ValueError(
                 "No new columns were created. This may be due to missing required columns (e.g., 'PPU' for RPI, or selected columns not present in your file for dummy). Please check your column selection and input data.")
 
+        logger.info(f"📊 [CREATE-PERFORM] FINAL DataFrame info AFTER all operations:")
+        logger.info(f"   - Shape: {df.shape}")
+        logger.info(f"   - All Columns: {list(df.columns)}")
+        logger.info(f"   - New Columns created: {new_cols_total}")
+        logger.info(f"   - Dtypes BEFORE CSV conversion: {df.dtypes.to_dict()}")
+        
+        # Check for date columns in final DataFrame
+        final_date_columns = []
+        for col in df.columns:
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                final_date_columns.append(col)
+                logger.info(f"   ✅ Date column preserved: '{col}' with dtype: {df[col].dtype}")
+        
+        if len(final_date_columns) != len(date_columns):
+            logger.warning(f"⚠️ [CREATE-PERFORM] Date column count changed!")
+            logger.warning(f"   Initial date columns: {date_columns}")
+            logger.warning(f"   Final date columns: {final_date_columns}")
+            logger.warning(f"   LOST: {set(date_columns) - set(final_date_columns)}")
 
         # Save result file using object_names only
         create_key = f"{object_names}_create.csv"
+        
+        logger.info(f"💾 [CREATE-PERFORM] Saving results to MinIO: {create_key}")
+        
         # Clean DataFrame before saving to CSV to handle NaN, infinity values
         clean_df_for_csv = df.replace({np.nan: None, np.inf: None, -np.inf: None})
         csv_bytes = clean_df_for_csv.to_csv(index=False).encode("utf-8")
+        
+        logger.info(f"📄 [CREATE-PERFORM] CSV preview (first 500 chars): {csv_bytes[:500]}")
+        
         minio_client.put_object(
             bucket_name=bucket_name,
             object_name=create_key,
@@ -570,11 +632,19 @@ async def perform_create(
             length=len(csv_bytes),
             content_type="text/csv",
         )
+        
+        logger.info(f"✅ [CREATE-PERFORM] Saved to MinIO successfully")
+        
         # 🔧 CRITICAL FIX: Return actual data like GroupBy does
         # Convert DataFrame to list of dictionaries for JSON serialization
         # Clean DataFrame to handle NaN, infinity, and other non-JSON-serializable values
         clean_df = df.replace({np.nan: None, np.inf: None, -np.inf: None})
         results_data = clean_df.to_dict('records')
+        
+        logger.info(f"🎉 [CREATE-PERFORM] Operation completed successfully")
+        logger.info(f"   - Total rows: {len(df)}")
+        logger.info(f"   - Total columns: {len(df.columns)}")
+        logger.info(f"   - New columns: {len(new_cols_total)}")
         
         return {
             "status": "SUCCESS", 
@@ -590,6 +660,10 @@ async def perform_create(
             }
         }
     except Exception as e:
+        logger.error(f"❌ [CREATE-PERFORM] Operation failed: {e}")
+        logger.error(f"❌ [CREATE-PERFORM] Exception type: {type(e)}")
+        import traceback
+        logger.error(f"❌ [CREATE-PERFORM] Traceback: {traceback.format_exc()}")
         return {"status": "FAILURE", "error": str(e)}
 
 from fastapi import Query
@@ -628,10 +702,12 @@ async def save_createcolumn_dataframe(
     project_name: str = Body(None),
     user_id: str = Body(None),
     project_id: int = Body(None),
-    operation_details: str = Body(None)
+    operation_details: str = Body(None),
+    overwrite_original: bool = Body(False)
 ):
     """
     Save a created column dataframe (CSV) to MinIO as Arrow file and save metadata to MongoDB.
+    If overwrite_original is True, overwrites the original input file.
     """
     import pandas as pd
     import pyarrow as pa
@@ -646,37 +722,130 @@ async def save_createcolumn_dataframe(
     print(f"🔍 DEBUG: project_name = '{project_name}'")
     print(f"🔍 DEBUG: user_id = '{user_id}'")
     print(f"🔍 DEBUG: project_id = {project_id}")
-    print(f"🔍 DEBUG: operation_details = '{operation_details[:200]}...' (truncated)")
+    print(f"🔍 DEBUG: operation_details = '{operation_details[:200]}...' (truncated)" if operation_details else "🔍 DEBUG: operation_details = None")
     print(f"🔍 DEBUG: filename = '{filename}'")
+    print(f"🔍 DEBUG: overwrite_original = {overwrite_original}")
 
     try:
-        # Parse CSV to DataFrame
-        df = pd.read_csv(io.StringIO(csv_data))
-        # Generate unique file key if not provided
-        if not filename:
-            file_id = str(uuid.uuid4())[:8]
-            filename = f"{file_id}_createcolumn.arrow"
-        if not filename.endswith('.arrow'):
-            filename += '.arrow'
-        # Get consistent object prefix and construct full path
-        prefix = await get_object_prefix()
-        filename = f"{prefix}create-data/{filename}"
-        print(f"[DEBUG] Saving to MinIO: bucket={MINIO_BUCKET}, filename={filename}")
-        # Save to MinIO
-        table = pa.Table.from_pandas(df)
-        arrow_buffer = pa.BufferOutputStream()
-        with ipc.new_file(arrow_buffer, table.schema) as writer:
-            writer.write_table(table)
-        arrow_bytes = arrow_buffer.getvalue().to_pybytes()
+        # 🔧 DTYPE FIX: Use robust CSV parsing with better dtype inference
+        # This prevents dtype errors on sparse columns, mixed types, and date columns
+        import logging
+        logger = logging.getLogger("createcolumn.save")
+        
+        try:
+            # 🔧 FIX: Use intelligent content-based date detection (NO hardcoded column names!)
+            # First, scan a sample to detect date columns by analyzing the CONTENT
+            # Use same sampling size as DataFrame Operations (10,000 rows) for consistency
+            df_preview = pd.read_csv(
+                io.StringIO(csv_data),
+                nrows=10000  # Sample 10,000 rows to detect patterns (same as DataFrame Operations)
+            )
+            
+            date_columns = []
+            for col in df_preview.columns:
+                # Skip if column is already numeric
+                if pd.api.types.is_numeric_dtype(df_preview[col]):
+                    continue
+                
+                # Get non-null values
+                non_null_values = df_preview[col].dropna()
+                if len(non_null_values) == 0:
+                    continue
+                
+                # Analyze content: try to parse as dates
+                try:
+                    # Attempt to parse sample values as dates (use up to 100 samples for robustness)
+                    sample_size = min(100, len(non_null_values))
+                    parsed = pd.to_datetime(non_null_values.head(sample_size), errors='coerce')
+                    # If at least 80% of samples parse successfully, it's a date column
+                    success_rate = parsed.notna().sum() / len(parsed)
+                    if success_rate >= 0.8:
+                        date_columns.append(col)
+                except:
+                    pass  # Not a date column
+            
+            # ✅ Improved CSV parsing with content-based date detection
+            df = pd.read_csv(
+                io.StringIO(csv_data),
+                low_memory=False,           # Scan ALL rows for better dtype inference
+                parse_dates=date_columns if date_columns else False,  # Parse detected date columns
+                infer_datetime_format=True, # Faster date parsing
+                na_values=['', 'None', 'null', 'NULL', 'nan', 'NaN', 'NA', 'N/A'],
+            )
+            
+            # Verify date columns were parsed correctly
+            for col in date_columns:
+                if col in df.columns and not pd.api.types.is_datetime64_any_dtype(df[col]):
+                    # Try manual conversion as fallback
+                    try:
+                        df[col] = pd.to_datetime(df[col], errors='coerce')
+                    except:
+                        pass  # Keep original dtype if conversion fails
+            
+        except Exception as parse_exc:
+            logger.error(f"❌ [CREATE-SAVE] CSV parsing failed: {parse_exc}")
+            logger.error(f"❌ [CREATE-SAVE] CSV preview: {csv_data[:500]}")
+            raise HTTPException(status_code=400, detail=f"Invalid csv_data: {parse_exc}")
+        
+        # Handle filename based on overwrite_original flag
+        if overwrite_original:
+            # When overwriting, use the filename as-is (should be the original file path)
+            if not filename:
+                raise HTTPException(status_code=400, detail="filename is required when overwriting original file")
+            if not filename.endswith('.arrow'):
+                filename += '.arrow'
+            final_filename = filename
+            logger.info(f"🔄 [CREATE-SAVE] Overwriting original file: {final_filename}")
+        else:
+            # Normal save - create new file in create-data folder
+            if not filename:
+                file_id = str(uuid.uuid4())[:8]
+                filename = f"{file_id}_createcolumn.arrow"
+            if not filename.endswith('.arrow'):
+                filename += '.arrow'
+            # Get consistent object prefix and construct full path
+            prefix = await get_object_prefix()
+            final_filename = f"{prefix}create-data/{filename}"
+            logger.info(f"💾 [CREATE-SAVE] Creating new file: {final_filename}")
+        
+        # Set message based on operation type
+        message = "Original file updated successfully" if overwrite_original else "DataFrame saved successfully"
+        
+        # Save to MinIO with dtype validation
+        logger.info(f"🔍 [CREATE-SAVE] Pre-save DataFrame inspection:")
+        logger.info(f"   - Shape: {df.shape}")
+        logger.info(f"   - Columns: {list(df.columns)}")
+        logger.info(f"   - Dtypes: {df.dtypes.to_dict()}")
+        
+        try:
+            logger.info(f"🔄 [CREATE-SAVE] Converting to Arrow format...")
+            table = pa.Table.from_pandas(df)
+            arrow_buffer = pa.BufferOutputStream()
+            with ipc.new_file(arrow_buffer, table.schema) as writer:
+                writer.write_table(table)
+            arrow_bytes = arrow_buffer.getvalue().to_pybytes()
+            logger.info(f"✅ [CREATE-SAVE] Arrow conversion successful")
+            logger.info(f"📦 [CREATE-SAVE] Arrow buffer size: {len(arrow_bytes)} bytes")
+        except Exception as arrow_exc:
+            logger.error(f"❌ [CREATE-SAVE] Arrow conversion failed: {arrow_exc}")
+            logger.error(f"❌ [CREATE-SAVE] DataFrame info at failure:")
+            logger.error(f"   - Columns: {list(df.columns)}")
+            logger.error(f"   - Dtypes: {df.dtypes.to_dict()}")
+            raise HTTPException(status_code=400, detail=f"Failed to convert DataFrame to Arrow format: {arrow_exc}")
+        
+        logger.info(f"⬆️ [CREATE-SAVE] Uploading to MinIO...")
         minio_client.put_object(
             MINIO_BUCKET,
-            filename,
+            final_filename,
             data=io.BytesIO(arrow_bytes),
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
+        logger.info(f"✅ [CREATE-SAVE] Upload successful")
+        
         # Cache in Redis for 1 hour
-        redis_client.setex(filename, 3600, arrow_bytes)
+        redis_client.setex(final_filename, 3600, arrow_bytes)
+        logger.info(f"✅ [CREATE-SAVE] Cached in Redis")
         
         # Save operation details to MongoDB if provided
         mongo_save_result = None
@@ -687,10 +856,11 @@ async def save_createcolumn_dataframe(
                 
                 # Get the input file from operation details
                 input_file = operation_data.get("input_file", "unknown_input_file")
-                operation_data["saved_file"] = filename
+                operation_data["saved_file"] = final_filename
                 operation_data["file_shape"] = df.shape
                 operation_data["file_columns"] = list(df.columns)
                 operation_data["saved_at"] = datetime.utcnow()
+                operation_data["overwrite_original"] = overwrite_original
                 
                 # Save to MongoDB
                 mongo_save_result = await save_createandtransform_configs(
@@ -705,19 +875,27 @@ async def save_createcolumn_dataframe(
                 print(f"✅ MongoDB save result: {mongo_save_result}")
                 
             except Exception as mongo_error:
-                print(f"⚠️ MongoDB save error: {mongo_error}")
+                logger.warning(f"⚠️ [CREATE-SAVE] MongoDB save error: {mongo_error}")
                 # Don't fail the entire operation if MongoDB save fails
                 mongo_save_result = {"status": "error", "error": str(mongo_error)}
         
+        logger.info(f"🎉 [CREATE-SAVE] Save operation completed successfully")
+        
         return {
-            "result_file": filename,
+            "result_file": final_filename,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully",
+            "message": message,
+            "overwrite_original": overwrite_original,
             "mongo_save_result": mongo_save_result
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"⚠️ save_createcolumn_dataframe error: {e}")
+        logger.error(f"❌ [CREATE-SAVE] Save operation failed: {e}")
+        logger.error(f"❌ [CREATE-SAVE] Exception type: {type(e)}")
+        import traceback
+        logger.error(f"❌ [CREATE-SAVE] Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -982,31 +1160,15 @@ async def get_createcolumn_configuration(
         print(f"Error retrieving createcolumn configuration: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve createcolumn configuration: {str(e)}")
 
-@router.post("/cardinality")
+@router.get("/cardinality")
 async def get_cardinality_data(
-    validator_atom_id: str = Form(...),
-    file_key: str = Form(...),
-    bucket_name: str = Form(...),
-    object_names: str = Form(...),
+    object_name: str = Query(..., description="Object name/path of the dataframe"),
 ):
     """Return cardinality data for columns in the dataset."""
     try:
-        # Get the current object prefix
-        prefix = await get_object_prefix()
-        
-        # Construct the full object path
-        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
-        
-        print(f"🔍 CreateColumn Cardinality file path resolution:")
-        print(f"  Original object_names: {object_names}")
-        print(f"  Current prefix: {prefix}")
-        print(f"  Full object path: {full_object_path}")
-        
-        # Load the dataframe
-        df = get_minio_df(bucket=bucket_name, file_key=full_object_path)
+        # Load the dataframe using object_name as-is (it already contains the full path)
+        df = get_minio_df(bucket="trinity", file_key=object_name)
         df.columns = df.columns.str.strip().str.lower()
-        
-        print(f"✅ Successfully loaded dataframe for cardinality with shape: {df.shape}")
         
         # Generate cardinality data
         cardinality_data = []

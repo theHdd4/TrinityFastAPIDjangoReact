@@ -1,9 +1,16 @@
 import React from 'react';
-import { Check, ChevronsDown, ChevronsUp, CircleDashed, Move, Palette, Sparkles, Trash2 } from 'lucide-react';
+import { ChevronsDown, ChevronsUp, CircleDashed, Move, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { type ShapeStrokeStyle } from './constants';
+import {
+  ColorTray,
+  DEFAULT_SOLID_COLOR_OPTIONS,
+  DEFAULT_GRADIENT_COLOR_OPTIONS,
+  type ColorTrayOption,
+  type ColorTraySection,
+} from '@/templates/color-tray';
 
 interface ShapeToolbarProps {
   label: string;
@@ -34,30 +41,58 @@ const clampStrokeWidth = (value: number) => Math.min(Math.max(value, 0), 60);
 
 const clampOpacity = (value: number) => Math.min(Math.max(value, 0), 1);
 
-const OUTLINE_COLORS: readonly string[] = [
-  '#111827',
-  '#1f2937',
-  '#4b5563',
-  '#6b7280',
-  '#0f172a',
-  '#2563eb',
-  '#1d4ed8',
-  '#4338ca',
-  '#7c3aed',
-  '#9333ea',
-  '#be123c',
-  '#dc2626',
-  '#f97316',
-  '#facc15',
-  '#10b981',
-  '#14b8a6',
-  '#0ea5e9',
-  '#38bdf8',
-  '#34d399',
-  '#f472b6',
-  '#fcd34d',
-  '#ffffff',
-  '#000000',
+const SHAPE_GRADIENT_OPTIONS: readonly ColorTrayOption[] = DEFAULT_GRADIENT_COLOR_OPTIONS.map(option => ({
+  ...option,
+  disabled: true,
+})) as readonly ColorTrayOption[];
+
+const SHAPE_FILL_SECTIONS: readonly ColorTraySection[] = [
+  {
+    id: 'solids',
+    label: 'Solid colors',
+    options: DEFAULT_SOLID_COLOR_OPTIONS,
+  },
+  {
+    id: 'gradients',
+    label: 'Gradients',
+    options: SHAPE_GRADIENT_OPTIONS,
+  },
+];
+
+const TRANSPARENT_OUTLINE_OPTION: ColorTrayOption = {
+  id: 'transparent',
+  value: 'transparent',
+  ariaLabel: 'Remove outline',
+  preview: (
+    <div className="flex h-full w-full items-center justify-center rounded-[inherit] bg-background">
+      <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
+        <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
+        <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    </div>
+  ),
+  groupId: 'utility',
+  groupLabel: 'Utility',
+  groupOrder: -2,
+  toneOrder: 0,
+};
+
+const OUTLINE_SOLID_OPTIONS = [
+  TRANSPARENT_OUTLINE_OPTION,
+  ...DEFAULT_SOLID_COLOR_OPTIONS,
+] as readonly ColorTrayOption[];
+
+const OUTLINE_COLOR_SECTIONS: readonly ColorTraySection[] = [
+  {
+    id: 'solids',
+    label: 'Solid colors',
+    options: OUTLINE_SOLID_OPTIONS,
+  },
+  {
+    id: 'gradients',
+    label: 'Gradients',
+    options: SHAPE_GRADIENT_OPTIONS,
+  },
 ];
 
 type OutlineStyleOptionId = 'none' | ShapeStrokeStyle;
@@ -95,8 +130,24 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
 }) => {
   const defaultStrokeWidth = supportsFill ? 2 : 6;
 
+  const normalizedFillId =
+    typeof fill === 'string' && fill.startsWith('#')
+      ? `solid-${fill.slice(1).toLowerCase()}`
+      : fill?.toLowerCase?.() ?? '';
+
+  const normalizedOutlineId = (() => {
+    if (typeof stroke === 'string' && stroke.startsWith('#')) {
+      return `solid-${stroke.slice(1).toLowerCase()}`;
+    }
+    return stroke?.toLowerCase?.() ?? '';
+  })();
+
   const handleToolbarMouseDown = (event: React.MouseEvent) => {
     event.preventDefault();
+  };
+
+  const handleSliderMouseDown = (event: React.MouseEvent<HTMLInputElement>) => {
+    event.stopPropagation();
   };
 
   const handleOpacityInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -125,6 +176,21 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
 
   const handleStrokeWidthSliderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const next = clampStrokeWidth(Number(event.target.value));
+
+    if (Number.isNaN(next)) {
+      return;
+    }
+
+    if (next <= 0) {
+      handleNoOutline();
+      return;
+    }
+
+    if (stroke === 'transparent') {
+      const fallbackColor = supportsFill && fill !== 'transparent' ? fill : '#111827';
+      onStrokeChange(fallbackColor);
+    }
+
     onStrokeWidthChange(next);
   };
 
@@ -173,18 +239,40 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       <PopoverContent
         side="top"
         align="center"
-        className="z-[4000] w-48 rounded-xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+        className="z-[4000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
         data-text-toolbar-root
       >
-        <div className="flex items-center justify-between gap-2">
-          <input
-            type="color"
-            value={fill || '#111827'}
+        <div className="w-[360px] space-y-4 p-4">
+          <ColorTray
+            sections={SHAPE_FILL_SECTIONS}
+            selectedId={normalizedFillId}
+            onSelect={option => {
+              if (!supportsFill || !onFillChange) {
+                return;
+              }
+
+              const value = option.value ?? option.id;
+              if (typeof value === 'string' && value.startsWith('#')) {
+                onFillChange(value);
+                return;
+              }
+              if (option.id.startsWith('solid-')) {
+                onFillChange(`#${option.id.slice(6)}`);
+              }
+            }}
             disabled={!supportsFill || !onFillChange}
-            onChange={event => onFillChange?.(event.target.value)}
-            className="h-10 w-full cursor-pointer rounded-lg border border-border"
+            defaultSectionId="solids"
           />
-          <Palette className="h-5 w-5 text-muted-foreground" />
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={fill || '#111827'}
+              disabled={!supportsFill || !onFillChange}
+              onChange={event => onFillChange?.(event.target.value)}
+              className="h-11 w-full cursor-pointer rounded-2xl border border-border"
+            />
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
+          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -216,134 +304,125 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       <PopoverContent
         side="top"
         align="start"
-        className="z-[4000] w-72 rounded-2xl border border-border/70 bg-background/95 p-3 shadow-2xl"
+        className="z-[4000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
         data-text-toolbar-root
       >
-        <p className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Outline</p>
-        <div className="mt-2 flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            {OUTLINE_STYLE_OPTIONS.map(option => {
-              const isActive = option.id === 'none'
-                ? isOutlineDisabled
-                : !isOutlineDisabled && activeStrokeStyle === option.style;
+        <div className="w-[360px] space-y-4 p-4">
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Outline style</p>
+            <div className="grid grid-cols-5 gap-2">
+              {OUTLINE_STYLE_OPTIONS.map(option => {
+                const isActive = option.id === 'none'
+                  ? isOutlineDisabled
+                  : !isOutlineDisabled && activeStrokeStyle === option.style;
 
-              return (
-                <button
-                  key={option.id}
-                  type="button"
-                  onMouseDown={handleToolbarMouseDown}
-                  onClick={() => handleOutlineStyleSelect(option.id)}
-                  className={cn(
-                    'flex h-9 w-9 items-center justify-center rounded-xl border border-border/60 bg-background transition-colors hover:border-primary/60 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                    isActive && 'border-primary bg-primary/10 text-primary shadow-sm',
-                  )}
-                  aria-label={option.label}
-                >
-                  {option.id === 'none' ? (
-                    <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
-                      <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
-                      <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 32 18" className="h-5 w-6" aria-hidden>
-                      <line
-                        x1="4"
-                        y1="9"
-                        x2="28"
-                        y2="9"
-                        stroke={outlineIndicatorColor}
-                        strokeWidth={2.6}
-                        strokeLinecap="round"
-                        strokeDasharray={
-                          option.style === 'dashed'
-                            ? '8 6'
-                            : option.style === 'dash-dot'
-                            ? '10 6 3 6'
-                            : option.style === 'dotted'
-                            ? '2 6'
-                            : undefined
-                        }
-                      />
-                    </svg>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <span className="text-[11px] font-semibold text-muted-foreground">Color</span>
-            <div className="grid grid-cols-6 gap-2">
-              {OUTLINE_COLORS.map(color => {
-                const isActive = !isOutlineDisabled && stroke.toLowerCase() === color.toLowerCase();
                 return (
                   <button
-                    key={color}
+                    key={option.id}
                     type="button"
                     onMouseDown={handleToolbarMouseDown}
-                    onClick={() => handleOutlineColorSelect(color)}
+                    onClick={() => handleOutlineStyleSelect(option.id)}
                     className={cn(
-                      'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                      isActive && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
+                      'flex h-11 items-center justify-center rounded-2xl border border-border/60 bg-background transition-colors hover:border-primary/60 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+                      isActive && 'border-primary bg-primary/10 text-primary shadow-sm',
                     )}
-                    style={{ backgroundColor: color }}
-                    aria-label={`Set outline color to ${color}`}
+                    aria-label={option.label}
                   >
-                    {isActive && <Check className="h-3 w-3 text-white" />}
+                    {option.id === 'none' ? (
+                      <svg viewBox="0 0 20 20" className="h-5 w-5" aria-hidden>
+                        <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
+                        <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 32 18" className="h-5 w-6" aria-hidden>
+                        <line
+                          x1="4"
+                          y1="9"
+                          x2="28"
+                          y2="9"
+                          stroke={outlineIndicatorColor}
+                          strokeWidth={2.6}
+                          strokeLinecap="round"
+                          strokeDasharray={
+                            option.style === 'dashed'
+                              ? '8 6'
+                              : option.style === 'dash-dot'
+                              ? '10 6 3 6'
+                              : option.style === 'dotted'
+                              ? '2 6'
+                              : undefined
+                          }
+                        />
+                      </svg>
+                    )}
                   </button>
                 );
               })}
-              <button
-                type="button"
-                onMouseDown={handleToolbarMouseDown}
-                onClick={handleNoOutline}
-                className={cn(
-                  'relative flex h-8 w-8 items-center justify-center rounded-full border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                  isOutlineDisabled && 'border-primary ring-2 ring-primary/60 ring-offset-1 ring-offset-background',
-                )}
-                aria-label="Remove outline"
-              >
-                <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden>
-                  <circle cx="10" cy="10" r="7.5" stroke="#cbd5f5" strokeWidth="1.4" fill="none" />
-                  <line x1="5" y1="15" x2="15" y2="5" stroke="#cbd5f5" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              </button>
             </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <span>Outline width</span>
+              <span className="text-foreground">{displayedStrokeWidth} px</span>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-muted/20 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-muted-foreground">0</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={60}
+                  value={displayedStrokeWidth}
+                  onChange={handleStrokeWidthSliderChange}
+                  onMouseDown={handleSliderMouseDown}
+                  className="h-1.5 w-full cursor-pointer accent-primary"
+                />
+                <span className="text-xs font-medium text-muted-foreground">60</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Outline color</p>
+            <ColorTray
+              sections={OUTLINE_COLOR_SECTIONS}
+              selectedId={isOutlineDisabled ? 'transparent' : normalizedOutlineId}
+              onSelect={option => {
+                const value = option.value ?? option.id;
+                if (value === 'transparent') {
+                  handleNoOutline();
+                  return;
+                }
+                if (typeof value === 'string' && value.startsWith('#')) {
+                  handleOutlineColorSelect(value);
+                  return;
+                }
+                if (option.id.startsWith('solid-')) {
+                  handleOutlineColorSelect(`#${option.id.slice(6)}`);
+                }
+              }}
+              defaultSectionId="solids"
+            />
             <div className="flex items-center gap-2">
               <input
                 type="color"
                 value={stroke === 'transparent' ? '#111827' : stroke}
                 onChange={event => handleOutlineColorSelect(event.target.value)}
                 onMouseDown={handleToolbarMouseDown}
-                className="h-10 w-full cursor-pointer rounded-lg border border-border"
+                className="h-11 w-full cursor-pointer rounded-2xl border border-border"
               />
               <Button
                 variant="ghost"
                 size="sm"
                 type="button"
-                className="h-8 rounded-full px-3 text-[11px] font-medium"
+                className="h-9 rounded-full px-3 text-[11px] font-medium"
                 onMouseDown={handleToolbarMouseDown}
                 onClick={handleResetOutline}
               >
                 Reset
               </Button>
             </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span className="font-semibold">Stroke weight</span>
-              <span>{displayedStrokeWidth} px</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={60}
-              value={displayedStrokeWidth}
-              onChange={handleStrokeWidthSliderChange}
-              onMouseDown={handleToolbarMouseDown}
-              className="h-1.5 w-full cursor-pointer accent-primary"
-            />
           </div>
         </div>
       </PopoverContent>

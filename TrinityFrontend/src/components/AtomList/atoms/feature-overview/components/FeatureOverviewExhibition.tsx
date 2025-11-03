@@ -47,11 +47,12 @@ interface FeatureOverviewExhibitionProps {
   onRenameSelection?: (key: string, name: string) => void;
 }
 
-type VisibilityToggleKey = 'componentTitle' | 'allowEdit';
+type VisibilityToggleKey = 'componentTitle' | 'allowEdit' | 'transparentBackground';
 
 const DEFAULT_VISIBILITY: Record<VisibilityToggleKey, boolean> = {
   componentTitle: true,
   allowEdit: false,
+  transparentBackground: true,
 };
 
 const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string; description?: string }> = [
@@ -64,6 +65,11 @@ const VISIBILITY_TOGGLES: Array<{ key: VisibilityToggleKey; label: string; descr
     key: 'allowEdit',
     label: 'Allow edit in exhibition',
     description: 'Permit collaborators to adjust this component while in exhibition mode.',
+  },
+  {
+    key: 'transparentBackground',
+    label: 'Make background transparent',
+    description: 'Show only the chart content on exhibition slides. Disable to keep the card styling.',
   },
 ];
 
@@ -168,6 +174,7 @@ const normaliseSelectionForExhibition = ({
     exhibitionControls: {
       enableComponentTitle: visibility.componentTitle,
       allowEditInExhibition: visibility.allowEdit,
+      transparentBackground: visibility.transparentBackground,
     },
     viewType: componentType === 'trend_analysis' ? 'trend_analysis' : 'statistical_summary',
   };
@@ -370,48 +377,63 @@ const FeatureOverviewExhibition = React.forwardRef<
       }
 
       const existingAtoms = Array.isArray(existingConfig?.atoms) ? existingConfig.atoms : [];
-      const retainedAtoms = existingAtoms.filter((entry): entry is ExhibitionAtomPayload => {
+      const retainedAtoms = existingAtoms.reduce<ExhibitionAtomPayload[]>((acc, entry) => {
         if (!entry || typeof entry !== 'object') {
-          return false;
+          return acc;
         }
 
         const identifier = typeof entry.id === 'string' && entry.id.trim().length > 0 ? entry.id.trim() : '';
         const atomName = typeof entry.atom_name === 'string' && entry.atom_name.trim().length > 0 ? entry.atom_name.trim() : '';
-        if (!identifier || !atomName) {
-          return false;
+        if (!identifier || !atomName || identifier === cardIdentifier) {
+          return acc;
         }
 
-        return identifier !== cardIdentifier;
-      });
+        const components = Array.isArray(entry.exhibited_components)
+          ? entry.exhibited_components.filter(
+              (component): component is ExhibitionComponentPayload =>
+                component != null && typeof component === 'object' && typeof (component as { id?: unknown }).id === 'string',
+            )
+          : [];
 
-      const exhibitedComponents: ExhibitionComponentPayload[] = processedSelections.flatMap(
-        ({
-          id,
-          title,
-          componentType,
-          metadata,
-          manifest,
-          manifestId,
-        }) => {
+        if (components.length === 0) {
+          return acc;
+        }
+
+        acc.push({
+          id: identifier,
+          atom_name: atomName,
+          exhibited_components: components.map(component => clonePlain(component)),
+        });
+
+        return acc;
+      }, []);
+
+      const exhibitedComponentMap = new Map<string, ExhibitionComponentPayload>();
+      processedSelections.forEach(
+        ({ id, title, componentType, metadata, manifest, manifestId }) => {
+          if (!id) {
+            return;
+          }
+
           const componentLabel =
             componentType === 'trend_analysis' ? 'Trend Analysis' : 'Statistical Summary';
 
           const metadataPayload = clonePlain(metadata);
 
-          return [
-            {
-              id,
-              atomId,
-              title: `${title} · ${componentLabel}`,
-              category: 'Feature Overview',
-              color: 'bg-amber-500',
-              metadata: metadataPayload,
-              manifest,
-              manifest_id: manifestId,
-            },
-          ];
+          exhibitedComponentMap.set(id, {
+            id,
+            atomId,
+            title: `${title} · ${componentLabel}`,
+            category: 'Feature Overview',
+            color: 'bg-amber-500',
+            metadata: metadataPayload,
+            manifest,
+            manifest_id: manifestId,
+          });
         },
       );
+
+      const exhibitedComponents = Array.from(exhibitedComponentMap.values());
 
       const newEntry: ExhibitionAtomPayload = {
         id: cardIdentifier,

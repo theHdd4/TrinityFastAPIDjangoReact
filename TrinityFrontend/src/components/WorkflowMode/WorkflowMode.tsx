@@ -30,13 +30,15 @@ const WorkflowMode = () => {
   const [isRightPanelVisible, setIsRightPanelVisible] = useState(true);
   const [isAtomLibraryVisible, setIsAtomLibraryVisible] = useState(false);
   const [isRightPanelToolVisible, setIsRightPanelToolVisible] = useState(false);
+  const [workflowName, setWorkflowName] = useState<string>('Untitled Workflow');
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // Load workflow state from localStorage on component mount
+  // Load workflow state on component mount - always try MongoDB first, then localStorage
   useEffect(() => {
     const savedCanvasMolecules = localStorage.getItem('workflow-canvas-molecules');
     const savedCustomMolecules = localStorage.getItem('workflow-custom-molecules');
+    const savedWorkflowName = localStorage.getItem('workflow-name');
     
     if (savedCanvasMolecules) {
       try {
@@ -54,6 +56,10 @@ const WorkflowMode = () => {
       } catch (error) {
         console.error('Error loading custom molecules:', error);
       }
+    }
+    
+    if (savedWorkflowName) {
+      setWorkflowName(savedWorkflowName);
     }
 
   }, []);
@@ -77,6 +83,10 @@ const WorkflowMode = () => {
   useEffect(() => {
     localStorage.setItem('workflow-custom-molecules', JSON.stringify(customMolecules));
   }, [customMolecules]);
+
+  useEffect(() => {
+    localStorage.setItem('workflow-name', workflowName);
+  }, [workflowName]);
 
   const handleMoleculeSelect = (moleculeId: string) => {
     setSelectedMoleculeId(moleculeId);
@@ -128,8 +138,13 @@ const WorkflowMode = () => {
 
   const handleMoleculeAdd = (moleculeData: any) => {
     // Add the molecule to canvasMolecules with its position preserved
-    setCanvasMolecules(prev => [...prev, moleculeData]);
-    console.log(`✅ Added molecule "${moleculeData.title}" to canvasMolecules with position:`, moleculeData.position);
+    // Preserve isAICreated flag if it exists
+    const enrichedMoleculeData = {
+      ...moleculeData,
+      isAICreated: moleculeData.isAICreated ?? false
+    };
+    setCanvasMolecules(prev => [...prev, enrichedMoleculeData]);
+    console.log(`✅ Added molecule "${moleculeData.title}" to canvasMolecules with position:`, moleculeData.position, 'isAICreated:', enrichedMoleculeData.isAICreated);
   };
 
   const handleMoleculePositionsUpdate = (positions: { moleculeId: string; position: { x: number; y: number } }[]) => {
@@ -156,9 +171,13 @@ const WorkflowMode = () => {
     );
     const nextNumber = existingNewMolecules.length + 1;
     const finalName = `New Molecule ${nextNumber}`;
+    
+    // Generate molecule ID in format: molecule_name-number
+    const moleculeName = finalName.toLowerCase().replace(/\s+/g, '-');
+    const moleculeId = `${moleculeName}-${nextNumber}`;
 
     const newMolecule = {
-      id: `custom-molecule-${Date.now()}`,
+      id: moleculeId,
       title: finalName,
       atoms: []
     };
@@ -429,6 +448,44 @@ const WorkflowMode = () => {
     });
   };
 
+  // Helper function to check if canvas has any molecules
+  const checkCanvasHasMolecules = useCallback(() => {
+    return canvasMolecules.length > 0;
+  }, [canvasMolecules]);
+
+  // Helper function to get AI-created molecule IDs
+  const getAICreatedMolecules = useCallback(() => {
+    return canvasMolecules
+      .filter(mol => mol.isAICreated === true)
+      .map(mol => mol.id);
+  }, [canvasMolecules]);
+
+  // Helper function to clear only AI-created molecules
+  const clearAICreatedMolecules = useCallback(() => {
+    const beforeCount = canvasMolecules.length;
+    setCanvasMolecules(prev => prev.filter(mol => mol.isAICreated !== true));
+    setCustomMolecules(prev => prev.filter(mol => {
+      const canvasMol = canvasMolecules.find(cm => cm.id === mol.id);
+      return !canvasMol || canvasMol.isAICreated !== true;
+    }));
+    const afterCount = canvasMolecules.filter(mol => mol.isAICreated !== true).length;
+    console.log(`🗑️ Cleared ${beforeCount - afterCount} AI-created molecules`);
+  }, [canvasMolecules]);
+
+  // Helper function to get rightmost molecule position
+  const getRightmostMoleculePosition = useCallback(() => {
+    if (canvasMolecules.length === 0) return 0;
+    
+    const moleculeWidth = 280;
+    const rightmostMolecule = canvasMolecules.reduce((rightmost, mol) => {
+      const molRight = (mol.position?.x || 0) + moleculeWidth;
+      const rightmostRight = (rightmost.position?.x || 0) + moleculeWidth;
+      return molRight > rightmostRight ? mol : rightmost;
+    }, canvasMolecules[0]);
+    
+    return (rightmostMolecule.position?.x || 0) + moleculeWidth;
+  }, [canvasMolecules]);
+
   // Handle molecule addition (for fetched molecules)
 
 
@@ -492,32 +549,14 @@ const WorkflowMode = () => {
   // Function to save workflow configuration
   const saveWorkflowConfiguration = async () => {
     try {
-      // Get current app/project information from localStorage
-      const currentAppStr = localStorage.getItem('current-app');
-      const currentProjectStr = localStorage.getItem('current-project');
+      // Get environment variables for MongoDB saving
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const client_name = env.CLIENT_NAME || 'default_client';
+      const app_name = env.APP_NAME || 'default_app';
+      const project_name = env.PROJECT_NAME || 'default_project';
       
-      let client_id = '';
-      let app_id = '';
-      let project_id = null;
-      
-      if (currentAppStr) {
-        try {
-          const currentApp = JSON.parse(currentAppStr);
-          client_id = currentApp.client_name || '';
-          app_id = currentApp.app_name || '';
-        } catch (e) {
-          console.warn('Failed to parse current app:', e);
-        }
-      }
-      
-      if (currentProjectStr) {
-        try {
-          const currentProject = JSON.parse(currentProjectStr);
-          project_id = currentProject.id || null;
-        } catch (e) {
-          console.warn('Failed to parse current project:', e);
-        }
-      }
+      console.log('🔍 Saving workflow with:', { client_name, app_name, project_name });
 
       const response = await fetch(`${MOLECULES_API}/workflow/save`, {
         method: 'POST',
@@ -526,12 +565,13 @@ const WorkflowMode = () => {
         },
         credentials: 'include',
         body: JSON.stringify({
+          workflow_name: workflowName,
           canvas_molecules: canvasMolecules,
           custom_molecules: customMolecules,
           user_id: '', // Could be enhanced with actual user ID from session
-          client_id: client_id,
-          app_id: app_id,
-          project_id: project_id
+          client_name: client_name,
+          app_name: app_name,
+          project_name: project_name
         })
       });
 
@@ -556,81 +596,131 @@ const WorkflowMode = () => {
   };
 
   // Function to load workflow configuration
-  const loadWorkflowConfiguration = async () => {
+  const loadWorkflowConfiguration = async (showToast: boolean = true): Promise<boolean> => {
     try {
-      // Get current app/project information from localStorage
-      const currentAppStr = localStorage.getItem('current-app');
-      const currentProjectStr = localStorage.getItem('current-project');
+      // Get environment variables for MongoDB saving
+      const envStr = localStorage.getItem('env');
+      console.log('🔍 Raw env string from localStorage:', envStr);
       
-      let client_id = '';
-      let app_id = '';
-      let project_id = null;
+      const env = envStr ? JSON.parse(envStr) : {};
+      console.log('🔍 Parsed env object:', env);
       
-      if (currentAppStr) {
-        try {
-          const currentApp = JSON.parse(currentAppStr);
-          client_id = currentApp.client_name || '';
-          app_id = currentApp.app_name || '';
-        } catch (e) {
-          console.warn('Failed to parse current app:', e);
-        }
-      }
+      const client_name = env.CLIENT_NAME || 'default_client';
+      const app_name = env.APP_NAME || 'default_app';
+      const project_name = env.PROJECT_NAME || 'default_project';
       
-      if (currentProjectStr) {
-        try {
-          const currentProject = JSON.parse(currentProjectStr);
-          project_id = currentProject.id || null;
-        } catch (e) {
-          console.warn('Failed to parse current project:', e);
-        }
-      }
+      console.log('🔍 Extracted from localStorage:', { client_name, app_name, project_name });
+      
+      // Check if we have real values or just defaults
+      const hasRealValues = client_name !== 'default_client' || 
+                           app_name !== 'default_app' || 
+                           project_name !== 'default_project';
+      
+      console.log('🔍 Has real values:', hasRealValues);
 
-      const response = await fetch(`${MOLECULES_API}/workflow/get`, {
+      // Try to load with current values first
+      let response = await fetch(`${MOLECULES_API}/workflow/get`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
         body: JSON.stringify({
-          user_id: '', // Could be enhanced with actual user ID from session
-          client_id: client_id,
-          app_id: app_id,
-          project_id: project_id
+          user_id: '',
+          client_name: client_name,
+          app_name: app_name,
+          project_name: project_name
         })
       });
 
+      console.log('📡 API response status:', response.status);
+      console.log('📡 API response ok:', response.ok);
+
       if (response.ok) {
         const result = await response.json();
+        console.log('📡 API response data:', result);
         
         if (result.workflow_data) {
-          const { canvas_molecules, custom_molecules } = result.workflow_data;
+          const { workflow_name, canvas_molecules, custom_molecules } = result.workflow_data;
           
           // Update state with loaded data
+          setWorkflowName(workflow_name || 'Untitled Workflow');
           setCanvasMolecules(canvas_molecules || []);
           setCustomMolecules(custom_molecules || []);
           
           toast({
             title: "Workflow Loaded",
-            description: `Workflow configuration has been loaded successfully`,
+            description: `Workflow "${workflow_name || 'Untitled Workflow'}" has been loaded successfully`,
           });
           console.log('Workflow loaded:', result.workflow_data);
+          return true; // Data was loaded successfully
         } else {
-          toast({
-            title: "No Saved Workflow",
-            description: "No saved workflow configuration found for this project",
-            variant: "destructive",
-          });
+          console.log('📡 No workflow_data in response');
+          
+          // If we used default values and got no data, try without any filters
+          if (!hasRealValues) {
+            console.log('🔄 Trying to load any workflow without filters...');
+            response = await fetch(`${MOLECULES_API}/workflow/get`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+              body: JSON.stringify({
+                user_id: '',
+                client_name: '',
+                app_name: '',
+                project_name: ''
+              })
+            });
+            
+            if (response.ok) {
+              const fallbackResult = await response.json();
+              console.log('📡 Fallback API response data:', fallbackResult);
+              
+              if (fallbackResult.workflow_data) {
+                const { canvas_molecules, custom_molecules } = fallbackResult.workflow_data;
+                console.log('📡 Found fallback workflow data - canvas_molecules:', canvas_molecules?.length || 0, 'custom_molecules:', custom_molecules?.length || 0);
+                
+                // Update state with loaded data
+                setCanvasMolecules(canvas_molecules || []);
+                setCustomMolecules(custom_molecules || []);
+                
+                if (showToast) {
+                  toast({
+                    title: "Workflow Loaded",
+                    description: `Workflow configuration has been loaded successfully`,
+                  });
+                }
+                console.log('Fallback workflow loaded:', fallbackResult.workflow_data);
+                return true; // Data was loaded successfully
+              }
+            }
+          }
+          
+          if (showToast) {
+            toast({
+              title: "No Saved Workflow",
+              description: "No saved workflow configuration found for this project",
+              variant: "destructive",
+            });
+          }
+          return false; // No data found
         }
       } else {
+        console.log('📡 API request failed with status:', response.status);
         throw new Error('Failed to load workflow');
       }
     } catch (error) {
       console.error('Error loading workflow:', error);
-      toast({
-        title: "Load Failed",
-        description: "Failed to load workflow configuration. Please try again.",
-        variant: "destructive",
-      });
+      if (showToast) {
+        toast({
+          title: "Load Failed",
+          description: "Failed to load workflow configuration. Please try again.",
+          variant: "destructive",
+        });
+      }
+      return false; // Failed to load
     }
   };
 
@@ -638,8 +728,10 @@ const WorkflowMode = () => {
   const clearWorkflowData = () => {
     setCanvasMolecules([]);
     setCustomMolecules([]);
+    setWorkflowName('Untitled Workflow');
     localStorage.removeItem('workflow-canvas-molecules');
     localStorage.removeItem('workflow-custom-molecules');
+    localStorage.removeItem('workflow-name');
     toast({
       title: 'Workflow Cleared',
       description: 'All molecules have been removed from the canvas'
@@ -759,8 +851,10 @@ const WorkflowMode = () => {
       {/* Workflow Header */}
       <div className="bg-card border-b border-border px-8 py-6 flex-shrink-0 relative z-20">
         <div className="flex items-center justify-between">
-              <div>
-            <h1 className="text-3xl font-semibold text-foreground mb-2">Workflow Mode</h1>
+          <div className="flex-1 max-w-2xl">
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-semibold text-foreground">Workflow Mode</h1>
+            </div>
             <p className="text-muted-foreground">
               Drag molecules from the list onto the workflow canvas. Connect molecules by drawing arrows between them.
             </p>
@@ -770,7 +864,7 @@ const WorkflowMode = () => {
             <Button variant="outline" size="sm" onClick={clearWorkflowData}>
               Clear
             </Button>
-            <Button variant="outline" size="sm" onClick={loadWorkflowConfiguration}>
+            <Button variant="outline" size="sm" onClick={() => loadWorkflowConfiguration(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Load
             </Button>
@@ -793,7 +887,7 @@ const WorkflowMode = () => {
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden" style={{ minHeight: 0 }}>
+      <div className="flex-1 flex overflow-visible" style={{ minHeight: 0 }}>
         {/* Molecule Library - LEFT SIDE */}
         {isLibraryVisible && (
           <div className="w-80 bg-card border-r border-border flex flex-col">
@@ -820,7 +914,10 @@ const WorkflowMode = () => {
         )}
 
         {/* Workflow Canvas - MAIN AREA */}
-        <div className={`flex-1 p-6 relative transition-all duration-300 ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}>
+        <div
+          className={`flex-1 p-6 relative transition-all duration-300 ${isLibraryVisible ? 'ml-0' : 'ml-0'}`}
+          style={{ zIndex: 0 }}
+        >
           <WorkflowCanvas
             onMoleculeSelect={handleMoleculeSelect}
             onCreateMolecule={handleCreateMolecule}
@@ -840,7 +937,7 @@ const WorkflowMode = () => {
         </div>
 
         {/* Right Side Panel with Icons - Always Visible */}
-        <div className="h-full overflow-hidden">
+        <div className="h-full overflow-visible relative z-20">
           <WorkflowRightPanel 
             molecules={allMolecules}
             onAtomAssignToMolecule={handleAtomAssignToMolecule}
@@ -848,6 +945,12 @@ const WorkflowMode = () => {
             assignedAtoms={assignedAtoms}
             onAtomLibraryVisibilityChange={handleAtomLibraryVisibilityChange}
             onRightPanelToolVisibilityChange={handleRightPanelToolVisibilityChange}
+            onMoleculeAdd={handleMoleculeAdd}
+            onRenderWorkflow={handleRenderWorkflow}
+            onCheckCanvasHasMolecules={checkCanvasHasMolecules}
+            onGetAICreatedMolecules={getAICreatedMolecules}
+            onClearAIMolecules={clearAICreatedMolecules}
+            onGetRightmostPosition={getRightmostMoleculePosition}
           />
         </div>
 

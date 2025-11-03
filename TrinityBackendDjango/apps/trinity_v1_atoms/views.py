@@ -17,12 +17,41 @@ class TrinityV1AtomViewSet(viewsets.ModelViewSet):
     lookup_field = 'atom_id'  # Allow lookup by atom_id instead of pk
     
     @action(detail=False, methods=['get'])
+    def atoms_for_workflow(self, request):
+        """
+        API endpoint specifically for workflow mode.
+        Returns only available atoms with full details including available_atoms field.
+        """
+        atoms = TrinityV1Atom.objects.filter(available_atoms=True).order_by('name')
+        
+        workflow_atoms = []
+        for atom in atoms:
+            workflow_atoms.append({
+                'id': atom.atom_id,
+                'name': atom.name,
+                'description': atom.description,
+                'category': atom.category,
+                'tags': atom.tags,
+                'color': atom.color,
+                'available_atoms': atom.available_atoms,
+                'created_at': atom.created_at,
+                'updated_at': atom.updated_at
+            })
+        
+        return Response({
+            'success': True,
+            'atoms': workflow_atoms,
+            'total': len(workflow_atoms),
+            'message': 'Only available atoms are returned for workflow mode'
+        })
+
+    @action(detail=False, methods=['get'])
     def atoms_for_frontend(self, request):
         """
         API endpoint that serves atoms in the format expected by the frontend.
-        Returns all atoms.
+        Returns only available atoms (available_atoms=True).
         """
-        atoms = TrinityV1Atom.objects.all().order_by('name')
+        atoms = TrinityV1Atom.objects.filter(available_atoms=True).order_by('name')
         
         frontend_atoms = []
         for atom in atoms:
@@ -43,8 +72,9 @@ class TrinityV1AtomViewSet(viewsets.ModelViewSet):
 def atoms_api(request):
     """
     Simple API endpoint for atoms (for backward compatibility).
+    Returns only available atoms (available_atoms=True).
     """
-    atoms = TrinityV1Atom.objects.all().order_by('name')
+    atoms = TrinityV1Atom.objects.filter(available_atoms=True).order_by('name')
     
     atoms_data = []
     for atom in atoms:
@@ -65,8 +95,9 @@ def atoms_api(request):
 def atoms_for_frontend_api(request):
     """
     API endpoint for frontend atoms without authentication.
+    Returns only available atoms (available_atoms=True).
     """
-    atoms = TrinityV1Atom.objects.all().order_by('name')
+    atoms = TrinityV1Atom.objects.filter(available_atoms=True).order_by('name')
     
     atoms_data = []
     for atom in atoms:

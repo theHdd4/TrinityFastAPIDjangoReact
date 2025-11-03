@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { ChartData, ChartMakerConfig, useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { ChartData, ChartMakerConfig, useLaboratoryStore, type ChartMakerExhibitionSelection, type ChartMakerExhibitionComponentType, type ChartMakerExhibitionSelectionChartState, type ChartMakerExhibitionSelectionContext } from '@/components/LaboratoryMode/store/laboratoryStore';
 import './ChartMakerCanvas.css';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useResponsiveChartLayout } from '@/hooks/useResponsiveChartLayout';
@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import Table from '@/templates/tables/table';
 import { MultiSelectDropdown } from '@/templates/dropdown';
 import { CHART_MAKER_API } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 
 // FilterMenu component moved outside to prevent recreation on every render
 const FilterMenu = ({ 
@@ -96,6 +97,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const dataSource = (atom?.settings as any)?.dataSource;
   const numberOfCharts = (atom?.settings as any)?.numberOfCharts || 1;
+  const { toast } = useToast();
   
   const [fullscreenChart, setFullscreenChart] = useState<ChartMakerConfig | null>(null);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
@@ -338,13 +340,20 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
 
   const getUniqueValuesForColumn = (column: string) => {
     // Use backend-provided unique values if available
-    if (typedData && (typedData.unique_values || typedData.uniqueValuesByColumn)) {
-      const uniqueMap = typedData.unique_values || typedData.uniqueValuesByColumn;
+    // Prioritize uniqueValuesByColumn (new) over unique_values (legacy)
+    if (typedData && (typedData.uniqueValuesByColumn || typedData.unique_values)) {
+      const uniqueMap = typedData.uniqueValuesByColumn || typedData.unique_values;
       if (uniqueMap && uniqueMap[column]) {
+        // console.log(`[ChartMakerCanvas] Found unique values for column "${column}" from backend:`, uniqueMap[column]);
         return uniqueMap[column];
+      } else {
+        console.log(`[ChartMakerCanvas] Column "${column}" not found in uniqueMap. Available columns:`, Object.keys(uniqueMap || {}));
       }
+    } else {
+      console.log(`[ChartMakerCanvas] No uniqueValuesByColumn data available. typedData:`, typedData);
     }
     // Fallback to frontend calculation
+    console.log(`[ChartMakerCanvas] Using fallback calculation for column "${column}"`);
     if (!typedData || !Array.isArray(typedData.rows)) return [];
     const values = new Set(typedData.rows.map(row => String(row[column])));
     return Array.from(values).filter(v => v !== '');
@@ -502,6 +511,120 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     }
   }, [chatBubble.visible, chatBubbleShouldRender, overlayActive]);
 
+  // Exhibition functionality
+  const exhibitionSelections = React.useMemo<ChartMakerExhibitionSelection[]>(() => {
+    return Array.isArray(atom?.settings?.exhibitionSelections)
+      ? atom.settings.exhibitionSelections
+      : [];
+  }, [atom?.settings?.exhibitionSelections]);
+
+  const createSelectionDescriptor = React.useCallback(
+    (chart: ChartMakerConfig, componentType: ChartMakerExhibitionComponentType) => {
+      const key = `chart::${chart.id}`;
+      const label = chart.title;
+
+      return {
+        key,
+        label,
+        componentType,
+        chart
+      };
+    },
+    [],
+  );
+
+  const cloneDeep = <T,>(value: T): T => {
+    if (value === undefined) {
+      return value;
+    }
+    try {
+      return JSON.parse(JSON.stringify(value)) as T;
+    } catch (error) {
+      console.warn("Unable to clone value for exhibition selection", error);
+      return value;
+    }
+  };
+
+  const updateExhibitionSelection = React.useCallback(
+    (
+      chart: ChartMakerConfig,
+      componentType: ChartMakerExhibitionComponentType,
+      checked: boolean | "indeterminate",
+    ) => {
+      const descriptor = createSelectionDescriptor(chart, componentType);
+      const existingIndex = exhibitionSelections.findIndex((entry) => entry.key === descriptor.key);
+      const nextChecked = checked === true;
+
+      if (nextChecked) {
+        const chartStateSnapshot: ChartMakerExhibitionSelectionChartState = {
+          chartType: chart.type,
+          xAxis: chart.xAxis,
+          yAxis: chart.yAxis,
+          filters: chart.filters,
+          aggregation: chart.aggregation,
+          legendField: chart.legendField,
+          isAdvancedMode: chart.isAdvancedMode,
+          traces: chart.traces ? cloneDeep(chart.traces) : undefined,
+        };
+
+        const chartContextSnapshot: ChartMakerExhibitionSelectionContext = {
+          dataSource: dataSource,
+          uploadedData: typedData ? cloneDeep(typedData) : null,
+          chartConfig: chart.chartConfig ? cloneDeep(chart.chartConfig) : undefined,
+        };
+
+        const selectionSnapshot: ChartMakerExhibitionSelection = {
+          key: descriptor.key,
+          chartId: chart.id,
+          chartTitle: chart.title,
+          componentType,
+          chartState: chartStateSnapshot,
+          chartContext: chartContextSnapshot,
+          capturedAt: new Date().toISOString(),
+        };
+
+        const nextSelections = [...exhibitionSelections];
+        if (existingIndex >= 0) {
+          nextSelections[existingIndex] = {
+            ...nextSelections[existingIndex],
+            ...selectionSnapshot,
+          };
+        } else {
+          nextSelections.push(selectionSnapshot);
+        }
+        updateSettings(atomId, { exhibitionSelections: nextSelections });
+      } else if (existingIndex >= 0) {
+        const nextSelections = exhibitionSelections.filter((entry) => entry.key !== descriptor.key);
+        updateSettings(atomId, { exhibitionSelections: nextSelections });
+      }
+    },
+    [
+      createSelectionDescriptor,
+      exhibitionSelections,
+      updateSettings,
+      atomId,
+      dataSource,
+      typedData,
+    ],
+  );
+
+  const stageSelectionForExhibition = React.useCallback(
+    (chart: ChartMakerConfig, componentType: ChartMakerExhibitionComponentType) => {
+      const descriptor = createSelectionDescriptor(chart, componentType);
+      const alreadySelected = exhibitionSelections.some((entry) => entry.key === descriptor.key);
+
+      updateExhibitionSelection(chart, componentType, true);
+      toast({
+        title: alreadySelected ? "Exhibition staging updated" : "Component staged for exhibition",
+        description:
+          descriptor.label
+            ? `${descriptor.label} is now available in the Exhibition panel.`
+            : "This component is now available in the Exhibition panel.",
+      });
+    },
+    [createSelectionDescriptor, exhibitionSelections, toast, updateExhibitionSelection],
+  );
+
 
 const renderChart = (
   chart: ChartMakerConfig,
@@ -618,6 +741,46 @@ const renderChart = (
     sortOrder: chartSortOrder[chart.id] || chart.chartConfig?.sortOrder || null,
     onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => onChartTypeChange?.(chart.id, newType.replace('_chart', '') as ChartMakerConfig['type']),
     onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleChartSortOrderChange(chart.id, newSortOrder),
+    onThemeChange: (theme: string) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, theme } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onGridToggle: (enabled: boolean) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, showGrid: enabled } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onLegendToggle: (enabled: boolean) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, showLegend: enabled } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onAxisLabelsToggle: (enabled: boolean) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, showAxisLabels: enabled } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onDataLabelsToggle: (enabled: boolean) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, showDataLabels: enabled } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
   } as const;
 
   return (
@@ -892,6 +1055,11 @@ const renderChart = (
             </Table>
         ) : null}
 
+        {/* Instructional text for exhibition */}
+        <div className="mt-6 text-center">
+          <p className="text-sm text-gray-600">Right-click a chart title to stage it for exhibition.</p>
+        </div>
+
         <div
           className={`grid gap-6 mt-8 ${layoutConfig.containerClass} transition-all duration-300 ease-in-out`}
           style={{
@@ -901,10 +1069,16 @@ const renderChart = (
           {charts.map((chart, index) => {
             const colors = getChartColors(index);
             
+            // Check if this chart is selected for exhibition
+            const descriptor = createSelectionDescriptor(chart, 'chart');
+            const isChartSelected = exhibitionSelections.some((entry) => entry.key === descriptor.key);
+            
             return (
                    <Card
                      key={chart.id}
-                    className="chart-card border border-pink-200 bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl cursor-pointer"
+                    className={`chart-card border ${
+                      isChartSelected ? "border-amber-400" : "border-pink-200"
+                    } bg-white/95 backdrop-blur-sm overflow-hidden transform hover:scale-[1.02] transition-all duration-300 relative flex flex-col group hover:shadow-2xl cursor-pointer`}
                     onClick={() => {
                       // Set selectedChartIndex to expand this chart's settings
                       updateSettings(atomId, { selectedChartIndex: index } as any);
@@ -923,56 +1097,60 @@ const renderChart = (
                     }}
                    >
                     <div className="bg-white border-b border-pink-200 p-4 relative flex-shrink-0 group-hover:shadow-lg transition-shadow duration-300">
-                      <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
-                        <div className="flex items-center">
-                          <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} text-gray-900`} />
-                          {chart.title}
-                        </div>
-                        {/* Hints container - aligned in same row */}
-                        <div className="flex items-center gap-2">
-                          {/* Interaction hint for multi-trace charts */}
-                          {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
-                            <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
-                              {chart.chartConfig.chart_type === 'bar' ? (
-                                <>
-                                  <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
-                                  <span className="sm:hidden">Click to emphasize</span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="hidden sm:inline">Click traces to emphasize</span>
-                                  <span className="sm:hidden">Click to emphasize</span>
-                                </>
-                              )}
+                      <ContextMenu>
+                        <ContextMenuTrigger asChild>
+                          <CardTitle className={`font-bold text-gray-900 flex items-center justify-between ${isCompact ? 'text-base' : 'text-lg'}`}>
+                            <div className="flex items-center">
+                              <BarChart3 className={`mr-2 ${isCompact ? 'w-4 h-4' : 'w-5 h-5'} text-gray-900`} />
+                              {chart.title}
                             </div>
-                          )}
-                          {/* Expand icon */}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 hover:bg-gray-200/60 relative"
-                            style={{ zIndex: 20 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setFullscreenChart(chart);
-                              setFullscreenIndex(index);
-                            }}
-                            title="Click to expand"
+                            {/* Hints container - aligned in same row */}
+                            <div className="flex items-center gap-2">
+                              {/* Interaction hint for multi-trace charts */}
+                              {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
+                                <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
+                                  {chart.chartConfig.chart_type === 'bar' ? (
+                                    <>
+                                      <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
+                                      <span className="sm:hidden">Click to emphasize</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span className="hidden sm:inline">Click traces to emphasize</span>
+                                      <span className="sm:hidden">Click to emphasize</span>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                              {/* Expand icon */}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 hover:bg-gray-200/60 relative"
+                                style={{ zIndex: 20 }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setFullscreenChart(chart);
+                                  setFullscreenIndex(index);
+                                }}
+                                title="Click to expand"
+                              >
+                                <Maximize2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </CardTitle>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent className="w-56 bg-white border border-gray-200 shadow-lg rounded-md p-1">
+                          <ContextMenuItem
+                            onClick={() =>
+                              stageSelectionForExhibition(chart, "chart")
+                            }
+                            className="cursor-pointer"
                           >
-                            <Maximize2 className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </CardTitle>
-                      {/* Transparent overlay for mouse hold for chart type switching */}
-                      <div
-                        className="absolute inset-0 cursor-pointer"
-                        style={{ background: 'transparent', zIndex: 10 }}
-                        onClick={e => {
-                          // Alt+Click functionality moved to expand icon button
-                          // Keep this for other interactions if needed
-                        }}
-                        /* onContextMenu={e => handleContextMenu(e, chart.id)} */
-                      />
+                            Exhibit this component
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
                      </div>
                      
                       {/* Filter Controls - Support both simple and multi-series modes */}

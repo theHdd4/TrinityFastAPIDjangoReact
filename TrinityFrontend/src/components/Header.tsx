@@ -93,7 +93,7 @@ const Header: React.FC<HeaderProps> = ({ projectCount = 0 }) => {
       className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shadow-sm"
     >
       <div className="flex items-center space-x-10">
-        <Link to="/" className="flex items-center space-x-3 group">
+        <Link to="/apps" className="flex items-center space-x-3 group">
           <TrinityAssets.AnimatedLogo className="w-12 h-12 group-hover:shadow-xl transition-all duration-300" />
           <TrinityAssets.LogoText />
         </Link>

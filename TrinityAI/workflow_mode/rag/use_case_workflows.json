@@ -1,0 +1,515 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Specific use case workflows with predefined molecule compositions",
+    "purpose": "Guide AI in creating molecules for specific business use cases",
+    "last_updated": "2025-01-27"
+  },
+  "use_case_workflows": {
+    "mmm_marketing_mix_modeling": {
+      "name": "MMM (Marketing Mix Modeling)",
+      "description": "Build marketing mix models to measure marketing effectiveness and ROI",
+      "industry": "Marketing Analytics",
+      "molecules": [
+        {
+          "molecule_number": 1,
+          "molecule_name": "Data Preparation & Feature Selection",
+          "purpose": "Start with data upload and validation, followed by feature analysis. Understand your dataset to prepare for modeling.",
+          "atoms": [
+            {
+              "id": "data-upload-validate",
+              "order": 1,
+              "purpose": "Upload marketing and sales data",
+              "required": true
+            },
+            {
+              "id": "column-classifier",
+              "order": 2,
+              "purpose": "Classify marketing spend columns, sales metrics, and external factors",
+              "required": true
+            },
+            {
+              "id": "scope-selector",
+              "order": 3,
+              "purpose": "Select relevant time periods, channels, and markets for modeling",
+              "required": true
+            }
+          ],
+          "expected_outputs": ["Cleaned dataset", "Classified features", "Modeling scope defined"],
+          "connections_to": [2]
+        },
+        {
+          "molecule_number": 2,
+          "molecule_name": "Model Building & Selection",
+          "purpose": "Use auto-regressive models for price forecasting. Evaluate model performance to ensure accuracy.",
+          "atoms": [
+            {
+              "id": "build-model-feature-based",
+              "order": 1,
+              "purpose": "Build marketing mix regression models with media variables",
+              "required": true
+            },
+            {
+              "id": "select-models-feature",
+              "order": 2,
+              "purpose": "Compare models and select best performing MMM",
+              "required": true
+            }
+          ],
+          "expected_outputs": ["Trained MMM models", "Best model selected", "Marketing coefficients"],
+          "connections_to": [3]
+        },
+        {
+          "molecule_number": 3,
+          "molecule_name": "Model Evaluation & Insights",
+          "purpose": "Create multiple pricing scenarios using the scenario planner. Visualize outcomes with interactive charts.",
+          "atoms": [
+            {
+              "id": "evaluate-models-feature",
+              "order": 1,
+              "purpose": "Evaluate MMM accuracy, generate ROI metrics, attribution analysis",
+              "required": true
+            }
+          ],
+          "expected_outputs": ["Model metrics", "Marketing ROI", "Channel attribution", "Optimization recommendations"],
+          "connections_to": []
+        }
+      ],
+      "business_value": "Measure marketing effectiveness, optimize budget allocation, calculate ROAS per channel",
+      "typical_duration": "Advanced workflow",
+      "prerequisites": ["Historical marketing spend data", "Sales/revenue data", "External factors (seasonality, promotions)"]
+    },
+    "customer_ltv_prediction": {
+      "name": "Customer Lifetime Value (LTV) Prediction",
+      "description": "Predict customer lifetime value for retention and targeting strategies",
+      "industry": "Customer Analytics",
+      "molecules": [
+        {
+          "molecule_number": 1,
+          "molecule_name": "Customer Data Integration",
+          "purpose": "Start by loading customer and transaction data, then merge them together. Clean and prepare features for accurate predictions.",
+          "atoms": [
+            {
+              "id": "csv-import",
+              "order": 1,
+              "purpose": "Load customer data",
+              "required": true
+            },
+            {
+              "id": "merge",
+              "order": 2,
+              "purpose": "Join customer demographics with transaction history",
+              "required": true
+            },
+            {
+              "id": "dataframe-operations",
+              "order": 3,
+              "purpose": "Clean and prepare customer features",
+              "required": true
+            }
+          ],
+          "connections_to": [2]
+        },
+        {
+          "molecule_number": 2,
+          "molecule_name": "Feature Engineering",
+          "purpose": "Create calculated columns for recency, frequency, and monetary metrics. Aggregate customer behavior to identify high-value patterns.",
+          "atoms": [
+            {
+              "id": "dataframe-operations",
+              "order": 1,
+              "purpose": "Calculate recency, frequency, monetary metrics",
+              "required": true
+            },
+            {
+              "id": "groupby-wtg-avg",
+              "order": 2,
+              "purpose": "Aggregate customer behavior metrics",
+              "required": true
+            }
+          ],
+          "connections_to": [3]
+        },
+        {
+          "molecule_number": 3,
+          "molecule_name": "LTV Model & Prediction",
+          "purpose": "Use regression models for LTV prediction and evaluate accuracy. Visualize segments with charts to optimize strategies.",
+          "atoms": [
+            {
+              "id": "regression-feature-based",
+              "order": 1,
+              "purpose": "Build LTV prediction model",
+              "required": true
+            },
+            {
+              "id": "evaluate-models-feature",
+              "order": 2,
+              "purpose": "Validate LTV predictions",
+              "required": true
+            },
+            {
+              "id": "chart-maker",
+              "order": 3,
+              "purpose": "Visualize LTV segments and distributions",
+              "required": false
+            }
+          ],
+          "connections_to": []
+        }
+      ],
+      "business_value": "Identify high-value customers, optimize acquisition spend, reduce churn",
+      "typical_duration": "Advanced workflow"
+    },
+    "demand_forecasting": {
+      "name": "Demand Forecasting",
+      "description": "Forecast product demand for inventory and supply chain planning",
+      "industry": "Supply Chain & Operations",
+      "molecules": [
+        {
+          "molecule_number": 1,
+          "molecule_name": "Historical Data Preparation",
+          "purpose": "Start with data upload and validation of historical sales data. Clean data and analyze patterns to understand trends.",
+          "atoms": [
+            {
+              "id": "data-upload-validate",
+              "order": 1,
+              "purpose": "Upload historical demand data",
+              "required": true
+            },
+            {
+              "id": "dataframe-operations",
+              "order": 2,
+              "purpose": "Handle missing values, outliers",
+              "required": true
+            },
+            {
+              "id": "feature-overview",
+              "order": 3,
+              "purpose": "Analyze demand patterns",
+              "required": false
+            }
+          ],
+          "connections_to": [2]
+        },
+        {
+          "molecule_number": 2,
+          "molecule_name": "Trend & Seasonality Analysis",
+          "purpose": "Use trend analysis to detect seasonal patterns and trends. Calculate statistics to prepare for accurate forecasting.",
+          "atoms": [
+            {
+              "id": "trend-analysis",
+              "order": 1,
+              "purpose": "Detect trends and seasonal patterns",
+              "required": true
+            },
+            {
+              "id": "descriptive-stats",
+              "order": 2,
+              "purpose": "Calculate demand statistics",
+              "required": false
+            }
+          ],
+          "connections_to": [3]
+        },
+        {
+          "molecule_number": 3,
+          "molecule_name": "Forecast Generation",
+          "purpose": "Use auto-regressive models for demand forecasting. Evaluate performance and visualize forecasts with charts.",
+          "atoms": [
+            {
+              "id": "auto-regressive-models",
+              "order": 1,
+              "purpose": "Build ARIMA/time series forecasting model",
+              "required": true
+            },
+            {
+              "id": "evaluate-models-auto-regressive",
+              "order": 2,
+              "purpose": "Validate forecast accuracy",
+              "required": true
+            },
+            {
+              "id": "chart-maker",
+              "order": 3,
+              "purpose": "Visualize forecast vs actuals",
+              "required": true
+            }
+          ],
+          "connections_to": []
+        }
+      ],
+      "business_value": "Optimize inventory levels, reduce stockouts, improve supply chain efficiency"
+    },
+    "price_elasticity_analysis": {
+      "name": "Price Elasticity Analysis",
+      "description": "Analyze how price changes affect demand and revenue",
+      "industry": "Pricing & Revenue Management",
+      "molecules": [
+        {
+          "molecule_number": 1,
+          "molecule_name": "Price & Sales Data Loading",
+          "purpose": "Start with loading pricing history and sales volume data. Merge them to create a unified dataset for analysis.",
+          "atoms": [
+            {
+              "id": "csv-import",
+              "order": 1,
+              "purpose": "Load pricing history",
+              "required": true
+            },
+            {
+              "id": "csv-import",
+              "order": 2,
+              "purpose": "Load sales/volume data",
+              "required": true
+            },
+            {
+              "id": "merge",
+              "order": 3,
+              "purpose": "Join price and volume data",
+              "required": true
+            }
+          ],
+          "connections_to": [2]
+        },
+        {
+          "molecule_number": 2,
+          "molecule_name": "Elasticity Calculation",
+          "purpose": "Create calculated columns for price and volume changes. Use regression to estimate elasticity coefficients by segment.",
+          "atoms": [
+            {
+              "id": "dataframe-operations",
+              "order": 1,
+              "purpose": "Calculate % price change and % volume change",
+              "required": true
+            },
+            {
+              "id": "regression-feature-based",
+              "order": 2,
+              "purpose": "Estimate elasticity coefficients",
+              "required": true
+            },
+            {
+              "id": "groupby-wtg-avg",
+              "order": 3,
+              "purpose": "Calculate elasticity by segment/product",
+              "required": false
+            }
+          ],
+          "connections_to": [3]
+        },
+        {
+          "molecule_number": 3,
+          "molecule_name": "Price Optimization & Scenario Planning",
+          "purpose": "Create multiple pricing scenarios using the scenario planner. Visualize outcomes with charts to optimize pricing.",
+          "atoms": [
+            {
+              "id": "base-price-estimator",
+              "order": 1,
+              "purpose": "Estimate optimal base prices",
+              "required": true
+            },
+            {
+              "id": "scenario-planner",
+              "order": 2,
+              "purpose": "Model different pricing scenarios",
+              "required": true
+            },
+            {
+              "id": "chart-maker",
+              "order": 3,
+              "purpose": "Visualize price-volume curves",
+              "required": true
+            }
+          ],
+          "connections_to": []
+        }
+      ],
+      "business_value": "Optimize pricing strategy, maximize revenue, understand demand sensitivity"
+    },
+    "churn_prediction": {
+      "name": "Customer Churn Prediction",
+      "description": "Predict which customers are likely to churn",
+      "industry": "Customer Retention",
+      "molecules": [
+        {
+          "molecule_number": 1,
+          "molecule_name": "Customer Feature Preparation",
+          "purpose": "Connect to customer database and load activity data. Create churn indicators to identify at-risk customers.",
+          "atoms": [
+            {
+              "id": "database-connect",
+              "order": 1,
+              "purpose": "Load customer activity data",
+              "required": true
+            },
+            {
+              "id": "feature-overview",
+              "order": 2,
+              "purpose": "Profile customer features",
+              "required": true
+            },
+            {
+              "id": "dataframe-operations",
+              "order": 3,
+              "purpose": "Create churn indicators (days since last login, usage decline, etc.)",
+              "required": true
+            }
+          ],
+          "connections_to": [2]
+        },
+        {
+          "molecule_number": 2,
+          "molecule_name": "Churn Model Building",
+          "purpose": "Use machine learning models to predict churn risk. Compare algorithms and build the best performing model.",
+          "atoms": [
+            {
+              "id": "select-models-feature",
+              "order": 1,
+              "purpose": "Compare classification models for churn",
+              "required": true
+            },
+            {
+              "id": "build-model-feature-based",
+              "order": 2,
+              "purpose": "Build final churn prediction model",
+              "required": true
+            }
+          ],
+          "connections_to": [3]
+        },
+        {
+          "molecule_number": 3,
+          "molecule_name": "Risk Scoring & Segmentation",
+          "purpose": "Evaluate model accuracy and generate churn risk scores. Segment at-risk customers and visualize with charts.",
+          "atoms": [
+            {
+              "id": "evaluate-models-feature",
+              "order": 1,
+              "purpose": "Validate churn model accuracy",
+              "required": true
+            },
+            {
+              "id": "clustering",
+              "order": 2,
+              "purpose": "Segment at-risk customers",
+              "required": false
+            },
+            {
+              "id": "chart-maker",
+              "order": 3,
+              "purpose": "Visualize churn risk segments",
+              "required": true
+            }
+          ],
+          "connections_to": []
+        }
+      ],
+      "business_value": "Reduce customer churn, target retention campaigns, improve customer satisfaction"
+    },
+    "sales_performance_dashboard": {
+      "name": "Sales Performance Dashboard",
+      "description": "Create comprehensive sales KPI dashboard",
+      "industry": "Sales Analytics",
+      "molecules": [
+        {
+          "molecule_number": 1,
+          "molecule_name": "Sales Data Integration",
+          "purpose": "Connect to sales database and load transaction data. Combine regional data for unified KPI tracking.",
+          "atoms": [
+            {
+              "id": "database-connect",
+              "order": 1,
+              "purpose": "Connect to sales database",
+              "required": true
+            },
+            {
+              "id": "concat",
+              "order": 2,
+              "purpose": "Combine regional sales data",
+              "required": false
+            }
+          ],
+          "connections_to": [2]
+        },
+        {
+          "molecule_number": 2,
+          "molecule_name": "KPI Calculation",
+          "purpose": "Aggregate sales by region, product, and time period. Create custom columns for growth rates and trends.",
+          "atoms": [
+            {
+              "id": "groupby-wtg-avg",
+              "order": 1,
+              "purpose": "Aggregate sales by region, product, time period",
+              "required": true
+            },
+            {
+              "id": "dataframe-operations",
+              "order": 2,
+              "purpose": "Calculate growth rates, targets vs actuals",
+              "required": true
+            },
+            {
+              "id": "trend-analysis",
+              "order": 3,
+              "purpose": "Identify sales trends",
+              "required": false
+            }
+          ],
+          "connections_to": [3]
+        },
+        {
+          "molecule_number": 3,
+          "molecule_name": "Dashboard Visualization",
+          "purpose": "Create interactive charts to visualize revenue and growth trends. Add executive summary insights for stakeholders.",
+          "atoms": [
+            {
+              "id": "chart-maker",
+              "order": 1,
+              "purpose": "Create KPI charts (revenue, units, growth)",
+              "required": true
+            },
+            {
+              "id": "chart-maker",
+              "order": 2,
+              "purpose": "Create trend charts and comparisons",
+              "required": true
+            },
+            {
+              "id": "text-box",
+              "order": 3,
+              "purpose": "Add executive summary and insights",
+              "required": true
+            }
+          ],
+          "connections_to": []
+        }
+      ],
+      "business_value": "Monitor sales performance, identify opportunities, track against targets"
+    }
+  },
+  "ai_instructions": {
+    "workflow_mode_behavior": "In Workflow Mode, AI should suggest MOLECULE COMPOSITIONS (grouping atoms together), not execute agents directly",
+    "molecule_creation_guidelines": [
+      "Group related atoms that work together for a specific sub-goal",
+      "Typical molecule size: 2-4 atoms",
+      "Each molecule should have a clear purpose",
+      "Molecules connect sequentially to form complete workflow",
+      "First molecule usually handles data loading/preparation",
+      "Middle molecules handle transformation/analysis/modeling",
+      "Last molecule handles visualization/reporting"
+    ],
+    "example_conversation": {
+      "user": "I want to build an MMM model",
+      "ai_response": "I'll help you create a workflow for Marketing Mix Modeling. Here's how I suggest grouping the atoms into molecules:\n\n**Molecule 1: Data Preparation & Feature Selection**\n- data-upload-validate (upload marketing data)\n- column-classifier (identify marketing channels and metrics)\n- scope-selector (select modeling timeframe)\n\n**Molecule 2: Model Building & Selection**\n- build-model-feature-based (build MMM regression)\n- select-models-feature (compare model variants)\n\n**Molecule 3: Model Evaluation**\n- evaluate-models-feature (assess accuracy and get marketing ROI)\n\nWould you like me to create this workflow?"
+    },
+    "how_to_suggest_molecules": [
+      "Analyze user's goal (e.g., 'MMM', 'churn prediction', 'sales forecast')",
+      "Look up matching use case in use_case_workflows.json",
+      "Present molecule compositions from the use case",
+      "Explain what each molecule does",
+      "Show how molecules connect in sequence",
+      "Ask user if they want to create this workflow"
+    ]
+  }
+}
+

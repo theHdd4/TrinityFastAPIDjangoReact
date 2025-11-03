@@ -1,13 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { MessageSquare, Atom, FileQuestion, X, Sparkles, ChevronDown, Search } from 'lucide-react';
+import { 
+  Database, Filter, BarChart3, Brain, TrendingUp, Target, Settings, DollarSign,
+  FileQuestion, X, ChevronDown, Search, Atom
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { atoms as allAtoms } from '@/components/AtomList/data';
-import { atomCategories } from '@/components/AtomCategory/data/atomCategories';
+import { TRINITY_V1_ATOMS_API } from '@/lib/api';
 import { atomIconMap } from '../utils/atomIconMap';
 import AtomTooltip from './AtomTooltip';
+import { TrinityAIIcon } from '@/components/TrinityAI';
+import WorkflowAIPanel from '@/components/TrinityAI/WorkflowAIPanel';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -22,9 +26,31 @@ interface WorkflowRightPanelProps {
   assignedAtoms?: string[];
   onAtomLibraryVisibilityChange?: (isVisible: boolean) => void;
   onRightPanelToolVisibilityChange?: (isVisible: boolean) => void;
+  onMoleculeAdd?: (molecule: any) => void;
+  onRenderWorkflow?: () => void;
+  onCheckCanvasHasMolecules?: () => boolean;
+  onGetAICreatedMolecules?: () => string[];
+  onClearAIMolecules?: () => void;
+  onGetRightmostPosition?: () => number;
 }
 
-type PanelType = 'chat' | 'atoms' | 'custom' | null;
+interface Atom {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  tags: string[];
+  color: string;
+}
+
+interface AtomCategory {
+  name: string;
+  icon: any;
+  color: string;
+  atoms: Atom[];
+}
+
+type PanelType = 'trinityAI' | 'atoms' | 'custom' | null;
 
 const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({ 
   molecules,
@@ -32,11 +58,88 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   onMultipleAtomsAssignToMolecule,
   assignedAtoms = [],
   onAtomLibraryVisibilityChange,
-  onRightPanelToolVisibilityChange
+  onRightPanelToolVisibilityChange,
+  onMoleculeAdd,
+  onRenderWorkflow,
+  onCheckCanvasHasMolecules,
+  onGetAICreatedMolecules,
+  onClearAIMolecules,
+  onGetRightmostPosition
 }) => {
   const [activePanel, setActivePanel] = useState<PanelType>(null);
   const [selectedAtomForAssignment, setSelectedAtomForAssignment] = useState<string | null>(null);
   const [selectedAtoms, setSelectedAtoms] = useState<string[]>([]);
+  const [atoms, setAtoms] = useState<Atom[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Fetch atoms from API
+  useEffect(() => {
+    const fetchAtoms = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await fetch(`${TRINITY_V1_ATOMS_API}/atoms-for-frontend/`, {
+          credentials: 'include'
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setAtoms(data.atoms || []);
+        } else {
+          setError('Failed to fetch atoms');
+        }
+      } catch (err) {
+        setError('Error fetching atoms');
+        console.error('Error fetching atoms:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAtoms();
+  }, []);
+
+  // Group atoms by category with correct order and icons (matching laboratory mode)
+  const atomCategories = useMemo(() => {
+    // Define category order and icons (matching laboratory mode)
+    const categoryConfig = [
+      { name: 'Data Sources', icon: Database, color: 'bg-blue-500' },
+      { name: 'Data Processing', icon: Filter, color: 'bg-green-500' },
+      { name: 'Analytics', icon: BarChart3, color: 'bg-purple-500' },
+      { name: 'Machine Learning', icon: Brain, color: 'bg-orange-500' },
+      { name: 'Visualization', icon: TrendingUp, color: 'bg-pink-500' },
+      { name: 'Planning & Optimization', icon: Target, color: 'bg-indigo-500' },
+      { name: 'Utilities', icon: Settings, color: 'bg-gray-500' },
+      { name: 'Business Intelligence', icon: DollarSign, color: 'bg-emerald-500' }
+    ];
+
+    const categoryMap = new Map<string, AtomCategory>();
+    
+    // Initialize categories in correct order
+    categoryConfig.forEach(config => {
+      categoryMap.set(config.name, {
+        name: config.name,
+        icon: config.icon,
+        color: config.color,
+        atoms: []
+      });
+    });
+    
+    // Add atoms to their categories
+    atoms.forEach(atom => {
+      if (categoryMap.has(atom.category)) {
+        categoryMap.get(atom.category)!.atoms.push(atom);
+      }
+    });
+
+    // Return categories in the correct order, only including those with atoms
+    return categoryConfig
+      .map(config => categoryMap.get(config.name)!)
+      .filter(category => category.atoms.length > 0);
+  }, [atoms]);
+
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>(() => {
     // Initialize all categories as collapsed by default
     const initialCollapsed: Record<string, boolean> = {};
@@ -45,7 +148,6 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
     });
     return initialCollapsed;
   });
-  const [searchTerm, setSearchTerm] = useState('');
 
   // Notify parent about initial atom library visibility state and any right panel tool visibility
   React.useEffect(() => {
@@ -82,11 +184,11 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
     return atomCategories.map(category => ({
       ...category,
       atoms: category.atoms.filter(atom => 
-        atom.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        atom.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         atom.id.toLowerCase().includes(searchTerm.toLowerCase())
       )
     })).filter(category => category.atoms.length > 0);
-  }, [searchTerm]);
+  }, [searchTerm, atomCategories]);
 
   const handleAtomClick = (atomId: string, event: React.MouseEvent) => {
     // Always allow multi-select - no need for Ctrl/Cmd key
@@ -119,30 +221,24 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
 
   return (
     <div className="flex h-full">
-      {/* Panel Area - Shows when active */}
-      {activePanel === 'chat' && (
-        <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
-          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">AI Agent Chat</h3>
-            <button
-              className="w-6 h-6 flex items-center justify-center hover:bg-gray-100 rounded"
-              onClick={() => setActivePanel(null)}
-            >
-              <X className="w-4 h-4 text-gray-600" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
-            <div className="p-4">
-              <p className="text-sm text-gray-600 mb-4">
-                AI Chat functionality will be integrated here.
-              </p>
-              <div className="h-96 bg-gray-50 rounded-lg flex items-center justify-center border border-gray-200">
-                <p className="text-sm text-gray-500">Chat interface coming soon</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Panel Area - Always mounted to preserve state */}
+      <div className={`h-full flex flex-col bg-white border-r border-gray-200 ${activePanel === 'trinityAI' ? '' : 'hidden'}`}>
+        <WorkflowAIPanel 
+          isCollapsed={activePanel !== 'trinityAI'}
+          onToggle={() => setActivePanel(activePanel === 'trinityAI' ? null : 'trinityAI')}
+          workflowContext={{
+            workflowName: localStorage.getItem('workflow-name') || 'Untitled Workflow',
+            canvasMolecules: JSON.parse(localStorage.getItem('workflow-canvas-molecules') || '[]'),
+            customMolecules: JSON.parse(localStorage.getItem('workflow-custom-molecules') || '[]')
+          }}
+          onMoleculeAdd={onMoleculeAdd}
+          onRenderWorkflow={onRenderWorkflow}
+          onCheckCanvasHasMolecules={onCheckCanvasHasMolecules}
+          onGetAICreatedMolecules={onGetAICreatedMolecules}
+          onClearAIMolecules={onClearAIMolecules}
+          onGetRightmostPosition={onGetRightmostPosition}
+        />
+      </div>
       
       {activePanel === 'atoms' && (
         <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
@@ -168,37 +264,43 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="pl-10 pr-4 py-2 text-sm border-gray-200 focus:border-blue-300 focus:ring-1 focus:ring-blue-300"
+                    disabled={loading}
                   />
                 </div>
                 
                 <p className="text-xs text-gray-600 leading-relaxed">
-                  {selectedAtoms.length > 0 
-                    ? `Click atoms to select (${selectedAtoms.length} selected). Right-click to assign to a molecule.`
-                    : 'Click atoms to select multiple, then right-click to assign to a molecule'}
+                  {loading 
+                    ? 'Loading available atoms...'
+                    : selectedAtoms.length > 0 
+                      ? `Click atoms to select (${selectedAtoms.length} selected). Right-click to assign to a molecule.`
+                      : 'Click atoms to select multiple, then right-click to assign to a molecule'}
                 </p>
               </div>
-              
-              {filteredAtomCategories.map(category => {
-                const CategoryIcon = category.icon;
-                const isCollapsed = collapsedCategories[category.name];
-                const availableAtoms = category.atoms.filter(atom => !assignedAtoms.includes(atom.id));
+
+              {/* Loading State */}
+              {loading && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                  <span className="ml-3 text-sm text-gray-600">Loading atoms...</span>
+                </div>
+              )}
+
+              {/* Error State */}
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-sm text-red-600">{error}</p>
+                </div>
+              )}
+
+              {/* Atoms List */}
+              {!loading && !error && (
+                <>
+                  {filteredAtomCategories.map(category => {
+                    const CategoryIcon = category.icon;
+                    const isCollapsed = collapsedCategories[category.name];
+                    const availableAtoms = category.atoms.filter(atom => !assignedAtoms.includes(atom.id));
                 
-                // Get category color based on laboratory mode colors
-                const getCategoryColor = (categoryName: string) => {
-                  switch (categoryName) {
-                    case 'Data Sources': return 'bg-blue-500';
-                    case 'Data Processing': return 'bg-green-500';
-                    case 'Analytics': return 'bg-purple-500';
-                    case 'Machine Learning': return 'bg-orange-500';
-                    case 'Visualization': return 'bg-pink-500';
-                    case 'Planning & Optimization': return 'bg-indigo-500';
-                    case 'Utilities': return 'bg-gray-500';
-                    case 'Business Intelligence': return 'bg-emerald-500';
-                    default: return 'bg-gray-500';
-                  }
-                };
-                
-                const categoryColor = getCategoryColor(category.name);
+                const categoryColor = category.color;
                 
                 return (
                   <div key={category.name} className="space-y-4">
@@ -228,25 +330,25 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                       {category.atoms
                         .filter(atom => !assignedAtoms.includes(atom.id))
                         .map(atom => {
-                        const AtomIcon = atomIconMap[atom.id] || CategoryIcon;
+                        const AtomIcon = atomIconMap[atom.id] || Atom;
                         const isSelected = selectedAtoms.includes(atom.id);
                         
-                        // Get category-based border colors
-                        const getCategoryBorderColor = (categoryName: string) => {
-                          switch (categoryName) {
-                            case 'Data Sources': return 'border-blue-300';
-                            case 'Data Processing': return 'border-green-300';
-                            case 'Analytics': return 'border-purple-300';
-                            case 'Machine Learning': return 'border-orange-300';
-                            case 'Visualization': return 'border-pink-300';
-                            case 'Planning & Optimization': return 'border-indigo-300';
-                            case 'Utilities': return 'border-gray-300';
-                            case 'Business Intelligence': return 'border-emerald-300';
-                            default: return 'border-gray-300';
-                          }
+                        // Convert category background color to border color
+                        const getBorderColor = (bgColor: string) => {
+                          const colorMap: Record<string, string> = {
+                            'bg-blue-500': 'border-blue-300',
+                            'bg-green-500': 'border-green-300',
+                            'bg-purple-500': 'border-purple-300',
+                            'bg-orange-500': 'border-orange-300',
+                            'bg-pink-500': 'border-pink-300',
+                            'bg-indigo-500': 'border-indigo-300',
+                            'bg-gray-500': 'border-gray-300',
+                            'bg-emerald-500': 'border-emerald-300'
+                          };
+                          return colorMap[bgColor] || 'border-gray-300';
                         };
                         
-                        const borderColor = getCategoryBorderColor(category.name);
+                        const borderColor = getBorderColor(category.color);
                         
                         return (
                           <ContextMenu key={atom.id}>
@@ -261,7 +363,7 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                                       isSelected && "bg-blue-50 shadow-sm"
                                     )}
                                     onClick={(e) => handleAtomClick(atom.id, e)}
-                                    title={atom.title}
+                                    title={atom.name}
                                   >
                                     <AtomIcon className="h-5 w-5 text-gray-600 transition-colors" />
                                     {isSelected && (
@@ -269,7 +371,7 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                                     )}
                                   </div>
                                   <span className="text-xs text-gray-700 font-medium text-center leading-tight">
-                                    {atom.title}
+                                    {atom.name}
                                   </span>
                                 </div>
                               </AtomTooltip>
@@ -302,6 +404,8 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                   </div>
                 );
               })}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -331,36 +435,48 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
       {/* Icons Column - Always visible and stays on the right */}
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('chat')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
-              activePanel === 'chat' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
+          <button
+            onClick={() => togglePanel('trinityAI')}
+            className={`group relative w-9 h-9 rounded-lg hover:bg-muted transition-all hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+              activePanel === 'trinityAI' ? 'bg-muted text-foreground' : 'text-gray-600'
             }`}
-            title="AI Agent Chat"
+            title="Trinity AI"
+            type="button"
           >
-            <MessageSquare className="w-4 h-4" />
+            <TrinityAIIcon className="text-purple-500" />
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              Trinity AI
+            </span>
           </button>
         </div>
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('atoms')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
-              activePanel === 'atoms' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
+          <button
+            onClick={() => togglePanel('atoms')}
+            className={`group relative w-9 h-9 rounded-lg hover:bg-muted transition-all hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+              activePanel === 'atoms' ? 'bg-muted text-foreground' : 'text-gray-600'
             }`}
             title="Atom Library"
+            type="button"
           >
             <Atom className="w-4 h-4" />
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              Atom Library
+            </span>
           </button>
         </div>
         <div className="p-3 flex items-center justify-center">
-          <button 
-            onClick={() => togglePanel('custom')} 
-            className={`w-8 h-8 flex items-center justify-center rounded-md transition-colors hover:bg-gray-100 ${
-              activePanel === 'custom' ? 'bg-yellow-100 text-yellow-600' : 'text-gray-600'
+          <button
+            onClick={() => togglePanel('custom')}
+            className={`group relative w-9 h-9 rounded-lg hover:bg-muted transition-all hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+              activePanel === 'custom' ? 'bg-muted text-foreground' : 'text-gray-600'
             }`}
             title="Custom Section"
+            type="button"
           >
             <FileQuestion className="w-4 h-4" />
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              Custom Section
+            </span>
           </button>
         </div>
       </div>

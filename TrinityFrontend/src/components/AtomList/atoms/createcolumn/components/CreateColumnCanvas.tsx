@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { SingleSelectDropdown } from '@/templates/dropdown';
 import { Badge } from '@/components/ui/badge';
 import { Save, Eye, Calculator, Trash2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
@@ -181,6 +182,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFileName, setSaveFileName] = useState('');
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<Record<string, any>[]>([]);
   const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
@@ -552,14 +555,26 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     }
   }, [previewFile, previewHeaders.length, previewData.length, preview.length]);
 
-  // Save DataFrame handler
-  const handleSaveDataFrame = async () => {
+  // Open save modal with default filename
+  const handleSaveDataFrame = () => {
+    if (preview.length === 0) return;
+    
+    // Generate default filename
+    const defaultFilename = `createcolumn_${atom?.settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+    setSaveFileName(defaultFilename);
+    setShowSaveModal(true);
+  };
+
+  // Actually save the DataFrame with the chosen filename
+  const confirmSaveDataFrame = async () => {
+    if (preview.length === 0) return;
+    
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
       const csv_data = previewToCSV(preview);
-      const filename = `createcolumn_${atom?.settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+      const filename = saveFileName.trim() || `createcolumn_${atom?.settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
       
       // Get environment variables for MongoDB saving
       const envStr = localStorage.getItem('env');
@@ -644,8 +659,123 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       }
       setSaveSuccess(true);
       setPreviewFile(filename.endsWith('.arrow') ? filename : filename + '.arrow');
+      setShowSaveModal(false);
       // Don't clear the preview data - keep it visible
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
+    } catch (err: any) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save DataFrame');
+      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save DataFrame', variant: 'destructive' });
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
+  // Save to original file (update the input file)
+  const handleSaveToOriginalFile = async () => {
+    if (preview.length === 0) return;
+    if (!atom?.settings?.dataSource) {
+      toast({ title: 'Error', description: 'No input file found', variant: 'destructive' });
+      return;
+    }
+    
+    setSaveLoading(true);
+    setSaveError(null);
+    setSaveSuccess(false);
+    try {
+      const csv_data = previewToCSV(preview);
+      // Use the full original path to overwrite at the original location
+      let filename = atom.settings.dataSource;
+      // Remove .arrow extension if present (backend will add it back)
+      if (filename.endsWith('.arrow')) {
+        filename = filename.replace('.arrow', '');
+      }
+      
+      // Get environment variables for MongoDB saving
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      const stored = localStorage.getItem('current-project');
+      const project = stored ? JSON.parse(stored) : {};
+      
+      // Prepare operation details for MongoDB
+      const operation_details = {
+        input_file: atom.settings.dataSource,
+        operations: operations.map(op => {
+          // Get the actual column name created (either rename or default)
+          let created_column_name = '';
+          if (op.rename && op.rename.trim()) {
+            created_column_name = op.rename.trim();
+          } else {
+            // Use default naming based on operation type
+            const columns = op.columns || [];
+            switch (op.type) {
+              case 'add': created_column_name = columns.join('_plus_'); break;
+              case 'subtract': created_column_name = columns.join('_minus_'); break;
+              case 'multiply': created_column_name = columns.join('_times_'); break;
+              case 'divide': created_column_name = columns.join('_dividedby_'); break;
+              case 'residual': created_column_name = `Res_${columns[0] || ''}`; break;
+              case 'dummy': created_column_name = columns.length > 0 ? `${columns[0]}_dummy` : 'dummy'; break;
+              case 'log': created_column_name = columns.length > 0 ? `${columns[0]}_log` : 'log'; break;
+              case 'sqrt': created_column_name = columns.length > 0 ? `${columns[0]}_sqrt` : 'sqrt'; break;
+              case 'exp': created_column_name = columns.length > 0 ? `${columns[0]}_exp` : 'exp'; break;
+              case 'power': created_column_name = columns.length > 0 && op.param ? `${columns[0]}_power${op.param}` : 'power'; break;
+              case 'standardize_zscore': created_column_name = columns.length > 0 ? `${columns[0]}_zscore_scaled` : 'zscore_scaled'; break;
+              case 'standardize_minmax': created_column_name = columns.length > 0 ? `${columns[0]}_minmax_scaled` : 'minmax_scaled'; break;
+              case 'logistic': created_column_name = columns.length > 0 ? `${columns[0]}_logistic` : 'logistic'; break;
+              case 'detrend': created_column_name = columns.length > 0 ? `${columns[0]}_detrended` : 'detrended'; break;
+              case 'deseasonalize': created_column_name = columns.length > 0 ? `${columns[0]}_deseasonalized` : 'deseasonalized'; break;
+              case 'detrend_deseasonalize': created_column_name = columns.length > 0 ? `${columns[0]}_detrend_deseasonalized` : 'detrend_deseasonalized'; break;
+              case 'datetime': {
+                if (columns.length > 0 && op.param) {
+                  const dateCol = columns[0];
+                  const param = op.param as string;
+                  if (param === 'to_year') created_column_name = `${dateCol}_year`;
+                  else if (param === 'to_month') created_column_name = `${dateCol}_month`;
+                  else if (param === 'to_week') created_column_name = `${dateCol}_week`;
+                  else if (param === 'to_day') created_column_name = `${dateCol}_day`;
+                  else if (param === 'to_day_name') created_column_name = `${dateCol}_day_name`;
+                  else if (param === 'to_month_name') created_column_name = `${dateCol}_month_name`;
+                  else created_column_name = 'datetime_extract';
+                } else {
+                  created_column_name = 'datetime_extract';
+                }
+                break;
+              }
+              default: created_column_name = `${op.type}_${columns.join('_')}`; break;
+            }
+          }
+          
+          return {
+            operation_type: op.type,
+            columns: op.columns || [],
+            rename: op.rename || null,
+            param: op.param || null,
+            created_column_name: created_column_name
+          };
+        })
+      };
+      
+      const response = await fetch(`${CREATECOLUMN_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          csv_data, 
+          filename,
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || '',
+          user_id: env.USER_ID || '',
+          project_id: project.id || null,
+          operation_details: JSON.stringify(operation_details),
+          overwrite_original: true
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`Save failed: ${response.statusText}`);
+      }
+      setSaveSuccess(true);
+      setPreviewFile(filename.endsWith('.arrow') ? filename : filename + '.arrow');
+      // Don't clear the preview data - keep it visible
+      toast({ title: 'Success', description: 'Original file updated successfully.' });
     } catch (err: any) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save DataFrame');
       toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save DataFrame', variant: 'destructive' });
@@ -672,13 +802,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      const formData = new FormData();
-      formData.append('validator_atom_id', atom.settings.validator_atom_id || '');
-      formData.append('file_key', atom.settings.dataSource || '');
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', atom.settings.dataSource || '');
-      
-      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(atom.settings.dataSource || '')}`;
+      const res = await fetch(url);
       const data = await res.json();
       
       if (data.status === 'SUCCESS' && data.cardinality) {
@@ -1716,11 +1841,18 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                             {allFilteredResults.length.toLocaleString()} rows • {Object.keys(preview[0] || {}).length} columns
                           </span>
                           <Button
+                            onClick={handleSaveToOriginalFile}
+                            disabled={saveLoading}
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                          >
+                            {saveLoading ? 'Saving...' : 'Save'}
+                          </Button>
+                          <Button
                             onClick={handleSaveDataFrame}
                             disabled={saveLoading}
                             className="bg-blue-600 hover:bg-blue-700 text-white"
                           >
-                            {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                            {saveLoading ? 'Saving...' : 'Save As'}
                           </Button>
                           {saveError && <span className="text-red-600 text-sm ml-2">{saveError}</span>}
                           {saveSuccess && <span className="text-green-600 text-sm ml-2">Saved!</span>}
@@ -1814,11 +1946,18 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                             {previewData.length.toLocaleString()} rows • {previewHeaders.length} columns
                           </span>
                           <Button
+                            onClick={handleSaveToOriginalFile}
+                            disabled={saveLoading}
+                            className="bg-green-600 hover:bg-green-700 text-white"
+                          >
+                            {saveLoading ? 'Saving...' : 'Save'}
+                          </Button>
+                          <Button
                             onClick={handleSaveDataFrame}
                             disabled={saveLoading}
                             className="bg-blue-600 hover:bg-blue-700 text-white"
                           >
-                            {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                            {saveLoading ? 'Saving...' : 'Save As'}
                           </Button>
                           {saveError && <span className="text-red-600 text-sm ml-2">{saveError}</span>}
                           {saveSuccess && <span className="text-green-600 text-sm ml-2">Saved!</span>}
@@ -1904,6 +2043,47 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       {previewFile && !previewLoading && previewHeaders.length === 0 && (
         <div className="p-4 text-center text-red-600">Failed to load paginated preview. Showing last previewed data.</div>
       )} */}
+
+      {/* Save DataFrame Modal */}
+      <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save DataFrame</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveFileName.trim()) {
+                  confirmSaveDataFrame();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveModal(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveDataFrame}
+              disabled={saveLoading || !saveFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

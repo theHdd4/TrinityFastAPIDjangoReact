@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import errno
 import json
 import logging
 import os
+import shutil
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi.concurrency import run_in_threadpool
 
@@ -44,17 +47,162 @@ def _default_storage_path() -> Path:
     """Return the default JSON file location for exhibition configurations."""
 
     root_dir = Path(os.getenv("EXHIBITION_STORAGE_DIR", "").strip() or Path(__file__).resolve().parents[3] / "storage")
+    
     return Path(root_dir) / "exhibition_configurations.json"
 
 
+def _fallback_storage_candidates(preferred: Path) -> List[Path]:
+    """Return ordered fallback file candidates for exhibition configurations."""
+
+    candidates: List[Path] = []
+    seen: set[Path] = set()
+
+    def _add(path: Path) -> None:
+        normalised = path.expanduser()
+        if normalised == preferred:
+            return
+        # ``Path`` instances are hashable so we can deduplicate quickly.
+        if normalised in seen:
+            return
+        seen.add(normalised)
+        candidates.append(normalised)
+
+    raw_path = os.getenv("EXHIBITION_STORAGE_FALLBACK_DIR", "").strip()
+    if raw_path:
+        configured = Path(raw_path)
+        with suppress(OSError):
+            if configured.exists() and configured.is_file():
+                _add(configured)
+                return candidates
+        if configured.suffix:
+            _add(configured)
+        else:
+            _add(configured / preferred.name)
+
+    # Common deployment locations (dev/prod containers, direct-IP instances, etc.)
+    for root in (
+        Path(os.getenv("TRINITY_STORAGE_ROOT", "").strip() or "/code/storage"),
+        Path.cwd() / "storage",
+        Path.home() / ".trinity",
+        Path("/var/lib/trinity"),
+        Path("/tmp/trinity_exhibition"),
+    ):
+        if not root:
+            continue
+        if root.is_file():
+            _add(root)
+            continue
+        _add(root / preferred.name)
+
+    return candidates
+
+
 class ExhibitionStorage:
+
     """Persist exhibition configurations to MongoDB with a JSON fallback."""
 
     def __init__(self, storage_file: Optional[os.PathLike[str] | str] = None) -> None:
-        self._path = Path(storage_file) if storage_file is not None else _default_storage_path()
+        preferred_path = (
+            Path(storage_file).expanduser()
+            if storage_file is not None
+            else _default_storage_path()
+        )
+        self._preferred_path = preferred_path
+        self._fallback_candidates = _fallback_storage_candidates(preferred_path)
+        self._path = self._select_active_storage_path(source_path=self._preferred_path)
+        self._using_fallback = self._path != self._preferred_path
         self._lock = Lock()
         self._mongo_collection: Optional[Collection] = None
         self._initialise_mongo()
+
+    def _select_active_storage_path(
+        self,
+        *,
+        log_on_fallback: bool = True,
+        source_path: Optional[Path] = None,
+    ) -> Path:
+        candidates: List[Path] = [self._preferred_path, *self._fallback_candidates]
+        errors: List[Tuple[Path, Optional[OSError]]] = []
+
+        for candidate in candidates:
+            writable, error = self._ensure_path_writable(candidate)
+            if writable:
+                if candidate != self._preferred_path and log_on_fallback:
+                    message = "primary storage not writable"
+                    if errors:
+                        preferred_error = errors[0][1]
+                        if preferred_error is not None:
+                            message = str(preferred_error)
+                    logging.warning(
+                        "ExhibitionStorage cannot write to %s (%s); using fallback storage file %s",
+                        self._preferred_path,
+                        message,
+                        candidate,
+                    )
+
+                if source_path and source_path != candidate:
+                    self._copy_existing_data(source_path, candidate)
+
+                self._using_fallback = candidate != self._preferred_path
+                return candidate
+
+            errors.append((candidate, error))
+
+        message_parts = []
+        for candidate, error in errors:
+            error_message = str(error) if error is not None else "unknown error"
+            message_parts.append(f"{candidate} -> {error_message}")
+        message_blob = "; ".join(message_parts) or "no candidates evaluated"
+        raise RuntimeError(
+            "ExhibitionStorage could not determine a writable storage location: "
+            f"{message_blob}"
+        )
+
+    def _ensure_path_writable(self, candidate: Path) -> Tuple[bool, Optional[OSError]]:
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return False, exc
+        try:
+            with candidate.open("a", encoding="utf-8"):
+                return True, None
+        except OSError as exc:
+            return False, exc
+
+    def _copy_existing_data(self, source: Path, destination: Path) -> None:
+        if source == destination:
+            return
+        try:
+            if not source.exists() or not source.is_file():
+                return
+        except OSError:
+            return
+        try:
+            if destination.exists():
+                return
+        except OSError:
+            return
+        try:
+            shutil.copyfile(source, destination)
+        except OSError as exc:
+            logging.warning(
+                "ExhibitionStorage could not copy existing data from %s to %s: %s",
+                source,
+                destination,
+                exc,
+            )
+
+    def _write_payload(self, target: Path, data: List[Dict[str, Any]]) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+
+    @staticmethod
+    def _should_retry_with_fallback(error: OSError) -> bool:
+        if isinstance(error, PermissionError):
+            return True
+        errno_value = getattr(error, "errno", None)
+        return errno_value in {errno.EACCES, errno.EPERM, errno.EROFS}
 
     # ------------------------------------------------------------------
     # Internal helpers - file storage
@@ -76,10 +224,28 @@ class ExhibitionStorage:
 
     def _write_all_sync(self, records: Iterable[Dict[str, Any]]) -> None:
         with self._lock:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
             serialisable = list(records)
-            with self._path.open("w", encoding="utf-8") as handle:
-                json.dump(serialisable, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+            try:
+                self._write_payload(self._path, serialisable)
+            except OSError as exc:
+                if not self._should_retry_with_fallback(exc):
+                    raise
+                logging.warning(
+                    "ExhibitionStorage encountered a write error at %s (%s); attempting fallback storage",
+                    self._path,
+                    exc,
+                )
+                try:
+                    source_exists = self._path.exists()
+                except OSError:
+                    source_exists = False
+                source_path = self._path if source_exists else None
+                self._path = self._select_active_storage_path(
+                    log_on_fallback=not self._using_fallback,
+                    source_path=source_path,
+                )
+                self._write_payload(self._path, serialisable)
+            self._using_fallback = self._path != self._preferred_path
 
     @staticmethod
     def _normalise_identity(value: str) -> str:
@@ -167,6 +333,9 @@ class ExhibitionStorage:
 
             raw_components = ExhibitionStorage._resolve_component_payload(atom)
             components = ExhibitionStorage._sanitise_components(raw_components)
+            if not components:
+                continue
+
             sanitised.append(
                 {
                     "id": raw_identifier,
@@ -277,11 +446,14 @@ class ExhibitionStorage:
                 if not entry_id or not atom_name:
                     continue
 
-                incoming_ids.add(entry_id)
-                document_id = self._mongo_document_id(client, app, project, entry_id)
                 components = ExhibitionStorage._sanitise_components(
                     ExhibitionStorage._resolve_component_payload(entry)
                 )
+                if not components:
+                    continue
+
+                incoming_ids.add(entry_id)
+                document_id = self._mongo_document_id(client, app, project, entry_id)
 
                 mongo_payload = {
                     "_id": document_id,
@@ -533,6 +705,8 @@ class ExhibitionStorage:
 
             raw_components = self._resolve_component_payload(entry)
             components = self._sanitise_components(raw_components)
+            if not components:
+                continue
             atom_payload = {
                 "id": entry_id,
                 "atom_name": atom_name,

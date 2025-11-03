@@ -3631,3 +3631,363 @@ async def rename_dataframe(object_name: str = Form(...), new_filename: str = For
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+
+@router.post("/file-metadata")
+async def get_file_metadata(request: Request):
+    """
+    Get metadata for a file including column dtypes, missing values, and sample data.
+    Expects JSON body with 'file_path' key.
+    """
+    try:
+        body = await request.json()
+        file_path = body.get("file_path")
+        
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
+        
+        # Read file from MinIO
+        data = read_minio_object(file_path)
+        filename = Path(file_path).name
+        
+        # Parse based on file type
+        if filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        df = df_pl.to_pandas()
+        
+        # Collect column metadata
+        columns_info = []
+        for col in df.columns:
+            col_data = df[col]
+            missing_count = int(col_data.isna().sum())
+            total_rows = len(df)
+            missing_percentage = (missing_count / total_rows * 100) if total_rows > 0 else 0
+            
+            # Get sample values (non-null)
+            sample_values = col_data.dropna().head(5).tolist()
+            
+            columns_info.append({
+                "name": str(col),
+                "dtype": str(col_data.dtype),
+                "missing_count": missing_count,
+                "missing_percentage": round(missing_percentage, 2),
+                "sample_values": sample_values,
+            })
+        
+        return {
+            "columns": columns_info,
+            "total_rows": len(df),
+            "total_columns": len(df.columns),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting file metadata: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/detect-datetime-format")
+async def detect_datetime_format(request: Request):
+    """
+    Auto-detect datetime format for a column.
+    Expects JSON body with:
+    - file_path: str
+    - column_name: str
+    """
+    try:
+        body = await request.json()
+        file_path = body.get("file_path")
+        column_name = body.get("column_name")
+        
+        if not file_path or not column_name:
+            raise HTTPException(status_code=400, detail="file_path and column_name are required")
+        
+        # Read file from MinIO
+        data = read_minio_object(file_path)
+        filename = Path(file_path).name
+        
+        # Parse based on file type
+        if filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        df = df_pl.to_pandas()
+        
+        if column_name not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{column_name}' not found")
+        
+        # Get non-null sample values
+        column_data = df[column_name].dropna()
+        if len(column_data) == 0:
+            return {
+                "detected_format": None,
+                "can_detect": False,
+                "sample_values": []
+            }
+        
+        sample_values = column_data.head(5).astype(str).tolist()
+        
+        # Normalize separators for detection (handle mixed / and -)
+        # Convert all / to - for standardization
+        normalized_samples = [str(val).replace('/', '-') for val in sample_values]
+        
+        # Try common datetime formats (normalized to use -)
+        common_formats = [
+            '%Y-%m-%d',
+            '%d/%m/%Y',
+            '%m/%d/%Y',
+            '%d-%m-%Y',
+            '%m-%d-%Y',
+            '%m/%d/%y',
+            '%d-%m-%y',
+            '%m-%d-%y',
+            '%Y/%m/%d',
+            '%Y-%m-%d %H:%M:%S',
+            '%d/%m/%Y %H:%M:%S',
+            '%m/%d/%Y %H:%M:%S',
+            '%Y-%m-%dT%H:%M:%S',
+        ]
+        
+        detected_format = None
+        for fmt in common_formats:
+            try:
+                # Test with normalized sample values
+                success_count = 0
+                for val in normalized_samples[:5]:
+                    try:
+                        pd.to_datetime(val, format=fmt)
+                        success_count += 1
+                    except:
+                        break
+                
+                if success_count >= len(normalized_samples[:5]):
+                    detected_format = fmt
+                    break
+            except:
+                continue
+        
+        return {
+            "detected_format": detected_format,
+            "can_detect": detected_format is not None,
+            "sample_values": sample_values
+        }
+        
+    except Exception as e:
+        logger.error(f"Error detecting datetime format: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/apply-data-transformations")
+async def apply_data_transformations(request: Request):
+    """
+    Apply dtype changes and missing value strategies to a file.
+    Expects JSON body with:
+    - file_path: str
+    - dtype_changes: dict[str, str | dict] (column_name -> new_dtype or {dtype: str, format: str})
+    - missing_value_strategies: dict[str, dict] (column_name -> {strategy: str, value?: str})
+    """
+    try:
+        body = await request.json()
+        logger.info("=" * 80)
+        logger.info("apply_data_transformations endpoint called")
+        logger.info(f"Full request body: {body}")
+        logger.info("=" * 80)
+        
+        file_path = body.get("file_path")
+        dtype_changes = body.get("dtype_changes", {})
+        missing_value_strategies = body.get("missing_value_strategies", {})
+        
+        logger.info(f"Extracted file_path: {file_path}")
+        logger.info(f"Extracted dtype_changes: {dtype_changes}")
+        logger.info(f"Extracted missing_value_strategies: {missing_value_strategies}")
+        
+        # Check if this is a missing value only request
+        if len(dtype_changes) == 0 and len(missing_value_strategies) > 0:
+            logger.warning("⚠️  MISSING VALUE ONLY REQUEST - No dtype changes found!")
+        elif len(dtype_changes) > 0 and len(missing_value_strategies) == 0:
+            logger.warning("⚠️  DTYPE ONLY REQUEST - No missing value strategies found!")
+        elif len(dtype_changes) > 0 and len(missing_value_strategies) > 0:
+            logger.info("✅ COMBINED REQUEST - Both dtype and missing value changes found!")
+        
+        if not file_path:
+            raise HTTPException(status_code=400, detail="file_path is required")
+        
+        # Read file from MinIO
+        data = read_minio_object(file_path)
+        filename = Path(file_path).name
+        
+        # Parse based on file type
+        if filename.lower().endswith(".csv"):
+            df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
+        elif filename.lower().endswith(".arrow"):
+            df_pl = pl.read_ipc(io.BytesIO(data))
+        else:
+            raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
+        
+        df = df_pl.to_pandas()
+        
+        # Apply missing value strategies first
+        for col_name, strategy_config in missing_value_strategies.items():
+            if col_name not in df.columns:
+                continue
+                
+            strategy = strategy_config.get("strategy", "none")
+            
+            if strategy == "none":
+                continue
+            elif strategy == "drop":
+                df = df.dropna(subset=[col_name])
+            elif strategy == "mean":
+                if pd.api.types.is_numeric_dtype(df[col_name]):
+                    df[col_name].fillna(df[col_name].mean(), inplace=True)
+            elif strategy == "median":
+                if pd.api.types.is_numeric_dtype(df[col_name]):
+                    df[col_name].fillna(df[col_name].median(), inplace=True)
+            elif strategy == "mode":
+                mode_val = df[col_name].mode()
+                if len(mode_val) > 0:
+                    df[col_name].fillna(mode_val[0], inplace=True)
+            elif strategy == "zero":
+                df[col_name].fillna(0, inplace=True)
+            elif strategy == "empty":
+                df[col_name].fillna("", inplace=True)
+            elif strategy == "custom":
+                custom_value = strategy_config.get("value", "")
+                logger.info(f"Applying custom value '{custom_value}' to column '{col_name}' (dtype: {df[col_name].dtype})")
+                
+                # Convert custom value to match column dtype
+                if pd.api.types.is_numeric_dtype(df[col_name]):
+                    try:
+                        # Try to convert to numeric
+                        numeric_value = pd.to_numeric(custom_value, errors='coerce')
+                        if pd.notna(numeric_value):
+                            df[col_name].fillna(numeric_value, inplace=True)
+                            logger.info(f"Converted custom value '{custom_value}' to numeric: {numeric_value}")
+                        else:
+                            logger.warning(f"Could not convert custom value '{custom_value}' to numeric for column '{col_name}'")
+                    except Exception as e:
+                        logger.warning(f"Error converting custom value '{custom_value}' to numeric: {str(e)}")
+                else:
+                    # For non-numeric columns, use as string
+                    df[col_name].fillna(str(custom_value), inplace=True)
+                    logger.info(f"Applied custom string value '{custom_value}' to column '{col_name}'")
+        
+        # Apply dtype changes
+        logger.info(f"Starting dtype changes. Total dtype_changes to apply: {len(dtype_changes)}")
+        logger.info(f"dtype_changes received: {dtype_changes}")
+        
+        for col_name, dtype_config in dtype_changes.items():
+            logger.info(f"Processing dtype change for column: {col_name}, config: {dtype_config}")
+            
+            if col_name not in df.columns:
+                logger.warning(f"Column '{col_name}' not found in dataframe. Skipping.")
+                continue
+            
+            # Handle both string dtype and dict with {dtype, format}
+            if isinstance(dtype_config, dict):
+                new_dtype = dtype_config.get('dtype')
+                datetime_format = dtype_config.get('format')
+                logger.info(f"Dict config detected - dtype: {new_dtype}, format: {datetime_format}")
+            else:
+                new_dtype = dtype_config
+                datetime_format = None
+                logger.info(f"String config detected - dtype: {new_dtype}")
+                
+            try:
+                if new_dtype == "int64":
+                    # logger.info(f"Converting column '{col_name}' to int64")
+                    # logger.info(f"Sample values before conversion: {df[col_name].head(5).tolist()}")
+                    # logger.info(f"Column dtype before conversion: {df[col_name].dtype}")
+                    
+                    # Convert to numeric first, then round to remove decimals, then to Int64
+                    numeric_col = pd.to_numeric(df[col_name], errors='coerce')
+                    df[col_name] = numeric_col.round().astype('Int64')
+                    
+                    # logger.info(f"Sample values after conversion: {df[col_name].head(5).tolist()}")
+                    # logger.info(f"Column dtype after conversion: {df[col_name].dtype}")
+                    # logger.info(f"Non-null count: {df[col_name].notna().sum()} out of {len(df[col_name])}")
+                elif new_dtype == "float64":
+                    df[col_name] = pd.to_numeric(df[col_name], errors='coerce')
+                elif new_dtype == "object":
+                    df[col_name] = df[col_name].astype(str)
+                elif new_dtype == "datetime64":
+                    # Use provided format if available
+                    if datetime_format:
+                        # logger.info(f"Converting column '{col_name}' to datetime64 with format: {datetime_format}")
+                        # logger.info(f"Sample values before conversion: {df[col_name].head(5).tolist()}")
+                        # logger.info(f"Column dtype before conversion: {df[col_name].dtype}")
+                        
+                        # Two-step process: First auto-parse and standardize, then convert
+                        # Step 1: Auto-detect parse (no format) and convert to standardized format string
+                        def parse_and_format(x):
+                            try:
+                                # Auto-detect the date format (no format parameter)
+                                parsed = pd.to_datetime(x, errors='coerce')
+                                if pd.notna(parsed):
+                                    # Format to the user's selected format
+                                    result = parsed.strftime(datetime_format)
+                                    return result
+                                return None
+                            except Exception as e:
+                                logger.warning(f"Error parsing value '{x}': {str(e)}")
+                                return None
+                        
+                        df[col_name] = df[col_name].apply(parse_and_format)
+                        # logger.info(f"After Step 1 (auto-parse & format): {df[col_name].head(5).tolist()}")
+                        # logger.info(f"Non-null count after Step 1: {df[col_name].notna().sum()} out of {len(df[col_name])}")
+                        
+                        # Step 2: Convert to datetime64 using the standardized format
+                        df[col_name] = pd.to_datetime(df[col_name], format=datetime_format, errors='coerce')
+                        # logger.info(f"After Step 2 (final conversion): {df[col_name].head(5).tolist()}")
+                        # logger.info(f"Non-null count after Step 2: {df[col_name].notna().sum()} out of {len(df[col_name])}")
+                        # logger.info(f"Column dtype after conversion: {df[col_name].dtype}")
+                    else:
+                        logger.info(f"Converting column '{col_name}' to datetime64 without specific format")
+                        df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
+                elif new_dtype == "bool":
+                    df[col_name] = df[col_name].astype(bool)
+            except Exception as e:
+                logger.warning(f"Could not convert {col_name} to {new_dtype}: {str(e)}")
+        
+        # Save back to MinIO (overwrite the temp file)
+        buffer = io.BytesIO()
+        if filename.lower().endswith(".csv"):
+            df.to_csv(buffer, index=False)
+        elif filename.lower().endswith((".xls", ".xlsx")):
+            df.to_excel(buffer, index=False)
+        elif filename.lower().endswith(".arrow"):
+            df_pl_updated = pl.from_pandas(df)
+            df_pl_updated.write_ipc(buffer)
+        
+        buffer.seek(0)
+        
+        # Upload back to MinIO
+        minio_client.put_object(
+            MINIO_BUCKET,
+            file_path,
+            buffer,
+            length=buffer.getbuffer().nbytes,
+            content_type="application/octet-stream",
+        )
+        
+        return {
+            "status": "success",
+            "message": "Transformations applied successfully",
+            "rows_affected": len(df),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error applying transformations: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

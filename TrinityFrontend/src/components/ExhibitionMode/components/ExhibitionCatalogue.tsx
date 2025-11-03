@@ -11,6 +11,8 @@ import {
   sanitizeSegment,
 } from '@/components/AtomList/atoms/feature-overview/utils/exhibitionLabels';
 import ExhibitionFeatureOverview from '@/components/ExhibitionMode/components/atoms/FeatureOverview';
+import ChartMaker from '@/components/ExhibitionMode/components/atoms/ChartMaker';
+import EvaluateModelsFeature from '@/components/ExhibitionMode/components/atoms/EvaluateModelsFeature';
 import type { FeatureOverviewExhibitionComponentType } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { DroppedAtom, LayoutCard } from '../store/exhibitionStore';
 
@@ -90,10 +92,20 @@ const CatalogueComponentCard: React.FC<{
     chartState: metadata?.chartState,
   };
 
+  // For ChartMaker and EvaluateModelsFeature, use their respective title fields directly
+  const isChartMaker = atom.atomId === 'chart-maker';
+  const isEvaluateModelsFeature = atom.atomId === 'evaluate-models-feature';
+  const chartMakerTitle = isChartMaker ? (metadata?.chartTitle || metadata?.chart_title) : null;
+  const evaluateModelsFeatureTitle = isEvaluateModelsFeature ? (metadata?.graphTitle || metadata?.graph_title) : null;
+
   const defaultHighlightedName = buildDefaultHighlightedName(descriptorInput, componentType);
   const highlightedName = sanitizeSegment(typeof metadata?.label === 'string' ? metadata?.label : atom.title) || defaultHighlightedName;
-  const baseDescriptor = buildBaseDescriptor(descriptorInput) || 'Not specified';
-  const displayActualName = buildPrefixedDescriptor(descriptorInput, componentType);
+  const baseDescriptor = isChartMaker ? (chartMakerTitle || 'Chart') : 
+                         isEvaluateModelsFeature ? (evaluateModelsFeatureTitle || 'Graph') :
+                         (buildBaseDescriptor(descriptorInput) || 'Not specified');
+  const displayActualName = isChartMaker ? chartMakerTitle : 
+                            isEvaluateModelsFeature ? evaluateModelsFeatureTitle :
+                            buildPrefixedDescriptor(descriptorInput, componentType);
 
   const highlightBackgroundClass =
     typeof atom.color === 'string' && atom.color.trim().length > 0 ? atom.color.trim() : 'bg-amber-100';
@@ -196,7 +208,13 @@ const CatalogueComponentCard: React.FC<{
             <div className="mt-2 rounded-md border border-gray-200 bg-white/80 p-2">
               <div className="pointer-events-none select-none">
                 <div className="overflow-auto">
-                  <ExhibitionFeatureOverview metadata={metadata} variant="full" />
+                  {atom.atomId === 'chart-maker' ? (
+                    <ChartMaker metadata={metadata} variant="full" />
+                  ) : atom.atomId === 'evaluate-models-feature' ? (
+                    <EvaluateModelsFeature metadata={metadata} variant="full" />
+                  ) : (
+                    <ExhibitionFeatureOverview metadata={metadata} variant="full" />
+                  )}
                 </div>
                 {showComponentTitle && (
                   <p className="mt-3 text-center text-sm font-semibold text-gray-900">{displayActualName || baseDescriptor}</p>

@@ -4,6 +4,7 @@ import { Upload, Settings } from 'lucide-react';
 import FeatureOverviewSettings from '../FeatureOverviewSettings';
 import FeatureOverviewVisualisation from '../FeatureOverviewVisualisation';
 import { useLaboratoryStore, DEFAULT_FEATURE_OVERVIEW_SETTINGS, FeatureOverviewSettings as SettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 
 interface Props {
   atomId: string;
@@ -17,6 +18,8 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
 
   const [pendingY, setPendingY] = useState<string[]>(settings.yAxes || []);
   const [pendingX, setPendingX] = useState<string>(settings.xAxis || 'date');
+  const [pendingDimensions, setPendingDimensions] = useState<Record<string, string[]>>(settings.dimensionMap || {});
+  const [originalDimensions, setOriginalDimensions] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     setPendingY(settings.yAxes || []);
@@ -26,12 +29,40 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
     setPendingX(settings.xAxis || 'date');
   }, [settings.xAxis]);
 
+  useEffect(() => {
+    setPendingDimensions(settings.dimensionMap || {});
+  }, [settings.dimensionMap]);
+
+  // Fetch original dimension mapping from column classifier
+  useEffect(() => {
+    const fetchOriginalDimensions = async () => {
+      if (!settings.dataSource) return;
+      
+      try {
+        const { mapping: rawMapping } = await fetchDimensionMapping({
+          objectName: settings.dataSource,
+        });
+        if (rawMapping && Object.keys(rawMapping).length > 0) {
+          setOriginalDimensions(rawMapping);
+        }
+      } catch (error) {
+        console.warn('Failed to fetch original dimension mapping:', error);
+      }
+    };
+
+    fetchOriginalDimensions();
+  }, [settings.dataSource]);
+
   const handleChange = (newSettings: Partial<SettingsType>) => {
     updateSettings(atomId, newSettings);
   };
 
   const applyVisual = () => {
-    updateSettings(atomId, { yAxes: pendingY, xAxis: pendingX });
+    console.log("🔄 Apply Visual clicked - updating settings");
+    console.log("🔄 Pending dimensions:", pendingDimensions);
+    console.log("🔄 Pending Y axes:", pendingY);
+    console.log("🔄 Pending X axis:", pendingX);
+    updateSettings(atomId, { yAxes: pendingY, xAxis: pendingX, dimensionMap: pendingDimensions });
   };
 
   return (
@@ -73,6 +104,9 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
             xValue={pendingX}
             onYChange={setPendingY}
             onXChange={setPendingX}
+            dimensionMap={pendingDimensions}
+            originalDimensionMap={originalDimensions}
+            onDimensionChange={setPendingDimensions}
             onApply={applyVisual}
           />
         </TabsContent>

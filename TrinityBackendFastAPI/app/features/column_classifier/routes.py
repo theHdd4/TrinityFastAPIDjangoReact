@@ -173,7 +173,8 @@ async def classify_columns(
     dataframe: str = Form(...),
     identifiers: str = Form(default="[]"),
     measures: str = Form(default="[]"),
-    unclassified: str = Form(default="[]")
+    unclassified: str = Form(default="[]"),
+    bypass_cache: str = Form(default="false"),
 ):
     """
     Auto-classify data columns with optional user overrides.
@@ -185,35 +186,56 @@ async def classify_columns(
     """
 
     object_name = unquote(dataframe)
-    flight_path = get_flight_path_for_csv(object_name)
-    if not flight_path:
-        info = await get_dataset_info(object_name)
-        if info:
-            file_key, flight_path, original_csv = info
-            set_ticket(file_key, object_name, flight_path, original_csv)
-    df = None
-    if flight_path:
-        try:
-            df = download_dataframe(flight_path)
-        except Exception:
-            df = None
-    if df is None:
+    force_bypass = str(bypass_cache).lower() in {"1", "true", "yes"}
+
+    # When bypassing cache, always load directly from MinIO (fresh schema)
+    if force_bypass:
         if not object_name.endswith(".arrow"):
             raise HTTPException(status_code=400, detail="Unsupported file format")
-        content = binary_redis.get(object_name)
-        if content is None:
-            try:
-                response = minio_client.get_object(MINIO_BUCKET, object_name)
-                content = response.read()
-                binary_redis.setex(object_name, 3600, content)
-            except S3Error as e:
-                code = getattr(e, "code", "")
-                if code in {"NoSuchKey", "NoSuchBucket"}:
-                    binary_redis.delete(object_name)
-                    raise HTTPException(status_code=404, detail="File not found")
-                raise HTTPException(status_code=500, detail=str(e))
+        try:
+            response = minio_client.get_object(MINIO_BUCKET, object_name)
+            content = response.read()
+            # Refresh redis cache with latest bytes to keep cache consistent
+            binary_redis.setex(object_name, 3600, content)
+        except S3Error as e:
+            code = getattr(e, "code", "")
+            if code in {"NoSuchKey", "NoSuchBucket"}:
+                binary_redis.delete(object_name)
+                raise HTTPException(status_code=404, detail="File not found")
+            raise HTTPException(status_code=500, detail=str(e))
         reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
         df = reader.read_all().to_pandas()
+    else:
+        # Existing behavior: prefer Flight (latest), fallback to Redis/MinIO
+        flight_path = get_flight_path_for_csv(object_name)
+        if not flight_path:
+            info = await get_dataset_info(object_name)
+            if info:
+                file_key, flight_path, original_csv = info
+                set_ticket(file_key, object_name, flight_path, original_csv)
+        df = None
+        if flight_path:
+            try:
+                df = download_dataframe(flight_path)
+            except Exception:
+                df = None
+        if df is None:
+            if not object_name.endswith(".arrow"):
+                raise HTTPException(status_code=400, detail="Unsupported file format")
+            content = binary_redis.get(object_name)
+            if content is None:
+                try:
+                    response = minio_client.get_object(MINIO_BUCKET, object_name)
+                    content = response.read()
+                    binary_redis.setex(object_name, 3600, content)
+                except S3Error as e:
+                    code = getattr(e, "code", "")
+                    if code in {"NoSuchKey", "NoSuchBucket"}:
+                        binary_redis.delete(object_name)
+                        raise HTTPException(status_code=404, detail="File not found")
+                    raise HTTPException(status_code=500, detail=str(e))
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
 
     df.columns = [str(c).lower() for c in df.columns]
     all_columns = df.columns.tolist()

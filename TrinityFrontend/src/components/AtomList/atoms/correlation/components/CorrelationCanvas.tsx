@@ -345,13 +345,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      const formData = new FormData();
-      formData.append('validator_atom_id', 'correlation_atom'); // Use a default ID for correlation
-      formData.append('file_key', data.selectedFile || '');
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', data.selectedFile || '');
-      
-      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(data.selectedFile || '')}`;
+      const res = await fetch(url);
       const responseData = await res.json();
       
       if (responseData.status === 'SUCCESS' && responseData.cardinality) {

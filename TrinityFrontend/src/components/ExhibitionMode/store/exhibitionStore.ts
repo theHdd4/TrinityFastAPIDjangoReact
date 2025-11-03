@@ -8,8 +8,31 @@ import {
   type ExhibitionLayoutResponse,
 } from '@/lib/exhibition';
 import { getActiveProjectContext, type ProjectContext } from '@/utils/projectEnv';
+import type {
+  GradientColorId,
+  GradientColorToken,
+  SolidColorToken,
+} from '@/templates/color-tray';
+import {
+  isKnownGradientId,
+  isSolidToken,
+  isGradientToken,
+} from '@/templates/color-tray';
+import {
+  DEFAULT_EXHIBITION_THEME,
+  type ExhibitionTheme,
+} from '../themes';
 
-export type CardColor = 'default' | 'blue' | 'purple' | 'green' | 'orange';
+export type CardColor = GradientColorId | SolidColorToken;
+export type SlideBackgroundPreset =
+  | 'default'
+  | 'ivory'
+  | 'slate'
+  | 'charcoal'
+  | 'indigo'
+  | 'emerald'
+  | 'rose';
+export type SlideBackgroundColor = SlideBackgroundPreset | SolidColorToken | GradientColorToken;
 export type CardWidth = 'M' | 'L';
 export type ContentAlignment = 'top' | 'center' | 'bottom';
 export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
@@ -17,7 +40,15 @@ export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
 const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
 
 const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
-const CARD_COLORS: readonly CardColor[] = ['default', 'blue', 'purple', 'green', 'orange'] as const;
+const SLIDE_BACKGROUND_PRESETS: readonly SlideBackgroundPreset[] = [
+  'default',
+  'ivory',
+  'slate',
+  'charcoal',
+  'indigo',
+  'emerald',
+  'rose',
+] as const;
 const CARD_WIDTHS: readonly CardWidth[] = ['M', 'L'] as const;
 const CONTENT_ALIGNMENTS: readonly ContentAlignment[] = ['top', 'center', 'bottom'] as const;
 const SLIDESHOW_TRANSITIONS: readonly SlideshowTransition[] = ['fade', 'slide', 'zoom'] as const;
@@ -146,6 +177,9 @@ const ensureCardLayout = (layout: unknown): CardLayout => {
 };
 
 export type SlideshowTransition = 'fade' | 'slide' | 'zoom';
+export type SlideBackgroundMode = 'preset' | 'solid' | 'gradient' | 'image';
+export type SlideNumberPosition = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+export type SlideNotesPosition = 'bottom' | 'right';
 
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardColor: 'purple',
@@ -155,8 +189,33 @@ export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = {
   cardLayout: DEFAULT_CARD_LAYOUT,
   accentImage: null,
   accentImageName: null,
+  backgroundColor: 'default',
   slideshowDuration: 8,
   slideshowTransition: 'fade',
+  backgroundLocked: false,
+  backgroundMode: 'preset',
+  backgroundSolidColor: '#ffffff',
+  backgroundGradientStart: '#667eea',
+  backgroundGradientEnd: '#764ba2',
+  backgroundGradientDirection: '135deg',
+  backgroundImageUrl: null,
+  backgroundOpacity: 100,
+  showGrid: false,
+  showGuides: false,
+  snapToGrid: true,
+  gridSize: 20,
+  showSlideNumber: true,
+  slideNumberPosition: 'bottom-right',
+  transitionEffect: 'fade',
+  transitionDuration: 450,
+  autoAdvance: false,
+  autoAdvanceDuration: 8,
+  highContrast: false,
+  largeText: false,
+  reducedMotion: false,
+  slideNotesPosition: 'bottom',
+  slideNotesVisible: false,
+  themeId: DEFAULT_EXHIBITION_THEME.id,
 };
 
 export interface PresentationSettings {
@@ -167,8 +226,33 @@ export interface PresentationSettings {
   cardLayout: CardLayout;
   accentImage?: string | null;
   accentImageName?: string | null;
+  backgroundColor: SlideBackgroundColor;
   slideshowDuration: number;
   slideshowTransition: SlideshowTransition;
+  backgroundLocked?: boolean;
+  backgroundMode?: SlideBackgroundMode;
+  backgroundSolidColor?: string;
+  backgroundGradientStart?: string;
+  backgroundGradientEnd?: string;
+  backgroundGradientDirection?: string;
+  backgroundImageUrl?: string | null;
+  backgroundOpacity?: number;
+  showGrid?: boolean;
+  showGuides?: boolean;
+  snapToGrid?: boolean;
+  gridSize?: number;
+  showSlideNumber?: boolean;
+  slideNumberPosition?: SlideNumberPosition;
+  transitionEffect?: SlideshowTransition | 'none' | 'flip' | 'cube' | 'dissolve';
+  transitionDuration?: number;
+  autoAdvance?: boolean;
+  autoAdvanceDuration?: number;
+  highContrast?: boolean;
+  largeText?: boolean;
+  reducedMotion?: boolean;
+  slideNotesPosition?: SlideNotesPosition;
+  slideNotesVisible?: boolean;
+  themeId?: string;
 }
 
 export interface DroppedAtom {
@@ -197,12 +281,9 @@ export const DEFAULT_CANVAS_OBJECT_WIDTH = 420;
 export const DEFAULT_CANVAS_OBJECT_HEIGHT = 320;
 const DEFAULT_TITLE_OBJECT_WIDTH = 560;
 const DEFAULT_TITLE_OBJECT_HEIGHT = 120;
-const DEFAULT_ACCENT_IMAGE_OBJECT_WIDTH = 360;
-const DEFAULT_ACCENT_IMAGE_OBJECT_HEIGHT = 240;
 export const CANVAS_SNAP_GRID = 8;
 
 export const buildSlideTitleObjectId = (cardId: string) => `${cardId}::slide-title`;
-export const buildSlideAccentImageObjectId = (cardId: string) => `${cardId}::accent-image`;
 
 export const createSlideObjectFromAtom = (
   atom: DroppedAtom,
@@ -240,18 +321,24 @@ interface ExhibitionStore {
   catalogueEntries: ExhibitionAtomPayload[];
   lastLoadedContext: ProjectContext | null;
   slideObjectsByCardId: Record<string, SlideObject[]>;
+  activeTheme: ExhibitionTheme;
   loadSavedConfiguration: (context?: ProjectContext | null) => Promise<void>;
   updateCard: (cardId: string, updatedCard: Partial<LayoutCard>) => void;
   addBlankSlide: (afterSlideIndex?: number) => LayoutCard | null;
-  setCards: (cards: LayoutCard[] | unknown) => void;
+  setCards: (
+    cards: LayoutCard[] | unknown,
+    slideObjects?: Record<string, SlideObject[] | undefined>,
+  ) => void;
   addSlideObject: (cardId: string, object: SlideObject) => void;
   bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => void;
   removeSlideObject: (cardId: string, objectId: string) => void;
+  removeSlide: (cardId: string) => void;
   bringSlideObjectsToFront: (cardId: string, objectIds: string[]) => void;
   bringSlideObjectsForward: (cardId: string, objectIds: string[]) => void;
   sendSlideObjectsToBack: (cardId: string, objectIds: string[]) => void;
   sendSlideObjectsBackward: (cardId: string, objectIds: string[]) => void;
   groupSlideObjects: (cardId: string, objectIds: string[], groupId: string | null) => void;
+  applyTheme: (theme: ExhibitionTheme) => void;
   reset: () => void;
 }
 
@@ -342,6 +429,32 @@ const looksLikeFeatureOverviewMetadata = (metadata: Record<string, any> | undefi
   return Boolean(hasMetric && (hasDimensions || hasStatistics || hasChartConfig));
 };
 
+const looksLikeChartMakerMetadata = (metadata: Record<string, any> | undefined): boolean => {
+  if (!metadata) {
+    return false;
+  }
+
+  const hasChartId = typeof metadata.chartId === 'string' || typeof metadata.chart_id === 'string';
+  const hasChartTitle = typeof metadata.chartTitle === 'string' || typeof metadata.chart_title === 'string';
+  const hasChartState = metadata.chartState != null || metadata.chart_state != null;
+  const hasChartContext = metadata.chartContext != null || metadata.chart_context != null;
+
+  return Boolean(hasChartId && hasChartTitle && (hasChartState || hasChartContext));
+};
+
+const looksLikeEvaluateModelsFeatureMetadata = (metadata: Record<string, any> | undefined): boolean => {
+  if (!metadata) {
+    return false;
+  }
+
+  const hasGraphId = typeof metadata.graphId === 'string' || typeof metadata.graph_id === 'string';
+  const hasGraphTitle = typeof metadata.graphTitle === 'string' || typeof metadata.graph_title === 'string';
+  const hasGraphState = metadata.graphState != null || metadata.graph_state != null;
+  const hasGraphContext = metadata.graphContext != null || metadata.graph_context != null;
+
+  return Boolean(hasGraphId && hasGraphTitle && (hasGraphState || hasGraphContext));
+};
+
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
@@ -354,8 +467,49 @@ const isValidDateString = (value: unknown): value is string => {
   return Number.isFinite(parsed);
 };
 
-const isValidCardColor = (value: unknown): value is CardColor =>
-  typeof value === 'string' && (CARD_COLORS as readonly string[]).includes(value);
+const isValidHexColor = (value: unknown): value is string => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const candidate = value.trim();
+  return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(candidate);
+};
+
+const isValidCardColor = (value: unknown): value is CardColor => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  if (isSolidToken(value)) {
+    return true;
+  }
+
+  if (isKnownGradientId(value)) {
+    return true;
+  }
+
+  return false;
+};
+
+const isValidBackgroundColor = (value: unknown): value is SlideBackgroundColor => {
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  if ((SLIDE_BACKGROUND_PRESETS as readonly string[]).includes(value)) {
+    return true;
+  }
+
+  if (isSolidToken(value)) {
+    return true;
+  }
+
+  if (isGradientToken(value)) {
+    return true;
+  }
+
+  return false;
+};
 
 const isValidCardWidth = (value: unknown): value is CardWidth =>
   typeof value === 'string' && (CARD_WIDTHS as readonly string[]).includes(value);
@@ -391,6 +545,9 @@ const ensurePresentationSettings = (
 
   const accentImage = isNonEmptyString(candidate.accentImage) ? candidate.accentImage : null;
   const accentImageName = isNonEmptyString(candidate.accentImageName) ? candidate.accentImageName : null;
+  const backgroundColor = isValidBackgroundColor(candidate.backgroundColor)
+    ? candidate.backgroundColor
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundColor;
 
   const slideshowDuration =
     typeof candidate.slideshowDuration === 'number' && Number.isFinite(candidate.slideshowDuration)
@@ -401,6 +558,119 @@ const ensurePresentationSettings = (
     ? candidate.slideshowTransition
     : DEFAULT_PRESENTATION_SETTINGS.slideshowTransition;
 
+  const isValidBackgroundMode = (value: unknown): value is SlideBackgroundMode => {
+    if (typeof value !== 'string') {
+      return false;
+    }
+    return ['preset', 'solid', 'gradient', 'image'].includes(value);
+  };
+
+  const backgroundMode = isValidBackgroundMode(candidate.backgroundMode)
+    ? candidate.backgroundMode
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundMode;
+
+  const backgroundLocked = typeof candidate.backgroundLocked === 'boolean'
+    ? candidate.backgroundLocked
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundLocked ?? false;
+
+  const backgroundSolidColor = isValidHexColor(candidate.backgroundSolidColor)
+    ? candidate.backgroundSolidColor
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
+
+  const backgroundGradientStart = isValidHexColor(candidate.backgroundGradientStart)
+    ? candidate.backgroundGradientStart
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart;
+
+  const backgroundGradientEnd = isValidHexColor(candidate.backgroundGradientEnd)
+    ? candidate.backgroundGradientEnd
+    : DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd;
+
+  const backgroundGradientDirection =
+    typeof candidate.backgroundGradientDirection === 'string' && candidate.backgroundGradientDirection.trim().length > 0
+      ? candidate.backgroundGradientDirection
+      : DEFAULT_PRESENTATION_SETTINGS.backgroundGradientDirection;
+
+  const backgroundImageUrl = isNonEmptyString(candidate.backgroundImageUrl)
+    ? candidate.backgroundImageUrl
+    : null;
+
+  const backgroundOpacity =
+    typeof candidate.backgroundOpacity === 'number' && Number.isFinite(candidate.backgroundOpacity)
+      ? Math.min(100, Math.max(0, Math.round(candidate.backgroundOpacity)))
+      : DEFAULT_PRESENTATION_SETTINGS.backgroundOpacity;
+
+  const showGrid = typeof candidate.showGrid === 'boolean' ? candidate.showGrid : DEFAULT_PRESENTATION_SETTINGS.showGrid;
+  const showGuides =
+    typeof candidate.showGuides === 'boolean' ? candidate.showGuides : DEFAULT_PRESENTATION_SETTINGS.showGuides;
+  const snapToGrid =
+    typeof candidate.snapToGrid === 'boolean' ? candidate.snapToGrid : DEFAULT_PRESENTATION_SETTINGS.snapToGrid;
+
+  const gridSizeCandidate =
+    typeof candidate.gridSize === 'number' && Number.isFinite(candidate.gridSize) ? candidate.gridSize : undefined;
+  const gridSize = gridSizeCandidate ? Math.min(200, Math.max(4, Math.round(gridSizeCandidate))) : DEFAULT_PRESENTATION_SETTINGS.gridSize;
+
+  const showSlideNumber =
+    typeof candidate.showSlideNumber === 'boolean'
+      ? candidate.showSlideNumber
+      : DEFAULT_PRESENTATION_SETTINGS.showSlideNumber;
+
+  const isValidSlideNumberPosition = (value: unknown): value is SlideNumberPosition =>
+    typeof value === 'string' && ['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(value);
+
+  const slideNumberPosition = isValidSlideNumberPosition(candidate.slideNumberPosition)
+    ? candidate.slideNumberPosition
+    : DEFAULT_PRESENTATION_SETTINGS.slideNumberPosition;
+
+  const isValidTransitionEffect = (value: unknown): value is NonNullable<PresentationSettings['transitionEffect']> => {
+    if (typeof value !== 'string') {
+      return false;
+    }
+    return ['none', 'fade', 'slide', 'zoom', 'flip', 'cube', 'dissolve'].includes(value);
+  };
+
+  const transitionEffect = isValidTransitionEffect(candidate.transitionEffect)
+    ? candidate.transitionEffect
+    : (slideshowTransition as NonNullable<PresentationSettings['transitionEffect']>);
+
+  const transitionDuration =
+    typeof candidate.transitionDuration === 'number' && Number.isFinite(candidate.transitionDuration)
+      ? Math.max(100, Math.round(candidate.transitionDuration))
+      : DEFAULT_PRESENTATION_SETTINGS.transitionDuration;
+
+  const autoAdvance =
+    typeof candidate.autoAdvance === 'boolean' ? candidate.autoAdvance : DEFAULT_PRESENTATION_SETTINGS.autoAdvance;
+
+  const autoAdvanceDurationCandidate =
+    typeof candidate.autoAdvanceDuration === 'number' && Number.isFinite(candidate.autoAdvanceDuration)
+      ? candidate.autoAdvanceDuration
+      : undefined;
+  const autoAdvanceDuration = autoAdvanceDurationCandidate
+    ? Math.max(1, Math.round(autoAdvanceDurationCandidate))
+    : Math.max(1, Math.round(slideshowDuration));
+
+  const highContrast =
+    typeof candidate.highContrast === 'boolean' ? candidate.highContrast : DEFAULT_PRESENTATION_SETTINGS.highContrast;
+  const largeText =
+    typeof candidate.largeText === 'boolean' ? candidate.largeText : DEFAULT_PRESENTATION_SETTINGS.largeText;
+  const reducedMotion =
+    typeof candidate.reducedMotion === 'boolean' ? candidate.reducedMotion : DEFAULT_PRESENTATION_SETTINGS.reducedMotion;
+
+  const isValidNotesPosition = (value: unknown): value is SlideNotesPosition =>
+    typeof value === 'string' && ['bottom', 'right'].includes(value);
+
+  const slideNotesPosition = isValidNotesPosition(candidate.slideNotesPosition)
+    ? candidate.slideNotesPosition
+    : DEFAULT_PRESENTATION_SETTINGS.slideNotesPosition;
+
+  const slideNotesVisible =
+    typeof candidate.slideNotesVisible === 'boolean'
+      ? candidate.slideNotesVisible
+      : DEFAULT_PRESENTATION_SETTINGS.slideNotesVisible;
+
+  const themeId = isNonEmptyString(candidate.themeId)
+    ? candidate.themeId
+    : DEFAULT_PRESENTATION_SETTINGS.themeId;
+
   return {
     cardColor,
     cardWidth,
@@ -409,27 +679,141 @@ const ensurePresentationSettings = (
     cardLayout,
     accentImage,
     accentImageName,
+    backgroundColor,
     slideshowDuration,
     slideshowTransition,
+    backgroundLocked,
+    backgroundMode,
+    backgroundSolidColor,
+    backgroundGradientStart,
+    backgroundGradientEnd,
+    backgroundGradientDirection,
+    backgroundImageUrl,
+    backgroundOpacity,
+    showGrid,
+    showGuides,
+    snapToGrid,
+    gridSize,
+    showSlideNumber,
+    slideNumberPosition,
+    transitionEffect,
+    transitionDuration,
+    autoAdvance,
+    autoAdvanceDuration,
+    highContrast,
+    largeText,
+    reducedMotion,
+    slideNotesPosition,
+    slideNotesVisible,
+    themeId,
   };
 };
+
+const clampOpacity = (value: number | undefined, fallback: number): number => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  const normalised = Math.min(100, Math.max(0, Math.round(value)));
+  return normalised;
+};
+
+const applyThemePresentation = (base: PresentationSettings, theme: ExhibitionTheme): PresentationSettings => {
+  const next: PresentationSettings = {
+    ...base,
+    themeId: theme.id,
+  };
+
+  const presentation = theme.presentation;
+  if (!presentation) {
+    return next;
+  }
+
+  if (typeof presentation.cardColor === 'string') {
+    next.cardColor = presentation.cardColor as PresentationSettings['cardColor'];
+  }
+
+  if (typeof presentation.cardWidth === 'string') {
+    next.cardWidth = presentation.cardWidth as PresentationSettings['cardWidth'];
+  }
+
+  if (typeof presentation.contentAlignment === 'string') {
+    next.contentAlignment = presentation.contentAlignment as PresentationSettings['contentAlignment'];
+  }
+
+  if (typeof presentation.fullBleed === 'boolean') {
+    next.fullBleed = presentation.fullBleed;
+  }
+
+  if (typeof presentation.backgroundMode === 'string') {
+    next.backgroundMode = presentation.backgroundMode;
+  }
+
+  if (typeof presentation.backgroundColor === 'string') {
+    next.backgroundColor = presentation.backgroundColor as PresentationSettings['backgroundColor'];
+  }
+
+  if (typeof presentation.backgroundSolidColor === 'string') {
+    next.backgroundSolidColor = presentation.backgroundSolidColor;
+  }
+
+  if (typeof presentation.backgroundGradientStart === 'string') {
+    next.backgroundGradientStart = presentation.backgroundGradientStart;
+  }
+
+  if (typeof presentation.backgroundGradientEnd === 'string') {
+    next.backgroundGradientEnd = presentation.backgroundGradientEnd;
+  }
+
+  if (typeof presentation.backgroundGradientDirection === 'string') {
+    next.backgroundGradientDirection = presentation.backgroundGradientDirection;
+  }
+
+  if (typeof presentation.backgroundOpacity === 'number') {
+    const fallback =
+      typeof next.backgroundOpacity === 'number'
+        ? next.backgroundOpacity
+        : DEFAULT_PRESENTATION_SETTINGS.backgroundOpacity ?? 100;
+    next.backgroundOpacity = clampOpacity(presentation.backgroundOpacity, fallback);
+  }
+
+  if ('accentImage' in presentation) {
+    next.accentImage = presentation.accentImage ?? null;
+  }
+
+  if ('accentImageName' in presentation) {
+    next.accentImageName = presentation.accentImageName ?? null;
+  }
+
+  return next;
+};
+
+const buildPresentationForTheme = (theme: ExhibitionTheme): PresentationSettings =>
+  applyThemePresentation({ ...DEFAULT_PRESENTATION_SETTINGS }, theme);
 
 const dedupeAtoms = (atoms: DroppedAtom[]): DroppedAtom[] => {
   const seen = new Set<string>();
   const result: DroppedAtom[] = [];
 
+  console.log('🔍 ExhibitionStore - dedupeAtoms input:', atoms);
   atoms.forEach(atom => {
+    // For EvaluateModelsFeature, just use the id since it's already unique (graph.id-combinationName)
     const key = atom.id ?? atom.atomId;
+    console.log('🔍 ExhibitionStore - dedupeAtoms processing atom:', atom.atomId, 'id:', atom.id, 'title:', atom.title, 'key:', key);
     if (!key) {
+      console.log('🔍 ExhibitionStore - dedupeAtoms skipping atom (no key):', atom);
       return;
     }
     if (seen.has(key)) {
+      console.log('🔍 ExhibitionStore - dedupeAtoms DUPLICATE FOUND! Skipping:', atom.atomId, 'key:', key);
       return;
     }
     seen.add(key);
     result.push(atom);
+    console.log('🔍 ExhibitionStore - dedupeAtoms ADDED:', atom.atomId, 'key:', key);
   });
 
+  console.log('🔍 ExhibitionStore - dedupeAtoms result:', result);
   return result;
 };
 
@@ -484,7 +868,7 @@ const synchroniseSlideObjects = (
     nextProps.fontFamily =
       typeof nextProps.fontFamily === 'string' && nextProps.fontFamily.trim().length > 0
         ? nextProps.fontFamily
-        : 'Times New Roman';
+        : 'Comic Sans';
     nextProps.bold = typeof nextProps.bold === 'boolean' ? nextProps.bold : true;
     nextProps.italic = Boolean(nextProps.italic);
     nextProps.underline = Boolean(nextProps.underline);
@@ -539,21 +923,6 @@ const synchroniseSlideObjects = (
         titleSource = { ...object };
       } else if (object.type === 'text-box' && object.id === titleId) {
         titleSource = { ...object };
-      } else if (object.type === 'accent-image') {
-        const accentImage = card.presentationSettings?.accentImage;
-        if (!accentImage) {
-          return;
-        }
-        next.push({
-          ...object,
-          id: buildSlideAccentImageObjectId(card.id),
-          type: 'accent-image',
-          props: {
-            ...(object.props || {}),
-            src: accentImage,
-            name: card.presentationSettings?.accentImageName ?? null,
-          },
-        });
       } else {
         next.push({ ...object });
       }
@@ -577,44 +946,7 @@ const synchroniseSlideObjects = (
     });
   }
 
-  const accentId = buildSlideAccentImageObjectId(card.id);
-
-  const accentImage = card.presentationSettings?.accentImage;
-  if (accentImage) {
-    const accentIndex = next.findIndex(object => object.id === accentId || object.type === 'accent-image');
-    const accentName = card.presentationSettings?.accentImageName ?? null;
-    const accentObject: SlideObject = accentIndex !== -1
-      ? {
-          ...next[accentIndex],
-          id: accentId,
-          type: 'accent-image',
-          props: {
-            ...(next[accentIndex].props || {}),
-            src: accentImage,
-            name: accentName,
-          },
-        }
-      : {
-          id: accentId,
-          type: 'accent-image',
-          x: 48,
-          y: 160,
-          width: DEFAULT_ACCENT_IMAGE_OBJECT_WIDTH,
-          height: DEFAULT_ACCENT_IMAGE_OBJECT_HEIGHT,
-          zIndex: 1,
-          rotation: 0,
-          groupId: null,
-          props: {
-            src: accentImage,
-            name: accentName,
-          },
-        };
-
-    next = next.filter(object => object.id !== accentId && object.type !== 'accent-image');
-    next = [accentObject, ...next];
-  } else {
-    next = next.filter(object => object.id !== accentId && object.type !== 'accent-image');
-  }
+  next = next.filter(object => object.type !== 'accent-image');
 
   const titleObject = createTitleObject(titleSource);
 
@@ -633,6 +965,7 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     return null;
   }
 
+  console.log('🔍 ExhibitionStore - normalizeAtom input:', component);
   const candidate = component as Partial<DroppedAtom & ExhibitionComponentPayload>;
 
   const resolvedId = isNonEmptyString(candidate.id) ? candidate.id.trim() : undefined;
@@ -672,6 +1005,26 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     atomId = 'feature-overview';
   }
 
+  if (
+    looksLikeChartMakerMetadata(metadata) &&
+    (!resolvedAtomId ||
+      atomId === id ||
+      atomId.toLowerCase().includes('chart-maker') ||
+      category.toLowerCase().includes('chart maker'))
+  ) {
+    atomId = 'chart-maker';
+  }
+
+  if (
+    looksLikeEvaluateModelsFeatureMetadata(metadata) &&
+    (!resolvedAtomId ||
+      atomId === id ||
+      atomId.toLowerCase().includes('evaluate-models-feature') ||
+      category.toLowerCase().includes('evaluate models feature'))
+  ) {
+    atomId = 'evaluate-models-feature';
+  }
+
   if (manifest && metadata.visualizationManifest == null) {
     metadata.visualizationManifest = manifest;
   }
@@ -680,7 +1033,7 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     metadata.manifestId = manifestId;
   }
 
-  return {
+  const result = {
     id,
     atomId,
     title,
@@ -688,6 +1041,8 @@ const normalizeAtom = (component: unknown): DroppedAtom | null => {
     color,
     metadata,
   };
+  console.log('🔍 ExhibitionStore - normalizeAtom result:', result);
+  return result;
 };
 
 const normaliseAtomList = (atoms: unknown): DroppedAtom[] => {
@@ -839,13 +1194,14 @@ const normaliseLayoutSlideObjects = (
   }, {} as Record<string, SlideObject[]>);
 };
 
-const createBlankSlide = (): LayoutCard =>
+const createBlankSlide = (theme?: ExhibitionTheme | null): LayoutCard =>
   withPresentationDefaults({
     id: `exhibition-slide-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     atoms: [],
     catalogueAtoms: [],
     isExhibited: true,
     moleculeTitle: 'Untitled Slide',
+    presentationSettings: theme ? buildPresentationForTheme(theme) : undefined,
   });
 
 const normaliseProjectContext = (context?: ProjectContext | null): ProjectContext | null => {
@@ -882,7 +1238,9 @@ const computeCatalogueCards = (cards: LayoutCard[]): LayoutCard[] => {
 };
 
 const normaliseCatalogueComponent = (component: ExhibitionComponentPayload, atomName: string): DroppedAtom | null => {
+  console.log('🔍 ExhibitionStore - normaliseCatalogueComponent input:', component);
   const normalised = normalizeAtom(component);
+  console.log('🔍 ExhibitionStore - normaliseCatalogueComponent normalized:', normalised);
   if (!normalised) {
     return null;
   }
@@ -937,9 +1295,19 @@ const buildCardFromEntry = (entry: ExhibitionAtomPayload, index: number): Layout
   const rawName = typeof entry.atom_name === 'string' && entry.atom_name.trim().length > 0 ? entry.atom_name.trim() : '';
   const atomName = rawName || identifier;
 
-  const components = extractExhibitedComponents(entry as AtomEntryLike)
-    .map(component => normaliseCatalogueComponent(component, atomName))
+  const extractedComponents = extractExhibitedComponents(entry as AtomEntryLike);
+  console.log('🔍 ExhibitionStore - buildCardFromEntry for:', atomName, 'extracted components:', extractedComponents);
+
+  const components = extractedComponents
+    .map((component, index) => {
+      console.log(`🔍 ExhibitionStore - Processing component ${index}:`, component);
+      const normalized = normaliseCatalogueComponent(component, atomName);
+      console.log(`🔍 ExhibitionStore - Normalized component ${index}:`, normalized);
+      return normalized;
+    })
     .filter((component): component is DroppedAtom => component !== null);
+
+  console.log('🔍 ExhibitionStore - buildCardFromEntry normalized components:', components);
 
   if (components.length === 0) {
     return null;
@@ -962,6 +1330,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
   catalogueEntries: [],
   lastLoadedContext: null,
   slideObjectsByCardId: {},
+  activeTheme: DEFAULT_EXHIBITION_THEME,
 
   loadSavedConfiguration: async (explicitContext?: ProjectContext | null) => {
     let loadedCards: LayoutCard[] = [];
@@ -1068,7 +1437,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       } else if (hasRemoteCards) {
         ensuredCards = [];
       } else {
-        ensuredCards = [createBlankSlide()];
+        ensuredCards = [createBlankSlide(state.activeTheme)];
         insertedBlankSlide = true;
       }
 
@@ -1203,7 +1572,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     let createdCard: LayoutCard | null = null;
 
     set(state => {
-      const newCard = createBlankSlide();
+      const newCard = createBlankSlide(state.activeTheme);
 
       createdCard = newCard;
 
@@ -1240,7 +1609,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     return createdCard;
   },
 
-  setCards: (cards: LayoutCard[] | unknown) => {
+  setCards: (cards: LayoutCard[] | unknown, slideObjects?: Record<string, SlideObject[] | undefined>) => {
     const safeCards = extractCards(cards);
 
     const cardsWithDefaults = safeCards.map(withPresentationDefaults);
@@ -1249,6 +1618,12 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     set(state => {
       const nextSlideObjects: Record<string, SlideObject[]> = {};
       cardsWithDefaults.forEach(card => {
+        const provided = slideObjects?.[card.id];
+        if (provided) {
+          nextSlideObjects[card.id] = synchroniseSlideObjects(provided, card);
+          return;
+        }
+
         nextSlideObjects[card.id] = synchroniseSlideObjects(state.slideObjectsByCardId[card.id], card);
       });
 
@@ -1321,6 +1696,25 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           ...state.slideObjectsByCardId,
           [cardId]: filtered,
         },
+      };
+    });
+  },
+  removeSlide: (cardId: string) => {
+    set(state => {
+      if (!state.cards.some(card => card.id === cardId)) {
+        return {};
+      }
+
+      const cards = state.cards.filter(card => card.id !== cardId);
+      const exhibitedCards = cards.filter(card => card.isExhibited);
+      const { [cardId]: _removed, ...remainingObjects } = state.slideObjectsByCardId;
+
+      return {
+        cards,
+        exhibitedCards,
+        slideObjectsByCardId: remainingObjects,
+        catalogueCards: state.catalogueCards,
+        catalogueEntries: state.catalogueEntries,
       };
     });
   },
@@ -1452,6 +1846,85 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       };
     });
   },
+  applyTheme: (theme: ExhibitionTheme) => {
+    set(state => {
+      const previousTheme = state.activeTheme ?? DEFAULT_EXHIBITION_THEME;
+      const defaultFonts = new Set(
+        [
+          'Comic Sans',
+          previousTheme?.fonts.heading,
+          previousTheme?.fonts.body,
+        ].filter((value): value is string => Boolean(value)),
+      );
+      const defaultColors = new Set(
+        [
+          '#111827',
+          previousTheme?.colors.foreground,
+        ].filter((value): value is string => Boolean(value)),
+      );
+
+      const slideObjectsByCardId = Object.entries(state.slideObjectsByCardId).reduce(
+        (acc, [cardId, objects]) => {
+          if (!Array.isArray(objects) || objects.length === 0) {
+            acc[cardId] = objects ?? [];
+            return acc;
+          }
+
+          const titleId = buildSlideTitleObjectId(cardId);
+          acc[cardId] = objects.map(object => {
+            if (object.type !== 'text-box') {
+              return { ...object };
+            }
+
+            const props = { ...(object.props ?? {}) } as Record<string, unknown>;
+            const currentFont = typeof props.fontFamily === 'string' ? props.fontFamily : '';
+            if (!currentFont || defaultFonts.has(currentFont)) {
+              props.fontFamily = object.id === titleId ? theme.fonts.heading : theme.fonts.body;
+            }
+
+            const currentColor = typeof props.color === 'string' ? props.color : '';
+            if (!currentColor || defaultColors.has(currentColor)) {
+              props.color = theme.colors.foreground;
+            }
+
+            return {
+              ...object,
+              props,
+            };
+          });
+
+          return acc;
+        },
+        {} as Record<string, SlideObject[]>,
+      );
+
+      const applyThemeToCards = (cards: LayoutCard[]): LayoutCard[] =>
+        cards.map(card => {
+          const currentSettings = ensurePresentationSettings(card.presentationSettings);
+          const nextSettings = currentSettings.backgroundLocked
+            ? { ...currentSettings, themeId: theme.id }
+            : applyThemePresentation(currentSettings, theme);
+
+          return {
+            ...card,
+            presentationSettings: nextSettings,
+          };
+        });
+
+      const cards = applyThemeToCards(state.cards);
+      const exhibitedCards = cards.filter(card => card.isExhibited);
+      const catalogueCards = applyThemeToCards(state.catalogueCards);
+
+      return {
+        activeTheme: theme,
+        cards,
+        exhibitedCards,
+        catalogueCards,
+        catalogueEntries: state.catalogueEntries,
+        slideObjectsByCardId,
+      };
+    });
+  },
   reset: () => {
     set({
       cards: [],
@@ -1460,6 +1933,7 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       catalogueEntries: [],
       lastLoadedContext: null,
       slideObjectsByCardId: {},
+      activeTheme: DEFAULT_EXHIBITION_THEME,
     });
   },
 }));

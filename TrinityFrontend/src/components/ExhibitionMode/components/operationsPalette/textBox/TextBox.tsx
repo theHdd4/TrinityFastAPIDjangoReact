@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils';
 import TextBoxToolbar from './TextBoxToolbar';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './constants';
-import type { TextBoxFormatting } from './types';
+import { resolveFontFamily } from './fontLoading';
+import type { TextBoxFormatting, TextStylePreset } from './types';
 
 interface SlideTextBoxObjectProps {
   id: string;
@@ -20,6 +21,7 @@ interface SlideTextBoxObjectProps {
   onInteract: () => void;
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
   onRequestPositionPanel?: () => void;
+  onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
 }
 
 const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
@@ -232,20 +234,73 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     selection.addRange(selectionRangeRef.current);
   }, []);
 
+  const hasEditableSelection = useCallback(() => {
+    const range = selectionRangeRef.current;
+    return Boolean(range && !range.collapsed);
+  }, []);
+
   const runCommand = useCallback(
-    (command: string) => {
+    (command: string, value?: string) => {
       if (!canEdit || typeof document === 'undefined') {
-        return;
+        return false;
       }
 
-      if (document.queryCommandSupported?.(command)) {
-        textRef.current?.focus();
-        restoreSelection();
-        document.execCommand(command, false);
+      textRef.current?.focus();
+      restoreSelection();
+
+      let executed = false;
+
+      try {
+        executed = document.execCommand(command, false, value ?? undefined);
+      } catch {
+        executed = false;
+      }
+
+      if (executed) {
         handleInput();
       }
+
+      return executed;
     },
     [canEdit, handleInput, restoreSelection],
+  );
+
+  const applyFontSizeToSelection = useCallback(
+    (nextSize: number) => {
+      if (!isEditing || typeof document === 'undefined' || !hasEditableSelection()) {
+        return false;
+      }
+
+      textRef.current?.focus();
+      restoreSelection();
+
+      try {
+        document.execCommand('fontSize', false, '7');
+      } catch {
+        return false;
+      }
+
+      const container = textRef.current;
+      if (!container) {
+        return false;
+      }
+
+      const targets = Array.from(container.querySelectorAll('font[size="7"]'));
+      if (targets.length === 0) {
+        return false;
+      }
+
+      targets.forEach(node => {
+        const span = document.createElement('span');
+        span.style.fontSize = `${nextSize}px`;
+        span.innerHTML = node.innerHTML;
+        node.replaceWith(span);
+      });
+
+      handleInput();
+      return true;
+    },
+    [handleInput, hasEditableSelection, isEditing, restoreSelection],
   );
 
   const updateFormatting = useCallback(
@@ -259,9 +314,26 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
 
   const handleToggle = useCallback(
     (key: keyof Pick<TextBoxFormatting, 'bold' | 'italic' | 'underline' | 'strikethrough'>) => {
+      if (isEditing && hasEditableSelection()) {
+        const commandMap: Record<'bold' | 'italic' | 'underline' | 'strikethrough', string> = {
+          bold: 'bold',
+          italic: 'italic',
+          underline: 'underline',
+          strikethrough: 'strikeThrough',
+        };
+
+        const command = commandMap[key];
+        const executed = runCommand(command);
+
+        if (executed) {
+          onInteract();
+          return;
+        }
+      }
+
       updateFormatting({ [key]: !localFormatting[key] } as Partial<TextBoxFormatting>);
     },
-    [localFormatting, updateFormatting],
+    [hasEditableSelection, isEditing, localFormatting, onInteract, runCommand, updateFormatting],
   );
 
   const handleAlign = useCallback(
@@ -348,32 +420,93 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
 
   const handleFontFamily = useCallback(
     (fontFamily: string) => {
+      if (isEditing && hasEditableSelection()) {
+        const executed = runCommand('fontName', fontFamily);
+        if (executed) {
+          onInteract();
+          return;
+        }
+      }
+
       updateFormatting({ fontFamily });
     },
-    [updateFormatting],
+    [hasEditableSelection, isEditing, onInteract, runCommand, updateFormatting],
   );
 
   const handleColor = useCallback(
     (color: string) => {
+      if (isEditing && hasEditableSelection()) {
+        const executed = runCommand('foreColor', color);
+        if (executed) {
+          onInteract();
+          return;
+        }
+      }
+
       updateFormatting({ color });
     },
-    [updateFormatting],
+    [hasEditableSelection, isEditing, onInteract, runCommand, updateFormatting],
   );
 
   const handleIncreaseFontSize = useCallback(() => {
-    updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize + 2) });
-  }, [localFormatting.fontSize, updateFormatting]);
+    const next = clampFontSize(localFormatting.fontSize + 2);
+    if (applyFontSizeToSelection(next)) {
+      onInteract();
+      return;
+    }
+
+    updateFormatting({ fontSize: next });
+  }, [applyFontSizeToSelection, localFormatting.fontSize, onInteract, updateFormatting]);
 
   const handleDecreaseFontSize = useCallback(() => {
-    updateFormatting({ fontSize: clampFontSize(localFormatting.fontSize - 2) });
-  }, [localFormatting.fontSize, updateFormatting]);
+    const next = clampFontSize(localFormatting.fontSize - 2);
+    if (applyFontSizeToSelection(next)) {
+      onInteract();
+      return;
+    }
+
+    updateFormatting({ fontSize: next });
+  }, [applyFontSizeToSelection, localFormatting.fontSize, onInteract, updateFormatting]);
+
+  const handleApplyTextStyle = useCallback(
+    (preset: TextStylePreset) => {
+      const updates: Partial<TextBoxFormatting> = {
+        fontSize: clampFontSize(preset.fontSize),
+      };
+
+      if (typeof preset.bold === 'boolean') {
+        updates.bold = preset.bold;
+      }
+      if (typeof preset.italic === 'boolean') {
+        updates.italic = preset.italic;
+      }
+      if (typeof preset.underline === 'boolean') {
+        updates.underline = preset.underline;
+      }
+      if (typeof preset.strikethrough === 'boolean') {
+        updates.strikethrough = preset.strikethrough;
+      }
+
+      updateFormatting(updates);
+    },
+    [updateFormatting],
+  );
 
   const handleDoubleClick = () => {
     if (!canEdit) {
       return;
     }
+
     onInteract();
-    onBeginEditing();
+
+    if (!isEditing) {
+      onBeginEditing();
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      textRef.current?.focus();
+    });
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -387,6 +520,11 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     }
   };
 
+  const cssFontFamily = useMemo(
+    () => resolveFontFamily(localFormatting.fontFamily),
+    [localFormatting.fontFamily],
+  );
+
   const toolbar = useMemo(
     () => (
       <TextBoxToolbar
@@ -395,6 +533,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         fontSize={localFormatting.fontSize}
         onIncreaseFontSize={handleIncreaseFontSize}
         onDecreaseFontSize={handleDecreaseFontSize}
+        onApplyTextStyle={handleApplyTextStyle}
         bold={localFormatting.bold}
         italic={localFormatting.italic}
         underline={localFormatting.underline}
@@ -420,6 +559,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       handleBulletedList,
       handleColor,
       handleDecreaseFontSize,
+      handleApplyTextStyle,
       handleFontFamily,
       handleNumberedList,
       handleIncreaseFontSize,
@@ -457,10 +597,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   const content = (
     <div
       className={cn(
-        'h-full w-full overflow-hidden rounded-2xl border border-transparent bg-transparent p-3 transition-colors focus-within:border-primary focus-within:shadow-lg',
-        canEdit && !isEditing && 'hover:border-border/70',
-        isSelected && !isEditing && 'border-border/80 shadow-sm',
-        isEditing && 'border-primary shadow-lg',
+        'h-full w-full overflow-hidden rounded-[22px] border border-transparent bg-transparent px-3 py-2 transition-colors',
+        isEditing ? 'border-yellow-400 shadow-lg' : 'focus-within:border-yellow-400 focus-within:shadow-lg',
       )}
       onDoubleClick={handleDoubleClick}
       onPointerDown={event => {
@@ -469,16 +607,18 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         }
       }}
       onContextMenu={event => {
-        if (canEdit) {
-          event.preventDefault();
+        if (!canEdit) {
+          return;
         }
+        onContextMenu?.(event);
       }}
     >
       <div
         ref={textRef}
         className={cn(
-          'h-full w-full overflow-auto outline-none empty:before:absolute empty:before:left-3 empty:before:top-3 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
+          'relative h-full w-full outline-none empty:before:absolute empty:before:left-3 empty:before:top-2 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
           canEdit ? 'cursor-text' : 'cursor-default select-none',
+          canEdit && (isSelected || isEditing) ? 'overflow-auto' : 'overflow-hidden',
         )}
         contentEditable={canEdit && isEditing}
         suppressContentEditableWarning
@@ -490,7 +630,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         data-textbox-editable={canEdit && isEditing ? 'true' : undefined}
         style={{
           fontSize: `${localFormatting.fontSize}px`,
-          fontFamily: localFormatting.fontFamily,
+          fontFamily: cssFontFamily,
           fontWeight: localFormatting.bold ? 'bold' : 'normal',
           fontStyle: localFormatting.italic ? 'italic' : 'normal',
           textDecoration: `${localFormatting.underline ? 'underline' : ''} ${
@@ -499,6 +639,8 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
           textAlign: localFormatting.align,
           color: localFormatting.color,
           whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
         }}
       />
       {!canEdit && localFormatting.text.trim().length === 0 && (

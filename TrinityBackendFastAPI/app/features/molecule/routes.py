@@ -54,15 +54,16 @@ class SaveWorkflowRequest(BaseModel):
     canvas_molecules: List[Dict[str, Any]]
     custom_molecules: List[Dict[str, Any]]
     user_id: str = ""
-    client_id: str = ""
-    app_id: str = ""
-    project_id: Optional[int] = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
 
 class GetWorkflowRequest(BaseModel):
     """Request model for getting workflow configuration"""
     user_id: Optional[str] = None
-    client_id: Optional[str] = None
-    project_id: Optional[int] = None
+    client_name: Optional[str] = None
+    app_name: Optional[str] = None
+    project_name: Optional[str] = None
 
 # =============================================================================
 # HEALTH CHECK ENDPOINT
@@ -330,9 +331,9 @@ async def save_workflow_configuration(request: SaveWorkflowRequest):
             canvas_molecules=request.canvas_molecules,
             custom_molecules=request.custom_molecules,
             user_id=request.user_id,
-            client_id=request.client_id,
-            app_id=request.app_id,
-            project_id=request.project_id
+            client_name=request.client_name,
+            app_name=request.app_name,
+            project_name=request.project_name
         )
         
         if result.get("status") != "success":
@@ -360,8 +361,9 @@ async def get_workflow_configuration(request: GetWorkflowRequest):
         
         workflow_data = get_workflow_from_mongo(
             user_id=request.user_id,
-            client_id=request.client_id,
-            project_id=request.project_id
+            client_name=request.client_name,
+            app_name=request.app_name,
+            project_name=request.project_name
         )
         
         return {
@@ -395,5 +397,30 @@ async def get_workflow_by_id(workflow_id: str):
         
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/workflow/debug/all")
+async def debug_all_workflows():
+    """Debug endpoint to see all workflow configurations in MongoDB"""
+    try:
+        from .database import workflow_collection
+        
+        # Get all workflow documents
+        all_workflows = list(workflow_collection.find({}))
+        
+        # Convert ObjectId to string for JSON serialization
+        for workflow in all_workflows:
+            if '_id' in workflow:
+                workflow['_id'] = str(workflow['_id'])
+        
+        return {
+            "status": "success",
+            "message": f"Found {len(all_workflows)} workflow configurations",
+            "workflows": all_workflows,
+            "count": len(all_workflows),
+            "timestamp": datetime.now().isoformat()
+        }
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

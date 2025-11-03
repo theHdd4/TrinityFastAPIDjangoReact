@@ -42,11 +42,25 @@ export interface DataUploadSettings {
   fileValidation: boolean;
   /** When true, allow uploads without selecting a master file */
   bypassMasterUpload?: boolean;
+  /** When true, enable column classifier functionality */
+  enableColumnClassifier?: boolean;
   columnConfig: Record<string, Record<string, string>>;
   frequency: string;
   dimensions: Record<string, unknown>;
   measures: Record<string, unknown>;
   uploadedFiles: string[];
+  /** Column classifier data - same structure as Column Classifier Atom */
+  classifierData?: ColumnClassifierData;
+  /** Selected dataframe for classification */
+  classifierSelectedFile?: string;
+  /** Classifier dimensions array */
+  classifierDimensions?: string[];
+  /** List of all custom dimensions created (stays even when unchecked) */
+  classifierCustomDimensionsList?: string[];
+  /** Enable dimension mapping in classifier */
+  classifierEnableDimensionMapping?: boolean;
+  /** Array of file names that have saved classifier configurations */
+  classifierSavedFiles?: string[];
   validatorId?: string;
   requiredFiles?: string[];
   validations?: Record<string, any>;
@@ -57,12 +71,31 @@ export interface DataUploadSettings {
   filePathMap?: Record<string, string>;
   /** Map of uploaded file display names to their file size in bytes */
   fileSizeMap?: Record<string, number>;
+  /** Map of file names to their dtype changes (column name -> new dtype or {dtype, format}) */
+  dtypeChanges?: Record<string, Record<string, string | { dtype: string; format: string }>>;
+  /** Map of file names to their missing value strategies (column name -> strategy config) */
+  missingValueStrategies?: Record<string, Record<string, { strategy: string; value?: string }>>;
+  /** Set of file names that have had changes applied */
+  filesWithAppliedChanges?: string[];
+  /** Map of file names to their metadata (columns info, row/column counts) */
+  filesMetadata?: Record<string, {
+    columns: Array<{
+      name: string;
+      dtype: string;
+      missing_count: number;
+      missing_percentage: number;
+      sample_values: any[];
+    }>;
+    total_rows: number;
+    total_columns: number;
+  }>;
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   masterFile: "",
   fileValidation: true,
   bypassMasterUpload: false,
+  enableColumnClassifier: false,
   columnConfig: {},
   frequency: "monthly",
   dimensions: {},
@@ -75,12 +108,26 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
   fileKeyMap: {},
   filePathMap: {},
   fileSizeMap: {},
+  dtypeChanges: {},
+  missingValueStrategies: {},
+  filesWithAppliedChanges: [],
+  filesMetadata: {},
+  classifierData: {
+    files: [],
+    activeFileIndex: 0,
+  },
+  classifierSelectedFile: "",
+  classifierDimensions: [],
+  classifierCustomDimensionsList: [],
+  classifierEnableDimensionMapping: false,
+  classifierSavedFiles: [],
 };
 
 export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   masterFile: "",
   fileValidation: true,
   bypassMasterUpload: false,
+  enableColumnClassifier: false,
   columnConfig: {},
   frequency: "monthly",
   dimensions: {},
@@ -93,6 +140,19 @@ export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   fileKeyMap: {},
   filePathMap: {},
   fileSizeMap: {},
+  dtypeChanges: {},
+  missingValueStrategies: {},
+  filesWithAppliedChanges: [],
+  filesMetadata: {},
+  classifierData: {
+    files: [],
+    activeFileIndex: 0,
+  },
+  classifierSelectedFile: "",
+  classifierDimensions: [],
+  classifierCustomDimensionsList: [],
+  classifierEnableDimensionMapping: false,
+  classifierSavedFiles: [],
 });
 
 export interface FeatureOverviewExhibitionSelectionDimension {
@@ -391,6 +451,7 @@ export interface ColumnClassifierColumn {
 
 export interface ColumnClassifierFile {
   fileName: string;
+  filePath?: string; // MinIO path for saving configuration
   columns: ColumnClassifierColumn[];
   customDimensions: { [key: string]: string[] };
 }
@@ -498,6 +559,37 @@ export interface ChartMakerConfig {
   traces?: ChartTraceConfig[];
 }
 
+// ChartMaker Exhibition Types
+export type ChartMakerExhibitionComponentType = 'chart';
+
+export interface ChartMakerExhibitionSelectionChartState {
+  chartType: string;
+  xAxis: string;
+  yAxis: string;
+  filters: Record<string, string[]>;
+  aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+  legendField?: string;
+  isAdvancedMode?: boolean;
+  traces?: ChartTraceConfig[];
+}
+
+export interface ChartMakerExhibitionSelectionContext {
+  dataSource?: string;
+  uploadedData?: ChartData | null;
+  chartConfig?: any; // Include chartConfig to preserve processed data
+}
+
+export interface ChartMakerExhibitionSelection {
+  key: string;
+  chartId: string;
+  chartTitle: string;
+  componentType?: ChartMakerExhibitionComponentType;
+  chartState?: ChartMakerExhibitionSelectionChartState;
+  chartContext?: ChartMakerExhibitionSelectionContext;
+  capturedAt?: string;
+  manifestId?: string;
+}
+
 export interface ChartMakerSettings {
   dataSource?: string;
   fileId?: string;
@@ -511,6 +603,7 @@ export interface ChartMakerSettings {
     filtering: boolean;
   };
   error?: string;
+  exhibitionSelections?: ChartMakerExhibitionSelection[];
 }
 
 export interface SelectModelsFeatureSettings {
@@ -535,6 +628,44 @@ export interface SelectModelsFeatureSettings {
   aggregationLevel: string;
   combinationStatus?: any;
   combinationStatusMinimized?: boolean;
+}
+
+// EvaluateModelsFeature Exhibition Types
+export type EvaluateModelsFeatureExhibitionComponentType = 'graph';
+
+export interface EvaluateModelsFeatureExhibitionSelectionGraphState {
+  graphType: string;
+  graphName: string;
+  graphId: string;
+  selected: boolean;
+  combinationName?: string; // Add combination name for individual graph tracking
+  chartTypePreference?: string; // Store chart type preference (bar_chart, line_chart, etc.)
+}
+
+export interface EvaluateModelsFeatureExhibitionSelectionContext {
+  selectedDataframe?: string;
+  scope?: string;
+  selectedCombinations?: string[];
+  identifiers?: Array<{
+    id: string;
+    name: string;
+    selected: boolean;
+  }>;
+  modelResults?: any[];
+  identifiersData?: {[key: string]: {column_name: string | null, unique_values: string[]}};
+  selectedIdentifierValues?: {[key: string]: string[]};
+  chartData?: Array<{name: string; value: number}>;
+}
+
+export interface EvaluateModelsFeatureExhibitionSelection {
+  key: string;
+  graphId: string;
+  graphTitle: string;
+  componentType?: EvaluateModelsFeatureExhibitionComponentType;
+  graphState?: EvaluateModelsFeatureExhibitionSelectionGraphState;
+  graphContext?: EvaluateModelsFeatureExhibitionSelectionContext;
+  capturedAt?: string;
+  manifestId?: string;
 }
 
 export interface EvaluateModelsFeatureSettings {
@@ -568,6 +699,7 @@ export interface EvaluateModelsFeatureSettings {
     chartHeight: number;
     autoRefresh: boolean;
   };
+  exhibitionSelections?: EvaluateModelsFeatureExhibitionSelection[];
 }
 
 export const DEFAULT_EVALUATE_MODELS_FEATURE_SETTINGS: EvaluateModelsFeatureSettings = {
@@ -598,7 +730,8 @@ export const DEFAULT_EVALUATE_MODELS_FEATURE_SETTINGS: EvaluateModelsFeatureSett
     showLegend: true,
     chartHeight: 300,
     autoRefresh: false
-  }
+  },
+  exhibitionSelections: [],
 };
 
 export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
@@ -629,6 +762,7 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
     filtering: false,
   },
   error: undefined,
+  exhibitionSelections: [],
 };
 
 export interface ClusteringData {
@@ -1461,6 +1595,80 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
 }
+
+// GroupBy Atom Settings
+export interface GroupByAtomSettings {
+  // Data source and validation
+  dataSource?: string;
+  validator_atom_id?: string;
+  allColumns?: Array<{ column: string; data_type: string; unique_count?: number }>;
+  
+  // Identifiers and measures
+  identifiers?: string[];
+  measures?: string[];
+  selectedIdentifiers?: string[];
+  selectedMeasures?: Array<{ field: string; aggregator: string; weight_by?: string; rename_to?: string }>;
+  selectedMeasureNames?: string[];
+  selectedAggregationMethods?: string[];
+  
+  // Draggable lists for settings tab
+  identifierList?: string[];
+  measureList?: string[];
+  
+  // Configuration panel state
+  configCollapsed?: boolean;
+  
+  // Pagination state
+  currentPage?: number;
+  
+  // Results filtering and sorting
+  resultsSortColumn?: string;
+  resultsSortDirection?: 'asc' | 'desc';
+  resultsColumnFilters?: Record<string, string[]>;
+  
+  // Cardinality view filtering and sorting
+  sortColumn?: string;
+  sortDirection?: 'asc' | 'desc';
+  columnFilters?: Record<string, string[]>;
+  
+  // GroupBy results
+  groupbyResults?: {
+    result_file?: string;
+    result_shape?: [number, number];
+    row_count?: number;
+    columns?: string[];
+    unsaved_data?: Record<string, any>[];
+  };
+}
+
+export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
+  dataSource: '',
+  validator_atom_id: '',
+  allColumns: [],
+  identifiers: [],
+  measures: [],
+  selectedIdentifiers: [],
+  selectedMeasures: [],
+  selectedMeasureNames: [],
+  selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+  identifierList: [],
+  measureList: [],
+  configCollapsed: false,
+  currentPage: 1,
+  resultsSortColumn: '',
+  resultsSortDirection: 'asc',
+  resultsColumnFilters: {},
+  sortColumn: 'unique_count',
+  sortDirection: 'desc',
+  columnFilters: {},
+  groupbyResults: {
+    result_file: '',
+    result_shape: [0, 0],
+    row_count: 0,
+    columns: [],
+    unsaved_data: []
+  }
+};
 
 interface LaboratoryStore {
   cards: LayoutCard[];

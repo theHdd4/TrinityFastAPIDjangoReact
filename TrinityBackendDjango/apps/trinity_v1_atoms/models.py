@@ -12,6 +12,7 @@ class TrinityV1Atom(models.Model):
     category = models.CharField(max_length=100, blank=True, help_text="Atom category")
     tags = models.JSONField(default=list, blank=True, help_text="List of tags for the atom")
     color = models.CharField(max_length=50, blank=True, help_text="Color associated with the atom's category")
+    available_atoms = models.BooleanField(default=False, help_text="Whether this atom is available and functional")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

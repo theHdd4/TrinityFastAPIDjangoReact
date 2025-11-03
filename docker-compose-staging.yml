@@ -151,10 +151,18 @@ services:
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
       FLIGHT_HOST: flight
+<<<<<<< HEAD:docker-compose-staging.yml
       FLIGHT_PORT: 8817  # Different from dev (8816) and prod (8815)
       HOST_IP: ${HOST_IP:-10.2.3.55}
       FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8085,http://${HOST_IP:-10.2.3.55}:8085,http://172.17.48.1:8085,http://10.2.4.48:8085,https://trinity-staging.quantmatrixai.com,https://trinity.quantmatrixai.com,https://trinity-dev.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_staging?authSource=admin"
+=======
+      FLIGHT_PORT: 8816
+      FLIGHT_REGISTRY_FILE: /tmp/flight_registry.json
+      HOST_IP: ${HOST_IP:-10.2.4.48}
+      FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.4.48}:8081,http://172.17.48.1:8081,http://10.2.4.48:8081,https://trinity-dev.quantmatrixai.com,https://trinity.quantmatrixai.com"
+      MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
+>>>>>>> dev:docker-compose-dev.example.yml
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
     ports:
       - "8007:8001"  # Different from dev (8004) and prod (8001)
@@ -210,10 +218,18 @@ services:
     labels:
       - "environment=staging"
       - "traefik.enable=true"
+<<<<<<< HEAD:docker-compose-staging.yml
       - "traefik.http.routers.trinity-ai-staging.rule=Host(`trinity-staging.quantmatrixai.com`) && PathPrefix(`/trinityai`)"
       - "traefik.http.routers.trinity-ai-staging.entrypoints=web"
       - "traefik.http.routers.trinity-ai-staging.priority=100"
       - "traefik.http.services.trinity-ai-staging.loadbalancer.server.port=8002"
+=======
+      - "traefik.http.routers.trinity-ai-dev.rule=Host(`trinity-dev.quantmatrixai.com`) && PathPrefix(`/trinityai`)"
+      - "traefik.http.routers.trinity-ai-dev.entrypoints=web"
+      - "traefik.http.routers.trinity-ai-dev.priority=100"
+      - "traefik.http.services.trinity-ai-dev.loadbalancer.server.port=8002"
+      - "traefik.http.services.trinity-ai-dev.loadbalancer.passhostheader=true"
+>>>>>>> dev:docker-compose-dev.example.yml
     restart: always
 
   frontend:

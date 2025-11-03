@@ -25,72 +25,35 @@ async def save_build_config(
     user_id: str = "",
     project_id: int | None = None,
 ):
-    """Save build model configuration data to MongoDB build-model_featurebased_configs collection"""
+    """Save build model configuration data to MongoDB build-model_featurebased_configs collection.
+    Always overwrites the entire document for the given document_id (no merging)."""
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
         
-        # Check if document already exists
-        existing_doc = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
+        # Create document - always overwrites existing document completely
+        document = {
+            "_id": document_id,
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "operation_type": "build_model_feature_based",
+            "updated_at": datetime.utcnow(),
+            "user_id": user_id,
+            "project_id": project_id,
+            **build_data,
+        }
         
-        if existing_doc:
-            # Merge new data with existing data instead of replacing
-            # Create base document with existing data
-            merged_document = existing_doc.copy()
-            
-            # Update timestamp and user info
-            merged_document["updated_at"] = datetime.utcnow()
-            if user_id:
-                merged_document["user_id"] = user_id
-            if project_id is not None:
-                merged_document["project_id"] = project_id
-            
-            # Merge build_data with existing data
-            for key, value in build_data.items():
-                if key in merged_document:
-                    # Special handling for combination_file_keys - replace instead of extend
-                    if key == "combination_file_keys" and isinstance(merged_document[key], list) and isinstance(value, list):
-                        merged_document[key] = value  # Replace the entire list
-                        logger.info(f"🔄 Replaced combination_file_keys with {len(value)} entries")
-                    # If key exists and both are lists, extend the list (for other list fields)
-                    elif isinstance(merged_document[key], list) and isinstance(value, list):
-                        merged_document[key].extend(value)
-                    # If key exists and both are dicts, merge the dicts
-                    elif isinstance(merged_document[key], dict) and isinstance(value, dict):
-                        merged_document[key].update(value)
-                    # Otherwise, replace the value
-                    else:
-                        merged_document[key] = value
-                else:
-                    # If key doesn't exist, add it
-                    merged_document[key] = value
-            
-            # Update the existing document
-            result = await db["build-model_featurebased_configs"].replace_one(
-                {"_id": document_id},
-                merged_document
-            )
-            
-            operation = "updated"
-        else:
-            # Create new document
-            document = {
-                "_id": document_id,
-                "client_name": client_name,
-                "app_name": app_name,
-                "project_name": project_name,
-                "operation_type": "build_model_feature_based",
-                "updated_at": datetime.utcnow(),
-                "user_id": user_id,
-                "project_id": project_id,
-                **build_data,
-            }
-            
-            # Insert new document
-            result = await db["build-model_featurebased_configs"].insert_one(document)
-            
-            operation = "inserted"
+        # Use replace_one with upsert=True to overwrite if exists, insert if not exists
+        result = await db["build-model_featurebased_configs"].replace_one(
+            {"_id": document_id},
+            document,
+            upsert=True
+        )
         
-        logger.info(f"📦 Stored in build-model_featurebased_configs: {document_id}")
+        # Determine operation type based on result
+        operation = "updated" if result.matched_count > 0 else "inserted"
+        
+        logger.info(f"📦 {'Overwritten' if operation == 'updated' else 'Inserted'} document in build-model_featurebased_configs: {document_id}")
         
         return {
             "status": "success", 
@@ -250,6 +213,142 @@ async def get_combination_column_values(minio_client, bucket_name: str, file_key
         logger.error(f"Error getting column values from {file_key}: {e}")
         return {identifier: "Unknown" for identifier in identifiers}
 
+async def get_atom_list_configuration(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    mode: str = "laboratory"
+):
+    """Retrieve atom configuration from MongoDB atom_list_configuration collection"""
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from datetime import datetime
+        
+        # Connect to MongoDB
+        client = AsyncIOMotorClient(MONGO_URI)
+        db = client[MONGO_DB]
+        
+        # Get environment IDs
+        client_id = client_name
+        app_id = app_name  
+        project_id = project_name
+        
+        # Get the collection
+        coll = db["atom_list_configuration"]
+        
+        # Query for atom configurations
+        query = {
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "mode": mode
+        }
+        
+        # Get all atom configurations for this project/mode
+        cursor = coll.find(query).sort([("canvas_position", 1), ("atom_positions", 1)])
+        atom_configs = await cursor.to_list(length=None)
+        
+        if not atom_configs:
+            logger.info(f"📦 No atom configurations found for {client_id}/{app_id}/{project_id} in mode {mode}")
+            return {
+                "status": "success",
+                "cards": [],
+                "workflow_molecules": [],
+                "count": 0
+            }
+        
+        # Group atoms by canvas position (cards)
+        cards_map = {}
+        workflow_molecules_map = {}
+        
+        for atom_config in atom_configs:
+            canvas_pos = atom_config.get("canvas_position", 0)
+            atom_pos = atom_config.get("atom_positions", 0)
+            
+            # Extract molecule information from top-level fields (preferred) or mode_meta (fallback)
+            molecule_id = atom_config.get("molecule_id") or atom_config.get("mode_meta", {}).get("molecule_id")
+            molecule_title = atom_config.get("molecule_title") or atom_config.get("mode_meta", {}).get("molecule_title")
+            
+            # Create card if it doesn't exist
+            if canvas_pos not in cards_map:
+                cards_map[canvas_pos] = {
+                    "id": f"card-{canvas_pos}",
+                    "atoms": [],
+                    "isExhibited": atom_config.get("exhibition_previews") == "yes",
+                    "collapsed": atom_config.get("open_cards") == "no",
+                    "scroll_position": atom_config.get("scroll_position", 0),
+                    "moleculeId": molecule_id,
+                    "moleculeTitle": molecule_title
+                }
+            
+            # Debug: Log molecule information being retrieved
+            logger.info(f"🔍 DEBUG: Retrieving atom {atom_config.get('atom_name')} with molecule_id: {molecule_id}, molecule_title: {molecule_title}")
+            
+            # Create atom object with all necessary fields including molecule information
+            atom_obj = {
+                "id": atom_config.get("mode_meta", {}).get("atom_id", f"atom-{atom_config['atom_name']}-{canvas_pos}-{atom_pos}"),
+                "atomId": atom_config.get("atom_name"),
+                "title": atom_config.get("atom_title"),
+                "category": "Atom",  # Default category
+                "color": "bg-gray-400",  # Default color
+                "source": "manual",
+                "settings": atom_config.get("atom_configs", {}),
+                "moleculeId": molecule_id,
+                "moleculeTitle": molecule_title
+            }
+            
+            # Add atom to card
+            cards_map[canvas_pos]["atoms"].append(atom_obj)
+            
+            # Track workflow molecules
+            if molecule_id:
+                if molecule_id not in workflow_molecules_map:
+                    workflow_molecules_map[molecule_id] = {
+                        "moleculeId": molecule_id,
+                        "moleculeTitle": molecule_title or molecule_id,
+                        "atoms": []
+                    }
+                
+                workflow_molecules_map[molecule_id]["atoms"].append({
+                    "atomName": atom_config.get("atom_name"),
+                    "order": atom_pos
+                })
+        
+        # Convert cards map to array and sort atoms within each card
+        cards = []
+        for canvas_pos in sorted(cards_map.keys()):
+            card = cards_map[canvas_pos]
+            # Atoms are already in correct order from the database query, no need to sort
+            cards.append(card)
+        
+        # Convert workflow molecules map to array and sort atoms
+        workflow_molecules = []
+        for molecule_id in workflow_molecules_map.keys():
+            molecule = workflow_molecules_map[molecule_id]
+            molecule["atoms"].sort(key=lambda x: x["order"])
+            workflow_molecules.append(molecule)
+        
+        logger.info(f"📦 Retrieved {len(cards)} cards with {sum(len(card['atoms']) for card in cards)} atoms from atom_list_configuration")
+        
+        # Debug: Log the structure of retrieved data
+        for i, card in enumerate(cards):
+            logger.info(f"🔍 DEBUG: Card {i}: id={card.get('id')}, molecule_id={card.get('moleculeId')}, molecule_title={card.get('moleculeTitle')}, atoms_count={len(card.get('atoms', []))}")
+            for j, atom in enumerate(card.get('atoms', [])):
+                logger.info(f"🔍 DEBUG:   Atom {j}: atomId={atom.get('atomId')}, moleculeId={atom.get('moleculeId')}, moleculeTitle={atom.get('moleculeTitle')}")
+        
+        logger.info(f"🔍 DEBUG: Workflow molecules: {workflow_molecules}")
+        
+        return {
+            "status": "success",
+            "cards": cards,
+            "workflow_molecules": workflow_molecules,
+            "count": len(atom_configs)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ MongoDB read error for atom_list_configuration: {e}")
+        return {"status": "error", "error": str(e)}
+
 async def save_atom_list_configuration(
     client_name: str,
     app_name: str,
@@ -344,14 +443,20 @@ async def save_atom_list_configuration(
                     "notes": atom_settings.get("notes", ""),
                     "last_edited": timestamp,
                     "version_hash": version_hash,
+                    # Molecule information as top-level fields for easier querying
+                    "molecule_id": card.get("moleculeId"),
+                    "molecule_title": card.get("moleculeTitle"),
                     "mode_meta": {
                         "card_id": card.get("id"),
                         "atom_id": atom.get("id"),
+                        "molecule_id": card.get("moleculeId"),
+                        "molecule_title": card.get("moleculeTitle"),
                     },
                     "isDeleted": False,
                 }
                 
                 # Debug: Log what's being saved for this atom
+                logger.info(f"🔍 DEBUG: Saving atom {atom_id} with molecule_id: {card.get('moleculeId')}, molecule_title: {card.get('moleculeTitle')}")
                 logger.info(f"🔍 DEBUG: Saving atom {atom_id} with atom_configs keys: {list(atom_settings.keys())}")
                 if 'roi_config' in atom_settings:
                     logger.info(f"🔍 DEBUG: Saving roi_config: {atom_settings['roi_config']}")

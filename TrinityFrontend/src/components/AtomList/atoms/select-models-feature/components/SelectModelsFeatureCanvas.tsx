@@ -15,6 +15,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, Conte
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import Table from '@/templates/tables/table';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
+import SCurveChartRenderer from '@/templates/charts/SCurveChartRenderer';
 
 interface SelectModelsFeatureCanvasProps {
   atomId: string;
@@ -2035,28 +2036,14 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     setCardinalityError(null);
     
     try {
-      // Extract the object name by removing the prefix (default_client/default_app/default_project/)
-      // The groupby endpoint will add the prefix back, so we need to pass the path without the prefix
-      let objectName = data.selectedDataset;
-      if (data.selectedDataset.includes('/')) {
-        const parts = data.selectedDataset.split('/');
-        // Remove the first 3 parts (default_client/default_app/default_project)
-        if (parts.length > 3) {
-          objectName = parts.slice(3).join('/');
-        } else {
-          // If less than 3 parts, just use the last part
-          objectName = parts[parts.length - 1];
-        }
-      }
+      // Send the full object path to cardinality
+      const objectName = data.selectedDataset;
+      console.log('🔍 SelectModelsFeature: Sending to cardinality:', objectName);
       
       // Use GROUPBY_API cardinality endpoint instead of FEATURE_OVERVIEW_API
-      const formData = new FormData();
-      formData.append('validator_atom_id', atomId); // Use atomId as validator_atom_id
-      formData.append('file_key', objectName);
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', objectName);
-      
-      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(objectName)}`;
+      console.log('🔍 SelectModelsFeature: Cardinality URL:', url);
+      const res = await fetch(url);
       const data_result = await res.json();
       
       if (data_result.status === 'SUCCESS' && data_result.cardinality) {
@@ -2724,15 +2711,15 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
                 {/* Multi-Variable Method Chart */}
     <div className="mb-6 mt-12">
-      <h4 className="text-sm font-medium text-orange-800 mb-6">
+      {/* <h4 className="text-sm font-medium text-orange-800 mb-6">
         {Array.isArray(data.selectedVariable) && data.selectedVariable.length > 0 && data.selectedMethod 
           ? `${data.selectedMethod.charAt(0).toUpperCase() + data.selectedMethod.slice(1)} by Model` 
           : 'Select variables and method to view data'
         }
-      </h4>
+      </h4> */}
               
               {data.elasticityData && data.elasticityData.length > 0 ? (
-                <div className="w-full h-[300px]">
+                <div className="w-full h-[450px]">
                   <RechartsChartRenderer
                     type={methodByModelChartType}
                     data={transformMethodByModelData()}
@@ -2743,7 +2730,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     yAxisLabel={data.selectedMethod ? data.selectedMethod.charAt(0).toUpperCase() + data.selectedMethod.slice(1) : 'Value'}
                     theme={methodByModelChartTheme}
                     enableScroll={false}
-                    height={300}
+                    height={450}
                     showDataLabels={methodByModelChartDataLabels}
                     showLegend={true}
                     sortOrder={methodByModelChartSortOrder as 'asc' | 'desc' | null}
@@ -2754,7 +2741,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                   />
                 </div>
               ) : (
-                <div className="h-[300px] bg-gray-50 rounded-lg flex items-center justify-center border border-gray-200">
+                <div className="h-[450px] bg-gray-50 rounded-lg flex items-center justify-center border border-gray-200">
                   <p className="text-gray-500 text-sm">
                     {Array.isArray(data.selectedVariable) && data.selectedVariable.length > 0
                       ? 'No data available for selected variables' 
@@ -3837,15 +3824,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                 {Object.entries(data.sCurveData.s_curves).slice(0, 2).map(([variable, curveData]: [string, any]) => (
                   <div key={variable} className="border border-gray-200 rounded-lg p-4">
                     <div className="w-full h-[350px]">
-                      <RechartsChartRenderer
-                        type="line_chart"
-                        data={curveData.percent_changes.map((percent: number, index: number) => ({
-                          name: `${percent > 0 ? '+' : ''}${percent.toFixed(0)}%`,
-                          value: curveData.total_volumes[index] || 0,
-                          percentage: percent
+                      <SCurveChartRenderer
+                        data={(curveData.media_values || []).map((reach: number, index: number) => ({
+                          x: reach || 0,
+                          y: curveData.total_volumes[index] || 0,
+                          percent_change: (curveData.percent_changes || [])[index] || 0
                         }))}
-                        xField="name"
-                        yField="value"
+                        curveAnalysis={curveData.curve_analysis}
                         xAxisLabel={variable.replace(/_/g, ' ')}
                         yAxisLabel="Total Volume"
                         theme="default"
@@ -3853,8 +3838,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                         height={350}
                         showDataLabels={false}
                         showLegend={false}
+                        showMinMaxLines={true}
                       />
                     </div>
+                    
+                    
                   </div>
                 ))}
               </div>

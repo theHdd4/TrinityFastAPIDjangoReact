@@ -12,6 +12,7 @@ import {
   DEFAULT_COLUMN_CLASSIFIER_SETTINGS
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
+import { fetchDimensionMapping } from '@/lib/dimensions';
 
 interface Frame { object_name: string; csv_name: string; arrow_name?: string }
 
@@ -110,9 +111,46 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
       if (cacheRes.ok) {
         await cacheRes.text();
       }
+      
+      // Fetch saved configuration to preserve identifiers and measures
+      updateSettings(atomId, { loadingStatus: 'Loading saved configuration' });
+      let savedIdentifiers: string[] = [];
+      let savedMeasures: string[] = [];
+      let savedUnclassified: string[] = [];
+      
+      try {
+        const { config } = await fetchDimensionMapping({ objectName: savedId });
+        console.log('🔍 Fetched config from backend:', config);
+        if (config) {
+          savedIdentifiers = Array.isArray(config.identifiers) ? config.identifiers : [];
+          savedMeasures = Array.isArray(config.measures) ? config.measures : [];
+          savedUnclassified = Array.isArray(config.unclassified) ? config.unclassified : [];
+          console.log('✅ Extracted from config:', {
+            identifiers: savedIdentifiers,
+            measures: savedMeasures,
+            unclassified: savedUnclassified
+          });
+        } else {
+          console.warn('⚠️ Config is null/undefined');
+        }
+      } catch (err) {
+        console.warn('❌ No saved configuration found, will auto-classify all columns:', err);
+      }
+      
       updateSettings(atomId, { loadingStatus: 'Classifying Dataframe' });
       const form = new FormData();
       form.append('dataframe', savedId);
+      form.append('identifiers', JSON.stringify(savedIdentifiers));
+      form.append('measures', JSON.stringify(savedMeasures));
+      form.append('unclassified', JSON.stringify(savedUnclassified));
+      // Force fresh read from MinIO to pick up new columns (do not remove caching globally)
+      form.append('bypass_cache', 'true');
+      console.log('📤 Sending to classify_columns:', {
+        dataframe: savedId,
+        identifiers: savedIdentifiers,
+        measures: savedMeasures,
+        unclassified: savedUnclassified
+      });
       const res = await fetch(`${CLASSIFIER_API}/classify_columns`, {
         method: 'POST',
         body: form,

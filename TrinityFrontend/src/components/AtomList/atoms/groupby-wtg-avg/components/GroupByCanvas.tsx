@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Card, CardContent } from '@/components/ui/card';
 import { X, Database, Settings2, BarChart, ChevronUp, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { GROUPBY_API } from '@/lib/api';
 import Table from '@/templates/tables/table';
@@ -73,17 +74,15 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  // Collapse state for configuration panel
-  const [configCollapsed, setConfigCollapsed] = useState(false);
-  
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize] = useState(20);
-  
-  // Filtering and sorting state for results (reusing cardinality state)
-  const [resultsSortColumn, setResultsSortColumn] = useState<string>('');
-  const [resultsSortDirection, setResultsSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [resultsColumnFilters, setResultsColumnFilters] = useState<{ [key: string]: string[] }>({});
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveFileName, setSaveFileName] = useState('');
+  // Get configuration state from global store
+  const configCollapsed = settings.configCollapsed || false;
+  const currentPage = settings.currentPage || 1;
+  const pageSize = 20;
+  const resultsSortColumn = settings.resultsSortColumn || '';
+  const resultsSortDirection = settings.resultsSortDirection || 'asc';
+  const resultsColumnFilters = settings.resultsColumnFilters || {};
 
   // Helper to convert results to CSV
   const resultsToCSV = (data: Record<string, any>[]): string => {
@@ -93,16 +92,28 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     return [headers.join(','), ...rows].join('\n');
   };
 
-  // Save DataFrame handler
-  const handleSaveDataFrame = async () => {
+  // Open save modal with default filename
+  const handleSaveDataFrame = () => {
     const dataToSave = allResults.length ? allResults : results;
-  if (!dataToSave || dataToSave.length === 0) return;
+    if (!dataToSave || dataToSave.length === 0) return;
+    
+    // Generate default filename
+    const defaultFilename = `groupby_${settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+    setSaveFileName(defaultFilename);
+    setShowSaveModal(true);
+  };
+
+  // Actually save the DataFrame with the chosen filename
+  const confirmSaveDataFrame = async () => {
+    const dataToSave = allResults.length ? allResults : results;
+    if (!dataToSave || dataToSave.length === 0) return;
+    
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
       const csv_data = resultsToCSV(dataToSave);
-      const filename = `groupby_${settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
+      const filename = saveFileName.trim() || `groupby_${settings?.dataSource?.split('/')?.pop() || 'data'}_${Date.now()}`;
       const response = await fetch(`${GROUPBY_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -112,8 +123,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         throw new Error(`Save failed: ${response.statusText}`);
       }
       setSaveSuccess(true);
-    // Mark as saved if needed or update settings
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
+      setShowSaveModal(false);
     } catch (err: any) {
       const msg = err instanceof Error ? err.message : 'Failed to save DataFrame';
       setSaveError(msg);
@@ -255,10 +266,10 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const [cardinalityLoading, setCardinalityLoading] = useState(false);
   const [cardinalityError, setCardinalityError] = useState<string | null>(null);
   
-  // Sorting and filtering state for Cardinality View
-  const [sortColumn, setSortColumn] = useState<string>('unique_count');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
+  // Get cardinality view state from global store
+  const sortColumn = settings.sortColumn || 'unique_count';
+  const sortDirection = settings.sortDirection || 'desc';
+  const columnFilters = settings.columnFilters || {};
 
   // Fetch cardinality data
   const fetchCardinalityData = async () => {
@@ -268,13 +279,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     setCardinalityError(null);
     
     try {
-      const formData = new FormData();
-      formData.append('validator_atom_id', settings.validator_atom_id || '');
-      formData.append('file_key', settings.dataSource || '');
-      formData.append('bucket_name', 'trinity');
-      formData.append('object_names', settings.dataSource || '');
-      
-      const res = await fetch(`${GROUPBY_API}/cardinality`, { method: 'POST', body: formData });
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(settings.dataSource)}`;
+      const res = await fetch(url);
       const data = await res.json();
       
       if (data.status === 'SUCCESS' && data.cardinality) {
@@ -352,30 +358,28 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const handleSort = (column: string, direction?: 'asc' | 'desc') => {
     if (sortColumn === column) {
       if (sortDirection === 'asc') {
-        setSortDirection('desc');
+        updateSettings(atomId, { sortDirection: 'desc' });
       } else if (sortDirection === 'desc') {
-        setSortColumn('');
-        setSortDirection('asc');
+        updateSettings(atomId, { sortColumn: '', sortDirection: 'asc' });
       }
     } else {
-      setSortColumn(column);
-      setSortDirection(direction || 'asc');
+      updateSettings(atomId, { sortColumn: column, sortDirection: direction || 'asc' });
     }
   };
 
   const handleColumnFilter = (column: string, values: string[]) => {
-    setColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
+    updateSettings(atomId, {
+      columnFilters: {
+        ...columnFilters,
+        [column]: values
+      }
+    });
   };
 
   const clearColumnFilter = (column: string) => {
-    setColumnFilters(prev => {
-      const cpy = { ...prev };
-      delete cpy[column];
-      return cpy;
-    });
+    const newFilters = { ...columnFilters };
+    delete newFilters[column];
+    updateSettings(atomId, { columnFilters: newFilters });
   };
 
   const FilterMenu = ({ column }: { column: string }) => {
@@ -508,7 +512,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           setTotalRows(allRows.length);
           setAllResults(allRows);
           setResults(allRows);
-          setCurrentPage(1); // Reset to first page when new data is loaded
+          updateSettings(atomId, { currentPage: 1 }); // Reset to first page when new data is loaded
           
           // Determine identifiers that have >1 unique value
           const idWithVariety = selectedIdentifiers.filter((id: string) => {
@@ -566,7 +570,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                 setTotalRows(rows.length);
                 setAllResults(rows);
                 setResults(rows);
-                setCurrentPage(1); // Reset to first page when new data is loaded
+                updateSettings(atomId, { currentPage: 1 }); // Reset to first page when new data is loaded
                 setResultsHeaders(headers);
                 
                 updateSettings(atomId, {
@@ -687,36 +691,34 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
   const totalPages = Math.ceil(allFilteredData.length / pageSize);
 
   const handlePageChange = (page: number) => {
-    setCurrentPage(page);
+    updateSettings(atomId, { currentPage: page });
   };
 
   const handleResultsSort = (column: string, direction?: 'asc' | 'desc') => {
     if (resultsSortColumn === column) {
       if (resultsSortDirection === 'asc') {
-        setResultsSortDirection('desc');
+        updateSettings(atomId, { resultsSortDirection: 'desc' });
       } else if (resultsSortDirection === 'desc') {
-        setResultsSortColumn('');
-        setResultsSortDirection('asc');
+        updateSettings(atomId, { resultsSortColumn: '', resultsSortDirection: 'asc' });
       }
     } else {
-      setResultsSortColumn(column);
-      setResultsSortDirection(direction || 'asc');
+      updateSettings(atomId, { resultsSortColumn: column, resultsSortDirection: direction || 'asc' });
     }
   };
 
   const handleResultsColumnFilter = (column: string, values: string[]) => {
-    setResultsColumnFilters(prev => ({
-      ...prev,
-      [column]: values
-    }));
+    updateSettings(atomId, {
+      resultsColumnFilters: {
+        ...resultsColumnFilters,
+        [column]: values
+      }
+    });
   };
 
   const clearResultsColumnFilter = (column: string) => {
-    setResultsColumnFilters(prev => {
-      const cpy = { ...prev };
-      delete cpy[column];
-      return cpy;
-    });
+    const newFilters = { ...resultsColumnFilters };
+    delete newFilters[column];
+    updateSettings(atomId, { resultsColumnFilters: newFilters });
   };
 
   const getResultsUniqueColumnValues = (column: string): string[] => {
@@ -756,7 +758,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
 
     const apply = () => {
       handleResultsColumnFilter(column, temp);
-      setCurrentPage(1); // Reset to first page when filtering
+      updateSettings(atomId, { currentPage: 1 }); // Reset to first page when filtering
     };
 
     return (
@@ -1025,7 +1027,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           </div>
           <button
             className="p-1 rounded hover:bg-green-100 transition-colors"
-            onClick={() => setConfigCollapsed(v => !v)}
+            onClick={() => updateSettings(atomId, { configCollapsed: !configCollapsed })}
             aria-label={configCollapsed ? 'Expand configuration' : 'Collapse configuration'}
           >
             {configCollapsed ? <ChevronDown className="w-5 h-5" /> : <ChevronUp className="w-5 h-5" />}
@@ -1241,7 +1243,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                     disabled={saveLoading}
                     className="bg-blue-600 hover:bg-blue-700 text-white"
                   >
-                    {saveLoading ? 'Saving...' : 'Save DataFrame'}
+                    {saveLoading ? 'Saving...' : 'Save As'}
                   </Button>
                   {saveError && <span className="text-red-600 text-sm">{saveError}</span>}
                   {saveSuccess && <span className="text-green-600 text-sm">Saved!</span>}
@@ -1319,6 +1321,47 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       ) : (
         <div className="p-4 text-gray-500">No results to display. Please Configure GroupBy options.</div>
       )}
+
+      {/* Save DataFrame Modal */}
+      <Dialog open={showSaveModal} onOpenChange={setShowSaveModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save DataFrame</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={saveFileName}
+              onChange={(e) => setSaveFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveFileName.trim()) {
+                  confirmSaveDataFrame();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveModal(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveDataFrame}
+              disabled={saveLoading || !saveFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

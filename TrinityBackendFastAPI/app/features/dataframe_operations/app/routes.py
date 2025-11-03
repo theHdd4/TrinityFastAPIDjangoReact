@@ -163,6 +163,21 @@ def _fn_substr(value: Any, start: Any, end: Any | None = None) -> Any:
 
 
 def _fn_str_replace(value: Any, old: Any, new: Any) -> Any:
+    """
+    Replace text in value. 
+    ENHANCED: If old="" (empty string), it matches blank cells (NULL, "", whitespace)
+    """
+    # Check if we're replacing blanks (old is empty string)
+    if old == "" or old == '':
+        # Check if value is blank (NULL, empty string, or whitespace only)
+        if _is_null(value):
+            return new  # Replace NULL with new value
+        str_val = str(value).strip()
+        if str_val == "":
+            return new  # Replace empty/whitespace with new value
+        return value  # Not blank, keep original
+    
+    # Normal string replacement
     if _is_null(value):
         return None
     return str(value).replace(str(old), str(new))
@@ -325,6 +340,24 @@ def _fn_fillna(value: Any, replacement: Any) -> Any:
     return replacement if _fn_isnull(value) else value
 
 
+def _fn_fillblank(value: Any, replacement: Any) -> Any:
+    """
+    Fill blank cells with replacement value.
+    Treats NULL, empty strings, and whitespace-only strings as blank.
+    """
+    # Check if value is NULL
+    if _is_null(value):
+        return replacement
+    
+    # Check if value is empty string or whitespace only
+    if isinstance(value, str):
+        if value == "" or value.strip() == "":
+            return replacement
+    
+    # Not blank, return original value
+    return value
+
+
 SAFE_EVAL_GLOBALS: Dict[str, Any] = {
     "__builtins__": {},
     "True": True,
@@ -359,6 +392,7 @@ SAFE_EVAL_GLOBALS: Dict[str, Any] = {
     "MAP": _fn_map,
     "ISNULL": _fn_isnull,
     "FILLNA": _fn_fillna,
+    "FILLBLANK": _fn_fillblank,
 }
 
 SAFE_EVAL_FUNCTIONS = {
@@ -450,57 +484,195 @@ async def cached_dataframe(object_name: str):
 @router.post("/load_cached")
 async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     """Load a cached dataframe by object key and create a session."""
+    import logging
+    logger = logging.getLogger("dataframe_operations.load")
+    
+    logger.info(f"🔵 [LOAD] Starting load_cached operation - object_name: {object_name}")
+    
     df = _fetch_df_from_object(object_name)
+    
+    logger.info(f"📊 [LOAD] DataFrame loaded successfully:")
+    logger.info(f"   - Shape: {df.shape}")
+    logger.info(f"   - Columns: {df.columns}")
+    logger.info(f"   - Dtypes: {dict(zip(df.columns, df.dtypes))}")
+    logger.info(f"   - Schema: {df.schema}")
+    
+    # Log sample data
+    try:
+        logger.info(f"📊 [LOAD] Sample row (first): {df.head(1).to_dicts()}")
+    except Exception as sample_err:
+        logger.warning(f"⚠️ [LOAD] Could not log sample data: {sample_err}")
+    
     df_id = str(uuid.uuid4())
     SESSIONS[df_id] = df
+    
+    logger.info(f"✅ [LOAD] DataFrame cached in session: {df_id}")
+    
     return _df_payload(df, df_id)
 
 class SaveRequest(BaseModel):
     csv_data: str | None = None
     filename: str | None = None
     df_id: str | None = None
+    overwrite_original: bool = False
+    
+    class Config:
+        # Allow extra fields for forward compatibility
+        extra = "allow"
 
 
 @router.post("/save")
 async def save_dataframe(payload: SaveRequest):
     """Save a dataframe session to MinIO, falling back to CSV payloads when no session is available."""
+    import logging
+    logger = logging.getLogger("dataframe_operations.save")
 
     df: pl.DataFrame | None = None
     session_id = payload.df_id
 
+    logger.info(f"🔵 [SAVE] Starting save operation - df_id: {session_id}, filename: {payload.filename}")
+
     if session_id:
+        logger.info(f"🔍 [SAVE] Looking for session: {session_id}")
+        logger.info(f"🔍 [SAVE] Available sessions: {list(SESSIONS.keys())}")
+        
         df = SESSIONS.get(session_id)
         if df is None and payload.csv_data is None:
+            logger.error(f"❌ [SAVE] DataFrame session not found: {session_id}")
             raise HTTPException(status_code=404, detail="DataFrame session not found")
-
+        
+        if df is not None:
+            logger.info(f"✅ [SAVE] Found dataframe in session: shape={df.shape}, columns={len(df.columns)}")
+            logger.info(f"📊 [SAVE] DataFrame columns: {df.columns}")
+            logger.info(f"📊 [SAVE] DataFrame dtypes: {dict(zip(df.columns, df.dtypes))}")
+            
+            # Log sample data to help debug dtype issues
+            try:
+                logger.info(f"📊 [SAVE] Sample row (first): {df.head(1).to_dicts()}")
+            except Exception as sample_err:
+                logger.warning(f"⚠️ [SAVE] Could not log sample data: {sample_err}")
+        else:
+            logger.warning(f"⚠️ [SAVE] Session {session_id} not found in SESSIONS")
+    
+    # 🔧 CRITICAL FIX: Only parse CSV if no session DataFrame was found
     if df is None:
         if not payload.csv_data:
+            logger.error("❌ [SAVE] csv_data is required when df_id is missing")
             raise HTTPException(status_code=400, detail="csv_data is required when df_id is missing")
         try:
-            df = pl.read_csv(io.StringIO(payload.csv_data))
+            logger.info(f"📥 [SAVE] Parsing CSV data (length: {len(payload.csv_data)} chars)")
+            
+            # 🔧 FIX: Use better schema inference to handle mixed types correctly
+            # This prevents the "could not parse as i64" error when columns have mixed int/float values
+            df = pl.read_csv(
+                io.StringIO(payload.csv_data),
+                infer_schema_length=10000,  # Scan more rows before inferring dtypes (default is ~100)
+                ignore_errors=False,  # Don't ignore errors, but with better inference they shouldn't occur
+                null_values=['', 'None', 'null', 'NULL', 'nan', 'NaN'],  # Explicit null handling
+                try_parse_dates=True  # Auto-detect date columns
+            )
+            
+            logger.info(f"✅ [SAVE] CSV parsed successfully: shape={df.shape}")
+            logger.info(f"📊 [SAVE] Parsed dtypes: {dict(zip(df.columns, df.dtypes))}")
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid csv_data: {exc}") from exc
+            logger.error(f"❌ [SAVE] Invalid csv_data: {exc}")
+            logger.error(f"❌ [SAVE] Trying again with ignore_errors=True...")
+            
+            # 🔧 FALLBACK: If strict parsing fails, try with ignore_errors
+            try:
+                df = pl.read_csv(
+                    io.StringIO(payload.csv_data),
+                    infer_schema_length=10000,
+                    ignore_errors=True,  # Be lenient with type mismatches
+                    null_values=['', 'None', 'null', 'NULL', 'nan', 'NaN'],
+                    try_parse_dates=True
+                )
+                logger.warning(f"⚠️ [SAVE] CSV parsed with ignore_errors=True: shape={df.shape}")
+                logger.info(f"📊 [SAVE] Parsed dtypes: {dict(zip(df.columns, df.dtypes))}")
+            except Exception as fallback_exc:
+                logger.error(f"❌ [SAVE] Even fallback parsing failed: {fallback_exc}")
+                raise HTTPException(status_code=400, detail=f"Invalid csv_data: {exc}") from exc
 
-    filename = (payload.filename or "").strip()
-    if not filename:
-        stub = (session_id or str(uuid.uuid4())).replace("-", "")[:8]
-        filename = f"{stub}_dataframe_ops.arrow"
-    if not filename.endswith(".arrow"):
-        filename += ".arrow"
+    # Handle filename based on overwrite_original flag
+    if payload.overwrite_original:
+        # Overwrite original file - use filename as-is
+        if not payload.filename:
+            raise HTTPException(status_code=400, detail="filename is required when overwriting original file")
+        if not payload.filename.endswith('.arrow'):
+            payload.filename += '.arrow'
+        object_name = payload.filename
+        logger.info(f"🔄 [SAVE] Overwriting original file: {object_name}")
+    else:
+        # Normal save - create new file in dataframe operations folder
+        filename = (payload.filename or "").strip()
+        if not filename:
+            stub = (session_id or str(uuid.uuid4())).replace("-", "")[:8]
+            filename = f"{stub}_dataframe_ops.arrow"
+        if not filename.endswith(".arrow"):
+            filename += ".arrow"
 
-    try:
+        logger.info(f"💾 [SAVE] Target filename: {filename}")
+
         prefix = await get_object_prefix()
         dfops_prefix = f"{prefix}dataframe operations/"
+        logger.info(f"📁 [SAVE] MinIO prefix: {dfops_prefix}")
+        
         try:
             minio_client.stat_object(MINIO_BUCKET, dfops_prefix)
         except S3Error:
+            logger.info(f"📁 [SAVE] Creating prefix directory: {dfops_prefix}")
             minio_client.put_object(MINIO_BUCKET, dfops_prefix, io.BytesIO(b""), 0)
 
         object_name = f"{dfops_prefix}{filename}"
+        logger.info(f"🎯 [SAVE] Full object name: {object_name}")
+    
+    # Set message based on operation type
+    message = "Original file updated successfully" if payload.overwrite_original else "DataFrame saved successfully"
 
+    try:
+
+        # Add detailed dtype validation and conversion logging
+        logger.info(f"🔍 [SAVE] Pre-save DataFrame inspection:")
+        logger.info(f"   - Shape: {df.shape}")
+        logger.info(f"   - Columns: {df.columns}")
+        logger.info(f"   - Dtypes: {df.dtypes}")
+        logger.info(f"   - Schema: {df.schema}")
+        
+        # Check for problematic dtypes
+        for col_name, dtype in zip(df.columns, df.dtypes):
+            logger.info(f"   - Column '{col_name}': dtype={dtype}, null_count={df[col_name].null_count()}")
+            
+        logger.info(f"🔄 [SAVE] Writing DataFrame to Arrow format...")
         arrow_buffer = io.BytesIO()
-        df.write_ipc(arrow_buffer)
+        try:
+            df.write_ipc(arrow_buffer)
+            logger.info(f"✅ [SAVE] Arrow write successful")
+        except Exception as write_err:
+            logger.error(f"❌ [SAVE] Arrow write failed: {write_err}")
+            logger.error(f"❌ [SAVE] Error type: {type(write_err)}")
+            logger.error(f"❌ [SAVE] DataFrame info at failure:")
+            logger.error(f"   - Columns: {df.columns}")
+            logger.error(f"   - Dtypes: {df.dtypes}")
+            logger.error(f"   - Null counts: {[df[col].null_count() for col in df.columns]}")
+            
+            # Try to identify the problematic column
+            for col in df.columns:
+                try:
+                    test_df = df.select([col])
+                    test_buffer = io.BytesIO()
+                    test_df.write_ipc(test_buffer)
+                    logger.info(f"   ✅ Column '{col}' can be written to Arrow")
+                except Exception as col_err:
+                    logger.error(f"   ❌ Column '{col}' CANNOT be written to Arrow: {col_err}")
+                    logger.error(f"      - dtype: {df[col].dtype}")
+                    logger.error(f"      - sample values: {df[col].head(5).to_list()}")
+            
+            raise Exception(f"Failed to write DataFrame to Arrow format: {write_err}") from write_err
+        
         arrow_bytes = arrow_buffer.getvalue()
+        logger.info(f"📦 [SAVE] Arrow buffer size: {len(arrow_bytes)} bytes")
+        
+        logger.info(f"⬆️ [SAVE] Uploading to MinIO...")
         minio_client.put_object(
             MINIO_BUCKET,
             object_name,
@@ -508,19 +680,27 @@ async def save_dataframe(payload: SaveRequest):
             length=len(arrow_bytes),
             content_type="application/octet-stream",
         )
+        logger.info(f"✅ [SAVE] Upload successful: {object_name}")
 
         response = {
             "result_file": object_name,
             "shape": df.shape,
             "columns": list(df.columns),
-            "message": "DataFrame saved successfully",
+            "message": message,
+            "overwrite_original": payload.overwrite_original,
         }
         if session_id:
             response["df_id"] = session_id
+        
+        logger.info(f"🎉 [SAVE] Save operation completed successfully")
         return response
     except HTTPException:
         raise
     except Exception as exc:
+        logger.error(f"❌ [SAVE] Save operation failed with exception: {exc}")
+        logger.error(f"❌ [SAVE] Exception type: {type(exc)}")
+        import traceback
+        logger.error(f"❌ [SAVE] Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -544,18 +724,37 @@ async def load_dataframe(file: UploadFile = File(...)):
 
 @router.post("/filter_rows")
 async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: Any = Body(...)):
+    import logging
+    logger = logging.getLogger("dataframe_operations.filter")
+    
+    logger.info(f"🔵 [FILTER] Starting filter operation - df_id: {df_id}, column: {column}, value: {value}")
+    
     df = _get_df(df_id)
+    
+    logger.info(f"📊 [FILTER] Before filter - Shape: {df.shape}, Dtypes: {dict(zip(df.columns, df.dtypes))}")
+    logger.info(f"📊 [FILTER] Column '{column}' dtype: {df[column].dtype}, null_count: {df[column].null_count()}")
+    
     try:
         if isinstance(value, dict):
             min_v = value.get("min")
             max_v = value.get("max")
+            logger.info(f"🔍 [FILTER] Range filter: {min_v} <= {column} <= {max_v}")
             df = df.filter(pl.col(column).is_between(min_v, max_v))
         elif isinstance(value, list):
+            logger.info(f"🔍 [FILTER] List filter: {column} in {value}")
             df = df.filter(pl.col(column).is_in(value))
         else:
+            logger.info(f"🔍 [FILTER] Equality filter: {column} == {value}")
             df = df.filter(pl.col(column) == value)
+            
+        logger.info(f"📊 [FILTER] After filter - Shape: {df.shape}, Dtypes: {dict(zip(df.columns, df.dtypes))}")
+        logger.info(f"✅ [FILTER] Filter operation successful")
+        
     except Exception as e:
+        logger.error(f"❌ [FILTER] Filter operation failed: {e}")
+        logger.error(f"❌ [FILTER] Error type: {type(e)}")
         raise HTTPException(status_code=400, detail=str(e))
+    
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
@@ -830,8 +1029,21 @@ async def apply_udf(
 
 @router.post("/rename_column")
 async def rename_column(df_id: str = Body(...), old_name: str = Body(...), new_name: str = Body(...)):
+    import logging
+    logger = logging.getLogger("dataframe_operations.rename")
+    
     df = _get_df(df_id)
+    logger.info(f"🔵 [RENAME] Renaming column - df_id: {df_id}, old_name: '{old_name}', new_name: '{new_name}'")
+    logger.info(f"📊 [RENAME] Current columns in dataframe: {df.columns}")
+    logger.info(f"📊 [RENAME] Column exists: {old_name in df.columns}")
+    
+    if old_name not in df.columns:
+        logger.error(f"❌ [RENAME] Column '{old_name}' not found in dataframe. Available: {df.columns}")
+        raise HTTPException(status_code=400, detail=f"Column '{old_name}' not found. Available columns: {df.columns}")
+    
     df = df.rename({old_name: new_name})
+    logger.info(f"✅ [RENAME] After rename - columns: {df.columns}")
+    
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result

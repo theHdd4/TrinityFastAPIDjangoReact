@@ -30,28 +30,30 @@ def get_dataframe_with_reload(file_id: str):
     # File not in memory - try to reload from the file_id directly (it might be a full path)
     print(f"⚠️ File {file_id} not in memory storage, trying to reload directly...")
     
-    # Extract filename from path if it's a full path
-    filename = file_id.split('/')[-1] if '/' in file_id else file_id
-    print(f"🔄 Attempting to reload from filename: {filename}")
+    # Try to reload using the full file_id first (preserves project path)
+    print(f"🔄 Attempting to reload from file_id: {file_id}")
     
     try:
-        new_file_id = chart_service.load_saved_dataframe(filename)
+        new_file_id = chart_service.load_saved_dataframe(file_id)
         df = chart_service.get_file(new_file_id)
         print(f"✅ Dataframe reloaded: {len(df)} rows, {len(df.columns)} columns")
         return df, new_file_id
     except Exception as reload_error:
-        print(f"❌ Failed to reload from filename: {reload_error}")
+        print(f"❌ Failed to reload from full path: {reload_error}")
         
-        # If the filename approach fails, try the original file_id as a fallback
-        if filename != file_id:
-            print(f"🔄 Trying original file_id as fallback: {file_id}")
+        # If full path fails, try extracting just the filename as fallback
+        # (this may load the wrong file if multiple projects have the same filename!)
+        if '/' in file_id:
+            filename = file_id.split('/')[-1]
+            print(f"⚠️ WARNING: Falling back to filename only (may load wrong file): {filename}")
+            print(f"🔄 Attempting to reload from filename: {filename}")
             try:
-                new_file_id = chart_service.load_saved_dataframe(file_id)
+                new_file_id = chart_service.load_saved_dataframe(filename)
                 df = chart_service.get_file(new_file_id)
-                print(f"✅ Dataframe reloaded from original file_id: {len(df)} rows, {len(df.columns)} columns")
+                print(f"✅ Dataframe reloaded from filename: {len(df)} rows, {len(df.columns)} columns")
                 return df, new_file_id
             except Exception as fallback_error:
-                print(f"❌ Fallback also failed: {fallback_error}")
+                print(f"❌ Filename fallback also failed: {fallback_error}")
         
         # Final fallback: check metadata to see if it has a saved source
         print(f"⚠️ Trying metadata approach for: {file_id}")

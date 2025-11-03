@@ -281,7 +281,7 @@ const validateFormulaColumns = (expression: string, availableColumns: string[]):
   const matches = expressionWithoutQuotes.match(columnPattern) || [];
   
   // Filter out function names, numbers, and other non-column references
-  const functionNames = ['SUM', 'AVG', 'MAX', 'MIN', 'DIV', 'PROD', 'ABS', 'ROUND', 'FLOOR', 'CEIL', 'EXP', 'LOG', 'SQRT', 'MEAN', 'CORR', 'ZSCORE', 'NORM', 'IF', 'ISNULL', 'LOWER', 'UPPER', 'LEN', 'SUBSTR', 'STR_REPLACE', 'YEAR', 'MONTH', 'DAY', 'WEEKDAY', 'DATE_DIFF', 'MAP', 'FILLNA', 'BIN', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE'];
+  const functionNames = ['SUM', 'AVG', 'MAX', 'MIN', 'DIV', 'PROD', 'ABS', 'ROUND', 'FLOOR', 'CEIL', 'EXP', 'LOG', 'SQRT', 'MEAN', 'CORR', 'ZSCORE', 'NORM', 'IF', 'ISNULL', 'LOWER', 'UPPER', 'LEN', 'SUBSTR', 'STR_REPLACE', 'YEAR', 'MONTH', 'DAY', 'WEEKDAY', 'DATE_DIFF', 'MAP', 'FILLNA', 'FILLBLANK', 'BIN', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE'];
   
   const columnReferences = matches.filter(match => 
     !functionNames.includes(match.toUpperCase()) && 
@@ -803,6 +803,16 @@ const formulaLibrary: FormulaItem[] = [
     category: 'nulls',
     matcher: createFunctionMatcher('FILLNA'),
     priority: 10,
+  },
+  {
+    key: 'fillblank',
+    name: 'Fill Blanks',
+    syntax: 'FILLBLANK(column, "value")',
+    description: 'Fill all blank cells (NULL, empty strings, whitespace) with a value.',
+    example: '=FILLBLANK(Col1, "Unknown")',
+    category: 'nulls',
+    matcher: createFunctionMatcher('FILLBLANK'),
+    priority: 5,
   },
 ];
 
