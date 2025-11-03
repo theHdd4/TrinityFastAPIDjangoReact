@@ -209,6 +209,14 @@ const parseBooleanish = (value: unknown): boolean | null => {
   return null;
 };
 
+const resolveLayerValue = (value: unknown): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : 0;
+};
+
 const normaliseHexColor = (value: string): string => {
   const trimmed = value.trim();
   if (/^#([0-9a-fA-F]{6})$/.test(trimmed)) {
@@ -1944,8 +1952,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const orderedObjects = useMemo(
       () =>
         [...objects].sort((a, b) => {
-          const aZ = typeof a.zIndex === 'number' ? a.zIndex : 0;
-          const bZ = typeof b.zIndex === 'number' ? b.zIndex : 0;
+          const aZ = resolveLayerValue(a.zIndex);
+          const bZ = resolveLayerValue(b.zIndex);
           if (aZ !== bZ) {
             return aZ - bZ;
           }
@@ -4093,7 +4101,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         <div className="relative z-20 h-full w-full">
           {orderedObjects.map(object => {
             const isSelected = selectedIds.includes(object.id);
-            const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
+            const baseLayer = Math.max(0, resolveLayerValue(object.zIndex));
+            const visualLayer = baseLayer * 100 + (isSelected ? 1 : 0);
             const rotation = typeof object.rotation === 'number' ? object.rotation : 0;
             const isAccentImageObject = object.type === 'accent-image';
             const isImageObject = object.type === 'image';
@@ -4142,7 +4151,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   top: object.y,
                   width: object.width,
                   height: object.height,
-                  zIndex: isSelected ? zIndex + 100 : zIndex,
+                  zIndex: visualLayer,
                 }}
                 data-exhibition-object-id={object.id}
                 data-exhibition-object-type={object.type}

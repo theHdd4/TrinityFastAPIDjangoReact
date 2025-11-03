@@ -1910,12 +1910,19 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
       let changed = false;
+      let requiresOrdering = false;
+
       const next = existing.map(object => {
         const patch = updates[object.id];
         if (!patch) {
           return object;
         }
+
         changed = true;
+        if (!requiresOrdering && Object.prototype.hasOwnProperty.call(patch, 'zIndex')) {
+          requiresOrdering = true;
+        }
+
         return normaliseSlideObject({ ...object, ...patch });
       });
 
@@ -1923,10 +1930,12 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         return {};
       }
 
+      const resolved = requiresOrdering ? normaliseZIndices(sortSlideObjectsByZIndex(next)) : next;
+
       return {
         slideObjectsByCardId: {
           ...state.slideObjectsByCardId,
-          [cardId]: next,
+          [cardId]: resolved,
         },
       };
     });
