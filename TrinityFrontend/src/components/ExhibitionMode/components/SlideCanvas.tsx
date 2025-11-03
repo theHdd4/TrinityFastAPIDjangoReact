@@ -3920,14 +3920,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
     const canvasBorderClass = (() => {
       if (isDragOver) {
-        return 'border-2 border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]';
+        return 'ring-2 ring-primary/20 shadow-xl scale-[0.99]';
       }
 
       if (showEmptyState) {
-        return 'border-2 border-dashed border-border/70';
+        return 'border-0';
       }
 
-      return fullBleed ? 'border-0' : 'border-2 border-border/60';
+      return fullBleed ? 'border-0' : 'border-0 shadow-lg shadow-black/5';
     })();
 
     const backgroundLockLabel = backgroundLocked ? 'Unlock background' : 'Lock background';
@@ -3982,7 +3982,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         {showEmptyState && (
           <div
             className={cn(
-              'pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground',
+              'pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-muted/10 px-6 text-center text-sm text-muted-foreground',
               canvasCornerClass,
             )}
           >
