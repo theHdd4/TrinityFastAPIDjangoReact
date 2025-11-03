@@ -31,7 +31,7 @@ export const createImageSlideObject = (
 ): SlideObject => {
   const { props: overrideProps, ...restOverrides } = overrides;
 
-  return {
+  const base: SlideObject = {
     id,
     type: 'image',
     x: DEFAULT_IMAGE_OBJECT_X,
@@ -47,6 +47,40 @@ export const createImageSlideObject = (
       source: options.source ?? null,
       ...(overrideProps ?? {}),
     },
+    position: { x: DEFAULT_IMAGE_OBJECT_X, y: DEFAULT_IMAGE_OBJECT_Y },
+    size: { width: DEFAULT_IMAGE_OBJECT_WIDTH, height: DEFAULT_IMAGE_OBJECT_HEIGHT },
+    content: {
+      src,
+      name: options.name ?? null,
+      source: options.source ?? null,
+    },
+    isSelected: false,
+  } as SlideObject;
+
+  const resolvedX = restOverrides.x ?? base.x;
+  const resolvedY = restOverrides.y ?? base.y;
+  const resolvedWidth = restOverrides.width ?? base.width;
+  const resolvedHeight = restOverrides.height ?? base.height;
+
+  return {
+    ...base,
     ...restOverrides,
+    x: resolvedX,
+    y: resolvedY,
+    width: resolvedWidth,
+    height: resolvedHeight,
+    position: restOverrides.position ?? { x: resolvedX, y: resolvedY },
+    size: restOverrides.size ?? { width: resolvedWidth, height: resolvedHeight },
+    props: {
+      ...(base.props ?? {}),
+      ...(overrideProps ?? {}),
+    },
+    content:
+      restOverrides.content ?? {
+        src,
+        name: options.name ?? null,
+        source: options.source ?? null,
+      },
+    isSelected: restOverrides.isSelected ?? false,
   };
 };

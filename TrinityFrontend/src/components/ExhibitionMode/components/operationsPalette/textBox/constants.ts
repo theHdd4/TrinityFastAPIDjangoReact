@@ -129,19 +129,47 @@ export const createTextBoxSlideObject = (
   id: string,
   overrides: Partial<SlideObject> = {},
   formattingOverrides: Partial<TextBoxFormatting> = {},
-): SlideObject => ({
-  id,
-  type: 'text-box',
-  x: 120,
-  y: 120,
-  width: DEFAULT_TEXT_BOX_WIDTH,
-  height: DEFAULT_TEXT_BOX_HEIGHT,
-  zIndex: 1,
-  rotation: 0,
-  groupId: null,
-  props: createDefaultFormatting(formattingOverrides),
-  ...overrides,
-});
+): SlideObject => {
+  const props = createDefaultFormatting(formattingOverrides);
+  const base: SlideObject = {
+    id,
+    type: 'text-box',
+    x: 120,
+    y: 120,
+    width: DEFAULT_TEXT_BOX_WIDTH,
+    height: DEFAULT_TEXT_BOX_HEIGHT,
+    zIndex: 1,
+    rotation: 0,
+    groupId: null,
+    props,
+    position: { x: 120, y: 120 },
+    size: { width: DEFAULT_TEXT_BOX_WIDTH, height: DEFAULT_TEXT_BOX_HEIGHT },
+    content: props,
+    isSelected: false,
+  } as SlideObject;
+
+  const resolvedX = overrides.x ?? base.x;
+  const resolvedY = overrides.y ?? base.y;
+  const resolvedWidth = overrides.width ?? base.width;
+  const resolvedHeight = overrides.height ?? base.height;
+
+  return {
+    ...base,
+    ...overrides,
+    x: resolvedX,
+    y: resolvedY,
+    width: resolvedWidth,
+    height: resolvedHeight,
+    position: overrides.position ?? { x: resolvedX, y: resolvedY },
+    size: overrides.size ?? { width: resolvedWidth, height: resolvedHeight },
+    props: {
+      ...(base.props ?? {}),
+      ...(overrides.props ?? {}),
+    },
+    content: overrides.content ?? props,
+    isSelected: overrides.isSelected ?? false,
+  };
+};
 
 export const extractTextBoxFormatting = (
   props: Record<string, unknown> | undefined,

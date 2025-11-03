@@ -1861,6 +1861,20 @@ type CanvasStageProps = {
   showGuides: boolean;
 };
 
+const arraysEqual = (a: readonly string[], b: readonly string[]): boolean => {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
   (
     {
@@ -1915,12 +1929,30 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [forwardedRef],
     );
 
-    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [selectedIdsState, setSelectedIdsState] = useState<string[]>([]);
+    const selectedIds = selectedIdsState;
     const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
     const [editingTextState, setEditingTextState] = useState<EditingTextState | null>(null);
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
     const [clipboard, setClipboard] = useState<SlideObject[]>([]);
     const [styleClipboard, setStyleClipboard] = useState<Record<string, string> | null>(null);
+    const selectedIdsRef = useRef<string[]>([]);
+    useEffect(() => {
+      selectedIdsRef.current = selectedIdsState;
+    }, [selectedIdsState]);
+
+    const orderedObjects = useMemo(
+      () =>
+        [...objects].sort((a, b) => {
+          const aZ = typeof a.zIndex === 'number' ? a.zIndex : 0;
+          const bZ = typeof b.zIndex === 'number' ? b.zIndex : 0;
+          if (aZ !== bZ) {
+            return aZ - bZ;
+          }
+          return a.id.localeCompare(b.id);
+        }),
+      [objects],
+    );
     const [chartEditorTarget, setChartEditorTarget] = useState<{
       objectId: string;
       data: ChartDataRow[];
@@ -1942,6 +1974,57 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         setChartEditorTarget(null);
       }
     }, [chartEditorTarget, objectsMap]);
+
+    const commitSelection = useCallback(
+      (ids: string[]) => {
+        const filtered = ids
+          .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+          .map(id => id.trim());
+        const unique = Array.from(new Set(filtered));
+        if (arraysEqual(selectedIdsRef.current, unique)) {
+          return;
+        }
+
+        setSelectedIdsState(unique);
+        const nextSet = new Set(unique);
+        const updates: Record<string, Partial<SlideObject>> = {};
+        objects.forEach(object => {
+          const nextSelected = nextSet.has(object.id);
+          if ((object.isSelected ?? false) !== nextSelected) {
+            updates[object.id] = { isSelected: nextSelected };
+          }
+        });
+
+        if (Object.keys(updates).length > 0) {
+          onBulkUpdate(updates);
+        }
+      },
+      [objects, onBulkUpdate],
+    );
+
+    const setSelectedIds = useCallback(
+      (value: string[] | ((prev: string[]) => string[])) => {
+        const base = selectedIdsRef.current;
+        const next = typeof value === 'function' ? (value as (prev: string[]) => string[])(base) : value;
+        if (!Array.isArray(next)) {
+          if (base.length > 0) {
+            commitSelection([]);
+          }
+          return;
+        }
+        commitSelection(next);
+      },
+      [commitSelection],
+    );
+
+    useEffect(() => {
+      const selectedFromStore = orderedObjects
+        .filter(object => object.isSelected)
+        .map(object => object.id);
+      if (!arraysEqual(selectedIdsRef.current, selectedFromStore)) {
+        setSelectedIdsState(selectedFromStore);
+      }
+    }, [orderedObjects]);
 
     const handleChartEditorSave = useCallback(
       (data: ChartDataRow[], updatedConfig: ChartConfig) => {
@@ -2053,7 +2136,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               : `Copied ${snapshots.length} objects to the clipboard.`,
         });
       },
-      [focusCanvas, resolveTargetIds, resolveTargetObjects],
+      [focusCanvas, resolveTargetIds, resolveTargetObjects, setSelectedIds],
     );
 
     const handleCutSelection = useCallback(
@@ -2122,6 +2205,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         onRemoveAtom,
         onRemoveObject,
         resolveTargetObjects,
+        setSelectedIds,
         titleObjectId,
       ],
     );
@@ -2567,7 +2651,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
         return objectsMap.has(prev.id) ? prev : null;
       });
-    }, [objectsMap]);
+    }, [objectsMap, setSelectedIds]);
 
     useEffect(() => {
       if (!editingTextState) {
@@ -3034,7 +3118,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           original: formatting.text,
         });
       },
-      [canEdit, editingTextState, focusCanvas, objectsMap, onInteract],
+      [canEdit, editingTextState, focusCanvas, objectsMap, onInteract, setSelectedIds],
     );
 
     const handleEditingValueChange = useCallback(
@@ -3152,8 +3236,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           id: newId,
           x,
           y,
+          position: { x, y },
+          width: snapshot.width,
+          height: snapshot.height,
+          size: { width: snapshot.width, height: snapshot.height },
           groupId: null,
           props: baseProps,
+          content: snapshot.content ?? baseProps,
+          isSelected: false,
         };
 
         onAddObject(prepared);
@@ -3184,6 +3274,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       onAddObject,
       onBringToFront,
       onInteract,
+      setSelectedIds,
     ]);
 
     const handleDuplicateSelection = useCallback(
@@ -3228,8 +3319,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             id: newId,
             x,
             y,
+            position: { x, y },
+            width: object.width,
+            height: object.height,
+            size: { width: object.width, height: object.height },
             groupId: null,
             props: baseProps,
+            content: object.content ?? baseProps,
+            isSelected: false,
           };
 
           onAddObject(duplicate);
@@ -3261,6 +3358,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         onBringToFront,
         onInteract,
         resolveTargetObjects,
+        setSelectedIds,
       ],
     );
 
@@ -3360,7 +3458,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         setSelectedIds([]);
         focusCanvas();
       },
-      [canEdit, commitEditingText, editingTextState, focusCanvas, onInteract],
+      [canEdit, commitEditingText, editingTextState, focusCanvas, onInteract, setSelectedIds],
     );
 
     const handleBackgroundContextMenu = useCallback(
@@ -3435,7 +3533,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         document.removeEventListener('mousedown', handlePointerDown);
         document.removeEventListener('touchstart', handlePointerDown);
       };
-    }, [canEdit, commitEditingText, editingTextState, onInteract, selectionCount]);
+    }, [canEdit, commitEditingText, editingTextState, onInteract, selectionCount, setSelectedIds]);
 
     const handleObjectPointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>, objectId: string) => {
@@ -3517,6 +3615,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         objectsMap,
         onBringToFront,
         selectedIds,
+        setSelectedIds,
       ],
     );
 
@@ -3553,7 +3652,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           },
         });
       },
-      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront],
+      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront, setSelectedIds],
     );
 
     const handleKeyDown = useCallback(
@@ -3729,6 +3828,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         selectedIds,
         selectedObjects,
         unlockedSelectedObjects,
+        setSelectedIds,
       ],
     );
 
@@ -3991,7 +4091,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         )}
 
         <div className="relative z-20 h-full w-full">
-          {objects.map(object => {
+          {orderedObjects.map(object => {
             const isSelected = selectedIds.includes(object.id);
             const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
             const rotation = typeof object.rotation === 'number' ? object.rotation : 0;
@@ -4255,10 +4355,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             </div>
             );
           };
-
-          if (isTableObject) {
-            return React.cloneElement(renderObject(), { key: object.id });
-          }
 
           const contextTargetIds = isSelected ? selectedIds : [object.id];
           const contextHasSelection = contextTargetIds.length > 0;

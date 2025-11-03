@@ -416,7 +416,7 @@ export const createShapeSlideObject = (
     shapeId: shape.id,
   };
 
-  return {
+  const base: SlideObject = {
     id,
     type: 'shape',
     x: 160,
@@ -427,7 +427,32 @@ export const createShapeSlideObject = (
     rotation: 0,
     groupId: null,
     props,
+    position: { x: 160, y: 160 },
+    size: { width: DEFAULT_SHAPE_WIDTH, height: DEFAULT_SHAPE_HEIGHT },
+    content: props,
+    isSelected: false,
+  } as SlideObject;
+
+  const resolvedX = overrides.x ?? base.x;
+  const resolvedY = overrides.y ?? base.y;
+  const resolvedWidth = overrides.width ?? base.width;
+  const resolvedHeight = overrides.height ?? base.height;
+
+  return {
+    ...base,
     ...overrides,
+    x: resolvedX,
+    y: resolvedY,
+    width: resolvedWidth,
+    height: resolvedHeight,
+    position: overrides.position ?? { x: resolvedX, y: resolvedY },
+    size: overrides.size ?? { width: resolvedWidth, height: resolvedHeight },
+    props: {
+      ...(base.props ?? {}),
+      ...(overrides.props ?? {}),
+    },
+    content: overrides.content ?? props,
+    isSelected: overrides.isSelected ?? false,
   };
 };
 
