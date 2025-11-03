@@ -111,7 +111,6 @@ const safeParseJson = (value: string): unknown => {
   try {
     return JSON.parse(value);
   } catch (error) {
-    console.warn('[FeatureOverview] Failed to parse JSON payload', error);
     return undefined;
   }
 };

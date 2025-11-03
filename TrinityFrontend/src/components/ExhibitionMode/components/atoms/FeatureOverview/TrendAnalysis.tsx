@@ -24,7 +24,7 @@ const TrendAnalysis: React.FC<FeatureOverviewComponentProps> = ({ metadata, vari
 
   return (
     <div 
-      className="rounded-2xl border border-border bg-background/80 p-6 shadow-sm"
+      className={`${containerClass} w-full max-w-full min-w-0`}
       onContextMenu={(e) => {
         // Prevent context menu in ExhibitionMode to match ChartMaker behavior
         e.preventDefault();

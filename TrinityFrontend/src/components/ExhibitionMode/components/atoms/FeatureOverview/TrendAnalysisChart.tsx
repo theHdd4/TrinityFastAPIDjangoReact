@@ -94,7 +94,7 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
 
   return (
     <div 
-      className="space-y-4"
+      className="space-y-4 w-full max-w-full min-w-0"
       onContextMenu={(e) => {
         // Prevent context menu in ExhibitionMode to match ChartMaker behavior
         e.preventDefault();

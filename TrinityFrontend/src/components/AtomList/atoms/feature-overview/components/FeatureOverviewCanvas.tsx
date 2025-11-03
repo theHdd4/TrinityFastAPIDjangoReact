@@ -512,7 +512,6 @@ function cloneDeep<T>(value: T): T {
   try {
     return JSON.parse(JSON.stringify(value)) as T;
   } catch (error) {
-    console.warn("Unable to clone value for exhibition selection", error);
     return value;
   }
 }
@@ -531,9 +530,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     (ids) => Array.isArray(ids) && ids.length > 0,
   );
   
-  console.log("🔍 hasMappedIdentifiers check:", hasMappedIdentifiers);
-  console.log("🔍 dimensionMap for hasMappedIdentifiers:", dimensionMap);
-  console.log("🔍 Object.values(dimensionMap):", Object.values(dimensionMap));
   const [skuRows, setSkuRows] = useState<any[]>(
     Array.isArray(settings.skuTable) ? settings.skuTable : [],
   );
@@ -733,7 +729,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         }
       } catch (error) {
         if (!active) return;
-        console.error("Failed to fetch dimension mapping:", error);
         const message =
           "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
         setDimensionError(message);
@@ -746,15 +741,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.dataSource, settings.allColumns, settings.columnSummary, settings.dimensionMap]);
 
    useEffect(() => {
-     console.log("🔄 SKU Analysis useEffect triggered");
-     console.log("🔄 settings.dataSource:", settings.dataSource);
-     console.log("🔄 hasMappedIdentifiers:", hasMappedIdentifiers);
-     console.log("🔄 skuRows.length:", skuRows.length);
-     console.log("🔄 dimensionMap:", dimensionMap);
-     console.log("🔄 lastFetchedSource.current:", lastFetchedSource.current);
-     
      if (!settings.dataSource) {
-       console.log("🔄 No data source, returning");
        lastFetchedSource.current = null;
        lastDimensionMapString.current = null;
        return;
@@ -769,15 +756,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
          skuRows.length > 0 &&
          dimensionMapString === lastDimensionMapString.current
        ) {
-         console.log("🔄 Skipping SKU analysis - already fetched for this source with same dimensions");
          return;
        }
-       console.log("🔄 Calling displaySkus() - dimension mapping changed or new data source");
        lastFetchedSource.current = settings.dataSource;
        lastDimensionMapString.current = dimensionMapString;
        displaySkus();
-     } else {
-       console.log("🔄 No mapped identifiers, skipping SKU analysis");
      }
      // eslint-disable-next-line react-hooks/exhaustive-deps
    }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
@@ -1540,10 +1523,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           return arrowResult;
         }
       } catch (err) {
-        console.warn(
-          "Arrow dataset load failed in Feature Overview, falling back to cached CSV",
-          err,
-        );
       }
     }
 
@@ -1556,9 +1535,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     numericColumns: Set<string>,
     columnOrder: string[],
   ): Record<string, any>[] => {
-    console.log("🔄 Aggregating SKU data with dimensions:", dimensionColumns);
-    console.log("🔄 Input rows count:", rows.length);
-    
     if (dimensionColumns.length === 0) {
       return rows.map((row, index) => ({ id: index + 1, ...row }));
     }
@@ -1648,26 +1624,19 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
       return result;
     });
-    
-    console.log("🔄 Aggregated result count:", Array.from(aggregates.values()).length);
-    console.log("🔄 Final aggregated data:", Array.from(aggregates.values()).map(entry => entry.base));
   };
 
   const displaySkus = async () => {
     if (!settings.dataSource || !hasMappedIdentifiers) {
-      console.warn("displaySkus called without data source or mapped identifiers");
       return;
     }
     setError(null);
     try {
-      console.log("🔎 loading dataset for", settings.dataSource);
       const dimensionColumns = Object.values(dimensionMap)
         .flat()
         .map((col) => (typeof col === "string" ? col.toLowerCase() : ""))
         .filter((col) => col);
       
-      console.log("📊 Dimension columns for SKU analysis:", dimensionColumns);
-      console.log("📊 Current dimensionMap:", dimensionMap);
 
       const loaded = await loadSkuDataset(dimensionColumns);
       const rows = Array.isArray(loaded.rows) ? loaded.rows : [];
@@ -1744,7 +1713,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       });
       logSessionState(user?.id);
     } catch (e: any) {
-      console.error("⚠️ failed to display SKUs", e);
       setError(e.message || "Error displaying SKUs");
       logSessionState(user?.id);
     }
