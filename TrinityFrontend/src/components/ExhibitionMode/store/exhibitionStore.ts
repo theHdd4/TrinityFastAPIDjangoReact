@@ -21,6 +21,7 @@ import {
 import {
   DEFAULT_EXHIBITION_THEME,
   type ExhibitionTheme,
+  resolveThemePresentationDefaults,
 } from '../themes';
 
 export type CardColor = GradientColorId | SolidColorToken;
@@ -724,13 +725,14 @@ const applyThemePresentation = (base: PresentationSettings, theme: ExhibitionThe
     themeId: theme.id,
   };
 
-  const presentation = theme.presentation;
-  if (!presentation) {
-    return next;
-  }
+  const presentation = resolveThemePresentationDefaults(theme);
 
   if (typeof presentation.cardColor === 'string') {
     next.cardColor = presentation.cardColor as PresentationSettings['cardColor'];
+  }
+
+  if (typeof presentation.cardLayout === 'string') {
+    next.cardLayout = ensureCardLayout(presentation.cardLayout);
   }
 
   if (typeof presentation.cardWidth === 'string') {
@@ -746,10 +748,10 @@ const applyThemePresentation = (base: PresentationSettings, theme: ExhibitionThe
   }
 
   if (typeof presentation.backgroundMode === 'string') {
-    next.backgroundMode = presentation.backgroundMode;
+    next.backgroundMode = presentation.backgroundMode as PresentationSettings['backgroundMode'];
   }
 
-  if (typeof presentation.backgroundColor === 'string') {
+  if (typeof presentation.backgroundColor === 'string' && isValidBackgroundColor(presentation.backgroundColor)) {
     next.backgroundColor = presentation.backgroundColor as PresentationSettings['backgroundColor'];
   }
 
