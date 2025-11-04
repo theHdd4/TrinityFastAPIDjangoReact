@@ -527,7 +527,7 @@ API_ENDPOINT_PARAMETER_PATTERNS = {
             },
             "data_manipulation": {
                 "binning": ["BIN(value,[edges...]) - Bucket numeric values into labeled bins"],
-                "mapping": ["MAP(value,{from:to}) - Lookup replacement values"],
+                "mapping": ["MAP(value,{{from:to}}) - Lookup replacement values"],
                 "null_handling": ["ISNULL(value)", "FILLNA(value,replacement)"]
             },
             "conditional_logic": {
@@ -796,7 +796,7 @@ All operations map directly to backend APIs at `/api/dataframe-operations/`:
 - FILLNA(column,replacement) - Fill NULL values only
 - **FILLBLANK(column,"value")** - Fill ALL blanks (NULL, empty strings, whitespace)
 - BIN(value,[edges]) - Bucket values into bins
-- MAP(value,{from:to}) - Map/lookup values
+- MAP(value,{{from:to}}) - Map/lookup values
 
 🔧 RESPONSE FORMAT REQUIREMENTS:
 - **ALWAYS** include "smart_response" field - this is what the user sees

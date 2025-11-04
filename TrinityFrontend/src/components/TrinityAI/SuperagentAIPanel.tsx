@@ -1158,6 +1158,8 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
                       updateProgressMessage(progressMessageId, progressContent);
                     }
                     
+                    // 🔧 FIX: Set isLoading to false when workflow completes
+                    setIsLoading(false);
                     setWorkflowProgress(null);
                     setWsConnected(false);
                     ws.close();
@@ -1167,6 +1169,8 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
                     console.error('❌ WebSocket error:', data.message);
                     progressContent += `\n\n❌ Error: ${data.message}`;
                     updateProgressMessage(progressMessageId, progressContent);
+                    // 🔧 FIX: Set isLoading to false on error
+                    setIsLoading(false);
                     setWorkflowProgress(null);
                     setWsConnected(false);
                     ws.close();
@@ -1178,12 +1182,16 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
                 console.error('❌ WebSocket error:', error);
                 progressContent += `\n\n❌ WebSocket connection error`;
                 updateProgressMessage(progressMessageId, progressContent);
+                // 🔧 FIX: Set isLoading to false on WebSocket error
+                setIsLoading(false);
                 setWorkflowProgress(null);
                 setWsConnected(false);
               };
               
               ws.onclose = () => {
                 console.log('🔌 WebSocket closed');
+                // 🔧 FIX: Set isLoading to false when WebSocket closes
+                setIsLoading(false);
                 setWsConnected(false);
                 setWsConnection(null);
               };
@@ -1208,11 +1216,13 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
                 });
               });
               
+              // 🔧 FIX: Set isLoading to false when WebSocket connection fails
+              setIsLoading(false);
               setWorkflowProgress(null);
             }
             
-            // Skip adding a separate AI message since we're using the progress message
-            setIsLoading(false);
+            // 🔧 FIX: DON'T set isLoading(false) here - keep loading active during workflow execution
+            // isLoading will be set to false when workflow_completed or error events arrive
             return;
           }
         }
