@@ -49,8 +49,9 @@ ATOM_MAPPING = {
         "task_desc": "Perform DataFrame operations",
         "keywords": ["dataframe", "operations", "filter", "sort", "transform"]
     },
-    "create-and-transform-features": {
-        "atomId": "create-and-transform-features",  # Correct: full name
+    # 🔧 CRITICAL FIX: Frontend uses 'create-column' as atomId, not 'create-and-transform-features'
+    "create-column": {
+        "atomId": "create-column",
         "endpoint": "/trinityai/create-transform",
         "task_desc": "Transform data columns and create features",
         "keywords": ["transform", "create column", "feature", "calculate"]
@@ -134,8 +135,9 @@ LEGACY_AGENT_MAPPING = {
     "chartmaker": "chart-maker",
     "groupby": "groupby-wtg-avg",
     "dataframe_operations": "dataframe-operations",
-    "create_transform": "create-and-transform-features",
-    "create-column": "create-and-transform-features"
+    # 🔧 CRITICAL FIX: Frontend uses 'create-column' as the correct atomId
+    "create_transform": "create-column",
+    "create-and-transform-features": "create-column"
 }
 
 # Mapping from fetch_atom return values to correct atomIds
@@ -150,8 +152,11 @@ FETCH_ATOM_TO_ATOMID = {
     "featureoverview": "feature-overview",
     "columnclassifier": "column-classifier",
     "dataframeoperations": "dataframe-operations",
-    "createandtransformfeatures": "create-and-transform-features",
-    "createtransformfeatures": "create-and-transform-features",
+    # 🔧 CRITICAL FIX: Frontend uses 'create-column' not 'create-and-transform-features'
+    "createandtransformfeatures": "create-column",
+    "createtransformfeatures": "create-column",
+    "createcolumn": "create-column",
+    "create": "create-column",
     "groupbywtgavg": "groupby-wtg-avg",
     "groupbywithweightedaverage": "groupby-wtg-avg",
     "merge": "merge",

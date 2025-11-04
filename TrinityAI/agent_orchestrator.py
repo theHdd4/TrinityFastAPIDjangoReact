@@ -308,9 +308,20 @@ class AgentExecutor:
                 logger.info(f"📞 Calling {endpoint} agent internally")
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
-                result = chartmaker_agent.process_request(
+                # Extract client context
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
+                
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # 🔧 FIX: ChartMakerAgent uses .process() not .process_request()
+                result = chartmaker_agent.process(
                     user_prompt=prompt,
-                    session_id=session_id
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
                 )
                 logger.info(f"✅ INTERNAL {endpoint} completed successfully")
                 
@@ -330,11 +341,14 @@ class AgentExecutor:
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
                 # Extract client context
-                client_name = context.get("client_name", "") if context else ""
-                app_name = context.get("app_name", "") if context else ""
-                project_name = context.get("project_name", "") if context else ""
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
                 
-                result = explore_agent.process_request(
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # 🔧 FIX: ExploreAgent uses .process() not .process_request()
+                result = explore_agent.process(
                     user_prompt=prompt,
                     session_id=session_id,
                     client_name=client_name,
@@ -408,9 +422,20 @@ class AgentExecutor:
                 logger.info("📞 Calling /dataframe-operations agent internally")
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
-                result = df_ops_agent.process_request(
+                # Extract client context
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
+                
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # 🔧 FIX: DataFrameOperationsAgent uses .process() not .process_request()
+                result = df_ops_agent.process(
                     user_prompt=prompt,
-                    session_id=session_id
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
                 )
                 logger.info(f"✅ INTERNAL /dataframe-operations completed successfully")
                 

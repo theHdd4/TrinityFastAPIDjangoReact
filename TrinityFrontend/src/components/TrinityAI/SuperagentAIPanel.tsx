@@ -37,21 +37,113 @@ const handleAtomFetched = async (data: any): Promise<{ success: boolean; error?:
       console.log('📊 atom_status:', data.atom_status);
       console.log('📊 match_type:', data.match_type);
       
-      // 🔧 FIX: Try to infer atomId from enhanced_query or match_type
+      // 🔧 FIX: Try to infer atomId from fetch results or query
       const fetchResults = data.fetch_results || {};
       const enhancedQuery = (fetchResults.enhanced_query || fetchResults.raw_query || '').toLowerCase();
       
-      // Check if we can infer the atom from the query
+      // 🔧 COMPREHENSIVE ATOM NAME MAPPING
+      // Maps backend fetch agent responses (lowercase, no spaces) to frontend atomIds (kebab-case)
+      const atomNameMapping: Record<string, string> = {
+        // Data Processing
+        'groupbywithwtgavg': 'groupby-wtg-avg',
+        'groupbywtgavg': 'groupby-wtg-avg',
+        'groupby': 'groupby-wtg-avg',
+        'concat': 'concat',
+        'concatenate': 'concat',
+        'merge': 'merge',
+        'join': 'merge',
+        // 🔧 CRITICAL FIX: Frontend uses 'create-column' not 'create-and-transform-features'
+        'createandtransformfeatures': 'create-column',
+        'createtransformfeatures': 'create-column',
+        'createcolumn': 'create-column',
+        'create': 'create-column',
+        'dataframeoperations': 'dataframe-operations',
+        'featureoverview': 'feature-overview',
+        'columnclassifier': 'column-classifier',
+        'scopeselector': 'scope-selector',
+        
+        // Analytics
+        'explore': 'explore',
+        'correlation': 'correlation',
+        'descriptivestats': 'descriptive-stats',
+        'trendanalysis': 'trend-analysis',
+        
+        // Visualization
+        'chartmaker': 'chart-maker',
+        'chart': 'chart-maker',
+        
+        // Machine Learning
+        'regressionfeaturebased': 'regression-feature-based',
+        'selectmodelsfeature': 'select-models-feature',
+        'selectmodelsfeaturebased': 'select-models-feature',
+        'evaluatemodelsfeature': 'evaluate-models-feature',
+        'evaluatemodelsfeaturebased': 'evaluate-models-feature',
+        'autoregressivemodels': 'auto-regressive-models',
+        'selectmodelsautoregressive': 'select-models-auto-regressive',
+        'evaluatemodelsautoregressive': 'evaluate-models-auto-regressive',
+        'buildmodelfeaturebased': 'build-model-feature-based',
+        'clustering': 'clustering',
+        
+        // Data Sources
+        'datauploadvalidate': 'data-upload-validate',
+        'dataupload': 'data-upload-validate',
+        'csvimport': 'csv-import',
+        'jsonimport': 'json-import',
+        'databaseconnect': 'database-connect',
+        
+        // Planning & Optimization
+        'scenarioplanner': 'scenario-planner',
+        'optimizer': 'optimizer',
+        
+        // Utilities
+        'atommaker': 'atom-maker',
+        'readpresentationsummarize': 'read-presentation-summarize',
+        
+        // Other atoms
+        'rowoperations': 'row-operations',
+        'scatterplot': 'scatter-plot',
+        'histogram': 'histogram',
+        'basepriceestimator': 'base-price-estimator',
+        'promoestimator': 'promo-estimator',
+        'textbox': 'text-box'
+      };
+      
+      // Try to map from detected_atom_name or infer from query
       let inferredAtomId = null;
-      if (enhancedQuery.includes('concat')) {
-        inferredAtomId = 'concat';
-        console.log('💡 Inferred atomId from query: concat');
-      } else if (enhancedQuery.includes('merge') || enhancedQuery.includes('join')) {
-        inferredAtomId = 'merge';
-        console.log('💡 Inferred atomId from query: merge');
-      } else if (enhancedQuery.includes('chart') || enhancedQuery.includes('visualiz')) {
-        inferredAtomId = 'chart-maker';
-        console.log('💡 Inferred atomId from query: chart-maker');
+      
+      // First priority: Check if detected_atom_name is in our mapping
+      if (data.detected_atom_name) {
+        const cleanName = data.detected_atom_name.toLowerCase().replace(/[^a-z]/g, '');
+        inferredAtomId = atomNameMapping[cleanName];
+        if (inferredAtomId) {
+          console.log(`💡 Mapped detected_atom_name "${data.detected_atom_name}" → ${inferredAtomId}`);
+        }
+      }
+      
+      // Second priority: Infer from query text
+      if (!inferredAtomId) {
+        if (enhancedQuery.includes('groupby') || enhancedQuery.includes('group by') || enhancedQuery.includes('aggregate')) {
+          inferredAtomId = 'groupby-wtg-avg';
+          console.log('💡 Inferred atomId from query: groupby-wtg-avg');
+        } else if (enhancedQuery.includes('concat')) {
+          inferredAtomId = 'concat';
+          console.log('💡 Inferred atomId from query: concat');
+        } else if (enhancedQuery.includes('merge') || enhancedQuery.includes('join')) {
+          inferredAtomId = 'merge';
+          console.log('💡 Inferred atomId from query: merge');
+        } else if (enhancedQuery.includes('chart') || enhancedQuery.includes('visualiz')) {
+          inferredAtomId = 'chart-maker';
+          console.log('💡 Inferred atomId from query: chart-maker');
+        } else if (enhancedQuery.includes('explore') || enhancedQuery.includes('analyze')) {
+          inferredAtomId = 'explore';
+          console.log('💡 Inferred atomId from query: explore');
+        } else if (enhancedQuery.includes('create') && (enhancedQuery.includes('column') || enhancedQuery.includes('feature'))) {
+          inferredAtomId = 'create-column';
+          console.log('💡 Inferred atomId from query: create-column');
+        } else if (enhancedQuery.includes('dataframe') || enhancedQuery.includes('data frame')) {
+          inferredAtomId = 'dataframe-operations';
+          console.log('💡 Inferred atomId from query: dataframe-operations');
+        }
       }
       
       if (inferredAtomId) {
@@ -59,7 +151,9 @@ const handleAtomFetched = async (data: any): Promise<{ success: boolean; error?:
         data.correct_atomid = inferredAtomId;
         data.detected_atom_name = inferredAtomId;
       } else {
-        console.error('❌ Could not infer atomId from query');
+        console.error('❌ Could not infer atomId from query or detected_atom_name');
+        console.log('💡 Detected atom name:', data.detected_atom_name);
+        console.log('💡 Enhanced query:', enhancedQuery);
         return { success: false, error: 'Missing correct_atomid and could not infer from query' };
       }
     }
