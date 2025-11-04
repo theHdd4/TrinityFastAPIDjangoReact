@@ -548,9 +548,11 @@ export interface ChartTraceConfig {
 export interface ChartMakerConfig {
   id: string;
   title: string;
-  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter';
+  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter' | 'stacked_bar';
   xAxis: string;
   yAxis: string;
+  secondYAxis?: string;
+  dualAxisMode?: 'dual' | 'single'; // 'dual' = separate axes, 'single' = combined single axis
   filters: Record<string, string[]>;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
   legendField?: string;
@@ -570,6 +572,8 @@ export interface ChartMakerExhibitionSelectionChartState {
   chartType: string;
   xAxis: string;
   yAxis: string;
+  secondYAxis?: string;
+  dualAxisMode?: 'dual' | 'single'; // 'dual' = separate axes, 'single' = combined single axis
   filters: Record<string, string[]>;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
   legendField?: string;

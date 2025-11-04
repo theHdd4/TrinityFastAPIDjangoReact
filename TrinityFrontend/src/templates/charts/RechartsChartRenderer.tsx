@@ -138,7 +138,7 @@ import {
 import * as d3 from 'd3';
 
 interface Props {
-  type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart';
+  type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart';
   data: any[];
   xField?: string;
   yField?: string;
@@ -154,7 +154,7 @@ interface Props {
   enableScroll?: boolean; // New prop for enabling horizontal scroll
   theme?: string; // Theme prop to receive from parent
   onThemeChange?: (theme: string) => void; // Callback for theme changes
-  onChartTypeChange?: (type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => void; // Callback for chart type changes
+  onChartTypeChange?: (type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart') => void; // Callback for chart type changes
   onGridToggle?: (enabled: boolean) => void; // Callback for grid toggle
   onLegendToggle?: (enabled: boolean) => void; // Callback for legend toggle
   // onAxisLabelsToggle?: (enabled: boolean) => void; // Callback for axis labels toggle
@@ -175,6 +175,8 @@ interface Props {
   showGrid?: boolean; // External control for grid visibility
   chartsPerRow?: number; // For multi pie chart layouts
   captureId?: string;
+  forceSingleAxis?: boolean; // Force rendering multiple series on single axis instead of dual axes
+  stackBars?: boolean; // Enable stacked bar chart when legendField is present
 }
 
 // Excel-like color themes
@@ -184,198 +186,194 @@ const COLOR_THEMES = {
     primary: '#6366f1',
     secondary: '#a5b4fc',
     tertiary: '#e0e7ff',
-    palette: ['#6366f1', '#a5b4fc', '#e0e7ff', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D']
+    palette: ['#6366f1', '#a5b4fc', '#e0e7ff', '#FFBB28', '#FF8042', '#8884D8', '#82CA9D', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA15E', '#BC6C25', '#9B59B6', '#E74C3C', '#3498DB', '#1ABC9C', '#F39C12', '#16A085', '#27AE60', '#E67E22', '#C0392B', '#8E44AD', '#2980B9', '#34495E', '#2C3E50', '#95A5A6', '#7F8C8D', '#EC7063', '#5DADE2', '#52BE80', '#F4D03F', '#E8DAEF', '#FADBD8', '#D5DBDB', '#A9CCE3', '#F8C471', '#85C1E2', '#73C6B6']
   },
   'blue': {
     name: 'Blue',
     primary: '#3b82f6',
     secondary: '#60a5fa',
     tertiary: '#dbeafe',
-    palette: ['#1e40af', '#3b82f6', '#60a5fa', '#93c5fd', '#dbeafe', '#eff6ff']
+    palette: ['#1e40af', '#1e3a8a', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe', '#eff6ff', '#0c4a6e', '#075985', '#0369a1', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe', '#f0f9ff', '#164e63', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#0f172a', '#1c4a6e', '#1e4d72', '#2563eb', '#3b82f6']
   },
   'green': {
     name: 'Green',
     primary: '#10b981',
     secondary: '#6ee7b7',
     tertiary: '#d1fae5',
-    palette: ['#065f46', '#10b981', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5']
+    palette: ['#065f46', '#064e3b', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5', '#022c22', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#99f6e4', '#ccfbf1', '#f0fdfa', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#86efac', '#bbf7d0', '#dcfce7', '#f0fdf4', '#1a365d', '#2d5016', '#365314', '#3f6212', '#4a7c59', '#54875d', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#d9f99d']
   },
   'purple': {
     name: 'Purple',
     primary: '#8b5cf6',
     secondary: '#c4b5fd',
     tertiary: '#ede9fe',
-    palette: ['#581c87', '#8b5cf6', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff']
+    palette: ['#581c87', '#6b21a8', '#7e22ce', '#9333ea', '#a855f7', '#c084fc', '#d8b4fe', '#e9d5ff', '#f3e8ff', '#4c1d95', '#5b21b6', '#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff', '#3b0764', '#4a044e', '#581c87', '#6b21a8', '#7e22ce', '#9333ea', '#a855f7', '#c084fc', '#d8b4fe', '#e9d5ff', '#f3e8ff', '#4c1d95', '#5b21b6', '#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff']
   },
   'orange': {
     name: 'Orange',
     primary: '#f59e0b',
     secondary: '#fcd34d',
     tertiary: '#fef3c7',
-    palette: ['#92400e', '#f59e0b', '#fcd34d', '#fde68a', '#fef3c7', '#fffbeb']
+    palette: ['#92400e', '#78350f', '#b45309', '#d97706', '#f59e0b', '#fbbf24', '#fcd34d', '#fde68a', '#fef3c7', '#fffbeb', '#9a3412', '#7c2d12', '#c2410c', '#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa', '#ffedd5', '#713f12', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#fde047', '#fef08a', '#fef9c3', '#7c2d12', '#9a3412', '#c2410c', '#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa', '#ffedd5', '#78350f', '#92400e', '#b45309']
   },
   'red': {
     name: 'Red',
     primary: '#ef4444',
     secondary: '#f87171',
     tertiary: '#fecaca',
-    palette: ['#991b1b', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fef2f2']
+    palette: ['#991b1b', '#7f1d1d', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#fef2f2', '#9f1239', '#881337', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#fff1f2', '#4c0519', '#7f1d1d', '#991b1b', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#fff1f2', '#ffebee']
   },
   'teal': {
     name: 'Teal',
     primary: '#14b8a6',
     secondary: '#5eead4',
     tertiary: '#ccfbf1',
-    palette: ['#134e4a', '#14b8a6', '#5eead4', '#99f6e4', '#ccfbf1', '#f0fdfa']
+    palette: ['#134e4a', '#042f2e', '#115e59', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#99f6e4', '#ccfbf1', '#d1fae5', '#f0fdfa', '#083344', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#164e63', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#042f2e', '#134e4a', '#115e59', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#99f6e4', '#ccfbf1', '#f0fdfa']
   },
   'pink': {
     name: 'Pink',
     primary: '#ec4899',
     secondary: '#f9a8d4',
     tertiary: '#fce7f3',
-    palette: ['#831843', '#ec4899', '#f9a8d4', '#fbcfe8', '#fce7f3', '#fdf2f8']
+    palette: ['#831843', '#881337', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#fdf2f8', '#4a044e', '#701a75', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#fae8ff', '#831843', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#881337', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#fdf2f8']
   },
   'gray': {
     name: 'Gray',
     primary: '#6b7280',
     secondary: '#9ca3af',
     tertiary: '#f3f4f6',
-    palette: ['#374151', '#6b7280', '#9ca3af', '#d1d5db', '#f3f4f6', '#f9fafb']
+    palette: ['#374151', '#111827', '#1f2937', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#030712', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa']
   },
   'indigo': {
     name: 'Indigo',
     primary: '#4f46e5',
     secondary: '#818cf8',
     tertiary: '#e0e7ff',
-    palette: ['#312e81', '#4f46e5', '#818cf8', '#a5b4fc', '#e0e7ff', '#eef2ff']
+    palette: ['#312e81', '#1e1b4b', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#eef2ff', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#1e1b4b', '#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#eef2ff', '#312e81', '#4338ca', '#4f46e5', '#818cf8']
   },
   'cyan': {
     name: 'Cyan',
     primary: '#06b6d4',
     secondary: '#67e8f9',
     tertiary: '#cffafe',
-    palette: ['#164e63', '#06b6d4', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff']
+    palette: ['#164e63', '#083344', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#0c4a6e', '#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe', '#164e63', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#083344', '#0e7490', '#0891b2', '#06b6d4']
   },
   'lime': {
     name: 'Lime',
     primary: '#84cc16',
     secondary: '#bef264',
     tertiary: '#f7fee7',
-    palette: ['#3f6212', '#84cc16', '#bef264', '#d9f99d', '#f7fee7', '#f7fee7']
+    palette: ['#3f6212', '#365314', '#4a7c59', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#d9f99d', '#f7fee7', '#1a2e05', '#365314', '#3f6212', '#4a7c59', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#d9f99d', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#86efac', '#bbf7d0', '#dcfce7', '#f0fdf4', '#1a2e05', '#365314', '#3f6212', '#4a7c59', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#d9f99d', '#f7fee7', '#ecfdf5']
   },
   'amber': {
     name: 'Amber',
     primary: '#f59e0b',
     secondary: '#fbbf24',
     tertiary: '#fef3c7',
-    palette: ['#78350f', '#f59e0b', '#fbbf24', '#fcd34d', '#fef3c7', '#fffbeb']
+    palette: ['#78350f', '#713f12', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#fde047', '#fef08a', '#fef9c3', '#92400e', '#b45309', '#d97706', '#f59e0b', '#fbbf24', '#fcd34d', '#fde68a', '#fef3c7', '#fffbeb', '#9a3412', '#c2410c', '#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa', '#ffedd5', '#78350f', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#fde047', '#fef08a', '#fef9c3', '#fffbeb', '#92400e', '#b45309', '#f59e0b']
   },
   'emerald': {
     name: 'Emerald',
     primary: '#059669',
     secondary: '#34d399',
     tertiary: '#d1fae5',
-    palette: ['#064e3b', '#059669', '#34d399', '#6ee7b7', '#d1fae5', '#ecfdf5']
+    palette: ['#064e3b', '#022c22', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#86efac', '#bbf7d0', '#dcfce7', '#f0fdf4', '#064e3b', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#022c22', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5']
   },
   'violet': {
     name: 'Violet',
     primary: '#7c3aed',
     secondary: '#a78bfa',
     tertiary: '#ede9fe',
-    palette: ['#4c1d95', '#7c3aed', '#a78bfa', '#c4b5fd', '#ede9fe', '#faf5ff']
+    palette: ['#4c1d95', '#3b0764', '#581c87', '#6b21a8', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff', '#4c1d95', '#5b21b6', '#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff', '#3b0764', '#581c87', '#6b21a8', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#4c1d95', '#581c87', '#6b21a8', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff']
   },
   'fuchsia': {
     name: 'Fuchsia',
     primary: '#d946ef',
     secondary: '#f0abfc',
     tertiary: '#fae8ff',
-    palette: ['#701a75', '#d946ef', '#f0abfc', '#f5d0fe', '#fae8ff', '#fdf4ff']
+    palette: ['#701a75', '#4a044e', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#fae8ff', '#fdf4ff', '#831843', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#701a75', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#fae8ff', '#4a044e', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#fae8ff', '#fdf4ff', '#831843']
   },
   'rose': {
     name: 'Rose',
     primary: '#e11d48',
     secondary: '#fb7185',
     tertiary: '#ffe4e6',
-    palette: ['#881337', '#e11d48', '#fb7185', '#fda4af', '#ffe4e6', '#fff1f2']
+    palette: ['#881337', '#4c0519', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#fff1f2', '#991b1b', '#7f1d1d', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#fef2f2', '#881337', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#4c0519', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#fff1f2']
   },
   'slate': {
     name: 'Slate',
     primary: '#475569',
     secondary: '#94a3b8',
     tertiary: '#f1f5f9',
-    palette: ['#1e293b', '#475569', '#94a3b8', '#cbd5e1', '#f1f5f9', '#f8fafc']
+    palette: ['#1e293b', '#0f172a', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc']
   },
   'zinc': {
     name: 'Zinc',
     primary: '#71717a',
     secondary: '#a1a1aa',
     tertiary: '#f4f4f5',
-    palette: ['#27272a', '#71717a', '#a1a1aa', '#d4d4d8', '#f4f4f5', '#fafafa']
+    palette: ['#27272a', '#18181b', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa']
   },
   'neutral': {
     name: 'Neutral',
     primary: '#737373',
     secondary: '#a3a3a3',
     tertiary: '#f5f5f5',
-    palette: ['#262626', '#737373', '#a3a3a3', '#d4d4d4', '#f5f5f5', '#fafafa']
+    palette: ['#262626', '#171717', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4', '#e5e5e5', '#f5f5f5', '#fafafa', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#171717', '#262626', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4', '#e5e5e5', '#f5f5f5', '#fafafa']
   },
   'stone': {
     name: 'Stone',
     primary: '#78716c',
     secondary: '#a8a29e',
     tertiary: '#f5f5f4',
-    palette: ['#292524', '#78716c', '#a8a29e', '#d6d3d1', '#f5f5f4', '#fafaf9']
+    palette: ['#292524', '#1c1917', '#44403c', '#57534e', '#78716c', '#a8a29e', '#d6d3d1', '#e7e5e4', '#f5f5f4', '#fafaf9', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#1c1917', '#292524', '#44403c', '#57534e', '#78716c', '#a8a29e', '#d6d3d1', '#e7e5e4', '#f5f5f4', '#fafaf9']
   },
   'sky': {
     name: 'Sky',
     primary: '#0ea5e9',
     secondary: '#38bdf8',
     tertiary: '#e0f2fe',
-    palette: ['#0c4a6e', '#0ea5e9', '#38bdf8', '#7dd3fc', '#e0f2fe', '#f0f9ff']
+    palette: ['#0c4a6e', '#082f49', '#075985', '#0369a1', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe', '#f0f9ff', '#164e63', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#1e40af', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe', '#eff6ff', '#0c4a6e', '#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe', '#f0f9ff', '#082f49', '#0c4a6e', '#075985']
   },
   'blue-gray': {
     name: 'Blue Gray',
     primary: '#64748b',
     secondary: '#94a3b8',
     tertiary: '#f1f5f9',
-    palette: ['#334155', '#64748b', '#94a3b8', '#cbd5e1', '#f1f5f9', '#f8fafc']
+    palette: ['#334155', '#1e293b', '#0f172a', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#374151', '#4b5563', '#6b7280', '#9ca3af']
   },
   'cool-gray': {
     name: 'Cool Gray',
     primary: '#6b7280',
     secondary: '#9ca3af',
     tertiary: '#f3f4f6',
-    palette: ['#374151', '#6b7280', '#9ca3af', '#d1d5db', '#f3f4f6', '#f9fafb']
+    palette: ['#374151', '#1f2937', '#111827', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#111827']
   },
   'warm-gray': {
     name: 'Warm Gray',
     primary: '#78716c',
     secondary: '#a8a29e',
     tertiary: '#f5f5f4',
-    palette: ['#44403c', '#78716c', '#a8a29e', '#d6d3d1', '#f5f5f4', '#fafaf9']
+    palette: ['#44403c', '#292524', '#1c1917', '#57534e', '#78716c', '#a8a29e', '#d6d3d1', '#e7e5e4', '#f5f5f4', '#fafaf9', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#292524', '#44403c', '#57534e', '#78716c', '#a8a29e', '#d6d3d1', '#e7e5e4', '#f5f5f4', '#fafaf9', '#1c1917', '#292524']
   }
 };
 
 const MODERN_PIE_COLORS = [
-  '#8884d8',
-  '#a5b4fc',
-  '#e0e7ff',
-  '#3b82f6',
-  '#f59e0b',
-  '#ef4444',
-  '#06b6d4',
-  '#84cc16',
-  '#f97316',
-  '#ec4899',
+  '#8884d8', '#a5b4fc', '#e0e7ff', '#3b82f6', '#f59e0b', '#ef4444', '#06b6d4', '#84cc16', '#f97316', '#ec4899',
+  '#6366f1', '#8b5cf6', '#10b981', '#14b8a6', '#f59e0b', '#e11d48', '#06b6d4', '#22d3ee', '#84cc16', '#bef264',
+  '#4f46e5', '#7c3aed', '#059669', '#0d9488', '#ca8a04', '#dc2626', '#0891b2', '#67e8f9', '#65a30d', '#a3e635',
+  '#4338ca', '#6b21a8', '#047857', '#0f766e', '#a16207', '#b91c1c', '#155e75', '#a5f3fc', '#4a7c59', '#d9f99d',
+  '#312e81', '#581c87', '#065f46', '#134e4a', '#78350f', '#991b1b', '#164e63', '#cffafe', '#365314', '#f7fee7'
 ];
 
 // Fallback flat palette (first scheme spread + legacy colors)
 // Default palette for explore charts - base colors with lighter shades
 const DEFAULT_COLORS = [
-  '#FFBD59', '#FFC878', '#FFD897',
-  '#41C185', '#5CD29A', '#78E3AF',
-  '#458EE2', '#6BA4E8', '#91BAEE',
-  '#F5F5F5', '#E0E0E0', '#C5C5C5'
+  '#FFBD59', '#FFC878', '#FFD897', '#41C185', '#5CD29A', '#78E3AF', '#458EE2', '#6BA4E8', '#91BAEE',
+  '#F5F5F5', '#E0E0E0', '#C5C5C5', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA15E',
+  '#BC6C25', '#9B59B6', '#E74C3C', '#3498DB', '#1ABC9C', '#F39C12', '#16A085', '#27AE60', '#E67E22',
+  '#C0392B', '#8E44AD', '#2980B9', '#34495E', '#2C3E50', '#95A5A6', '#7F8C8D', '#EC7063', '#5DADE2',
+  '#52BE80', '#F4D03F', '#E8DAEF', '#FADBD8', '#D5DBDB', '#A9CCE3', '#F8C471', '#85C1E2', '#73C6B6'
 ];
 
 const FONT_FAMILY = `'Inter', 'Segoe UI', sans-serif`;
@@ -506,6 +504,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   showGrid: propShowGrid, // External control for grid visibility
   chartsPerRow,
   captureId,
+  forceSingleAxis = false,
+  stackBars = false,
 }) => {
 
   // State for color theme - simplified approach
@@ -587,6 +587,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
   });
   const titleEditableRef = useRef<HTMLDivElement | null>(null);
   const [isTitleFocused, setIsTitleFocused] = useState(false);
+
+  // State for per-series settings (color and data labels)
+  interface SeriesSettings {
+    color?: string;
+    showDataLabels?: boolean;
+  }
+  const [seriesSettings, setSeriesSettings] = useState<Record<string, SeriesSettings>>({});
+  const [selectedSeries, setSelectedSeries] = useState<{ dataKey: string; name: string; currentColor: string } | null>(null);
+  const [showSeriesSettingsModal, setShowSeriesSettingsModal] = useState(false);
 
   const resolvedTitle = useMemo(() => {
     const trimmedCustom = customTitle?.trim?.() ?? '';
@@ -908,7 +917,8 @@ const RechartsChartRenderer: React.FC<Props> = ({
   
   // Use external props if provided, otherwise use internal state
   const currentShowGrid = propShowGrid !== undefined ? propShowGrid : showGrid;
-  const currentShowLegend = propShowLegend !== undefined ? propShowLegend : showLegend;
+  // Force legend on when using single axis mode with multiple series
+  const currentShowLegend = (propShowLegend !== undefined ? propShowLegend : showLegend) || forceSingleAxis;
   // const currentShowAxisLabels = propShowAxisLabels !== undefined ? propShowAxisLabels : showAxisLabels;
   const currentShowXAxisLabels = propShowXAxisLabels !== undefined ? propShowXAxisLabels : showXAxisLabels;
   const currentShowYAxisLabels = propShowYAxisLabels !== undefined ? propShowYAxisLabels : showYAxisLabels;
@@ -1057,7 +1067,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Memoized pivoted data for charts with legend field
   const { pivoted: pivotedLineData, uniqueValues: legendValues, actualXKey: pivotActualXKey } = useMemo(() => {
-    if ((type === 'line_chart' || type === 'bar_chart' || type === 'area_chart' || type === 'scatter_chart') && legendField && xField && yField) {
+    if ((type === 'line_chart' || type === 'bar_chart' || type === 'stacked_bar_chart' || type === 'area_chart' || type === 'scatter_chart') && legendField && xField && yField) {
       // Check if data is already pivoted (has multiple numeric columns beyond
       // the designated x, y, and legend fields)
       const firstRow = chartDataForRendering[0];
@@ -1257,7 +1267,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   };
 
   // Handle chart type change
-  const handleChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
+  const handleChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart') => {
     if (onChartTypeChange) {
       onChartTypeChange(newType);
     }
@@ -1781,6 +1791,17 @@ const RechartsChartRenderer: React.FC<Props> = ({
           </svg>
         )
       },
+      // Stacked Bar Chart - only show when legendField exists
+      ...(legendField && legendValues.length > 0 ? [{
+        key: 'stacked_bar_chart' as const,
+        label: 'Stacked Bar Chart',
+        icon: (
+          <svg className="w-5 h-5 text-gray-800" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/>
+            <path d="M4 21h16v1H4z"/>
+          </svg>
+        )
+      }] : []),
       { 
         key: 'line_chart', 
         label: 'Line Chart', 
@@ -1833,7 +1854,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               className="px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-2"
               onMouseDown={(e) => {
                 e.preventDefault();
-                handleChartTypeChange(chartType.key as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart');
+                handleChartTypeChange(chartType.key as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart');
               }}
             >
               {type === chartType.key && (
@@ -1993,7 +2014,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         if (type === 'pie_chart') {
           xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
           yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
-        } else if (type === 'bar_chart') {
+        } else if (type === 'bar_chart' || type === 'stacked_bar_chart') {
           // For bar charts, prioritize actual field names over generic keys
           xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
           yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
@@ -2026,7 +2047,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           if (type === 'pie_chart') {
             xKey = availableKeys.includes('name') ? 'name' : availableKeys.includes('label') ? 'label' : availableKeys[0];
             yKey = availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0];
-          } else if (type === 'bar_chart') {
+          } else if (type === 'bar_chart' || type === 'stacked_bar_chart') {
             xKey = xField || (availableKeys.includes('x') ? 'x' : availableKeys.includes('name') ? 'name' : availableKeys.includes('category') ? 'category' : availableKeys[0]);
             yKey = yField || (availableKeys.includes('y') ? 'y' : availableKeys.includes('value') ? 'value' : availableKeys[1] || availableKeys[0]);
           } else if (type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') {
@@ -2212,7 +2233,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // CRITICAL FIX: Transform data for bar charts, line charts, area charts, and scatter charts when data has generic keys
     // Now also supports dual Y-axes by mapping both Y fields when available
     let transformedChartData = chartDataForRendering;
-    if ((type === 'bar_chart' || type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') && xField && yField && chartDataForRendering.length > 0) {
+    if ((type === 'bar_chart' || type === 'stacked_bar_chart' || type === 'line_chart' || type === 'area_chart' || type === 'scatter_chart') && xField && yField && chartDataForRendering.length > 0) {
       const firstItem = chartDataForRendering[0];
       const availableKeys = Object.keys(firstItem);
 
@@ -2320,6 +2341,34 @@ const RechartsChartRenderer: React.FC<Props> = ({
       }
     }
 
+    // Calculate combined min/max for single axis mode (when forceSingleAxis is true)
+    // Must be calculated after data transformation to use actual field names
+    const calculateCombinedDomain = (data: any[], fields: string[]): [number, number] | undefined => {
+      if (!forceSingleAxis || !fields || fields.length < 2 || !data || data.length === 0) return undefined;
+      
+      let min = Infinity;
+      let max = -Infinity;
+      
+      data.forEach(item => {
+        fields.forEach(field => {
+          const value = item[field];
+          if (typeof value === 'number' && !isNaN(value)) {
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+          }
+        });
+      });
+      
+      if (min === Infinity || max === -Infinity) return undefined;
+      
+      // Add small padding (5%) to the domain for better visualization
+      const padding = (max - min) * 0.05;
+      return [min - padding, max + padding];
+    };
+
+    // Calculate combined domain after data transformation
+    const combinedDomain = calculateCombinedDomain(transformedChartData, yFields || yKeys);
+
     switch (type) {
       case 'bar_chart':
         
@@ -2390,25 +2439,42 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
-              {legendValues.map((seriesKey, idx) => (
-                <Bar
-                  key={seriesKey}
-                  dataKey={seriesKey}
-                  name={seriesKey}
-                  fill={palette[idx % palette.length]}
-                  animationDuration={800}
-                  animationEasing="ease-out"
-                >
-                  {currentShowDataLabels && (
-                    <LabelList
-                      dataKey={seriesKey}
-                      position="top"
-                      formatter={(value) => formatLargeNumber(value)}
-                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                    />
-                  )}
-                </Bar>
-              ))}
+              {legendValues.map((seriesKey, idx) => {
+                const seriesColor = seriesSettings[seriesKey]?.color || palette[idx % palette.length];
+                const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
+                  ? seriesSettings[seriesKey]?.showDataLabels 
+                  : currentShowDataLabels;
+                return (
+                  <Bar
+                    key={seriesKey}
+                    dataKey={seriesKey}
+                    name={seriesKey}
+                    fill={seriesColor}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                    {...(stackBars ? { stackId: "stack" } : {})}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSeries({
+                        dataKey: seriesKey,
+                        name: seriesKey,
+                        currentColor: seriesColor
+                      });
+                      setShowSeriesSettingsModal(true);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {seriesShowDataLabels && (
+                      <LabelList
+                        dataKey={seriesKey}
+                        position="top"
+                        formatter={(value) => formatLargeNumber(value)}
+                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                      />
+                    )}
+                  </Bar>
+                );
+              })}
             </BarChart>
           );
         } else {
@@ -2435,9 +2501,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
+              {...(combinedDomain ? { domain: combinedDomain } : {})}
             />
             {/* Secondary Y-Axis (Right) - only if we have dual Y-axes */}
-            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
+            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && !forceSingleAxis && (
               <YAxis 
                 yAxisId={1}
                 orientation="right"
@@ -2517,34 +2584,205 @@ const RechartsChartRenderer: React.FC<Props> = ({
               </linearGradient>
             </defs>
             {/* Primary Bar */}
-            <Bar dataKey={yKey} fill="url(#barGradient1)" animationDuration={800} animationEasing="ease-out" yAxisId={0}>
-                {currentShowDataLabels && (
-                <LabelList 
+            {(() => {
+              const seriesColor = seriesSettings[yKey]?.color || palette[0];
+              const seriesShowDataLabels = seriesSettings[yKey]?.showDataLabels !== undefined 
+                ? seriesSettings[yKey]?.showDataLabels 
+                : currentShowDataLabels;
+              return (
+                <Bar 
                   dataKey={yKey} 
-                  position="top" 
-                  formatter={(value) => formatLargeNumber(value)}
-                  style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                />
-              )}
-            </Bar>
+                  fill={seriesColor} 
+                  animationDuration={800} 
+                  animationEasing="ease-out" 
+                  yAxisId={0}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedSeries({
+                      dataKey: yKey,
+                      name: effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey,
+                      currentColor: seriesColor
+                    });
+                    setShowSeriesSettingsModal(true);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {seriesShowDataLabels && (
+                    <LabelList 
+                      dataKey={yKey} 
+                      position="top" 
+                      formatter={(value) => formatLargeNumber(value)}
+                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                    />
+                  )}
+                </Bar>
+              );
+            })()}
             {/* Secondary Bar - only if we have dual Y-axes */}
-            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-              <Bar dataKey={yKeys[1] || yFields[1]} fill="url(#barGradient2)" animationDuration={800} animationEasing="ease-out" yAxisId={1}>
-                  {currentShowDataLabels && (
-                  <LabelList 
-                    dataKey={yKeys[1] || yFields[1]} 
-                    position="top" 
-                    formatter={(value) => formatLargeNumber(value)}
-                    style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                  />
-                )}
-              </Bar>
-            )}
+            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (() => {
+              const secondKey = yKeys[1] || yFields[1];
+              const seriesColor = seriesSettings[secondKey]?.color || palette[1];
+              const seriesShowDataLabels = seriesSettings[secondKey]?.showDataLabels !== undefined 
+                ? seriesSettings[secondKey]?.showDataLabels 
+                : currentShowDataLabels;
+              return (
+                <Bar 
+                  dataKey={secondKey} 
+                  fill={seriesColor} 
+                  animationDuration={800} 
+                  animationEasing="ease-out" 
+                  yAxisId={forceSingleAxis ? 0 : 1}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedSeries({
+                      dataKey: secondKey,
+                      name: effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey,
+                      currentColor: seriesColor
+                    });
+                    setShowSeriesSettingsModal(true);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {seriesShowDataLabels && (
+                    <LabelList 
+                      dataKey={secondKey} 
+                      position="top" 
+                      formatter={(value) => formatLargeNumber(value)}
+                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                    />
+                  )}
+                </Bar>
+              );
+            })()}
           </BarChart>
         );
         }
+        break;
 
-
+      case 'stacked_bar_chart':
+        /* -------------------------------------------------------------
+         * Stacked bar chart rendering when a legend field is provided
+         * ----------------------------------------------------------- */
+        if (legendField && legendValues.length > 0 && pivotedLineData.length > 0) {
+          const xKeyForBar =
+            pivotActualXKey ||
+            xField ||
+            Object.keys(pivotedLineData[0] || {}).find(k => !legendValues.includes(k)) ||
+            Object.keys(pivotedLineData[0] || {})[0];
+          return (
+            <BarChart data={pivotedLineData} margin={getChartMargins()}>
+              {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
+              <XAxis 
+                dataKey={xKeyForBar}
+                type="category"
+                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
+                tick={xAxisTickStyle}
+                tickLine={false}
+                allowDuplicatedCategory={false}
+                tickFormatter={xAxisTickFormatter}
+                {...(() => {
+                  const firstValue = pivotedLineData[0]?.[xKeyForBar];
+                  const isNumericOrDate = typeof firstValue === 'number' || firstValue instanceof Date || !isNaN(Date.parse(firstValue));
+                  return isNumericOrDate ? {} : { interval: 0, minTickGap: 0, height: 80 };
+                })()}
+              />
+              <YAxis
+                tickFormatter={formatLargeNumber}
+                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                tick={axisTickStyle}
+                tickLine={false}
+              />
+              <Tooltip
+                content={({ active, payload, label }) => {
+                  if (active && payload && payload.length) {
+                    return (
+                      <div className="explore-chart-tooltip">
+                        <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
+                        {payload.map((entry: any, index: number) => (
+                          <div key={index} className="flex items-center gap-2 mb-1">
+                            <div
+                              className="w-3 h-3 rounded-full"
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              {entry.dataKey}:
+                            </span>
+                            <span className="text-sm font-semibold text-gray-700">
+                              {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  return null;
+                }}
+                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+              />
+              {currentShowLegend && (
+                <Legend
+                  layout="horizontal"
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ bottom: 20, fontSize: '11px' }}
+                />
+              )}
+              {legendValues.map((seriesKey, idx) => {
+                const seriesColor = seriesSettings[seriesKey]?.color || palette[idx % palette.length];
+                const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
+                  ? seriesSettings[seriesKey]?.showDataLabels 
+                  : currentShowDataLabels;
+                return (
+                  <Bar
+                    key={seriesKey}
+                    dataKey={seriesKey}
+                    name={seriesKey}
+                    fill={seriesColor}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                    stackId="stack"
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSeries({
+                        dataKey: seriesKey,
+                        name: seriesKey,
+                        currentColor: seriesColor
+                      });
+                      setShowSeriesSettingsModal(true);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {seriesShowDataLabels && (
+                      <LabelList
+                        dataKey={seriesKey}
+                        position="inside"
+                        formatter={(value) => formatLargeNumber(value)}
+                        style={{ 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          fill: '#ffffff',
+                          textShadow: '0 0 3px rgba(0,0,0,0.8), 0 0 3px rgba(0,0,0,0.8)',
+                          pointerEvents: 'none'
+                        }}
+                      />
+                    )}
+                  </Bar>
+                );
+              })}
+            </BarChart>
+          );
+        } else {
+          // Fallback: show message if no legend field
+          return (
+            <div className="flex items-center justify-center h-full text-gray-500">
+              <div className="text-center">
+                <div className="text-lg font-medium">Stacked Bar Chart Requires Segregated Field</div>
+                <div className="text-sm">Please select a segregated field to use stacked bar chart</div>
+              </div>
+            </div>
+          );
+        }
+        break;
 
       case 'line_chart':
         /* -------------------------------------------------------------
@@ -2625,27 +2863,43 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
-              {legendValues.map((seriesKey, idx) => (
-                <Line
-                  key={seriesKey}
-                  type="monotone"
-                  dataKey={seriesKey}
-                  name={seriesKey}
-                  stroke={palette[idx % palette.length]}
-                  strokeWidth={2}
-                  dot={{ r: 0 }}
-                  activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
-                >
-                  {currentShowDataLabels && (
-                    <LabelList
-                      dataKey={seriesKey}
-                      position="top"
-                      formatter={formatLargeNumber}
-                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                    />
-                  )}
-                </Line>
-              ))}
+              {legendValues.map((seriesKey, idx) => {
+                const seriesColor = seriesSettings[seriesKey]?.color || palette[idx % palette.length];
+                const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
+                  ? seriesSettings[seriesKey]?.showDataLabels 
+                  : currentShowDataLabels;
+                return (
+                  <Line
+                    key={seriesKey}
+                    type="monotone"
+                    dataKey={seriesKey}
+                    name={seriesKey}
+                    stroke={seriesColor}
+                    strokeWidth={2}
+                    dot={{ r: 0 }}
+                    activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSeries({
+                        dataKey: seriesKey,
+                        name: seriesKey,
+                        currentColor: seriesColor
+                      });
+                      setShowSeriesSettingsModal(true);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {seriesShowDataLabels && (
+                      <LabelList
+                        dataKey={seriesKey}
+                        position="top"
+                        formatter={formatLargeNumber}
+                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                      />
+                    )}
+                  </Line>
+                );
+              })}
             </LineChart>
           );
         } else {
@@ -2679,10 +2933,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
-                domain={['dataMin', 'dataMax']}
+                {...(combinedDomain ? { domain: combinedDomain } : { domain: ['dataMin', 'dataMax'] })}
               />
-              {/* Secondary Y-Axis (Right) - only if we have dual Y-axes */}
-              {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
+              {/* Secondary Y-Axis (Right) - only if we have dual Y-axes and not forcing single axis */}
+              {(yKeys.length > 1 || (yFields && yFields.length > 1)) && !forceSingleAxis && (
                 <YAxis
                   yAxisId={1}
                   orientation="right"
@@ -2755,59 +3009,94 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 />
               )}
               {/* Primary Line */}
-              <Line 
-                type="monotone" 
-                dataKey={yKey} 
-                stroke={palette[0]} 
-                strokeWidth={2}
-                dot={{ fill: palette[0], strokeWidth: 0, r: 0 }}
-                activeDot={{ 
-                  r: 6, 
-                  fill: palette[0], 
-                  stroke: 'white', 
-                  strokeWidth: 3,
-                  style: { cursor: 'pointer' }
-                }}
-                yAxisId={0}
-              >
-                {currentShowDataLabels && (
-                  <LabelList 
+              {(() => {
+                const seriesColor = seriesSettings[yKey]?.color || palette[0];
+                const seriesShowDataLabels = seriesSettings[yKey]?.showDataLabels !== undefined 
+                  ? seriesSettings[yKey]?.showDataLabels 
+                  : currentShowDataLabels;
+                return (
+                  <Line 
+                    type="monotone" 
                     dataKey={yKey} 
-                    position="top" 
-                    formatter={(value) => formatLargeNumber(value)}
-                    style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                    offset={10}
-                  />
-                )}
-              </Line>
+                    stroke={seriesColor} 
+                    strokeWidth={2}
+                    dot={{ fill: seriesColor, strokeWidth: 0, r: 0 }}
+                    activeDot={{ 
+                      r: 6, 
+                      fill: seriesColor, 
+                      stroke: 'white', 
+                      strokeWidth: 3,
+                      style: { cursor: 'pointer' }
+                    }}
+                    yAxisId={0}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSeries({
+                        dataKey: yKey,
+                        name: effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey,
+                        currentColor: seriesColor
+                      });
+                      setShowSeriesSettingsModal(true);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {seriesShowDataLabels && (
+                      <LabelList 
+                        dataKey={yKey} 
+                        position="top" 
+                        formatter={(value) => formatLargeNumber(value)}
+                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                        offset={10}
+                      />
+                    )}
+                  </Line>
+                );
+              })()}
               {/* Secondary Line - only if we have dual Y-axes */}
-              {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                <Line 
-                  type="monotone" 
-                  dataKey={yKeys[1] || yFields[1]} 
-                  stroke={palette[1]} 
-                  strokeWidth={2}
-                  dot={{ fill: palette[1], strokeWidth: 0, r: 0 }}
-                  activeDot={{ 
-                    r: 6, 
-                    fill: palette[1], 
-                    stroke: 'white', 
-                    strokeWidth: 3,
-                    style: { cursor: 'pointer' }
-                  }}
-                  yAxisId={1}
-                >
-                  {currentShowDataLabels && (
-                    <LabelList 
-                      dataKey={yKeys[1] || yFields[1]} 
-                      position="top" 
-                      formatter={(value) => formatLargeNumber(value)}
-                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                      offset={10}
-                    />
-                  )}
-                </Line>
-              )}
+              {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (() => {
+                const secondKey = yKeys[1] || yFields[1];
+                const seriesColor = seriesSettings[secondKey]?.color || palette[1];
+                const seriesShowDataLabels = seriesSettings[secondKey]?.showDataLabels !== undefined 
+                  ? seriesSettings[secondKey]?.showDataLabels 
+                  : currentShowDataLabels;
+                return (
+                  <Line 
+                    type="monotone" 
+                    dataKey={secondKey} 
+                    stroke={seriesColor} 
+                    strokeWidth={2}
+                    dot={{ fill: seriesColor, strokeWidth: 0, r: 0 }}
+                    activeDot={{ 
+                      r: 6, 
+                      fill: seriesColor, 
+                      stroke: 'white', 
+                      strokeWidth: 3,
+                      style: { cursor: 'pointer' }
+                    }}
+                    yAxisId={forceSingleAxis ? 0 : 1}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSeries({
+                        dataKey: secondKey,
+                        name: effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey,
+                        currentColor: seriesColor
+                      });
+                      setShowSeriesSettingsModal(true);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {seriesShowDataLabels && (
+                      <LabelList 
+                        dataKey={secondKey} 
+                        position="top" 
+                        formatter={(value) => formatLargeNumber(value)}
+                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                        offset={10}
+                      />
+                    )}
+                  </Line>
+                );
+              })()}
             </LineChart>
           );
         }
@@ -2888,16 +3177,41 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   wrapperStyle={{ bottom: 20, fontSize: '11px' }}
                 />
               )}
-              {legendValues.map((seriesKey, idx) => (
-                <Area
-                  key={seriesKey}
-                  type="monotone"
-                  dataKey={seriesKey}
-                  name={seriesKey}
-                  stroke={palette[idx % palette.length]}
-                  fill={palette[idx % palette.length]}
-                />
-              ))}
+              {legendValues.map((seriesKey, idx) => {
+                const seriesColor = seriesSettings[seriesKey]?.color || palette[idx % palette.length];
+                const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
+                  ? seriesSettings[seriesKey]?.showDataLabels 
+                  : currentShowDataLabels;
+                return (
+                  <Area
+                    key={seriesKey}
+                    type="monotone"
+                    dataKey={seriesKey}
+                    name={seriesKey}
+                    stroke={seriesColor}
+                    fill={seriesColor}
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedSeries({
+                        dataKey: seriesKey,
+                        name: seriesKey,
+                        currentColor: seriesColor
+                      });
+                      setShowSeriesSettingsModal(true);
+                    }}
+                    style={{ cursor: 'pointer' }}
+                  >
+                    {seriesShowDataLabels && (
+                      <LabelList
+                        dataKey={seriesKey}
+                        position="top"
+                        formatter={formatLargeNumber}
+                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                      />
+                    )}
+                  </Area>
+                );
+              })}
             </AreaChart>
           );
         }
@@ -2922,8 +3236,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
+              {...(combinedDomain ? { domain: combinedDomain } : {})}
             />
-            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
+            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && !forceSingleAxis && (
               <YAxis
                 yAxisId={1}
                 orientation="right"
@@ -2942,28 +3257,75 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 wrapperStyle={{ bottom: 20, fontSize: '11px' }}
               />
             )}
-            <Area type="monotone" dataKey={yKey} stroke={palette[0]} fill={palette[1]} yAxisId={0}>
-              {currentShowDataLabels && (
-                <LabelList 
+            {(() => {
+              const seriesColor = seriesSettings[yKey]?.color || palette[0];
+              const seriesShowDataLabels = seriesSettings[yKey]?.showDataLabels !== undefined 
+                ? seriesSettings[yKey]?.showDataLabels 
+                : currentShowDataLabels;
+              return (
+                <Area 
+                  type="monotone" 
                   dataKey={yKey} 
-                  position="top" 
-                  formatter={(value) => formatLargeNumber(value)}
-                  style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                />
-              )}
-            </Area>
-            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-              <Area type="monotone" dataKey={yKeys[1] || yFields[1]} stroke={palette[1]} fill={palette[2]} yAxisId={1}>
-                {currentShowDataLabels && (
-                  <LabelList 
-                    dataKey={yKeys[1] || yFields[1]} 
-                    position="top" 
-                    formatter={(value) => formatLargeNumber(value)}
-                    style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                  />
-                )}
-              </Area>
-            )}
+                  stroke={seriesColor} 
+                  fill={seriesColor} 
+                  yAxisId={0}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedSeries({
+                      dataKey: yKey,
+                      name: effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey,
+                      currentColor: seriesColor
+                    });
+                    setShowSeriesSettingsModal(true);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {seriesShowDataLabels && (
+                    <LabelList 
+                      dataKey={yKey} 
+                      position="top" 
+                      formatter={(value) => formatLargeNumber(value)}
+                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                    />
+                  )}
+                </Area>
+              );
+            })()}
+            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (() => {
+              const secondKey = yKeys[1] || yFields[1];
+              const seriesColor = seriesSettings[secondKey]?.color || palette[1];
+              const seriesShowDataLabels = seriesSettings[secondKey]?.showDataLabels !== undefined 
+                ? seriesSettings[secondKey]?.showDataLabels 
+                : currentShowDataLabels;
+              return (
+                <Area 
+                  type="monotone" 
+                  dataKey={secondKey} 
+                  stroke={seriesColor} 
+                  fill={seriesColor} 
+                  yAxisId={forceSingleAxis ? 0 : 1}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedSeries({
+                      dataKey: secondKey,
+                      name: effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey,
+                      currentColor: seriesColor
+                    });
+                    setShowSeriesSettingsModal(true);
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
+                  {seriesShowDataLabels && (
+                    <LabelList 
+                      dataKey={secondKey} 
+                      position="top" 
+                      formatter={(value) => formatLargeNumber(value)}
+                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                    />
+                  )}
+                </Area>
+              );
+            })()}
           </AreaChart>
         );
 
@@ -3008,8 +3370,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
+              {...(combinedDomain ? { domain: combinedDomain } : {})}
             />
-            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
+            {(yKeys.length > 1 || (yFields && yFields.length > 1)) && !forceSingleAxis && (
               <YAxis
                 yAxisId={1}
                 orientation="right"
@@ -3019,7 +3382,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickFormatter={formatLargeNumber}
               />
             )}
-            <Tooltip 
+            <Tooltip
               content={({ active, payload, label }) => {
                 if (active && payload && payload.length) {
                   return (
@@ -3085,7 +3448,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   )}
                 </Scatter>
                 {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                  <Scatter data={transformedChartData} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={1}>
+                  <Scatter data={transformedChartData} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={forceSingleAxis ? 0 : 1}>
                     {currentShowDataLabels && (
                       <LabelList 
                         dataKey={yKeys[1] || yFields[1]} 
@@ -3579,6 +3942,100 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   className="px-4 py-2 text-sm bg-blue-500 text-white rounded-md hover:bg-blue-600"
                 >
                   Save
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Series Settings Modal */}
+        {showSeriesSettingsModal && selectedSeries && (
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]"
+            onClick={() => {
+              setShowSeriesSettingsModal(false);
+              setSelectedSeries(null);
+            }}
+          >
+            <div
+              className="bg-white rounded-lg p-6 w-96 max-w-md mx-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold mb-4">Series Settings: {selectedSeries.name}</h3>
+              
+              {/* Color Picker */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Color
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={seriesSettings[selectedSeries.dataKey]?.color || selectedSeries.currentColor}
+                    onChange={(e) => {
+                      setSeriesSettings(prev => ({
+                        ...prev,
+                        [selectedSeries.dataKey]: {
+                          ...prev[selectedSeries.dataKey],
+                          color: e.target.value
+                        }
+                      }));
+                    }}
+                    className="w-16 h-10 border border-gray-300 rounded cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={seriesSettings[selectedSeries.dataKey]?.color || selectedSeries.currentColor}
+                    onChange={(e) => {
+                      const color = e.target.value;
+                      if (/^#[0-9A-Fa-f]{6}$/.test(color) || /^#[0-9A-Fa-f]{3}$/.test(color)) {
+                        setSeriesSettings(prev => ({
+                          ...prev,
+                          [selectedSeries.dataKey]: {
+                            ...prev[selectedSeries.dataKey],
+                            color: color
+                          }
+                        }));
+                      }
+                    }}
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="#000000"
+                  />
+                </div>
+              </div>
+
+              {/* Data Labels Toggle */}
+              <div className="mb-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={seriesSettings[selectedSeries.dataKey]?.showDataLabels !== undefined 
+                      ? seriesSettings[selectedSeries.dataKey]?.showDataLabels 
+                      : currentShowDataLabels}
+                    onChange={(e) => {
+                      setSeriesSettings(prev => ({
+                        ...prev,
+                        [selectedSeries.dataKey]: {
+                          ...prev[selectedSeries.dataKey],
+                          showDataLabels: e.target.checked
+                        }
+                      }));
+                    }}
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-gray-700">Show Data Labels</span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={() => {
+                    setShowSeriesSettingsModal(false);
+                    setSelectedSeries(null);
+                  }}
+                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                >
+                  Close
                 </button>
               </div>
             </div>

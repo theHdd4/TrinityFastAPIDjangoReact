@@ -273,7 +273,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
           // Prepare chart request
           const chartRequest = {
             file_id: (settings as any).dataSource || settings.fileId!,
-            chart_type: migratedChart.type,
+            chart_type: migratedChart.type === 'stacked_bar' ? 'bar' : migratedChart.type,
             traces: traces,
             title: migratedChart.title,
             filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
