@@ -34,7 +34,7 @@ import {
   CANVAS_SNAP_GRID,
   buildSlideTitleObjectId,
   resolveCardTitle,
-} from '../store/exhibitionStore';
+} from '../../store/exhibitionStore';
 import ExhibitedAtomRenderer from '../ExhibitedAtomRenderer';
 import { CardFormattingPanel } from '../operationsPalette/CardFormattingPanel';
 import {
@@ -73,8 +73,6 @@ interface CanvasDropPlacement {
   width: number;
   height: number;
 }
-
-const snapToGrid = (value: number, gridSize: number) => Math.round(value / gridSize) * gridSize;
 
 const slideBackgroundClassNames: Record<SlideBackgroundPreset, string> = {
   default: 'bg-card',
