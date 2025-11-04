@@ -658,7 +658,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         resizeObserver.disconnect();
       }
     };
-  }, [canvasDimensions.height, canvasDimensions.width, presentationMode]);
+  }, [canvasDimensions.height, canvasDimensions.width, presentationMode, presentationPadding]);
 
   const handleBulkUpdate = useCallback(
     (updates: Record<string, Partial<SlideObject>>) => {
@@ -1388,6 +1388,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     settings.reducedMotion && 'transition-none motion-reduce:transition-none',
   );
 
+  const presentationFrameStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!presentationMode) {
+      return undefined;
+    }
+    const safePadding = Math.max(0, presentationPadding);
+    return { padding: safePadding / 2 };
+  }, [presentationMode, presentationPadding]);
+
   const slideThemeStyle: React.CSSProperties = useMemo(() => {
     return {
       ...(themeContext.containerStyle ?? {}),
@@ -1413,9 +1421,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
           presentationMode
-            ? 'flex h-full w-full items-center justify-center p-12 bg-neutral-950'
+            ? 'flex h-full w-full items-center justify-center bg-neutral-950'
             : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
         }
+        style={presentationFrameStyle}
       >
         {viewMode === 'vertical' && (
           <div className="mb-4 flex items-center justify-between">
@@ -1662,7 +1671,7 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
 
 export const CANVAS_STAGE_HEIGHT = 520;
 export const DEFAULT_PRESENTATION_WIDTH = 960;
-export const PRESENTATION_PADDING = 160;
+export const PRESENTATION_PADDING = 96;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
