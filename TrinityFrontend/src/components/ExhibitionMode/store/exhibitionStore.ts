@@ -276,7 +276,68 @@ export interface SlideObject {
   rotation: number;
   groupId?: string | null;
   props: Record<string, unknown>;
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+  content: any;
+  isSelected: boolean;
 }
+
+type SlideObjectDraft = Omit<SlideObject, 'position' | 'size' | 'content' | 'isSelected' | 'props'> & {
+  props?: Record<string, unknown> | undefined;
+  position?: { x: number; y: number } | null;
+  size?: { width: number; height: number } | null;
+  content?: any;
+  isSelected?: boolean;
+};
+
+const ensureFiniteNumber = (value: unknown, fallback: number): number => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const ensureInteger = (value: unknown, fallback: number): number => {
+  const resolved = ensureFiniteNumber(value, fallback);
+  const rounded = Math.round(resolved);
+  return Number.isFinite(rounded) ? rounded : Math.round(fallback);
+};
+
+const normaliseSlideObject = (input: SlideObjectDraft): SlideObject => {
+  const x = ensureFiniteNumber(input.position?.x ?? input.x, 0);
+  const y = ensureFiniteNumber(input.position?.y ?? input.y, 0);
+  const width = ensureFiniteNumber(
+    input.size?.width ?? input.width,
+    DEFAULT_CANVAS_OBJECT_WIDTH,
+  );
+  const height = ensureFiniteNumber(
+    input.size?.height ?? input.height,
+    DEFAULT_CANVAS_OBJECT_HEIGHT,
+  );
+  const zIndex = Math.max(1, ensureInteger(input.zIndex, 1));
+  const rotation = ensureFiniteNumber(input.rotation, 0);
+  const props = isRecord(input.props) ? { ...input.props } : {};
+  const groupId = input.groupId ?? null;
+  const content = input.content !== undefined ? input.content : props;
+
+  return {
+    ...input,
+    x,
+    y,
+    width,
+    height,
+    zIndex,
+    rotation,
+    groupId,
+    props,
+    position: { x, y },
+    size: { width, height },
+    content,
+    isSelected: Boolean(input.isSelected),
+  };
+};
 
 export const DEFAULT_CANVAS_OBJECT_WIDTH = 420;
 export const DEFAULT_CANVAS_OBJECT_HEIGHT = 320;
@@ -289,19 +350,22 @@ export const buildSlideTitleObjectId = (cardId: string) => `${cardId}::slide-tit
 export const createSlideObjectFromAtom = (
   atom: DroppedAtom,
   overrides: Partial<SlideObject> = {},
-): SlideObject => ({
-  id: atom.id,
-  type: 'atom',
-  x: 96,
-  y: 192,
-  width: DEFAULT_CANVAS_OBJECT_WIDTH,
-  height: DEFAULT_CANVAS_OBJECT_HEIGHT,
-  zIndex: 1,
-  rotation: 0,
-  groupId: null,
-  props: { atom } as Record<string, unknown>,
-  ...overrides,
-});
+): SlideObject =>
+  normaliseSlideObject({
+    id: atom.id,
+    type: 'atom',
+    x: 96,
+    y: 192,
+    width: DEFAULT_CANVAS_OBJECT_WIDTH,
+    height: DEFAULT_CANVAS_OBJECT_HEIGHT,
+    zIndex: 1,
+    rotation: 0,
+    groupId: null,
+    props: { atom } as Record<string, unknown>,
+    content: { atom },
+    isSelected: false,
+    ...overrides,
+  });
 
 export interface LayoutCard {
   id: string;
@@ -828,8 +892,8 @@ const mergeCatalogueAtoms = (
   return dedupeAtoms([...start, ...extra]);
 };
 
-const normaliseZIndices = (objects: SlideObject[]): SlideObject[] =>
-  objects.map((object, index) => ({ ...object, zIndex: index + 1 }));
+const normaliseZIndices = (objects: SlideObjectDraft[]): SlideObject[] =>
+  objects.map((object, index) => normaliseSlideObject({ ...object, zIndex: index + 1 }));
 
 const sortSlideObjectsByZIndex = (objects: SlideObject[]): SlideObject[] =>
   objects
@@ -1037,7 +1101,7 @@ const synchroniseSlideObjects = (
     const baseProps = base?.props as Record<string, unknown> | undefined;
     const resolvedZIndex = typeof base?.zIndex === 'number' ? base.zIndex : next.length + 1;
 
-    return {
+    return normaliseSlideObject({
       id: titleId,
       type: 'text-box',
       x: typeof base?.x === 'number' ? base.x : 64,
@@ -1048,7 +1112,8 @@ const synchroniseSlideObjects = (
       rotation: typeof base?.rotation === 'number' ? base.rotation : 0,
       groupId: base?.groupId ?? null,
       props: ensureTitleProps(baseProps),
-    };
+      isSelected: Boolean(base?.isSelected),
+    });
   };
 
   let titleSource: SlideObject | null = null;
@@ -1065,17 +1130,20 @@ const synchroniseSlideObjects = (
           return;
         }
         used.add(atom.id);
-        next.push({
-          ...object,
-          type: 'atom',
-          props: { ...(object.props || {}), atom },
-        });
+        next.push(
+          normaliseSlideObject({
+            ...object,
+            type: 'atom',
+            props: { ...(object.props || {}), atom },
+            content: { atom },
+          }),
+        );
       } else if (object.type === 'title') {
         titleSource = { ...object };
       } else if (object.type === 'text-box' && object.id === titleId) {
         titleSource = { ...object };
       } else {
-        next.push({ ...object });
+        next.push(normaliseSlideObject({ ...object }));
       }
     });
   }
@@ -1102,10 +1170,10 @@ const synchroniseSlideObjects = (
   const titleObject = createTitleObject(titleSource);
 
   next = next.filter(object => object.id !== titleId);
-  const finalTitleObject: SlideObject = {
+  const finalTitleObject = normaliseSlideObject({
     ...titleObject,
     zIndex: typeof titleObject.zIndex === 'number' ? titleObject.zIndex : next.length + 1,
-  };
+  });
   next = [...next, finalTitleObject];
 
   return normaliseZIndices(next);
@@ -1310,18 +1378,35 @@ const normaliseSavedSlideObject = (value: unknown): SlideObject | null => {
 
   const groupId = isNonEmptyString(value.groupId) ? value.groupId.trim() : null;
 
-  return {
+  const positionRecord = isRecord(value.position) ? value.position : null;
+  const sizeRecord = isRecord(value.size) ? value.size : null;
+
+  return normaliseSlideObject({
     id,
     type,
-    x: toNumber(value.x, 0),
-    y: toNumber(value.y, 0),
-    width: toNumber(value.width, DEFAULT_CANVAS_OBJECT_WIDTH),
-    height: toNumber(value.height, DEFAULT_CANVAS_OBJECT_HEIGHT),
+    x: toNumber(value.x ?? positionRecord?.x, 0),
+    y: toNumber(value.y ?? positionRecord?.y, 0),
+    width: toNumber(value.width ?? sizeRecord?.width, DEFAULT_CANVAS_OBJECT_WIDTH),
+    height: toNumber(value.height ?? sizeRecord?.height, DEFAULT_CANVAS_OBJECT_HEIGHT),
     zIndex: toNumber(value.zIndex, 1),
     rotation: toNumber(value.rotation, 0),
     groupId,
     props,
-  };
+    position: positionRecord
+      ? {
+          x: toNumber(positionRecord.x, toNumber(value.x, 0)),
+          y: toNumber(positionRecord.y, toNumber(value.y, 0)),
+        }
+      : undefined,
+    size: sizeRecord
+      ? {
+          width: toNumber(sizeRecord.width, toNumber(value.width, DEFAULT_CANVAS_OBJECT_WIDTH)),
+          height: toNumber(sizeRecord.height, toNumber(value.height, DEFAULT_CANVAS_OBJECT_HEIGHT)),
+        }
+      : undefined,
+    content: value.content ?? props,
+    isSelected: Boolean(value.isSelected),
+  });
 };
 
 const normaliseLayoutSlideObjects = (
@@ -1803,10 +1888,10 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
       const maxZ = existing.reduce((acc, entry) => Math.max(acc, entry.zIndex ?? 0), 0);
-      const prepared: SlideObject = {
+      const prepared = normaliseSlideObject({
         ...object,
         zIndex: typeof object.zIndex === 'number' ? object.zIndex : maxZ + 1,
-      };
+      });
       const index = existing.findIndex(entry => entry.id === prepared.id);
       const nextList =
         index === -1
@@ -1825,23 +1910,32 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
     set(state => {
       const existing = state.slideObjectsByCardId[cardId] ?? [];
       let changed = false;
+      let requiresOrdering = false;
+
       const next = existing.map(object => {
         const patch = updates[object.id];
         if (!patch) {
           return object;
         }
+
         changed = true;
-        return { ...object, ...patch };
+        if (!requiresOrdering && Object.prototype.hasOwnProperty.call(patch, 'zIndex')) {
+          requiresOrdering = true;
+        }
+
+        return normaliseSlideObject({ ...object, ...patch });
       });
 
       if (!changed) {
         return {};
       }
 
+      const resolved = requiresOrdering ? normaliseZIndices(sortSlideObjectsByZIndex(next)) : next;
+
       return {
         slideObjectsByCardId: {
           ...state.slideObjectsByCardId,
-          [cardId]: next,
+          [cardId]: resolved,
         },
       };
     });

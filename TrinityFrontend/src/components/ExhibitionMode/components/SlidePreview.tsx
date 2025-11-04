@@ -5,7 +5,7 @@ import {
   CANVAS_STAGE_HEIGHT,
   DEFAULT_PRESENTATION_WIDTH,
   PRESENTATION_PADDING,
-} from './SlideCanvas';
+} from './slideCanvas';
 import { type LayoutCard } from '../store/exhibitionStore';
 
 const PREVIEW_BASE_WIDTH = DEFAULT_PRESENTATION_WIDTH + PRESENTATION_PADDING;

@@ -19,6 +19,10 @@ const createObject = (id: string, zIndex: number): SlideObject => ({
   zIndex,
   groupId: null,
   props: {},
+  position: { x: 0, y: 0 },
+  size: { width: 100, height: 100 },
+  content: null,
+  isSelected: false,
 });
 
 const baseObjects: SlideObject[] = [

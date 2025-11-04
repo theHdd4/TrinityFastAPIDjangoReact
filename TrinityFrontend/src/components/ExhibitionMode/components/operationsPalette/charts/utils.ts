@@ -206,16 +206,37 @@ export const createChartSlideObject = (
       chartData: safeData,
       chartConfig: safeConfig,
     },
+    position: { x: 180, y: 180 },
+    size: { width: DEFAULT_CHART_WIDTH, height: DEFAULT_CHART_HEIGHT },
+    content: { chartData: safeData, chartConfig: safeConfig },
+    isSelected: false,
   } as SlideObject;
+
+  const resolvedX = overrides.x ?? base.x;
+  const resolvedY = overrides.y ?? base.y;
+  const resolvedWidth = overrides.width ?? base.width;
+  const resolvedHeight = overrides.height ?? base.height;
 
   return {
     ...base,
     ...overrides,
+    x: resolvedX,
+    y: resolvedY,
+    width: resolvedWidth,
+    height: resolvedHeight,
+    position: overrides.position ?? { x: resolvedX, y: resolvedY },
+    size: overrides.size ?? { width: resolvedWidth, height: resolvedHeight },
     props: {
       ...(base.props ?? {}),
       ...(overrides.props ?? {}),
       chartData: safeData,
       chartConfig: safeConfig,
     },
+    content:
+      overrides.content ?? {
+        chartData: safeData,
+        chartConfig: safeConfig,
+      },
+    isSelected: overrides.isSelected ?? false,
   };
 };

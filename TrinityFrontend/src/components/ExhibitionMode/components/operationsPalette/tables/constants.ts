@@ -606,7 +606,7 @@ export const createTableSlideObject = (
   const rows = data.length;
   const cols = data[0]?.length ?? 0;
 
-  return {
+  const base: SlideObject = {
     id,
     type: 'table',
     x: 144,
@@ -623,6 +623,40 @@ export const createTableSlideObject = (
       locked: Boolean(options.locked),
       showOutline: options.showOutline !== false,
     },
+    position: { x: 144, y: 144 },
+    size: { width: DEFAULT_TABLE_WIDTH, height: DEFAULT_TABLE_HEIGHT },
+    content: {
+      data,
+      rows,
+      cols,
+    },
+    isSelected: false,
+  } as SlideObject;
+
+  const resolvedX = overrides.x ?? base.x;
+  const resolvedY = overrides.y ?? base.y;
+  const resolvedWidth = overrides.width ?? base.width;
+  const resolvedHeight = overrides.height ?? base.height;
+
+  return {
+    ...base,
     ...overrides,
+    x: resolvedX,
+    y: resolvedY,
+    width: resolvedWidth,
+    height: resolvedHeight,
+    position: overrides.position ?? { x: resolvedX, y: resolvedY },
+    size: overrides.size ?? { width: resolvedWidth, height: resolvedHeight },
+    props: {
+      ...(base.props ?? {}),
+      ...(overrides.props ?? {}),
+    },
+    content:
+      overrides.content ?? {
+        data,
+        rows,
+        cols,
+      },
+    isSelected: overrides.isSelected ?? false,
   };
 };
