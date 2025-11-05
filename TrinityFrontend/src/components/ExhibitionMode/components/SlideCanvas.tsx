@@ -1665,18 +1665,18 @@ const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
 const SIDE_LAYOUT_RATIO = 0.34;
 
-const LayoutOverlay: React.FC<{
-  layout: CardLayout;
-  color: CardColor;
-  accentImage?: string | null;
-  accentImageName?: string | null;
-  fullBleed: boolean;
-}> = ({ layout, color, accentImage, accentImageName, fullBleed }) => {
+const resolveLayoutOverlay = (
+  layout: CardLayout,
+  color: CardColor,
+  accentImage: string | null | undefined,
+  accentImageName: string | null | undefined,
+  fullBleed: boolean,
+) => {
   if (layout === 'none') {
     return null;
   }
 
-  const overlayStyle = useMemo(() => resolveCardOverlayStyle(color), [color]);
+  const overlayStyle = resolveCardOverlayStyle(color);
   const wrapperClass = cn(
     'pointer-events-none absolute inset-0 overflow-hidden transition-all duration-300 ease-out',
     'shadow-[0_32px_72px_-32px_rgba(76,29,149,0.45)]',
@@ -1717,22 +1717,20 @@ const LayoutOverlay: React.FC<{
     );
   };
 
-  const renderHorizontalOverlay = (position: 'left' | 'right') => {
-    return (
-      <div className={wrapperClass}>
-        <div className="flex h-full w-full flex-row">
-          {position === 'right' && <div className="flex-1 min-w-0" />}
-          <div
-            className="relative flex-shrink-0 overflow-hidden"
-            style={{ flexBasis: `${SIDE_LAYOUT_RATIO * 100}%`, minWidth: SIDE_LAYOUT_MIN_WIDTH }}
-          >
-            {content}
-          </div>
-          {position === 'left' && <div className="flex-1 min-w-0" />}
+  const renderHorizontalOverlay = (position: 'left' | 'right') => (
+    <div className={wrapperClass}>
+      <div className="flex h-full w-full flex-row">
+        {position === 'right' && <div className="flex-1 min-w-0" />}
+        <div
+          className="relative flex-shrink-0 overflow-hidden"
+          style={{ flexBasis: `${SIDE_LAYOUT_RATIO * 100}%`, minWidth: SIDE_LAYOUT_MIN_WIDTH }}
+        >
+          {content}
         </div>
+        {position === 'left' && <div className="flex-1 min-w-0" />}
       </div>
-    );
-  };
+    </div>
+  );
 
   switch (layout) {
     case 'top':
@@ -3918,16 +3916,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
     const canvasCornerClass = fullBleed ? 'rounded-none' : 'rounded-[28px]';
 
+    const layoutOverlay = useMemo(
+      () => resolveLayoutOverlay(layout, cardColor, accentImage, accentImageName, fullBleed),
+      [layout, cardColor, accentImage, accentImageName, fullBleed],
+    );
+
     const canvasBorderClass = (() => {
       if (isDragOver) {
-        return 'border-2 border-primary/60 ring-2 ring-primary/20 shadow-xl scale-[0.99]';
+        return 'ring-2 ring-primary/20 shadow-xl scale-[0.99]';
       }
 
       if (showEmptyState) {
-        return 'border-2 border-dashed border-border/70';
+        return 'border-0';
       }
 
-      return fullBleed ? 'border-0' : 'border-2 border-border/60';
+      return fullBleed ? 'border-0' : 'border-0 shadow-lg shadow-black/5';
     })();
 
     const backgroundLockLabel = backgroundLocked ? 'Unlock background' : 'Lock background';
@@ -3950,15 +3953,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             onDragLeave={onCanvasDragLeave}
             onDrop={onCanvasDrop}
           >
-        <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
-          <LayoutOverlay
-            layout={layout}
-            color={cardColor}
-            accentImage={accentImage}
-            accentImageName={accentImageName}
-            fullBleed={fullBleed}
-          />
-        </div>
+        <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">{layoutOverlay}</div>
 
         {showGrid && (
           <div
@@ -3982,7 +3977,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         {showEmptyState && (
           <div
             className={cn(
-              'pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-dashed border-border/60 bg-muted/20 px-6 text-center text-sm text-muted-foreground',
+              'pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-muted/10 px-6 text-center text-sm text-muted-foreground',
               canvasCornerClass,
             )}
           >

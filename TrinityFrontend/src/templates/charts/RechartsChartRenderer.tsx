@@ -157,7 +157,9 @@ interface Props {
   onChartTypeChange?: (type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => void; // Callback for chart type changes
   onGridToggle?: (enabled: boolean) => void; // Callback for grid toggle
   onLegendToggle?: (enabled: boolean) => void; // Callback for legend toggle
-  onAxisLabelsToggle?: (enabled: boolean) => void; // Callback for axis labels toggle
+  // onAxisLabelsToggle?: (enabled: boolean) => void; // Callback for axis labels toggle
+  onXAxisLabelsToggle?: (enabled: boolean) => void; // Callback for X axis labels toggle
+  onYAxisLabelsToggle?: (enabled: boolean) => void; // Callback for Y axis labels toggle
   onDataLabelsToggle?: (enabled: boolean) => void; // Callback for data labels toggle
   onSave?: () => void; // Callback for save action
   sortOrder?: 'asc' | 'desc' | null; // Current sort order
@@ -165,7 +167,9 @@ interface Props {
   sortColumn?: string; // Column to sort by
   onSortColumnChange?: (column: string) => void; // Callback when sort column changes
   showLegend?: boolean; // External control for legend visibility
-  showAxisLabels?: boolean; // External control for axis labels visibility
+  // showAxisLabels?: boolean; // External control for axis labels visibility
+  showXAxisLabels?: boolean; // External control for X axis labels visibility
+  showYAxisLabels?: boolean; // External control for Y axis labels visibility
   showDataLabels?: boolean; // External control for data labels visibility
   initialShowDataLabels?: boolean; // Default state for data labels
   showGrid?: boolean; // External control for grid visibility
@@ -484,7 +488,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
   onChartTypeChange,
   onGridToggle,
   onLegendToggle,
-  onAxisLabelsToggle,
+  // onAxisLabelsToggle,
+  onXAxisLabelsToggle,
+  onYAxisLabelsToggle,
   onDataLabelsToggle,
   onSave,
   sortOrder,
@@ -492,7 +498,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
   sortColumn: propSortColumn, // Column to sort by
   onSortColumnChange, // Callback when sort column changes
   showLegend: propShowLegend, // External control for legend visibility
-  showAxisLabels: propShowAxisLabels, // External control for axis labels visibility
+  // showAxisLabels: propShowAxisLabels, // External control for axis labels visibility
+  showXAxisLabels: propShowXAxisLabels,
+  showYAxisLabels: propShowYAxisLabels,
   showDataLabels: propShowDataLabels, // External control for data labels visibility
   initialShowDataLabels,
   showGrid: propShowGrid, // External control for grid visibility
@@ -517,6 +525,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showSortSubmenu, setShowSortSubmenu] = useState(false);
   const [showChartTypeSubmenu, setShowChartTypeSubmenu] = useState(false);
   const [showAxisLabelSubmenu, setShowAxisLabelSubmenu] = useState(false);
+  const [showAxisToggleSubmenu, setShowAxisToggleSubmenu] = useState(false);
   const [colorSubmenuPos, setColorSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [sortSubmenuPos, setSortSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [internalSortColumn, setInternalSortColumn] = useState<string>('');
@@ -537,6 +546,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   }, [sortColumn, propSortColumn, internalSortColumn, sortOrder]);
   const [chartTypeSubmenuPos, setChartTypeSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [axisLabelSubmenuPos, setAxisLabelSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [axisToggleSubmenuPos, setAxisToggleSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
   const rootAttributes = captureId
@@ -665,6 +675,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowSortSubmenu(false);
     setShowChartTypeSubmenu(false);
     setShowAxisLabelSubmenu(false);
+    setShowAxisToggleSubmenu(false);
   };
 
   // Handler for axis label editing submenu
@@ -682,7 +693,21 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowColorSubmenu(false);
     setShowSortSubmenu(false);
     setShowChartTypeSubmenu(false);
+    setShowAxisToggleSubmenu(false);
   }, [customXAxisLabel, xAxisLabel, customYAxisLabel, yAxisLabel]);
+
+  // Handler for axis toggle submenu
+  const handleAxisToggleClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setAxisToggleSubmenuPos({ x: rect.right + 4, y: rect.top });
+    setShowAxisToggleSubmenu(prev => !prev);
+    setShowColorSubmenu(false);
+    setShowSortSubmenu(false);
+    setShowChartTypeSubmenu(false);
+    setShowAxisLabelSubmenu(false);
+  }, []);
 
   // Handler for saving X-axis label
   const handleSaveXAxisLabel = () => {
@@ -703,12 +728,14 @@ const RechartsChartRenderer: React.FC<Props> = ({
   };
 
 
-  const overlayVisible = showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu;
+  const overlayVisible = showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu || showAxisToggleSubmenu;
 
   // State for chart options
   const [showGrid, setShowGrid] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
   const [showAxisLabels, setShowAxisLabels] = useState(true);
+  const [showXAxisLabels, setShowXAxisLabels] = useState(true);
+  const [showYAxisLabels, setShowYAxisLabels] = useState(true);
   const [showDataLabels, setShowDataLabels] = useState(initialShowDataLabels ?? true);
 
   // Sync internal states with external props for persistence
@@ -720,9 +747,21 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (propShowLegend !== undefined) setShowLegend(propShowLegend);
   }, [propShowLegend]);
 
+  // useEffect(() => {
+  //   if (propShowAxisLabels !== undefined) {
+  //     setShowAxisLabels(propShowAxisLabels);
+  //     setShowXAxisLabels(propShowAxisLabels);
+  //     setShowYAxisLabels(propShowAxisLabels);
+  //   }
+  // }, [propShowAxisLabels]);
+
   useEffect(() => {
-    if (propShowAxisLabels !== undefined) setShowAxisLabels(propShowAxisLabels);
-  }, [propShowAxisLabels]);
+    if (propShowXAxisLabels !== undefined) setShowXAxisLabels(propShowXAxisLabels);
+  }, [propShowXAxisLabels]);
+
+  useEffect(() => {
+    if (propShowYAxisLabels !== undefined) setShowYAxisLabels(propShowYAxisLabels);
+  }, [propShowYAxisLabels]);
 
   useEffect(() => {
     if (propShowDataLabels !== undefined) setShowDataLabels(propShowDataLabels);
@@ -870,7 +909,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // Use external props if provided, otherwise use internal state
   const currentShowGrid = propShowGrid !== undefined ? propShowGrid : showGrid;
   const currentShowLegend = propShowLegend !== undefined ? propShowLegend : showLegend;
-  const currentShowAxisLabels = propShowAxisLabels !== undefined ? propShowAxisLabels : showAxisLabels;
+  // const currentShowAxisLabels = propShowAxisLabels !== undefined ? propShowAxisLabels : showAxisLabels;
+  const currentShowXAxisLabels = propShowXAxisLabels !== undefined ? propShowXAxisLabels : showXAxisLabels;
+  const currentShowYAxisLabels = propShowYAxisLabels !== undefined ? propShowYAxisLabels : showYAxisLabels;
   const currentShowDataLabels = propShowDataLabels !== undefined ? propShowDataLabels : showDataLabels;
 
   // Use custom axis labels if provided, otherwise fall back to props
@@ -880,14 +921,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Calculate dynamic margins based on axis labels visibility
   const getChartMargins = () => {
-    if (!currentShowAxisLabels) {
-      // When axis labels are hidden, still need space for full category names
-      return { top: 20, right: 20, left: 20, bottom: 80 };
+    // Base margins for when no axis labels are shown
+    let left = 20;
+    let bottom = 80;
+    
+    // Adjust based on which axis labels are visible
+    if (currentShowYAxisLabels) {
+      left = 60; // Add space for Y-axis label
     }
     
-    // When axis labels are shown, add space for both X and Y axis labels
-    // Increased bottom margin to accommodate full X-axis labels and prevent overlap with legends
-    return { top: 20, right: 20, left: 60, bottom: 100 };
+    if (currentShowXAxisLabels) {
+      bottom = 100; // Add space for X-axis label
+    }
+    
+    return { top: 20, right: 20, left, bottom };
   };
 
   // Calculate dynamic margins for pie charts (no axis labels, but may have legend)
@@ -1241,13 +1288,37 @@ const RechartsChartRenderer: React.FC<Props> = ({
   };
 
   // Handle axis labels toggle
-  const handleAxisLabelsToggle = () => {
-    const newAxisLabelsState = !showAxisLabels;
-    setShowAxisLabels(newAxisLabelsState);
+  // const handleAxisLabelsToggle = () => {
+  //   const newAxisLabelsState = !showAxisLabels;
+  //   setShowAxisLabels(newAxisLabelsState);
+  //   setShowXAxisLabels(newAxisLabelsState);
+  //   setShowYAxisLabels(newAxisLabelsState);
+  //   setShowContextMenu(false);
+  //   setShowColorSubmenu(false);
+  //   if (onAxisLabelsToggle) {
+  //     onAxisLabelsToggle(newAxisLabelsState);
+  //   }
+  // };
+
+  // Handle X-axis labels toggle
+  const handleXAxisLabelsToggle = () => {
+    const newXAxisLabelsState = !showXAxisLabels;
+    setShowXAxisLabels(newXAxisLabelsState);
     setShowContextMenu(false);
     setShowColorSubmenu(false);
-    if (onAxisLabelsToggle) {
-      onAxisLabelsToggle(newAxisLabelsState);
+    if (onXAxisLabelsToggle) {
+      onXAxisLabelsToggle(newXAxisLabelsState);
+    }
+  };
+
+  // Handle Y-axis labels toggle
+  const handleYAxisLabelsToggle = () => {
+    const newYAxisLabelsState = !showYAxisLabels;
+    setShowYAxisLabels(newYAxisLabelsState);
+    setShowContextMenu(false);
+    setShowColorSubmenu(false);
+    if (onYAxisLabelsToggle) {
+      onYAxisLabelsToggle(newYAxisLabelsState);
     }
   };
 
@@ -1292,9 +1363,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
       const isOutsideSortSubmenu = !target.closest('.sort-submenu');
       const isOutsideChartTypeSubmenu = !target.closest('.chart-type-submenu');
       const isOutsideAxisLabelSubmenu = !target.closest('.axis-label-submenu');
+      const isOutsideAxisToggleSubmenu = !target.closest('.axis-toggle-submenu');
 
       // Only close menus if click is outside ALL active menus
-      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideSortSubmenu && isOutsideChartTypeSubmenu && isOutsideAxisLabelSubmenu) {
+      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideSortSubmenu && isOutsideChartTypeSubmenu && isOutsideAxisLabelSubmenu && isOutsideAxisToggleSubmenu) {
         // Add a small delay to ensure button clicks are processed first
         setTimeout(() => {
           setShowContextMenu(false);
@@ -1302,11 +1374,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
           setShowSortSubmenu(false);
           setShowChartTypeSubmenu(false);
           setShowAxisLabelSubmenu(false);
+          setShowAxisToggleSubmenu(false);
         }, 50);
       }
     };
 
-    if (showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu) {
+    if (showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu || showAxisToggleSubmenu) {
       // Use a longer delay to allow submenu to open properly
       const timeoutId = setTimeout(() => {
         document.addEventListener('click', handleClickOutside, false);
@@ -1317,7 +1390,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         document.removeEventListener('click', handleClickOutside, false);
       };
     }
-  }, [showContextMenu, showColorSubmenu, showSortSubmenu, showChartTypeSubmenu, showAxisLabelSubmenu]);
+  }, [showContextMenu, showColorSubmenu, showSortSubmenu, showChartTypeSubmenu, showAxisLabelSubmenu, showAxisToggleSubmenu]);
 
   // Context menu component
   const ContextMenu = () => {
@@ -1402,22 +1475,16 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
         {/* Axis Labels Toggle */}
         <button
-          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-          onClick={handleAxisLabelsToggle}
+          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
+          onClick={handleAxisToggleClick}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
           </svg>
           <span>Axis Labels</span>
-          <div className="ml-auto">
-            <div className={`w-4 h-3 rounded border ${showAxisLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
-              {showAxisLabels && (
-                <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-          </div>
+          <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
         </button>
 
         {/* Separator */}
@@ -1810,6 +1877,69 @@ const RechartsChartRenderer: React.FC<Props> = ({
       />,
       document.body
     );
+  };
+
+  // Axis Toggle Submenu component
+  const AxisToggleSubmenu = () => {
+    if (!showAxisToggleSubmenu) return null;
+
+    const submenu = (
+      <div
+        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 axis-toggle-submenu"
+        style={{
+          left: axisToggleSubmenuPos.x,
+          top: axisToggleSubmenuPos.y,
+          minWidth: '200px'
+        }}
+      >
+        <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-2">
+          Axis Labels
+        </div>
+        <div className="flex flex-col">
+          {/* X-Axis Toggle */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={handleXAxisLabelsToggle}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+            </svg>
+            <span>X-Axis</span>
+            <div className="ml-auto">
+              <div className={`w-4 h-3 rounded border ${showXAxisLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
+                {showXAxisLabels && (
+                  <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </div>
+            </div>
+          </button>
+
+          {/* Y-Axis Toggle */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={handleYAxisLabelsToggle}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+            </svg>
+            <span>Y-Axis</span>
+            <div className="ml-auto">
+              <div className={`w-4 h-3 rounded border ${showYAxisLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
+                {showYAxisLabels && (
+                  <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+    );
+
+    return createPortal(submenu, document.body);
   };
 
   const renderChart = () => {
@@ -2208,7 +2338,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <XAxis 
                 dataKey={xKeyForBar}
                 type="category"
-                label={currentShowAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
+                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
@@ -2221,7 +2351,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
-                label={currentShowAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
               />
@@ -2288,7 +2418,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis 
               dataKey={xKey} 
-                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
+                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
               tick={xAxisTickStyle}
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
@@ -2301,7 +2431,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             {/* Primary Y-Axis (Left) */}
             <YAxis 
               yAxisId={0}
-                label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
@@ -2311,7 +2441,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis 
                 yAxisId={1}
                 orientation="right"
-                  label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                  label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
@@ -2441,7 +2571,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForLine}
-                label={currentShowAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
+                label={currentShowXAxisLabels && effectiveXAxisLabel ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
@@ -2454,7 +2584,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               />
               <YAxis
                 tickFormatter={formatLargeNumber}
-                label={currentShowAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                label={currentShowYAxisLabels && effectiveYAxisLabel ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
               />
@@ -2532,7 +2662,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKey}
-                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
+                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
                 tickFormatter={isDateAxis ? (value) => formatDateTick(new Date(value)) : xAxisTickFormatter}
@@ -2545,7 +2675,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {/* Primary Y-Axis (Left) */}
               <YAxis
                 yAxisId={0}
-                label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
@@ -2556,7 +2686,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 <YAxis
                   yAxisId={1}
                   orientation="right"
-                  label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                  label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                   tick={axisTickStyle}
                   tickLine={false}
                   tickFormatter={formatLargeNumber}
@@ -2704,7 +2834,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
               <XAxis
                 dataKey={xKeyForArea}
-                label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
+                label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
                 tick={xAxisTickStyle}
                 tickLine={false}
                 allowDuplicatedCategory={false}
@@ -2716,7 +2846,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 })()}
               />
               <YAxis
-                label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
@@ -2776,7 +2906,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKey}
-              label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
+              label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: axisLabelStyle } : undefined}
               tick={xAxisTickStyle}
               tickLine={false}
               tickFormatter={xAxisTickFormatter}
@@ -2788,7 +2918,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             />
             <YAxis
               yAxisId={0}
-              label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+              label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
@@ -2797,7 +2927,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis
                 yAxisId={1}
                 orientation="right"
-                label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
@@ -2861,7 +2991,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             {currentShowGrid && <CartesianGrid strokeDasharray="3 3" />}
             <XAxis
               dataKey={xKeyForScatter}
-              label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
+              label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 35 } : undefined}
               tick={xAxisTickStyle}
               tickLine={false}
               allowDuplicatedCategory={false}
@@ -2874,7 +3004,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             />
             <YAxis
               yAxisId={0}
-              label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
+              label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: axisLabelStyle } : undefined}
               tick={axisTickStyle}
               tickLine={false}
               tickFormatter={formatLargeNumber}
@@ -2883,7 +3013,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               <YAxis
                 yAxisId={1}
                 orientation="right"
-                label={currentShowAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
+                label={currentShowYAxisLabels && effectiveYAxisLabels && effectiveYAxisLabels[1] ? { value: capitalizeWords(effectiveYAxisLabels[1]), angle: 90, position: 'right', style: effectiveYAxisLabelStyle, offset: 5 } : undefined}
                 tick={axisTickStyle}
                 tickLine={false}
                 tickFormatter={formatLargeNumber}
@@ -3379,6 +3509,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         <SortSubmenu />
         <ChartTypeSubmenu />
         <AxisLabelSubmenu />
+        <AxisToggleSubmenu />
         
         {/* X-Axis Label Edit Dialog */}
         {showXAxisLabelDialog && (

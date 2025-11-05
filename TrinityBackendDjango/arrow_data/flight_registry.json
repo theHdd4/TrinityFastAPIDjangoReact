@@ -1,1 +1,5 @@
+<<<<<<< HEAD
 {"latest_by_key": {}, "filekey_to_csv": {}, "csv_to_flight": {}, "arrow_to_original": {}}
+=======
+{"latest_by_key": {"D0_MMM.csv": "bypass_upload/D0_MMM.arrow"}, "filekey_to_csv": {"D0_MMM.csv": "Quant_Matrix_AI_Schema/blank/New Custom Project 20/D0_MMM.arrow"}, "csv_to_flight": {"Quant_Matrix_AI_Schema/blank/New Custom Project 21/D0_MMM.arrow": "bypass_upload/D0_MMM.arrow", "Quant_Matrix_AI_Schema/blank/New Custom Project 22/D0_MMM.arrow": "bypass_upload/D0_MMM.arrow", "Quant_Matrix_AI_Schema/blank/New Custom Project 20/D0_MMM.arrow": "bypass_upload/D0_MMM.arrow"}, "arrow_to_original": {"Quant_Matrix_AI_Schema/blank/New Custom Project 21/D0_MMM.arrow": "D0_MMM.arrow", "Quant_Matrix_AI_Schema/blank/New Custom Project 22/D0_MMM.arrow": "D0_MMM.arrow", "Quant_Matrix_AI_Schema/blank/New Custom Project 20/D0_MMM.arrow": "D0_MMM.arrow"}}
+>>>>>>> dc5c6a932e91c5efc4f3b62c408572270f16152b

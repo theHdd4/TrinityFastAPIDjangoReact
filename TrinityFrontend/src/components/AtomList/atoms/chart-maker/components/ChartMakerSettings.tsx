@@ -70,14 +70,10 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
   }, [dataSource]);
 
   const applyDataframeSelect = async (objectName: string) => {
-    console.log('[ChartMakerSettings] Starting dataframe selection:', objectName);
-    const startTime = performance.now();
-
     try {
       setUploadError(null);
       setSelectedDataSource(objectName);
 
-      console.log('[ChartMakerSettings] Setting loading state immediately');
       onDataUpload(null, '', objectName);
 
       let processedObjectName = objectName;
@@ -88,12 +84,8 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
       let uploadResponse;
 
       try {
-        console.log('[ChartMakerSettings] Attempting direct loading method');
         uploadResponse = await chartMakerApi.loadSavedDataframe(processedObjectName);
-        console.log('[ChartMakerSettings] Direct loading successful');
       } catch (error) {
-        console.log('[ChartMakerSettings] Direct loading failed, falling back to download/upload method:', error);
-
         const displayName =
           frames
             .find(df => df.object_name === objectName)
@@ -101,24 +93,20 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
         const isArrow = processedObjectName.endsWith('.arrow');
 
         if (isArrow) {
-          console.log('[ChartMakerSettings] Downloading Arrow file...');
           const response = await fetch(`${FEATURE_OVERVIEW_API}/flight_table?object_name=${encodeURIComponent(processedObjectName)}`);
           if (!response.ok) {
             throw new Error(`Failed to load Arrow dataframe: ${response.statusText}`);
           }
           const arrowBuffer = await response.arrayBuffer();
           const file = new File([arrowBuffer], `${displayName}.arrow`, { type: 'application/vnd.apache.arrow.file' });
-          console.log('[ChartMakerSettings] Re-uploading Arrow file...');
           uploadResponse = await chartMakerApi.uploadArrow(file);
         } else {
-          console.log('[ChartMakerSettings] Downloading CSV file...');
           const response = await fetch(`${FEATURE_OVERVIEW_API}/cached_dataframe?object_name=${encodeURIComponent(processedObjectName)}`);
           if (!response.ok) {
             throw new Error(`Failed to load dataframe: ${response.statusText}`);
           }
           const csvContent = await response.text();
           const file = new File([csvContent], `${displayName}.csv`, { type: 'text/csv' });
-          console.log('[ChartMakerSettings] Re-uploading CSV file...');
           uploadResponse = await chartMakerApi.uploadCSV(file);
         }
       }
@@ -133,12 +121,8 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
         row_count: uploadResponse.row_count
       };
 
-      const endTime = performance.now();
-      console.log(`[ChartMakerSettings] Data loading completed in ${endTime - startTime}ms`);
-
       onDataUpload(chartData, uploadResponse.file_id, objectName);
     } catch (error) {
-      console.error('Error loading saved dataframe:', error);
       setUploadError(error instanceof Error ? error.message : 'Failed to load saved dataframe');
       onDataUpload(null, '', objectName);
     }

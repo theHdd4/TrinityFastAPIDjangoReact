@@ -145,9 +145,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
 
   // Fetch cardinality data when data is available
   useEffect(() => {
-    console.log('ChartMakerCanvas - typedData:', typedData);
-    console.log('ChartMakerCanvas - file_id:', typedData?.file_id);
-    console.log('ChartMakerCanvas - dataSource:', dataSource);
     if (typedData && typedData.file_id && dataSource) {
       fetchCardinalityData();
     }
@@ -165,10 +162,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
       // This allows the backend to reload from the saved file even if in-memory storage is cleared
       const objectName = dataSource || typedData.file_id;
       const url = `${CHART_MAKER_API}/column_summary?object_name=${encodeURIComponent(objectName)}`;
-      console.log('Fetching cardinality data from:', url);
-      console.log('Using dataSource:', dataSource, 'or file_id:', typedData.file_id);
       const response = await fetch(url);
-      console.log('Response status:', response.status);
       if (response.ok) {
         const summary = await response.json();
         const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
@@ -185,7 +179,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
         setOriginalFileName(summary.original_name || typedData.file_id);
       } else {
         const errorText = await response.text();
-        console.log('Error response:', errorText);
         setCardinalityError(`Failed to fetch cardinality data: ${response.status} - ${errorText}`);
       }
     } catch (e: any) {
@@ -344,16 +337,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     if (typedData && (typedData.uniqueValuesByColumn || typedData.unique_values)) {
       const uniqueMap = typedData.uniqueValuesByColumn || typedData.unique_values;
       if (uniqueMap && uniqueMap[column]) {
-        // console.log(`[ChartMakerCanvas] Found unique values for column "${column}" from backend:`, uniqueMap[column]);
         return uniqueMap[column];
-      } else {
-        console.log(`[ChartMakerCanvas] Column "${column}" not found in uniqueMap. Available columns:`, Object.keys(uniqueMap || {}));
       }
-    } else {
-      console.log(`[ChartMakerCanvas] No uniqueValuesByColumn data available. typedData:`, typedData);
     }
     // Fallback to frontend calculation
-    console.log(`[ChartMakerCanvas] Using fallback calculation for column "${column}"`);
     if (!typedData || !Array.isArray(typedData.rows)) return [];
     const values = new Set(typedData.rows.map(row => String(row[column])));
     return Array.from(values).filter(v => v !== '');
@@ -540,7 +527,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     try {
       return JSON.parse(JSON.stringify(value)) as T;
     } catch (error) {
-      console.warn("Unable to clone value for exhibition selection", error);
       return value;
     }
   };
@@ -734,7 +720,9 @@ const renderChart = (
     colors: [colors.primary, colors.secondary, colors.tertiary],
     theme: chart.chartConfig?.theme,
     showLegend: chart.chartConfig?.showLegend,
-    showAxisLabels: chart.chartConfig?.showAxisLabels,
+    // showAxisLabels: chart.chartConfig?.showAxisLabels,
+    showXAxisLabels: chart.chartConfig?.showXAxisLabels,
+    showYAxisLabels: chart.chartConfig?.showYAxisLabels,
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
     height: chartHeightValue,
@@ -765,10 +753,26 @@ const renderChart = (
       );
       updateSettings(atomId, { charts: updatedCharts });
     },
-    onAxisLabelsToggle: (enabled: boolean) => {
+    // onAxisLabelsToggle: (enabled: boolean) => {
+    //   const updatedCharts = charts.map(c => 
+    //     c.id === chart.id 
+    //       ? { ...c, chartConfig: { ...c.chartConfig, showAxisLabels: enabled } }
+    //       : c
+    //   );
+    //   updateSettings(atomId, { charts: updatedCharts });
+    // },
+    onXAxisLabelsToggle: (enabled: boolean) => {
       const updatedCharts = charts.map(c => 
         c.id === chart.id 
-          ? { ...c, chartConfig: { ...c.chartConfig, showAxisLabels: enabled } }
+          ? { ...c, chartConfig: { ...c.chartConfig, showXAxisLabels: enabled } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onYAxisLabelsToggle: (enabled: boolean) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, showYAxisLabels: enabled } }
           : c
       );
       updateSettings(atomId, { charts: updatedCharts });
@@ -839,7 +843,6 @@ const renderChart = (
       
       <div className="relative z-10 p-6 overflow-hidden">
         {/* Cardinality View */}
-        {console.log('Rendering cardinality view - cardinalityLoading:', cardinalityLoading, 'cardinalityError:', cardinalityError, 'cardinalityData:', cardinalityData)}
         {cardinalityLoading ? (
           <div className="p-4 text-blue-600">Loading cardinality data...</div>
         ) : cardinalityError ? (

@@ -174,7 +174,9 @@ export interface FeatureOverviewVisualizationManifestChart {
   type: string;
   theme?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   xField?: string;
@@ -219,7 +221,9 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   chartType: string;
   theme: string;
   showDataLabels: boolean;
-  showAxisLabels: boolean;
+  // showAxisLabels: boolean;
+  showXAxisLabels: boolean;
+  showYAxisLabels: boolean;
   showGrid: boolean;
   showLegend: boolean;
   xAxisField: string;

@@ -46,7 +46,6 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
           setOriginalDimensions(rawMapping);
         }
       } catch (error) {
-        console.warn('Failed to fetch original dimension mapping:', error);
       }
     };
 
@@ -58,10 +57,6 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   const applyVisual = () => {
-    console.log("🔄 Apply Visual clicked - updating settings");
-    console.log("🔄 Pending dimensions:", pendingDimensions);
-    console.log("🔄 Pending Y axes:", pendingY);
-    console.log("🔄 Pending X axis:", pendingX);
     updateSettings(atomId, { yAxes: pendingY, xAxis: pendingX, dimensionMap: pendingDimensions });
   };
 

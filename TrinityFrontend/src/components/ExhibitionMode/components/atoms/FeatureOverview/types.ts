@@ -7,7 +7,9 @@ export interface FeatureOverviewChartState {
   chartType?: string;
   theme?: string;
   showDataLabels?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showGrid?: boolean;
   showLegend?: boolean;
   xAxisField?: string;

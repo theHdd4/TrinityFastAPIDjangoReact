@@ -54,9 +54,6 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
     const isChecked = Boolean(checked);
     const updatedDimensions = { ...dimensionMap };
     
-    console.log(`🔄 Toggling dimension: ${dimensionName}.${column} to ${isChecked}`);
-    console.log(`🔄 Current dimensionMap before toggle:`, dimensionMap);
-    
     if (!updatedDimensions[dimensionName]) {
       updatedDimensions[dimensionName] = [];
     }
@@ -69,7 +66,6 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
       updatedDimensions[dimensionName] = updatedDimensions[dimensionName].filter(col => col !== column);
     }
     
-    console.log(`🔄 Updated dimensionMap after toggle:`, updatedDimensions);
     onDimensionChange(updatedDimensions);
   };
 

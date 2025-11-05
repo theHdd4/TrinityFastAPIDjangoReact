@@ -512,7 +512,6 @@ function cloneDeep<T>(value: T): T {
   try {
     return JSON.parse(JSON.stringify(value)) as T;
   } catch (error) {
-    console.warn("Unable to clone value for exhibition selection", error);
     return value;
   }
 }
@@ -531,9 +530,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     (ids) => Array.isArray(ids) && ids.length > 0,
   );
   
-  console.log("🔍 hasMappedIdentifiers check:", hasMappedIdentifiers);
-  console.log("🔍 dimensionMap for hasMappedIdentifiers:", dimensionMap);
-  console.log("🔍 Object.values(dimensionMap):", Object.values(dimensionMap));
   const [skuRows, setSkuRows] = useState<any[]>(
     Array.isArray(settings.skuTable) ? settings.skuTable : [],
   );
@@ -572,7 +568,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   
   // Chart display options state
   const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
-  const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
+  // const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
+  const [showXAxisLabels, setShowXAxisLabels] = useState<boolean>(true);
+  const [showYAxisLabels, setShowYAxisLabels] = useState<boolean>(true);
   const [showGrid, setShowGrid] = useState<boolean>(true);
   const [showLegend, setShowLegend] = useState<boolean>(true);
 
@@ -731,7 +729,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         }
       } catch (error) {
         if (!active) return;
-        console.error("Failed to fetch dimension mapping:", error);
         const message =
           "Column Classifier is not configured for the selected dataframe. Configure it to view hierarchical dimensions.";
         setDimensionError(message);
@@ -744,15 +741,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   }, [settings.dataSource, settings.allColumns, settings.columnSummary, settings.dimensionMap]);
 
    useEffect(() => {
-     console.log("🔄 SKU Analysis useEffect triggered");
-     console.log("🔄 settings.dataSource:", settings.dataSource);
-     console.log("🔄 hasMappedIdentifiers:", hasMappedIdentifiers);
-     console.log("🔄 skuRows.length:", skuRows.length);
-     console.log("🔄 dimensionMap:", dimensionMap);
-     console.log("🔄 lastFetchedSource.current:", lastFetchedSource.current);
-     
      if (!settings.dataSource) {
-       console.log("🔄 No data source, returning");
        lastFetchedSource.current = null;
        lastDimensionMapString.current = null;
        return;
@@ -767,15 +756,11 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
          skuRows.length > 0 &&
          dimensionMapString === lastDimensionMapString.current
        ) {
-         console.log("🔄 Skipping SKU analysis - already fetched for this source with same dimensions");
          return;
        }
-       console.log("🔄 Calling displaySkus() - dimension mapping changed or new data source");
        lastFetchedSource.current = settings.dataSource;
        lastDimensionMapString.current = dimensionMapString;
        displaySkus();
-     } else {
-       console.log("🔄 No mapped identifiers, skipping SKU analysis");
      }
      // eslint-disable-next-line react-hooks/exhaustive-deps
    }, [settings.dataSource, hasMappedIdentifiers, skuRows.length, dimensionMap]);
@@ -923,47 +908,59 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const handleChartTypeChange = (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => {
     setChartType(newType);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { chartType: newType });
+    onUpdateSettings({ chartType: newType });
   };
 
   // Handle chart theme change
   const handleChartThemeChange = (newTheme: string) => {
     setChartTheme(newTheme);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { chartTheme: newTheme });
+    onUpdateSettings({ chartTheme: newTheme });
   };
 
   // Handle chart sort order change
   const handleChartSortOrderChange = (order: 'asc' | 'desc' | null) => {
     setChartSortOrder(order);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { chartSortOrder: order });
+    onUpdateSettings({ chartSortOrder: order });
   };
 
   // Handle data labels toggle
   const handleDataLabelsToggle = (show: boolean) => {
     setShowDataLabels(show);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { showDataLabels: show });
+    onUpdateSettings({ showDataLabels: show });
   };
 
   // Handle axis labels toggle
-  const handleAxisLabelsToggle = (show: boolean) => {
-    setShowAxisLabels(show);
+  // const handleAxisLabelsToggle = (show: boolean) => {
+  //   setShowAxisLabels(show);
+  //   // Save to global settings to persist configuration
+  //   onUpdateSettings({ showAxisLabels: show });
+  // };
+
+  const handleXAxisLabelsToggle = (show: boolean) => {
+    setShowXAxisLabels(show);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { showAxisLabels: show });
+    onUpdateSettings({ showXAxisLabels: show });
+  };
+
+  const handleYAxisLabelsToggle = (show: boolean) => {
+    setShowYAxisLabels(show);
+    // Save to global settings to persist configuration
+    onUpdateSettings({ showYAxisLabels: show });
   };
 
   const handleGridToggle = (show: boolean) => {
     setShowGrid(show);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { showGrid: show });
+    onUpdateSettings({ showGrid: show });
   };
 
   const handleLegendToggle = (show: boolean) => {
     setShowLegend(show);
     // Save to global settings to persist configuration
-    updateSettings(atomId, { showLegend: show });
+    onUpdateSettings({ showLegend: show });
   };
 
   // Handle metric graph expansion
@@ -1192,7 +1189,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 type: chartState.chartType,
                 theme: chartState.theme,
                 showLegend: chartState.showLegend,
-                showAxisLabels: chartState.showAxisLabels,
+                // showAxisLabels: chartState.showAxisLabels,
+                showXAxisLabels: chartState.showXAxisLabels,
+                showYAxisLabels: chartState.showYAxisLabels,
                 showDataLabels: chartState.showDataLabels,
                 showGrid: chartState.showGrid,
                 xField: chartState.xAxisField,
@@ -1274,7 +1273,9 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 chartType,
                 theme: chartTheme,
                 showDataLabels,
-                showAxisLabels,
+                // showAxisLabels,
+                showXAxisLabels,
+                showYAxisLabels,
                 showGrid,
                 showLegend,
                 xAxisField,
@@ -1356,7 +1357,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       dimensionMap,
       exhibitionSelections,
       onUpdateSettings,
-      showAxisLabels,
+      showXAxisLabels,
+      showYAxisLabels,
       showDataLabels,
       statDataMap,
       xAxisField,
@@ -1521,10 +1523,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
           return arrowResult;
         }
       } catch (err) {
-        console.warn(
-          "Arrow dataset load failed in Feature Overview, falling back to cached CSV",
-          err,
-        );
       }
     }
 
@@ -1537,9 +1535,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     numericColumns: Set<string>,
     columnOrder: string[],
   ): Record<string, any>[] => {
-    console.log("🔄 Aggregating SKU data with dimensions:", dimensionColumns);
-    console.log("🔄 Input rows count:", rows.length);
-    
     if (dimensionColumns.length === 0) {
       return rows.map((row, index) => ({ id: index + 1, ...row }));
     }
@@ -1629,26 +1624,19 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
 
       return result;
     });
-    
-    console.log("🔄 Aggregated result count:", Array.from(aggregates.values()).length);
-    console.log("🔄 Final aggregated data:", Array.from(aggregates.values()).map(entry => entry.base));
   };
 
   const displaySkus = async () => {
     if (!settings.dataSource || !hasMappedIdentifiers) {
-      console.warn("displaySkus called without data source or mapped identifiers");
       return;
     }
     setError(null);
     try {
-      console.log("🔎 loading dataset for", settings.dataSource);
       const dimensionColumns = Object.values(dimensionMap)
         .flat()
         .map((col) => (typeof col === "string" ? col.toLowerCase() : ""))
         .filter((col) => col);
       
-      console.log("📊 Dimension columns for SKU analysis:", dimensionColumns);
-      console.log("📊 Current dimensionMap:", dimensionMap);
 
       const loaded = await loadSkuDataset(dimensionColumns);
       const rows = Array.isArray(loaded.rows) ? loaded.rows : [];
@@ -1725,7 +1713,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
       });
       logSessionState(user?.id);
     } catch (e: any) {
-      console.error("⚠️ failed to display SKUs", e);
       setError(e.message || "Error displaying SKUs");
       logSessionState(user?.id);
     }
@@ -2362,14 +2349,18 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                                     xAxisLabel={settings.xAxis || "Date"}
                                                                     yAxisLabel={m || "Value"}
                                                                     showDataLabels={showDataLabels}
-                                                                    showAxisLabels={showAxisLabels}
+                                                                    // showAxisLabels={showAxisLabels}
+                                                                    showXAxisLabels={showXAxisLabels}
+                                                                    showYAxisLabels={showYAxisLabels}
                                                                     showGrid={showGrid}
                                                                     showLegend={showLegend}
                                                                     theme={chartTheme}
                                                                     onChartTypeChange={handleChartTypeChange}
                                                                     onThemeChange={handleChartThemeChange}
                                                                     onDataLabelsToggle={handleDataLabelsToggle}
-                                                                    onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                                    // onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                                    onXAxisLabelsToggle={handleXAxisLabelsToggle}
+                                                                    onYAxisLabelsToggle={handleYAxisLabelsToggle}
                                                                     onGridToggle={handleGridToggle}
                                                                     onLegendToggle={handleLegendToggle}
                                                                     sortOrder={chartSortOrder}
@@ -2402,14 +2393,18 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                               xAxisLabel={settings.xAxis || "Date"}
                                                               yAxisLabel={m || "Value"}
                                                               showDataLabels={showDataLabels}
-                                                              showAxisLabels={showAxisLabels}
+                                                              // showAxisLabels={showAxisLabels}
+                                                              showXAxisLabels={showXAxisLabels}
+                                                              showYAxisLabels={showYAxisLabels}
                                                               showGrid={showGrid}
                                                               showLegend={showLegend}
                                                               theme={chartTheme}
                                                               onChartTypeChange={handleChartTypeChange}
                                                               onThemeChange={handleChartThemeChange}
                                                               onDataLabelsToggle={handleDataLabelsToggle}
-                                                              onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                              // onAxisLabelsToggle={handleAxisLabelsToggle}
+                                                              onXAxisLabelsToggle={handleXAxisLabelsToggle}
+                                                              onYAxisLabelsToggle={handleYAxisLabelsToggle}
                                                               onGridToggle={handleGridToggle}
                                                               onLegendToggle={handleLegendToggle}
                                                               sortOrder={chartSortOrder}

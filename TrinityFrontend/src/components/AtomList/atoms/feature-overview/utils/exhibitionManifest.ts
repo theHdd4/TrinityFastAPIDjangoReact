@@ -24,7 +24,9 @@ export type ManifestChartRendererProps = {
   theme?: string;
   title?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   xAxisLabel?: string;
@@ -84,7 +86,9 @@ export const buildChartRendererPropsFromManifest = (
     theme: manifest.chart.theme,
     title: manifest.label ?? manifest.metric,
     showLegend: manifest.chart.showLegend,
-    showAxisLabels: manifest.chart.showAxisLabels,
+    // showAxisLabels: manifest.chart.showAxisLabels,
+    showXAxisLabels: manifest.chart.showXAxisLabels,
+    showYAxisLabels: manifest.chart.showYAxisLabels,
     showDataLabels: manifest.chart.showDataLabels,
     showGrid: manifest.chart.showGrid,
     xAxisLabel: manifest.chart.xAxisLabel,

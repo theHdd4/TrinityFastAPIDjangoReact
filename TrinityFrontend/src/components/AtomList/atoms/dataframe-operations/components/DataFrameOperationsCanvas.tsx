@@ -886,6 +886,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [savedFiles, setSavedFiles] = useState<any[]>([]);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveFileName, setSaveFileName] = useState('');
+  const [showOverwriteConfirmDialog, setShowOverwriteConfirmDialog] = useState(false);
 
   // Add local state for editing value
   const [editingCellValue, setEditingCellValue] = useState<string>('');
@@ -1132,14 +1133,25 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     }
   };
 
-  // Save to original file (update the input file)
-  const handleSaveToOriginalFile = async () => {
+  // Show confirmation dialog before saving to original file
+  const handleSaveToOriginalFile = () => {
+    if (!data) return;
+    if (!settings.selectedFile) {
+      toast({ title: 'Error', description: 'No input file found', variant: 'destructive' });
+      return;
+    }
+    setShowOverwriteConfirmDialog(true);
+  };
+
+  // Save to original file (update the input file) - called after confirmation
+  const confirmOverwriteSave = async () => {
     if (!data) return;
     if (!settings.selectedFile) {
       toast({ title: 'Error', description: 'No input file found', variant: 'destructive' });
       return;
     }
     
+    setShowOverwriteConfirmDialog(false);
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
@@ -5365,6 +5377,47 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Overwrite Confirmation Dialog */}
+      <Dialog open={showOverwriteConfirmDialog} onOpenChange={setShowOverwriteConfirmDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Overwrite</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm text-gray-700 mb-2">
+                  Are you sure you want to save the changes to the original file?
+                </p>
+                <p className="text-sm font-medium text-gray-900 mb-1">
+                  File: {settings.selectedFile}
+                </p>
+                <p className="text-xs text-gray-600">
+                  This action will overwrite the original file and cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowOverwriteConfirmDialog(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmOverwriteSave}
+              disabled={saveLoading}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Yes, Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>
