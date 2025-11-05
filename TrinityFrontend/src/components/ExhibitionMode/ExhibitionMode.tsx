@@ -22,8 +22,8 @@ import { OperationsPalette } from './components/operationsPalette';
 import { SlideNavigation } from './components/SlideNavigation';
 import { SlideThumbnails } from './components/SlideThumbnails';
 import { SlideNotes } from './components/SlideNotes';
-import { GridView } from './components/GridView';
-import { ExportDialog } from './components/ExportDialog';
+import { GridViewPanel } from './components/Staging Palette/GridView';
+import { ExportDialog } from './components/Staging Palette/Export';
 import { ShareDialog } from './components/ShareDialog';
 import { ImagePanel, type ImageSelectionRequest } from './components/Images';
 import { cn } from '@/lib/utils';
@@ -198,7 +198,6 @@ const ExhibitionMode = () => {
     | null
   >(null);
   const [showThumbnails, setShowThumbnails] = useState(false);
-  const [showGridView, setShowGridView] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
   const [isSaving, setIsSaving] = useState(false);
@@ -206,6 +205,7 @@ const ExhibitionMode = () => {
   const [isCatalogueCollapsed, setIsCatalogueCollapsed] = useState(false);
   const [operationsPanelState, setOperationsPanelState] = useState<
     | { type: 'custom'; node: ReactNode }
+    | { type: 'grid-view' }
     | { type: 'notes' }
     | { type: 'shapes' }
     | { type: 'images' }
@@ -1444,6 +1444,25 @@ const ExhibitionMode = () => {
     setOperationsPanelState(prev => (prev?.type === 'themes' ? null : prev));
   }, []);
 
+  const handleOpenGridViewPanel = useCallback(() => {
+    if (exhibitedCards.length === 0) {
+      return;
+    }
+    setOperationsPanelState({ type: 'grid-view' });
+  }, [exhibitedCards.length]);
+
+  const handleCloseGridViewPanel = useCallback(() => {
+    setOperationsPanelState(prev => (prev?.type === 'grid-view' ? null : prev));
+  }, []);
+
+  const handleGridViewPanelSlideSelect = useCallback(
+    (index: number) => {
+      handleSlideSelection(index);
+      setOperationsPanelState(null);
+    },
+    [handleSlideSelection],
+  );
+
   const handleImagePanelSelect = useCallback(
     (selections: ImageSelectionRequest[]) => {
       if (!canEdit || selections.length === 0) {
@@ -2020,6 +2039,15 @@ const ExhibitionMode = () => {
             onClose={handleCloseNotesPanel}
           />
         );
+      case 'grid-view':
+        return (
+          <GridViewPanel
+            cards={exhibitedCards}
+            currentSlide={currentSlide}
+            onSlideSelect={handleGridViewPanelSlideSelect}
+            onClose={handleCloseGridViewPanel}
+          />
+        );
       case 'shapes':
         return (
           <ShapesPanel
@@ -2090,6 +2118,7 @@ const ExhibitionMode = () => {
     currentPresentationSettings,
     currentSlide,
     exhibitedCards,
+    handleCloseGridViewPanel,
     handleCloseImagesPanel,
     handleCloseNotesPanel,
     handleCloseSettingsPanel,
@@ -2097,6 +2126,7 @@ const ExhibitionMode = () => {
     handleCloseShapesPanel,
     handleCloseThemesPanel,
     handleCloseChartsPanel,
+    handleGridViewPanelSlideSelect,
     handleImagePanelSelect,
     handleNotesChange,
     handlePresentationChange,
@@ -2163,7 +2193,6 @@ const ExhibitionMode = () => {
                 <button
                   type="button"
                   onClick={() => {
-                    setShowGridView(false);
                     setShowThumbnails(current => !current);
                   }}
                   className={cn(
@@ -2330,7 +2359,7 @@ const ExhibitionMode = () => {
         {!isPresentationView && (
           <OperationsPalette
             onExport={() => setIsExportOpen(true)}
-            onGridView={() => setShowGridView(true)}
+            onGridView={handleOpenGridViewPanel}
             onCreateTextBox={handleCreateTextBox}
             onCreateTable={handleCreateTable}
             onOpenShapesPanel={handleOpenShapesPanel}
@@ -2354,7 +2383,7 @@ const ExhibitionMode = () => {
           if (isSlideshowActive) {
             handleStopSlideshow();
           }
-          setShowGridView(true);
+          handleOpenGridViewPanel();
         }}
         onExport={() => {
           if (isSlideshowActive) {
@@ -2376,18 +2405,6 @@ const ExhibitionMode = () => {
         }}
         onSlideshowSettingsChange={handleSlideshowSettingsChange}
       />
-
-      {showGridView && (
-        <GridView
-          cards={exhibitedCards}
-          currentSlide={currentSlide}
-          onSlideSelect={index => {
-            handleSlideSelection(index);
-            setShowGridView(false);
-          }}
-          onClose={() => setShowGridView(false)}
-        />
-      )}
 
       <ExportDialog
         open={isExportOpen}

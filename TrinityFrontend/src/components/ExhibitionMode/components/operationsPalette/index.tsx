@@ -1,5 +1,4 @@
 import React, { ReactNode, useCallback, useMemo } from 'react';
-import { Layers, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -13,6 +12,9 @@ import { createChartsOperation } from './operations/charts';
 import { createTemplatesTool } from './tools/templates';
 import { createThemesTool } from './tools/themes';
 import { createSettingsTool } from './tools/settings';
+import type { StagingPaletteFeature } from '../Staging Palette/types';
+import { createGridViewFeature } from '../Staging Palette/GridView';
+import { createExportFeature } from '../Staging Palette/Export';
 export const POSITION_PANEL_WIDTH = '22rem';
 
 interface OperationsPaletteProps {
@@ -82,6 +84,20 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
       createSettingsTool({ onOpenSettingsPanel, canEdit }),
     ],
     [canEdit, onOpenSettingsPanel, onOpenTemplatesPanel, onOpenThemesPanel],
+  );
+
+  const stagingFeatures = useMemo<StagingPaletteFeature[]>(
+    () => [
+      createGridViewFeature({
+        onActivate: typeof onGridView === 'function' ? onGridView : undefined,
+        isDisabled: typeof onGridView !== 'function',
+      }),
+      createExportFeature({
+        onActivate: typeof onExport === 'function' ? onExport : undefined,
+        isDisabled: typeof onExport !== 'function',
+      }),
+    ],
+    [onExport, onGridView],
   );
 
   const isPanelVisible = Boolean(positionPanel);
@@ -169,32 +185,25 @@ export const OperationsPalette: React.FC<OperationsPaletteProps> = ({
           <Separator className="w-6" />
 
           <div className="flex flex-col items-center gap-2 mt-auto">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg"
-              onClick={() => onGridView?.()}
-              title="Grid view"
-              type="button"
-            >
-              <Layers className="h-4 w-4 text-black dark:text-white" />
-              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-                Grid View
-              </span>
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg"
-              onClick={() => onExport?.()}
-              title="Export presentation"
-              type="button"
-            >
-              <Download className="h-4 w-4 text-black dark:text-white" />
-              <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-                Export
-              </span>
-            </Button>
+            {stagingFeatures.map(feature => (
+              <Button
+                key={feature.id}
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg',
+                  feature.isDisabled && 'pointer-events-none opacity-50',
+                )}
+                onClick={() => feature.onActivate?.()}
+                title={feature.label}
+                type="button"
+              >
+                <feature.icon className="h-4 w-4 text-black dark:text-white" />
+                <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+                  {feature.label}
+                </span>
+              </Button>
+            ))}
           </div>
         </div>
       </div>
