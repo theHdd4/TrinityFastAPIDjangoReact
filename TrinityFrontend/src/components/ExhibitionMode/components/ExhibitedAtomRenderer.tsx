@@ -945,10 +945,6 @@ const DefaultExhibitedAtom: React.FC<
 };
 
 const ExhibitedAtomRenderer: React.FC<ExhibitedAtomRendererProps> = ({ atom, variant = 'full' }) => {
-  console.log('🔍 ExhibitedAtomRenderer - atom:', atom);
-  console.log('🔍 ExhibitedAtomRenderer - atom.atomId:', atom.atomId);
-  console.log('🔍 ExhibitedAtomRenderer - atom.metadata:', atom.metadata);
-  
   const metadata = useMemo<AtomMetadata>(
     () => (isRecord(atom.metadata) ? atom.metadata : undefined),
     [atom.metadata],

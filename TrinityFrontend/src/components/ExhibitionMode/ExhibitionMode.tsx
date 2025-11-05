@@ -616,7 +616,6 @@ const ExhibitionMode = () => {
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.localStorage.getItem('laboratory-config')) {
-      console.log('Successfully Loaded Existing Project State');
       toast({ title: 'Successfully Loaded Existing Project State' });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

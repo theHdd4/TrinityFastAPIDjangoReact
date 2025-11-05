@@ -344,24 +344,21 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   const backendCombinations = data.backendCombinations || null;
   
   // Debug logging to see data flow
-  // console.log('Settings Component - Data from store:', {
-  //   backendIdentifiers: !!backendIdentifiers,
-  //   backendFeatures: !!backendFeatures,
-  //   backendCombinations: !!backendCombinations,
-  //   identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
-  //   featuresCount: backendFeatures?.all_unique_features?.length || 0,
-  //   combinationsCount: backendCombinations?.total_combinations || 0,
-  //   hasIdentifiers: !!data.identifiers?.length,
-  //   hasFeatures: !!data.features?.length,
-  //   hasCombinations: !!data.combinations?.length,
-  //   // ✅ NEW: Check if data is real or dummy
-  //   hasRealData: data.identifiers?.some(id => 
-  //     id.name && id.name !== 'Identifier 1' && id.name !== 'Identifier 2'
-  //   ) || false,
-  //   selectedCombinations: data.selectedCombinations?.length || 0,
-  //   fullDataObject: data,
-  //   dataBackendCombinations: data.backendCombinations
-  // });
+  console.log('🔍 Settings Component - Data from store:', {
+    backendIdentifiers: !!backendIdentifiers,
+    backendFeatures: !!backendFeatures,
+    backendCombinations: !!backendCombinations,
+    identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
+    featuresCount: backendFeatures?.all_unique_features?.length || 0,
+    combinationsCount: backendCombinations?.total_combinations || 0,
+    hasIdentifiers: !!data.identifiers?.length,
+    hasFeatures: !!data.features?.length,
+    hasCombinations: !!data.combinations?.length,
+    backendIdentifiersStructure: backendIdentifiers ? Object.keys(backendIdentifiers) : [],
+    backendFeaturesStructure: backendFeatures ? Object.keys(backendFeatures) : [],
+    currentIdentifiersLength: data.identifiers?.length || 0,
+    currentFeaturesLength: data.features?.length || 0
+  });
   
 
 
@@ -731,14 +728,16 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
   // ✅ SIMPLE LOG: Check if backend data is being received
   useEffect(() => {
-    // console.log('🔍 Backend Data Status:', {
-    //   hasIdentifiers: !!backendIdentifiers,
-    //   hasFeatures: !!backendFeatures,
-    //   hasCombinations: !!backendCombinations,
-    //   identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
-    //   featuresCount: backendFeatures?.all_unique_features?.length || 0,
-    //   combinationsCount: backendCombinations?.total_combinations || 0
-    // });
+    console.log('🔍 Backend Data Status:', {
+      hasIdentifiers: !!backendIdentifiers,
+      hasFeatures: !!backendFeatures,
+      hasCombinations: !!backendCombinations,
+      identifiersCount: backendIdentifiers?.identifier_columns?.length || 0,
+      featuresCount: backendFeatures?.all_unique_features?.length || 0,
+      combinationsCount: backendCombinations?.total_combinations || 0,
+      backendIdentifiersFull: backendIdentifiers,
+      backendFeaturesFull: backendFeatures
+    });
   }, [backendIdentifiers, backendFeatures, backendCombinations]);
 
   // ✅ SIMPLE LOG: Check if reference values are being received
@@ -748,16 +747,23 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
 
   // ✅ FIXED: Sync backend data with frontend settings when data changes
   useEffect(() => {
-    // ✅ SIMPLIFIED: No more dummy data checks - always sync when backend data is available
-    if (data.identifiers && data.identifiers.length > 0) {
-      // Continue with sync to ensure backend data is properly integrated
-    } else {
-      // Backend sync will proceed to load data
-    }
+    console.log('🔄 Sync effect triggered:', {
+      hasBackendIdentifiers: !!backendIdentifiers,
+      hasBackendFeatures: !!backendFeatures,
+      backendIdentifiersKeys: backendIdentifiers ? Object.keys(backendIdentifiers) : [],
+      backendFeaturesKeys: backendFeatures ? Object.keys(backendFeatures) : [],
+      identifierColumns: backendIdentifiers?.identifier_columns?.length || 0,
+      allUniqueFeatures: backendFeatures?.all_unique_features?.length || 0,
+      currentIdentifiersLength: data.identifiers?.length || 0,
+      currentFeaturesLength: data.features?.length || 0
+    });
 
-    if (backendIdentifiers && backendFeatures && 
-        backendIdentifiers.identifier_columns && 
-        backendFeatures.all_unique_features) {
+    // Check if we have backend data in the expected format
+    const hasIdentifierColumns = backendIdentifiers?.identifier_columns && Array.isArray(backendIdentifiers.identifier_columns) && backendIdentifiers.identifier_columns.length > 0;
+    const hasUniqueFeatures = backendFeatures?.all_unique_features && Array.isArray(backendFeatures.all_unique_features) && backendFeatures.all_unique_features.length > 0;
+
+    if (hasIdentifierColumns && hasUniqueFeatures) {
+      console.log('✅ Backend data structure is valid, syncing...');
       
       try {
         // Update identifiers based on backend data
@@ -771,21 +777,54 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
           }))
         }));
 
-        // Update features based on backend data
-        const newFeatures = (backendFeatures.all_unique_features || []).map((feature: string, index: number) => ({
-          id: `feature-${index + 1}`,
-          name: feature,
-          selected: index < 3// Select first 3 features by default
-        }));
-
-        // ✅ IMPROVED: Only update if we have new data and it's actually different to prevent infinite loop
-        const currentIdentifiers = data.identifiers || [];
+        // Update features based on backend data, but preserve user selections
         const currentFeatures = data.features || [];
+        const newFeatures = (backendFeatures.all_unique_features || []).map((feature: string, index: number) => {
+          // Try to find existing feature with same name to preserve selection state
+          const existingFeature = currentFeatures.find(f => f.name === feature);
+          return {
+            id: existingFeature?.id || `feature-${index + 1}`,
+            name: feature,
+            // Preserve user selection if feature exists, otherwise default to first 3
+            selected: existingFeature !== undefined ? existingFeature.selected : (index < 3)
+          };
+        });
+
+        console.log('🔄 Converted data:', {
+          newIdentifiersCount: newIdentifiers.length,
+          newFeaturesCount: newFeatures.length,
+          firstIdentifier: newIdentifiers[0],
+          firstFeature: newFeatures[0],
+          preservedSelections: newFeatures.filter(f => currentFeatures.some(cf => cf.name === f.name && cf.selected === f.selected)).length
+        });
+
+        // ✅ IMPROVED: Only sync if we don't have features yet, or if feature names changed
+        const currentIdentifiers = data.identifiers || [];
         
-        const identifiersChanged = JSON.stringify(newIdentifiers) !== JSON.stringify(currentIdentifiers);
-        const featuresChanged = JSON.stringify(newFeatures) !== JSON.stringify(currentFeatures);
+        // Check if identifiers changed (by name, not selection state)
+        const currentIdentifierNames = currentIdentifiers.map(id => id.name).sort();
+        const newIdentifierNames = newIdentifiers.map(id => id.name).sort();
+        const identifiersChanged = JSON.stringify(currentIdentifierNames) !== JSON.stringify(newIdentifierNames);
         
-        if (newIdentifiers.length > 0 && newFeatures.length > 0 && (identifiersChanged || featuresChanged)) {
+        // Check if features changed (by name, not selection state)
+        const currentFeatureNames = currentFeatures.map(f => f.name).sort();
+        const newFeatureNames = newFeatures.map(f => f.name).sort();
+        const featuresChanged = JSON.stringify(currentFeatureNames) !== JSON.stringify(newFeatureNames);
+        
+        // Only sync if we don't have data OR if the feature/identifier names changed (new data from backend)
+        const shouldSync = !currentFeatures.length || !currentIdentifiers.length || identifiersChanged || featuresChanged;
+        
+        console.log('🔄 Change detection:', {
+          identifiersChanged,
+          featuresChanged,
+          currentIdentifiersLength: currentIdentifiers.length,
+          currentFeaturesLength: currentFeatures.length,
+          shouldSync
+        });
+        
+        if (newIdentifiers.length > 0 && newFeatures.length > 0 && shouldSync) {
+          console.log('✅ Updating identifiers and features in store...');
+          
           // ✅ FIXED: Update both global data and current scenario data
           const updateData: Partial<SettingsType> = {
             identifiers: newIdentifiers,
@@ -805,18 +844,28 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
             }
           }
           
+          console.log('🔄 Calling onDataChange with:', {
+            identifiersCount: updateData.identifiers?.length,
+            featuresCount: updateData.features?.length,
+            hasScenarios: !!updateData.scenarios
+          });
+          
           onDataChange(updateData);
+        } else {
+          console.log('⏭️ Skipping update - no changes detected or empty data');
         }
       } catch (error) {
-        // console.error('❌ Error syncing backend data:', error);
+        console.error('❌ Error syncing backend data:', error);
       }
     } else {
-      // ✅ NEW: If we have backend data but it's not being used, force a sync
-      if (backendIdentifiers && backendFeatures && (!data.identifiers || data.identifiers.length === 0)) {
-        // This will trigger the sync logic in the next render cycle
-      }
+      console.log('⚠️ Backend data structure issue:', {
+        hasIdentifierColumns,
+        hasUniqueFeatures,
+        backendIdentifiersType: typeof backendIdentifiers,
+        backendFeaturesType: typeof backendFeatures
+      });
     }
-  }, [backendIdentifiers, backendFeatures, data.identifiers]); // ✅ FIXED: Removed data.features - features shouldn't trigger combination regeneration
+  }, [backendIdentifiers, backendFeatures]); // ✅ FIXED: Removed data.identifiers and data.features to prevent overwriting user selections
 
 
   // Initialize filters when aggregated views change
@@ -1176,9 +1225,17 @@ export const ScenarioPlannerSettings: React.FC<ScenarioPlannerSettingsProps> = (
   };
 
   const toggleFeature = (featureId: string) => {
+    console.log('🔄 toggleFeature called:', {
+      featureId,
+      currentFeatures: data.features?.map(f => ({ id: f.id, name: f.name, selected: f.selected }))
+    });
+    
     const updatedFeatures = (data.features || []).map(feature =>
       feature.id === featureId ? { ...feature, selected: !feature.selected } : feature
     );
+    
+    console.log('🔄 Updated features:', updatedFeatures.map(f => ({ id: f.id, name: f.name, selected: f.selected })));
+    
     onDataChange({ features: updatedFeatures });
   };
 

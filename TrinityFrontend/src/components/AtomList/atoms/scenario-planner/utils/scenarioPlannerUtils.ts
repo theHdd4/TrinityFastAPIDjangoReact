@@ -308,9 +308,15 @@ export const updateCurrentScenarioData = (
 };
 
 export const createNewScenario = (settings: ScenarioPlannerSettings, scenarioId: string) => {
+  // ✅ FIXED: Ensure allScenarios is always an array
+  const currentAllScenarios = Array.isArray(settings.allScenarios) 
+    ? settings.allScenarios 
+    : (settings.scenarios ? Object.keys(settings.scenarios) : ['scenario-1']);
+  
   // ✅ NEW: Create fresh scenario structure without copying data
   return {
     ...settings,
+    allScenarios: currentAllScenarios.includes(scenarioId) ? currentAllScenarios : [...currentAllScenarios, scenarioId],
     scenarios: {
       ...settings.scenarios,
       [scenarioId]: {
@@ -375,9 +381,15 @@ export const duplicateCurrentScenario = (settings: ScenarioPlannerSettings, newS
   duplicatedScenarioData.viewResults = {}; // Clear all view results
   duplicatedScenarioData.selectedView = 'view-1'; // Reset to View 1
   
+  // ✅ FIXED: Ensure allScenarios is always an array
+  const currentAllScenarios = Array.isArray(settings.allScenarios) 
+    ? settings.allScenarios 
+    : (settings.scenarios ? Object.keys(settings.scenarios) : ['scenario-1']);
+  
   // Keep all the configuration but clear the results
   return {
     ...settings,
+    allScenarios: currentAllScenarios.includes(newScenarioId) ? currentAllScenarios : [...currentAllScenarios, newScenarioId],
     scenarios: {
       ...settings.scenarios,
       [newScenarioId]: duplicatedScenarioData
@@ -388,8 +400,13 @@ export const duplicateCurrentScenario = (settings: ScenarioPlannerSettings, newS
 
 // ✅ NEW: Enhanced function to add a new scenario by duplicating current one
 export const addNewScenario = (settings: ScenarioPlannerSettings, newScenarioId: string) => {
+  // ✅ FIXED: Ensure allScenarios is always an array
+  const currentAllScenarios = Array.isArray(settings.allScenarios) 
+    ? settings.allScenarios 
+    : (settings.scenarios ? Object.keys(settings.scenarios) : ['scenario-1']);
+  
   // 1. Add to allScenarios array
-  const updatedAllScenarios = [...settings.allScenarios, newScenarioId];
+  const updatedAllScenarios = [...currentAllScenarios, newScenarioId];
   
   // ✅ CHANGED: Duplicate the current scenario instead of creating fresh one
   const updatedSettings = duplicateCurrentScenario(settings, newScenarioId);
@@ -402,13 +419,18 @@ export const addNewScenario = (settings: ScenarioPlannerSettings, newScenarioId:
 
 // ✅ NEW: Function to remove a scenario and clean up its data
 export const removeScenario = (settings: ScenarioPlannerSettings, scenarioId: string) => {
+  // ✅ FIXED: Ensure allScenarios is always an array
+  const currentAllScenarios = Array.isArray(settings.allScenarios) 
+    ? settings.allScenarios 
+    : (settings.scenarios ? Object.keys(settings.scenarios) : ['scenario-1']);
+  
   // Don't allow removing the last scenario
-  if (settings.allScenarios.length <= 1) {
+  if (currentAllScenarios.length <= 1) {
     return settings;
   }
   
   // 1. Remove from allScenarios array
-  const updatedAllScenarios = settings.allScenarios.filter(id => id !== scenarioId);
+  const updatedAllScenarios = currentAllScenarios.filter(id => id !== scenarioId);
   
   // 2. Remove scenario data
   const updatedScenarios = { ...settings.scenarios };
