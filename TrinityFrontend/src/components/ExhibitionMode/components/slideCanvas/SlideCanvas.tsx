@@ -3897,6 +3897,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onAdd2Rows={() => addRowsToTable(object.id, 2)}
                       onToolbarStateChange={node => handleTextToolbarStateChange(object.id, node)}
                       onInteract={onInteract}
+                      onBringToFront={() => handleLayerAction('front', [object.id])}
+                      onBringForward={() => handleLayerAction('forward', [object.id])}
+                      onSendBackward={() => handleLayerAction('backward', [object.id])}
+                      onSendToBack={() => handleLayerAction('back', [object.id])}
                       className="h-full w-full"
                     />
                   ) : isShapeObject ? (

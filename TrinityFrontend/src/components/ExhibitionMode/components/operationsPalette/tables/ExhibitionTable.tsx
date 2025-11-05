@@ -53,6 +53,10 @@ export interface ExhibitionTableProps {
   onToolbarStateChange?: (toolbar: React.ReactNode | null) => void;
   onInteract?: () => void;
   onStyleChange?: (styleId: string) => void;
+  onBringToFront?: () => void;
+  onBringForward?: () => void;
+  onSendBackward?: () => void;
+  onSendToBack?: () => void;
 }
 
 const noop = () => {};
@@ -657,6 +661,10 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onToolbarStateChange,
   onInteract,
   onStyleChange = noop,
+  onBringToFront,
+  onBringForward,
+  onSendBackward,
+  onSendToBack,
 }) => {
   const [internalSelection, setInternalSelection] = useState<TableSelection | null>(null);
   const [toolbarFormatting, setToolbarFormatting] = useState<TableCellFormatting>(DEFAULT_CELL_FORMATTING);
@@ -1272,6 +1280,10 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
         onAddRow={onAddRow}
         onAdd2Rows={onAdd2Rows}
         onSelectStyle={onStyleChange}
+        onBringToFront={onBringToFront}
+        onBringForward={onBringForward}
+        onSendBackward={onSendBackward}
+        onSendToBack={onSendToBack}
       />
     </ContextMenu>
   );
