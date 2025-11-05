@@ -70,11 +70,11 @@ class TextCleaner:
             (r'^#{1,6}\s*', ''),  # Remove markdown headers
             (r'#{1,6}\s*', ''),   # Remove markdown headers anywhere
             
-            # Bold and italic (convert to HTML for better display)
-            (r'\*\*([^*]+)\*\*', r'<strong>\1</strong>'),
-            (r'\*([^*]+)\*', r'<em>\1</em>'),
-            (r'__([^_]+)__', r'<strong>\1</strong>'),
-            (r'_([^_]+)_', r'<em>\1</em>'),
+            # Bold and italic (keep as plain text - NO HTML)
+            (r'\*\*([^*]+)\*\*', r'\1'),  # Remove ** markdown bold
+            (r'\*([^*]+)\*', r'\1'),       # Remove * markdown italic
+            (r'__([^_]+)__', r'\1'),       # Remove __ markdown bold
+            (r'_([^_]+)_', r'\1'),         # Remove _ markdown italic
             
             # Lists
             (r'^\s*[-*+]\s*', '• '),  # Convert bullet lists
@@ -82,6 +82,19 @@ class TextCleaner:
             
             # Links
             (r'\[([^\]]+)\]\([^)]+\)', r'\1'),  # Remove markdown links
+        ]
+        
+        # HTML tag patterns (remove any HTML tags)
+        self.html_patterns = [
+            (r'<strong>(.*?)</strong>', r'\1'),  # Remove strong tags
+            (r'<b>(.*?)</b>', r'\1'),            # Remove bold tags
+            (r'<em>(.*?)</em>', r'\1'),          # Remove em tags
+            (r'<i>(.*?)</i>', r'\1'),            # Remove italic tags
+            (r'<u>(.*?)</u>', r'\1'),            # Remove underline tags
+            (r'<span[^>]*>(.*?)</span>', r'\1'), # Remove span tags
+            (r'<div[^>]*>(.*?)</div>', r'\1'),   # Remove div tags
+            (r'<p>(.*?)</p>', r'\1'),            # Remove p tags
+            (r'<[^>]+>', ''),                    # Remove any remaining HTML tags
         ]
         
         self.cleanup_patterns = [
@@ -104,13 +117,16 @@ class TextCleaner:
         # Step 1: Remove think tags
         text = self._remove_think_tags(text)
         
-        # Step 2: Handle LaTeX
+        # Step 2: Remove HTML tags
+        text = self._clean_html(text)
+        
+        # Step 3: Handle LaTeX
         text = self._clean_latex(text)
         
-        # Step 3: Handle markdown
+        # Step 4: Handle markdown
         text = self._clean_markdown(text)
         
-        # Step 4: Final cleanup
+        # Step 5: Final cleanup
         text = self._final_cleanup(text)
         
         return text.strip()
@@ -119,6 +135,12 @@ class TextCleaner:
         """Remove think tags from text."""
         for pattern in self.think_patterns:
             text = re.sub(pattern, '', text, flags=re.DOTALL | re.IGNORECASE)
+        return text
+    
+    def _clean_html(self, text: str) -> str:
+        """Remove HTML tags from text."""
+        for pattern, replacement in self.html_patterns:
+            text = re.sub(pattern, replacement, text, flags=re.DOTALL | re.IGNORECASE)
         return text
     
     def _clean_latex(self, text: str) -> str:
@@ -158,7 +180,7 @@ class TextCleaner:
         return text.strip()
     
     def format_for_display(self, text: str) -> dict:
-        """Format text for display with HTML formatting."""
+        """Format text for display as plain text (no HTML)."""
         cleaned_text = self.clean_text(text)
         
         # Split into paragraphs
@@ -167,7 +189,7 @@ class TextCleaner:
         return {
             'text': cleaned_text,
             'paragraphs': paragraphs,
-            'has_formatting': '<strong>' in cleaned_text or '<em>' in cleaned_text
+            'has_formatting': False  # We always strip HTML now
         }
 
 # Global instance

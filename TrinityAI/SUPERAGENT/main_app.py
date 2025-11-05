@@ -58,8 +58,32 @@ except ImportError as e:
         SMART_WORKFLOW_AVAILABLE = False
         logger.warning(f"⚠️ SmartWorkflowAgent not available: {e} | {e2}")
 
+# Import the intelligent prompt classifier
+try:
+    from SUPERAGENT.prompt_classifier import PromptClassifier
+    PROMPT_CLASSIFIER_AVAILABLE = True
+    logger.info("✅ PromptClassifier imported successfully")
+except ImportError as e:
+    try:
+        from prompt_classifier import PromptClassifier
+        PROMPT_CLASSIFIER_AVAILABLE = True
+        logger.info("✅ PromptClassifier imported successfully (direct)")
+    except ImportError as e2:
+        PROMPT_CLASSIFIER_AVAILABLE = False
+        logger.warning(f"⚠️ PromptClassifier not available: {e} | {e2}")
+
 # Create router for SuperAgent endpoints
 router = APIRouter(prefix="/superagent", tags=["SuperAgent"])
+
+# Initialize prompt classifier globally (if available)
+prompt_classifier = None
+if PROMPT_CLASSIFIER_AVAILABLE:
+    try:
+        prompt_classifier = PromptClassifier()
+        logger.info("✅ Global PromptClassifier initialized")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to initialize PromptClassifier: {e}")
+        prompt_classifier = None
 
 class ChatRequest(BaseModel):
     message: str
@@ -723,8 +747,12 @@ Response:"""
             return self.get_fallback_response(message)
         
         try:
-            # Simple prompt - just send the message
+            # Simple prompt - just send the message with system instruction
             messages = [
+                {
+                    "role": "system", 
+                    "content": "You are a helpful AI assistant for a data analytics platform. Always respond in PLAIN TEXT without any HTML tags (<em>, <strong>, <b>, <i>, etc.). Keep responses clear and conversational."
+                },
                 {"role": "user", "content": message}
             ]
             
@@ -1177,15 +1205,56 @@ async def chat_with_superagent(request: ChatRequest):
             except Exception as e:
                 logger.warning(f"⚠️ Failed to enrich with file context: {e}")
         
-        # Check if this is a workflow request (data science operation)
-        message_lower = request.message.lower()
-        is_workflow_request = any(keyword in message_lower for keyword in [
-            'workflow', 'merge', 'concat', 'chart', 'graph', 'visualiz', 'plot',
-            'group', 'aggregate', 'explore', 'analyze', 'transform', 'dataframe',
-            'file', 'data', 'dataset', 'join', 'combine', 'uk mayo', 'uk beans'
-        ])
+        # Use intelligent classifier to determine if this needs a workflow or general response
+        classification_result = None
+        needs_workflow = False
         
-        if is_workflow_request:
+        if prompt_classifier:
+            try:
+                logger.info("🔍 Using intelligent prompt classifier")
+                classification_result = prompt_classifier.classify_prompt(
+                    user_prompt=request.message,
+                    file_context=file_context
+                )
+                
+                needs_workflow = classification_result.get("needs_workflow", False)
+                classification_type = classification_result.get("classification", "unknown")
+                confidence = classification_result.get("confidence", 0.0)
+                reasoning = classification_result.get("reasoning", "")
+                
+                logger.info(f"📊 Classification: {classification_type}")
+                logger.info(f"   Needs Workflow: {needs_workflow}")
+                logger.info(f"   Confidence: {confidence}")
+                logger.info(f"   Reasoning: {reasoning}")
+                
+                print("\n" + "🔍 "*40)
+                print("INTELLIGENT PROMPT CLASSIFICATION")
+                print("🔍 "*40)
+                print(f"📝 Prompt: {request.message}")
+                print(f"📊 Classification: {classification_type}")
+                print(f"🎯 Needs Workflow: {needs_workflow}")
+                print(f"💯 Confidence: {confidence}")
+                print(f"💭 Reasoning: {reasoning}")
+                print("="*80 + "\n")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Classifier failed, falling back to keyword check: {e}")
+                # Fallback to simple keyword check
+                message_lower = request.message.lower()
+                needs_workflow = any(keyword in message_lower for keyword in [
+                    'merge', 'concat', 'chart', 'graph', 'visualiz', 'plot',
+                    'group', 'aggregate', 'transform', 'join', 'combine'
+                ])
+        else:
+            # Fallback to simple keyword check if classifier not available
+            logger.warning("⚠️ Prompt classifier not available, using keyword check")
+            message_lower = request.message.lower()
+            needs_workflow = any(keyword in message_lower for keyword in [
+                'merge', 'concat', 'chart', 'graph', 'visualiz', 'plot',
+                'group', 'aggregate', 'transform', 'join', 'combine'
+            ])
+        
+        if needs_workflow:
             logger.info("🎯 Detected workflow request - generating workflow JSON")
             
             # Generate workflow using SmartWorkflowAgent
@@ -1233,9 +1302,71 @@ async def chat_with_superagent(request: ChatRequest):
                 response_text = smart_response + "\n\n" + json_module.dumps(workflow_json, indent=2)
                 return ChatResponse(response=response_text)
         else:
-            # Regular conversational request
-            logger.info("💬 Regular chat request")
-            # Use enriched message for regular chat too
+            # Regular conversational request or clarification needed
+            logger.info("💬 Regular chat request (no workflow needed)")
+            
+            # If we have classification results, use the response hint
+            if classification_result:
+                classification_type = classification_result.get("classification", "general_response")
+                response_hint = classification_result.get("response_hint", "")
+                
+                if classification_type == "clarification_needed":
+                    # Ask for clarification
+                    clarification_prompt = f"""The user said: "{request.message}"
+
+This request is too vague or unclear. Please ask the user for clarification about what they want to do.
+
+Response hint: {response_hint}
+
+IMPORTANT INSTRUCTIONS:
+- Use PLAIN TEXT only - NO HTML tags like <em>, <strong>, <b>, <i>, etc.
+- Reference our available ATOMS (data operations):
+  * Merge: Combine multiple files/datasets
+  * Filter: Filter data by conditions
+  * Chart Maker: Create visualizations
+  * Group By: Aggregate data
+  * Dataframe Operations: Transform columns, calculate statistics
+  * Explore: Analyze data patterns
+  * Concat: Stack datasets vertically
+
+Provide a helpful, friendly response that:
+1. Acknowledges their request
+2. Asks for more specific details
+3. Suggests which ATOMS they might want to use based on their goal
+
+Keep it conversational and helpful. Use plain text formatting only."""
+                    
+                    ai_response = llm_client.get_ai_response(clarification_prompt)
+                    return ChatResponse(response=ai_response)
+                
+                elif classification_type == "general_response":
+                    # General conversational response
+                    general_prompt = f"""The user said: "{request.message}"
+
+This is a general question or conversational message (not a data operation request).
+
+Response hint: {response_hint}
+
+IMPORTANT INSTRUCTIONS:
+- Use PLAIN TEXT only - NO HTML tags like <em>, <strong>, <b>, <i>, etc.
+- Focus on OUR PLATFORM'S capabilities using ATOMS (not generic tools like Pandas or Excel)
+- Be specific about what atoms are available
+
+AVAILABLE ATOMS (Data Operations):
+1. **Merge**: Combine multiple files/datasets by matching columns (like SQL JOIN)
+2. **Filter**: Filter rows based on conditions (e.g., sales > 1000, year = 2023)
+3. **Chart Maker**: Create visualizations (bar charts, line charts, scatter plots, etc.)
+4. **Group By**: Aggregate data by categories (sum, average, count, etc.)
+5. **Dataframe Operations**: Transform data (create columns, calculations, statistics)
+6. **Explore**: Analyze data patterns and correlations
+7. **Concat**: Stack multiple datasets vertically (combine rows)
+
+Provide a helpful, informative response. If they're asking about capabilities, explain which ATOMS they can use. If they mention analyzing data, guide them to specific atoms. Keep it friendly and conversational. Use plain text formatting only."""
+                    
+                    ai_response = llm_client.get_ai_response(general_prompt)
+                    return ChatResponse(response=ai_response)
+            
+            # Default: use enriched message for regular chat
             ai_response = llm_client.get_ai_response(enriched_message)
             return ChatResponse(response=ai_response)
         

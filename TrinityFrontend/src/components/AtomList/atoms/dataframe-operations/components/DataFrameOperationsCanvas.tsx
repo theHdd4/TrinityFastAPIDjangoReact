@@ -2313,16 +2313,41 @@ const handleHeaderClick = (header: string) => {
     resetSaveSuccess();
     // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
     const activeFileId = settings.fileId || fileId;
-    if (!data || !selectedColumn || !activeFileId) {
-      showValidationError('Please select a target column first');
+    
+    // 🔧 IMPROVED: Better error messages for debugging
+    if (!data) {
+      showValidationError('No data loaded. Please load a file first.');
+      console.error('[Formula] Cannot apply formula: No data loaded');
       return;
     }
+    
+    if (!selectedColumn) {
+      showValidationError('Please select a target column first');
+      console.error('[Formula] Cannot apply formula: No target column selected');
+      return;
+    }
+    
+    if (!activeFileId) {
+      showValidationError('File ID missing. Please reload the file and try again.');
+      console.error('[Formula] Cannot apply formula: Missing fileId', {
+        settingsFileId: settings.fileId,
+        propFileId: fileId,
+        activeFileId
+      });
+      return;
+    }
+    
     const trimmedFormula = formulaInput.trim();
     if (!trimmedFormula) {
       showValidationError('Please enter a formula');
       return;
     }
   
+    console.log('[Formula] 🚀 Applying formula:', {
+      fileId: activeFileId,
+      targetColumn: selectedColumn,
+      formula: trimmedFormula
+    });
   
   // Apply formula directly without queuing to test
   setFormulaLoading(true);
@@ -2335,18 +2360,38 @@ const handleHeaderClick = (header: string) => {
       const currentFilters = settings.filters || {};
       const currentSearchTerm = settings.searchTerm || '';
       
-      // Apply the formula to the original data (backend requirement)
-      // But we'll ensure the filtered view reflects the changes
+      // 🔧 CRITICAL: Apply the formula to the original data via backend endpoint
+      console.log('[Formula] 📡 Calling API endpoint: /apply_formula');
+      console.log('[Formula] Request payload:', {
+        df_id: activeFileId,
+        target_column: selectedColumn,
+        formula: trimmedFormula
+      });
+      
       const resp = await apiApplyFormula(activeFileId, selectedColumn, trimmedFormula);
+      console.log('[Formula] ✅ API response received:', resp);
+      
+      // 🔧 CRITICAL: Update fileId from response if provided (for future operations)
+      const updatedFileId = resp?.df_id || activeFileId;
+      if (updatedFileId && updatedFileId !== activeFileId) {
+        console.log('[Formula] 🔄 Updating fileId:', activeFileId, '→', updatedFileId);
+        onSettingsChange({ fileId: updatedFileId });
+      }
     
     // Preserve deleted columns by filtering out columns that were previously deleted
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
     const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
     
+    console.log('[Formula] 📊 Updating canvas with calculated values:', {
+      rows: filtered.rows.length,
+      headers: filtered.headers.length,
+      targetColumn: selectedColumn
+    });
+    
     onDataChange({
       headers: filtered.headers,
-      rows: filtered.rows,
+      rows: filtered.rows, // ✅ This contains the CALCULATED values from backend
       fileName: data.fileName,
       columnTypes: filtered.columnTypes,
       pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),

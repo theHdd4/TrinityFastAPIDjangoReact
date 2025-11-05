@@ -158,6 +158,7 @@ FETCH_ATOM_TO_ATOMID = {
     "createcolumn": "create-column",
     "create": "create-column",
     "groupbywtgavg": "groupby-wtg-avg",
+    "groupbywithwtgavg": "groupby-wtg-avg",  # 🔧 FIX: From fetch agent "GroupBy with Wtg Avg"
     "groupbywithweightedaverage": "groupby-wtg-avg",
     "merge": "merge",
     "concat": "concat",

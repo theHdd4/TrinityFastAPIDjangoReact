@@ -66,14 +66,13 @@ class DataFrameOperationsAgent:
             # Set environment context for dynamic path resolution
             self.set_context(client_name, app_name, project_name)
             
-            # Get or create session
+            # Get or create session (in-memory only - no disk storage)
             if not session_id:
                 session_id = f"df_ops_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
-            # Try to load existing session from disk
+            # Initialize session if not exists
             if session_id not in self.sessions:
-                if not self._load_session_from_disk(session_id):
-                    self.sessions[session_id] = []
+                self.sessions[session_id] = []
             
             # Add user message to session
             self.sessions[session_id].append({
@@ -82,6 +81,10 @@ class DataFrameOperationsAgent:
                 "timestamp": datetime.now().isoformat(),
                 "current_df_id": current_df_id
             })
+            
+            # Keep only recent messages to prevent memory bloat (last 50 messages)
+            if len(self.sessions[session_id]) > 50:
+                self.sessions[session_id] = self.sessions[session_id][-50:]
             
             # Load available files if not already loaded
             if not self.files_with_columns:
@@ -119,13 +122,51 @@ class DataFrameOperationsAgent:
             
             prompt = build_dataframe_operations_prompt(user_prompt, self.files_with_columns, context, current_df_state)
             logger.info(f"🔍 DataFrame Operations Process - Generated prompt length: {len(prompt)}")
+            logger.info("="*100)
+            logger.info("📤 SENDING TO LLM:")
+            logger.info("="*100)
+            logger.info(f"User Prompt: {user_prompt}")
+            logger.info(f"Available Files: {list(self.files_with_columns.keys())}")
+            logger.info(f"Context Length: {len(context)} characters")
+            logger.info("")
+            logger.info("📝 FULL COMPLETE PROMPT (ALL CHARACTERS):")
+            logger.info("="*100)
+            logger.info(prompt)
+            logger.info("="*100)
+            logger.info(f"Total Prompt Length: {len(prompt)} characters")
+            logger.info("="*100)
             
             llm_response = call_dataframe_operations_llm(self.api_url, self.model_name, self.bearer_token, prompt)
-            logger.info(f"🔍 DataFrame Operations Process - LLM response length: {len(llm_response)}")
+            
+            logger.info("="*100)
+            logger.info("📥 RECEIVED FROM LLM:")
+            logger.info("="*100)
+            logger.info(f"LLM Response Length: {len(llm_response)} characters")
+            logger.info(f"LLM Response Full Text:\n{llm_response}")
+            logger.info("="*100)
             
             
             result = extract_dataframe_operations_json(llm_response, self.files_with_columns)
-            logger.info(f"🔍 DataFrame Operations Process - Extracted result: {json.dumps(result, indent=2) if result else 'None'}")
+            
+            logger.info("="*100)
+            logger.info("🔍 JSON EXTRACTION RESULT:")
+            logger.info("="*100)
+            if result:
+                logger.info(f"✅ JSON Extracted Successfully!")
+                logger.info(f"Success: {result.get('success', False)}")
+                logger.info(f"Has dataframe_config: {'dataframe_config' in result}")
+                if 'dataframe_config' in result and 'operations' in result['dataframe_config']:
+                    operations = result['dataframe_config']['operations']
+                    logger.info(f"Number of operations: {len(operations)}")
+                    for i, op in enumerate(operations):
+                        logger.info(f"  Operation {i+1}: {op.get('api_endpoint', 'unknown')} - {op.get('operation_name', 'unknown')}")
+                        logger.info(f"    Parameters: {json.dumps(op.get('parameters', {}), indent=4)}")
+                logger.info(f"Smart Response: {result.get('smart_response', 'N/A')}")
+                logger.info(f"Full Extracted JSON:\n{json.dumps(result, indent=2)}")
+            else:
+                logger.error(f"❌ JSON Extraction Failed!")
+                logger.error(f"LLM Response that failed parsing:\n{llm_response}")
+            logger.info("="*100)
             
             
             if not result:
@@ -156,9 +197,6 @@ class DataFrameOperationsAgent:
                     "full_result": error_result
                 })
                 
-                # Save session to disk
-                self._save_session_to_disk(session_id)
-                
                 return error_result
             
             # Add session tracking
@@ -171,9 +209,6 @@ class DataFrameOperationsAgent:
                 "timestamp": datetime.now().isoformat(),
                 "full_result": result
             })
-            
-            # Save session to disk
-            self._save_session_to_disk(session_id)
             
             logger.info(f"Successfully generated DataFrame operations config for session {session_id}")
             return result
@@ -197,9 +232,6 @@ class DataFrameOperationsAgent:
                     "timestamp": datetime.now().isoformat(),
                     "full_result": error_result
                 })
-                
-                # Save session to disk
-                self._save_session_to_disk(session_id)
             
             return error_result
     
@@ -475,34 +507,14 @@ class DataFrameOperationsAgent:
         
         return "\n".join(context_parts)
     
-    def _save_session_to_disk(self, session_id: str):
-        """Save session to disk for persistence"""
-        try:
-            import os
-            sessions_dir = "sessions"
-            if not os.path.exists(sessions_dir):
-                os.makedirs(sessions_dir)
-            
-            session_file = os.path.join(sessions_dir, f"{session_id}.json")
-            with open(session_file, 'w') as f:
-                json.dump(self.sessions[session_id], f, indent=2)
-            
-            logger.info(f"Session {session_id} saved to disk")
-        except Exception as e:
-            logger.warning(f"Failed to save session {session_id} to disk: {e}")
-    
-    def _load_session_from_disk(self, session_id: str):
-        """Load session from disk if it exists"""
-        try:
-            import os
-            sessions_dir = "sessions"
-            session_file = os.path.join(sessions_dir, f"{session_id}.json")
-            
-            if os.path.exists(session_file):
-                with open(session_file, 'r') as f:
-                    self.sessions[session_id] = json.load(f)
-                logger.info(f"Session {session_id} loaded from disk with {len(self.sessions[session_id])} messages")
-                return True
-        except Exception as e:
-            logger.warning(f"Failed to load session {session_id} from disk: {e}")
+    def clear_session(self, session_id: str) -> bool:
+        """Clear a specific session from memory"""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            logger.info(f"Cleared session: {session_id}")
+            return True
         return False
+    
+    def get_all_sessions(self) -> List[str]:
+        """Get list of all active session IDs"""
+        return list(self.sessions.keys())
