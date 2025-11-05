@@ -3,11 +3,12 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw } from 'lucide-react';
+import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle } from 'lucide-react';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
 import StreamStepMonitor from './StreamStepMonitor';
+import StreamStepApproval from './StreamStepApproval';
 
 // FastAPI base URL
 const FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || 'http://localhost:8002';
@@ -66,6 +67,16 @@ interface Message {
   content: string;
   sender: 'user' | 'ai';
   timestamp: Date;
+  type?: 'text' | 'workflow_preview' | 'workflow_monitor' | 'step_approval';
+  data?: any; // For storing workflow/step data
+}
+
+interface Chat {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: Date;
+  sessionId?: string; // Backend session ID for this chat
 }
 
 interface StreamAIPanelProps {
@@ -74,36 +85,217 @@ interface StreamAIPanelProps {
 }
 
 export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollapsed, onToggle }) => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      content: "Hello! I'm Stream AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
-      sender: 'ai',
-      timestamp: new Date()
-    }
-  ]);
+  // Chat management
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string>('');
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [showChatHistory, setShowChatHistory] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(384); // Default 384px (w-96)
+  const [isPanelFrozen, setIsPanelFrozen] = useState(true);
+  const [isResizing, setIsResizing] = useState(false);
+  const [baseFontSize] = useState(14);
+  const [smallFontSize] = useState(12);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const resizeRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  
+  // WebSocket connection
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
   const [availableFiles, setAvailableFiles] = useState<any[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [panelWidth, setPanelWidth] = useState(384); // Default 384px (w-96)
-  const [isPanelFrozen, setIsPanelFrozen] = useState(true);
-  const [baseFontSize] = useState(14);
-  const [smallFontSize] = useState(12);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Workflow state
-  const [workflowPlan, setWorkflowPlan] = useState<any>(null);
-  const [showWorkflowPreview, setShowWorkflowPreview] = useState(false);
-  const [executionSteps, setExecutionSteps] = useState<any[]>([]);
-  const [currentExecutingStep, setCurrentExecutingStep] = useState(0);
-  const [showStepMonitor, setShowStepMonitor] = useState(false);
+  // Workflow state (for current active workflow only)
+  const [currentWorkflowMessageId, setCurrentWorkflowMessageId] = useState<string | null>(null);
+  const [originalPrompt, setOriginalPrompt] = useState('');
+  const [currentSessionId, setCurrentSessionId] = useState<string>('');
+  const [completedStepNumber, setCompletedStepNumber] = useState(0);
   
   // Laboratory store
   const { setCards, updateCard } = useLaboratoryStore();
+  
+  // Create new chat
+  const createNewChat = () => {
+    const newChatId = `stream_chat_${Date.now()}`;
+    const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const newChat: Chat = {
+      id: newChatId,
+      title: 'New Stream AI Chat',
+      messages: [
+        {
+          id: '1',
+          content: "Hello! I'm Stream AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+          sender: 'ai',
+          timestamp: new Date()
+        }
+      ],
+      createdAt: new Date(),
+      sessionId: newSessionId
+    };
+    
+    setChats(prev => [newChat, ...prev]);
+    setCurrentChatId(newChatId);
+    setMessages(newChat.messages);
+    setCurrentSessionId(newSessionId);
+    
+    // Close any existing WebSocket when creating new chat
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      wsConnection.close();
+      setWsConnection(null);
+    }
+    setCurrentWorkflowMessageId(null);
+  };
+  
+  // Load chats from localStorage on mount
+  useEffect(() => {
+    const loadChats = () => {
+      const savedChats = localStorage.getItem('stream-ai-chats');
+      const savedCurrentChatId = localStorage.getItem('stream-ai-current-chat-id');
+      
+      if (savedChats) {
+        try {
+          const parsedChats = JSON.parse(savedChats);
+          // Convert date strings back to Date objects
+          const chatsWithDates = parsedChats.map((chat: any) => ({
+            ...chat,
+            createdAt: new Date(chat.createdAt),
+            messages: chat.messages.map((msg: any) => ({
+              ...msg,
+              timestamp: new Date(msg.timestamp)
+            }))
+          }));
+          
+          setChats(chatsWithDates);
+          
+          if (savedCurrentChatId && chatsWithDates.find((c: Chat) => c.id === savedCurrentChatId)) {
+            setCurrentChatId(savedCurrentChatId);
+            const currentChat = chatsWithDates.find((c: Chat) => c.id === savedCurrentChatId);
+            if (currentChat) {
+              setMessages(currentChat.messages);
+            }
+          } else if (chatsWithDates.length > 0) {
+            setCurrentChatId(chatsWithDates[0].id);
+            setMessages(chatsWithDates[0].messages);
+          } else {
+            createNewChat();
+          }
+        } catch (e) {
+          console.error('Failed to load chats:', e);
+          createNewChat();
+        }
+      } else {
+        createNewChat();
+      }
+    };
+    
+    loadChats();
+    setIsInitialized(true);
+  }, []);
+  
+  // Save chats to localStorage
+  useEffect(() => {
+    if (chats.length > 0) {
+      localStorage.setItem('stream-ai-chats', JSON.stringify(chats));
+    }
+  }, [chats]);
+  
+  // Save current chat ID
+  useEffect(() => {
+    if (currentChatId) {
+      localStorage.setItem('stream-ai-current-chat-id', currentChatId);
+    }
+  }, [currentChatId]);
+  
+  // Save messages to current chat
+  useEffect(() => {
+    if (currentChatId && messages.length > 0) {
+      setChats(prev => prev.map(chat => 
+        chat.id === currentChatId 
+          ? { ...chat, messages, title: messages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || chat.title }
+          : chat
+      ));
+    }
+  }, [messages, currentChatId]);
+  
+  // Switch to a different chat
+  const switchToChat = (chatId: string) => {
+    setCurrentChatId(chatId);
+    const chat = chats.find(c => c.id === chatId);
+    if (chat) {
+      setMessages(chat.messages);
+      setCurrentSessionId(chat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+      
+      // Close existing WebSocket and reset workflow state when switching chats
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        wsConnection.close();
+        setWsConnection(null);
+      }
+      setCurrentWorkflowMessageId(null);
+      setIsLoading(false);
+    }
+    setShowChatHistory(false);
+  };
+  
+  // Delete current chat
+  const deleteCurrentChat = () => {
+    if (chats.length === 1) {
+      createNewChat();
+    } else {
+      const remainingChats = chats.filter(chat => chat.id !== currentChatId);
+      setChats(remainingChats);
+      setCurrentChatId(remainingChats[0].id);
+      setMessages(remainingChats[0].messages);
+    }
+  };
+  
+  // Resize handlers
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const newWidth = window.innerWidth - e.clientX;
+      setPanelWidth(Math.max(320, Math.min(800, newWidth)));
+    };
+    
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+    
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+  
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (isPanelFrozen) return;
+    e.preventDefault();
+    setIsResizing(true);
+  };
+  
+  // Update wsRef whenever wsConnection changes
+  useEffect(() => {
+    wsRef.current = wsConnection;
+  }, [wsConnection]);
+  
+  // Cleanup WebSocket ONLY on unmount, NOT on collapse
+  useEffect(() => {
+    return () => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        console.log('🧹 Stream AI unmounting, closing WebSocket');
+        wsRef.current.close();
+      }
+    };
+  }, []);
   
   // Auto-scroll
   useEffect(() => {
@@ -117,7 +309,9 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
     // Send approval message to backend via WebSocket
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
       wsConnection.send(JSON.stringify({
-        type: 'approve_plan'
+        type: 'approve_plan',
+        session_id: currentSessionId,
+        chat_id: currentChatId
       }));
       
       setShowWorkflowPreview(false);
@@ -142,7 +336,9 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
     // Send rejection message to backend via WebSocket
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
       wsConnection.send(JSON.stringify({
-        type: 'reject_plan'
+        type: 'reject_plan',
+        session_id: currentSessionId,
+        chat_id: currentChatId
       }));
       
       // Close WebSocket after rejection
@@ -162,6 +358,79 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
       timestamp: new Date()
     };
     setMessages(prev => [...prev, rejectMsg]);
+  };
+  
+  // Handle step approval (Accept/Reject/Add)
+  const handleStepAccept = () => {
+    console.log('✅ User accepted step, continuing to next step');
+    
+    // Send approval to continue to next step
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      wsConnection.send(JSON.stringify({
+        type: 'approve_step',
+        step_number: completedStepNumber,
+        session_id: currentSessionId,
+        chat_id: currentChatId
+      }));
+      
+      setShowStepApproval(false);
+      setIsLoading(true);
+    }
+  };
+  
+  const handleStepReject = () => {
+    console.log('❌ User rejected workflow at step', completedStepNumber);
+    
+    // Send rejection
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      wsConnection.send(JSON.stringify({
+        type: 'reject_workflow',
+        step_number: completedStepNumber,
+        session_id: currentSessionId,
+        chat_id: currentChatId
+      }));
+      
+      wsConnection.close();
+      setWsConnection(null);
+    }
+    
+    setShowStepApproval(false);
+    setIsLoading(false);
+    
+    const rejectMsg: Message = {
+      id: `step-reject-${Date.now()}`,
+      content: `❌ Workflow rejected at step ${completedStepNumber}. You can start a new workflow.`,
+      sender: 'ai',
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, rejectMsg]);
+  };
+  
+  const handleStepAdd = (additionalInfo: string) => {
+    console.log('➕ User added info at step', completedStepNumber, ':', additionalInfo);
+    
+    // Send ADD message with additional information
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      wsConnection.send(JSON.stringify({
+        type: 'add_info',
+        step_number: completedStepNumber,
+        additional_info: additionalInfo,
+        original_prompt: originalPrompt,
+        session_id: currentSessionId,
+        chat_id: currentChatId
+      }));
+      
+      setShowStepApproval(false);
+      setIsLoading(true);
+      
+      const addMsg: Message = {
+        id: `add-info-${Date.now()}`,
+        content: `➕ Processing additional information: "${additionalInfo}"...`,
+        sender: 'ai',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, addMsg]);
+    }
   };
   
   // Handle attach button click - load files when needed (EXACT Trinity AI pattern)
@@ -260,6 +529,16 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
     
+    // CRITICAL: Close any existing WebSocket before creating new one
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      console.log('🔌 Closing existing WebSocket before new prompt');
+      wsConnection.close();
+      setWsConnection(null);
+    }
+    
+    // Reset workflow tracking for new prompt
+    setCurrentWorkflowMessageId(null);
+    
     const userMessage: Message = {
       id: `user-${Date.now()}`,
       content: inputValue,
@@ -325,12 +604,17 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
         console.log('✅ WebSocket connected');
         updateProgress('\n\n✅ Connected! Generating plan...');
         
+        // Store original prompt for ADD functionality
+        setOriginalPrompt(userMessage.content);
+        
         // Send initial message with available files
         ws.send(JSON.stringify({
           message: userMessage.content,
           available_files: fileNames,  // Use freshly loaded files
           project_context: projectContext,
-          user_id: 'current_user'
+          user_id: 'current_user',
+          session_id: currentSessionId,  // Send session ID for chat context
+          chat_id: currentChatId
         }));
       };
       
@@ -346,45 +630,102 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
           case 'plan_generated':
             console.log('📋 Plan generated:', data.plan);
             
-            // Store workflow plan and show preview
-            setWorkflowPlan(data.plan);
-            setShowWorkflowPreview(true);
-            setIsLoading(false); // Stop loading to show preview
+            setIsLoading(false);
             
-            // Initialize execution steps
-            const steps = data.plan.workflow_steps.map((step: any) => ({
-              ...step,
-              status: 'pending'
-            }));
-            setExecutionSteps(steps);
-            
-            // Add message about plan generation
-            const planMsg: Message = {
-              id: `plan-${Date.now()}`,
-              content: `🎯 I've generated a ${data.plan.total_steps}-step workflow for you. Please review and approve to proceed.`,
+            // Add workflow preview as a message bubble
+            const workflowPreviewMsg: Message = {
+              id: `workflow-preview-${Date.now()}`,
+              content: '', // Content rendered by component
               sender: 'ai',
-              timestamp: new Date()
+              timestamp: new Date(),
+              type: 'workflow_preview',
+              data: {
+                plan: data.plan,
+                sequence_id: data.sequence_id,
+                steps: data.plan.workflow_steps.map((step: any) => ({
+                  ...step,
+                  status: 'pending'
+                }))
+              }
             };
-            setMessages(prev => [...prev, planMsg]);
             
-            // DON'T close WebSocket - keep it open for workflow execution
-            // User can approve and execution continues on same connection
+            // Store this workflow message ID for tracking updates
+            const thisWorkflowId = workflowPreviewMsg.id;
+            console.log(`📝 Created workflow message: ${thisWorkflowId}`);
+            
+            setMessages(prev => [...prev, workflowPreviewMsg]);
+            setCurrentWorkflowMessageId(thisWorkflowId);
+            
+            // Store workflow ID on the WebSocket object for event routing
+            if (ws) {
+              (ws as any)._workflowMessageId = thisWorkflowId;
+            }
             break;
             
           case 'workflow_started':
-            console.log('🚀 Workflow started');
-            setShowStepMonitor(true);
+            console.log('🚀 Workflow started for sequence:', data.sequence_id);
+            
+            // Find and update the correct workflow message by sequence_id
+            setMessages(prev => prev.map(msg => 
+              msg.type === 'workflow_preview' && msg.data?.sequence_id === data.sequence_id
+                ? { 
+                    ...msg, 
+                    type: 'workflow_monitor' as const,
+                    data: {
+                      ...msg.data,
+                      currentStep: 0  // Initialize currentStep
+                    }
+                  }
+                : msg
+            ));
+            break;
+            
+          case 'plan_updated':
+            console.log('🔄 Plan updated:', data);
+            
+            // Update execution steps with new remaining steps
+            const updatedFromStep = data.updated_from_step || 1;
+            setExecutionSteps(prev => {
+              const currentSteps = prev.slice(0, updatedFromStep - 1); // Keep completed steps
+              const newSteps = data.plan.workflow_steps.slice(updatedFromStep - 1).map((step: any) => ({
+                ...step,
+                status: 'pending'
+              }));
+              return [...currentSteps, ...newSteps];
+            });
+            
+            // Update workflow plan
+            setWorkflowPlan(data.plan);
+            
+            // Add message about plan update
+            const updateMsg: Message = {
+              id: `plan-updated-${Date.now()}`,
+              content: `🔄 Workflow updated from step ${updatedFromStep}. Continuing with refined steps...`,
+              sender: 'ai',
+              timestamp: new Date()
+            };
+            setMessages(prev => [...prev, updateMsg]);
             break;
             
           case 'step_started':
-            console.log('📍 Step started:', data.step, data.atom_id);
-            setCurrentExecutingStep(data.step);
+            console.log('📍 Step started:', data.step, data.atom_id, 'for sequence:', data.sequence_id);
             
-            // Update step status to running
-            setExecutionSteps(prev => prev.map(s => 
-              s.step_number === data.step 
-                ? { ...s, status: 'running' }
-                : s
+            // Find and update the correct workflow message by sequence_id
+            setMessages(prev => prev.map(msg => 
+              msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id
+                ? {
+                    ...msg,
+                    data: {
+                      ...msg.data,
+                      currentStep: data.step,
+                      steps: msg.data.steps.map((s: any) => 
+                        s.step_number === data.step 
+                          ? { ...s, status: 'running' }
+                          : s
+                      )
+                    }
+                  }
+                : msg
             ));
             break;
             
@@ -471,14 +812,57 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
             break;
             
           case 'step_completed':
-            console.log('✅ Step completed:', data.step);
+            console.log('✅ Step completed:', data.step, 'for sequence:', data.sequence_id);
             
-            // Update step status to completed
-            setExecutionSteps(prev => prev.map(s => 
-              s.step_number === data.step 
-                ? { ...s, status: 'completed', summary: data.summary || 'Step completed successfully' }
-                : s
-            ));
+            // Find and update the correct workflow message by sequence_id
+            setMessages(prev => {
+              const updated = prev.map(msg => 
+                msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id
+                  ? {
+                      ...msg,
+                      data: {
+                        ...msg.data,
+                        steps: msg.data.steps.map((s: any) => 
+                          s.step_number === data.step 
+                            ? { ...s, status: 'completed', summary: data.summary || 'Step completed successfully' }
+                            : s
+                        )
+                      }
+                    }
+                  : msg
+              );
+              
+              // Check if we need step approval for THIS workflow (by sequence_id)
+              const workflowMsg = updated.find(m => 
+                m.type === 'workflow_monitor' && m.data?.sequence_id === data.sequence_id
+              );
+              
+              if (workflowMsg && data.step < workflowMsg.data.steps.length) {
+                console.log(`⏸️ Adding step approval for step ${data.step} (sequence: ${data.sequence_id})`);
+                
+                // Set completed step number for handlers
+                setCompletedStepNumber(data.step);
+                
+                // Add step approval message after workflow monitor
+                const approvalMsg: Message = {
+                  id: `step-approval-${data.sequence_id}-${data.step}-${Date.now()}`,
+                  content: '',
+                  sender: 'ai',
+                  timestamp: new Date(),
+                  type: 'step_approval',
+                  data: {
+                    stepNumber: data.step,
+                    totalSteps: workflowMsg.data.steps.length,
+                    stepDescription: workflowMsg.data.steps.find((s: any) => s.step_number === data.step)?.description || '',
+                    sequence_id: data.sequence_id  // Store sequence ID for routing
+                  }
+                };
+                return [...updated, approvalMsg];
+              }
+              
+              return updated;
+            });
+            setIsLoading(false);
             break;
             
           case 'workflow_completed':
@@ -513,6 +897,11 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
   };
   
   // Don't unmount when collapsed - keep WebSocket connections and requests alive
+  // Show loading during initialization
+  if (!isInitialized) {
+    return null;
+  }
+
   return (
     <div className={isCollapsed ? 'hidden' : ''} style={{ height: '100%' }}>
     <Card className="h-full bg-white backdrop-blur-xl shadow-[0_20px_70px_rgba(0,0,0,0.3)] border-2 border-gray-200 overflow-hidden flex flex-col relative ring-1 ring-gray-100" style={{ width: `${panelWidth}px` }}>
@@ -543,8 +932,8 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
-                      <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>Freeze Panel</h5>
-                      <p className="text-gray-600 font-inter text-xs">Lock panel width</p>
+                      <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>Freeze Panel Size</h5>
+                      <p className="text-gray-600 font-inter text-xs">Lock panel width and prevent resizing</p>
                     </div>
                     <button
                       onClick={() => setIsPanelFrozen(!isPanelFrozen)}
@@ -558,14 +947,153 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                     </button>
                   </div>
                 </div>
+                
+                {/* WebSocket Connection Status */}
+                <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
+                  <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Connection Status</h5>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${wsConnection ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                    <span className="text-gray-600 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
+                      {wsConnection ? 'Connected' : 'Disconnected'}
+                    </span>
+                  </div>
+                  {currentWorkflowMessageId && (
+                    <div className="mt-2">
+                      <p className="text-gray-600 font-inter text-xs">
+                        Active workflow in progress
+                      </p>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Panel Width Info */}
+                <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
+                  <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Panel Width</h5>
+                  <div className="text-gray-600 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
+                    Current: {panelWidth}px
+                  </div>
+                  <p className="text-gray-500 font-inter text-xs mt-1">
+                    Drag the left edge to resize (when not frozen)
+                  </p>
+                </div>
+                
+                {/* Clear Chat History */}
+                <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                  <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Data Management</h5>
+                  <Button
+                    onClick={() => {
+                      if (confirm('Are you sure you want to clear all chat history? This cannot be undone.')) {
+                        localStorage.removeItem('stream-ai-chats');
+                        localStorage.removeItem('stream-ai-current-chat-id');
+                        createNewChat();
+                        setShowSettings(false);
+                      }
+                    }}
+                    className="w-full bg-red-500 hover:bg-red-600 text-white font-inter"
+                    style={{ fontSize: `${smallFontSize}px` }}
+                  >
+                    Clear All Chat History
+                  </Button>
+                </div>
               </div>
             </div>
           </ScrollArea>
         </div>
       )}
       
+      {/* Chat History Sidebar */}
+      {showChatHistory && (
+        <div className="absolute right-0 top-0 w-80 h-full bg-white backdrop-blur-xl border-l-2 border-gray-200 z-50 flex flex-col shadow-xl">
+          <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Chat History</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowChatHistory(false)}
+                className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+          
+          <div className="p-4 border-b border-gray-200">
+            <Button
+              onClick={createNewChat}
+              className="w-full bg-[#41C185] hover:bg-[#3AB077] text-white font-semibold font-inter rounded-xl shadow-md hover:shadow-lg transition-all duration-200"
+              style={{ fontSize: `${smallFontSize}px` }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Chat
+            </Button>
+          </div>
+          
+          <ScrollArea className="flex-1">
+            <div className="p-4 space-y-2">
+              {chats.length === 0 ? (
+                <div className="text-center py-8">
+                  <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 font-inter text-sm">No chat history yet</p>
+                </div>
+              ) : (
+                chats.map((chat) => (
+                  <div
+                    key={chat.id}
+                    onClick={() => switchToChat(chat.id)}
+                    className={`p-3 rounded-xl cursor-pointer transition-all duration-200 border-2 ${
+                      chat.id === currentChatId
+                        ? 'bg-[#41C185]/10 border-[#41C185] shadow-md'
+                        : 'bg-gray-50 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold text-gray-800 font-inter text-sm truncate">
+                          {chat.title}
+                        </h4>
+                        <p className="text-gray-500 font-inter text-xs mt-1">
+                          {new Date(chat.createdAt).toLocaleDateString()} • {chat.messages.length} messages
+                        </p>
+                      </div>
+                      {chat.id === currentChatId && (
+                        <div className="w-2 h-2 bg-[#41C185] rounded-full flex-shrink-0 mt-1" />
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+          
+          <div className="p-4 border-t-2 border-gray-200 bg-gray-50">
+            <div className="text-center">
+              <p className="text-gray-500 font-inter text-xs">
+                {chats.length} {chats.length === 1 ? 'chat' : 'chats'} saved
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Resize Handle */}
+      <div
+        ref={resizeRef}
+        onMouseDown={handleMouseDown}
+        className={`absolute left-0 top-0 w-1 h-full z-40 hover:bg-[#41C185] transition-colors cursor-col-resize ${
+          isPanelFrozen 
+            ? 'cursor-not-allowed opacity-30' 
+            : 'cursor-col-resize hover:w-2'
+        }`}
+        style={{ 
+          background: isResizing ? '#41C185' : 'transparent',
+          width: isResizing ? '4px' : '4px'
+        }}
+        title={isPanelFrozen ? "Panel is frozen (resize disabled)" : "Drag to resize panel"}
+      />
+      
       {/* Header */}
-      <div className={`flex items-center justify-between p-5 border-b-2 border-gray-200 cursor-grab active:cursor-grabbing bg-gradient-to-r from-gray-50 to-white backdrop-blur-sm relative overflow-hidden group ${showSettings ? 'z-40' : 'z-10'}`}>
+      <div className={`flex items-center justify-between p-5 border-b-2 border-gray-200 cursor-grab active:cursor-grabbing bg-gradient-to-r from-gray-50 to-white backdrop-blur-sm relative overflow-hidden group ${showChatHistory || showSettings ? 'z-40' : 'z-10'}`}>
         {/* Animated background effect */}
         <div className="absolute inset-0 bg-gradient-to-r from-gray-50/0 via-gray-100/50 to-gray-50/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
         
@@ -591,31 +1119,26 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
           <Button
             variant="ghost"
             size="sm"
+            className="h-9 w-9 p-0 hover:bg-purple-100 hover:text-purple-500 transition-all duration-200 rounded-xl"
+            onClick={() => setShowChatHistory(!showChatHistory)}
+            title="Chat History"
+          >
+            <Clock className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             className="h-9 w-9 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl"
-            onClick={() => {
-              setMessages([{
-                id: '1',
-                content: "Hello! I'm Stream AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
-                sender: 'ai',
-                timestamp: new Date()
-              }]);
-            }}
-            title="Clear Chat"
+            onClick={deleteCurrentChat}
+            title="Delete Current Chat"
           >
             <Trash2 className="w-4 h-4" />
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            className="h-9 w-9 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl"
-            onClick={() => {
-              setMessages([{
-                id: '1',
-                content: "Hello! I'm Stream AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
-                sender: 'ai',
-                timestamp: new Date()
-              }]);
-            }}
+            className="h-9 w-9 p-0 hover:bg-green-100 hover:text-green-500 transition-all duration-200 rounded-xl"
+            onClick={createNewChat}
             title="New Chat"
           >
             <Plus className="w-4 h-4" />
@@ -658,63 +1181,144 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                 msg.sender === 'user' ? 'flex-row-reverse' : ''
               }`}
             >
-              {/* Avatar */}
-              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg transition-all duration-300 hover:scale-110 ${
-                msg.sender === 'ai' 
-                  ? 'bg-[#50C878] border-2 border-[#50C878]/30 shadow-[#50C878]/20' 
-                  : 'bg-[#458EE2] border-2 border-[#458EE2]/30 shadow-[#458EE2]/20'
-              }`}>
-                {msg.sender === 'ai' ? (
-                  <Bot className="w-5 h-5 text-white" />
-                ) : (
-                  <User className="w-5 h-5 text-white" />
-                )}
-              </div>
+              {/* Avatar - Hide for workflow components to save space */}
+              {(!msg.type || msg.type === 'text') && (
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg transition-all duration-300 hover:scale-110 ${
+                  msg.sender === 'ai' 
+                    ? 'bg-[#50C878] border-2 border-[#50C878]/30 shadow-[#50C878]/20' 
+                    : 'bg-[#458EE2] border-2 border-[#458EE2]/30 shadow-[#458EE2]/20'
+                }`}>
+                  {msg.sender === 'ai' ? (
+                    <Bot className="w-5 h-5 text-white" />
+                  ) : (
+                    <User className="w-5 h-5 text-white" />
+                  )}
+                </div>
+              )}
 
-              {/* Message Bubble */}
+              {/* Message Bubble or Component */}
               <div className={`flex-1 group ${
                 msg.sender === 'user' ? 'flex flex-col items-end' : ''
-              }`} style={{ maxWidth: '500px' }}>
-                <div className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
-                  msg.sender === 'ai'
-                    ? 'bg-[#50C878] text-white border-[#50C878]/30 rounded-tl-md backdrop-blur-sm'
-                    : 'bg-[#458EE2] text-white border-[#458EE2]/30 rounded-tr-md backdrop-blur-sm'
-                  }`}>
-                    <div
-                      className="leading-relaxed font-medium font-inter text-sm"
-                      dangerouslySetInnerHTML={{
-                        __html: parseMarkdown(msg.content)
+              }`} style={{ 
+                maxWidth: msg.type && msg.type !== 'text' ? '100%' : '500px',
+                marginLeft: msg.type && msg.type !== 'text' ? '0' : undefined
+              }}>
+                {/* Regular text message */}
+                {(!msg.type || msg.type === 'text') && (
+                  <>
+                    <div className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
+                      msg.sender === 'ai'
+                        ? 'bg-[#50C878] text-white border-[#50C878]/30 rounded-tl-md backdrop-blur-sm'
+                        : 'bg-[#458EE2] text-white border-[#458EE2]/30 rounded-tr-md backdrop-blur-sm'
+                      }`}>
+                        <div
+                          className="leading-relaxed font-medium font-inter text-sm"
+                          dangerouslySetInnerHTML={{
+                            __html: parseMarkdown(msg.content)
+                          }}
+                        />
+                      </div>
+                      <p className="text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter text-xs">
+                      {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  </>
+                )}
+                
+                {/* Workflow Preview Component */}
+                {msg.type === 'workflow_preview' && msg.data && (
+                  <div className="mt-2">
+                    <StreamWorkflowPreview
+                      workflow={msg.data.plan}
+                      onAccept={() => {
+                        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+                          wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+                          setIsLoading(true);
+                        }
+                      }}
+                      onReject={() => {
+                        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+                          wsConnection.send(JSON.stringify({ type: 'reject_plan' }));
+                          wsConnection.close();
+                          setWsConnection(null);
+                        }
+                        setIsLoading(false);
+                      }}
+                      onAdd={(info) => {
+                        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+                          wsConnection.send(JSON.stringify({
+                            type: 'add_info',
+                            step_number: 0,
+                            additional_info: info,
+                            original_prompt: originalPrompt
+                          }));
+                          setIsLoading(true);
+                        }
                       }}
                     />
                   </div>
-                  <p className="text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter text-xs">
-                  {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
+                )}
+                
+                {/* Workflow Monitor Component */}
+                {msg.type === 'workflow_monitor' && msg.data && (
+                  <div className="mt-2">
+                    <StreamStepMonitor
+                      steps={msg.data.steps}
+                      currentStep={msg.data.currentStep || 0}
+                      totalSteps={msg.data.steps.length}
+                    />
+                  </div>
+                )}
+                
+                {/* Step Approval Component */}
+                {msg.type === 'step_approval' && msg.data && (
+                  <div className="mt-2">
+                    <StreamStepApproval
+                      stepNumber={msg.data.stepNumber}
+                      totalSteps={msg.data.totalSteps}
+                      stepDescription={msg.data.stepDescription}
+                      onAccept={() => {
+                        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+                          wsConnection.send(JSON.stringify({
+                            type: 'approve_step',
+                            step_number: msg.data.stepNumber
+                          }));
+                          // Remove this approval message
+                          setMessages(prev => prev.filter(m => m.id !== msg.id));
+                          setIsLoading(true);
+                        }
+                      }}
+                      onReject={() => {
+                        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+                          wsConnection.send(JSON.stringify({
+                            type: 'reject_workflow',
+                            step_number: msg.data.stepNumber
+                          }));
+                          wsConnection.close();
+                          setWsConnection(null);
+                        }
+                        // Remove this approval message
+                        setMessages(prev => prev.filter(m => m.id !== msg.id));
+                        setIsLoading(false);
+                      }}
+                      onAdd={(info) => {
+                        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+                          wsConnection.send(JSON.stringify({
+                            type: 'add_info',
+                            step_number: msg.data.stepNumber,
+                            additional_info: info,
+                            original_prompt: originalPrompt
+                          }));
+                          // Remove this approval message
+                          setMessages(prev => prev.filter(m => m.id !== msg.id));
+                          setIsLoading(true);
+                        }
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           ))}
-          
-          {/* Workflow Preview */}
-          {showWorkflowPreview && workflowPlan && (
-            <div className="mt-6">
-              <StreamWorkflowPreview
-                workflow={workflowPlan}
-                onAccept={handleAcceptWorkflow}
-                onReject={handleRejectWorkflow}
-              />
-            </div>
-          )}
-          
-          {/* Step Execution Monitor */}
-          {showStepMonitor && executionSteps.length > 0 && (
-            <div className="mt-6">
-              <StreamStepMonitor
-                steps={executionSteps}
-                currentStep={currentExecutingStep}
-                totalSteps={executionSteps.length}
-              />
-            </div>
-          )}
 
           {/* Typing Indicator */}
           {isLoading && (

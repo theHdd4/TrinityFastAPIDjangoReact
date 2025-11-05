@@ -78,6 +78,10 @@ async def execute_workflow_websocket(websocket: WebSocket):
         available_files = message.get("available_files", [])
         project_context = message.get("project_context", {})
         user_id = message.get("user_id", "default_user")
+        session_id = message.get("session_id", None)  # Frontend chat session ID
+        chat_id = message.get("chat_id", None)  # Frontend chat ID
+        
+        logger.info(f"🔑 Session ID: {session_id}, Chat ID: {chat_id}")
         
         # Execute workflow with real-time events
         await ws_orchestrator.execute_workflow_with_websocket(
@@ -85,7 +89,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
             user_prompt=user_prompt,
             available_files=available_files,
             project_context=project_context,
-            user_id=user_id
+            user_id=user_id,
+            frontend_session_id=session_id,
+            frontend_chat_id=chat_id
         )
         
     except WebSocketDisconnect:

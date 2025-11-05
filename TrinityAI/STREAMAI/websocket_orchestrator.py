@@ -395,10 +395,14 @@ Respond ONLY with valid JSON array, no other text:
         user_prompt: str,
         available_files: List[str],
         project_context: Dict[str, Any],
-        user_id: str
+        user_id: str,
+        frontend_session_id: Optional[str] = None,
+        frontend_chat_id: Optional[str] = None
     ):
         """
         Execute complete workflow with WebSocket events.
+        
+        Uses frontend session ID for proper context isolation between chats.
         
         Sends events:
         - connected: WebSocket connected
@@ -411,7 +415,9 @@ Respond ONLY with valid JSON array, no other text:
         - error: Error occurred
         """
         try:
-            sequence_id = f"seq_{uuid.uuid4().hex[:12]}"
+            # Use frontend session ID if provided, otherwise generate new one
+            sequence_id = frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
+            logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
             
             # Send connected event
             await websocket.send_text(WebSocketEvent(
@@ -508,6 +514,45 @@ Respond ONLY with valid JSON array, no other text:
                             {"message": "Workflow rejected by user", "sequence_id": sequence_id}
                         ).to_json())
                         return  # Exit without executing
+                    elif approval_msg.get('type') == 'add_info':
+                        # User added info before step 1 - regenerate entire workflow
+                        additional_info = approval_msg.get('additional_info', '')
+                        original_prompt = approval_msg.get('original_prompt', user_prompt)
+                        combined_prompt = f"{original_prompt}. Additional requirements: {additional_info}"
+                        
+                        logger.info(f"➕ Regenerating workflow with additional info: {additional_info}")
+                        
+                        # Regenerate workflow with combined prompt
+                        workflow_steps_raw = await self._generate_workflow_with_llm(
+                            user_prompt=combined_prompt,
+                            available_files=available_files
+                        )
+                        
+                        # Rebuild plan
+                        plan = WorkflowPlan(
+                            workflow_steps=[
+                                WorkflowStep(
+                                    step_number=idx + 1,
+                                    atom_id=step.get('atom_id'),
+                                    description=step.get('description', '')
+                                )
+                                for idx, step in enumerate(workflow_steps_raw)
+                            ],
+                            total_steps=len(workflow_steps_raw)
+                        )
+                        
+                        # Send updated plan
+                        await websocket.send_text(WebSocketEvent(
+                            "plan_generated",
+                            {
+                                "plan": plan.to_dict(),
+                                "sequence_id": sequence_id,
+                                "total_steps": plan.total_steps
+                            }
+                        ).to_json())
+                        
+                        logger.info(f"✅ Regenerated workflow with {plan.total_steps} steps")
+                        # Continue waiting for approval
                 except Exception as e:
                     logger.error(f"❌ Error waiting for approval: {e}")
                     break
@@ -528,7 +573,7 @@ Respond ONLY with valid JSON array, no other text:
                 }
             ).to_json())
             
-            for step in plan.workflow_steps:
+            for idx, step in enumerate(plan.workflow_steps):
                 await self._execute_step_with_events(
                     websocket=websocket,
                     step=step,
@@ -540,9 +585,93 @@ Respond ONLY with valid JSON array, no other text:
                     available_files=available_files
                 )
                 
-                # Wait for user approval between steps
-                # (In production, listen for 'approve_step' WebSocket message)
-                logger.info(f"⏸️ Waiting for approval before next step...")
+                # Wait for user approval between steps (if not last step)
+                if idx < len(plan.workflow_steps) - 1:
+                    logger.info(f"⏸️ Waiting for approval before step {step.step_number + 1}...")
+                    
+                    step_approved = False
+                    workflow_rejected = False
+                    
+                    while not step_approved and not workflow_rejected:
+                        try:
+                            message_data = await websocket.receive_text()
+                            approval_msg = json.loads(message_data)
+                            
+                            logger.info(f"📨 Received step approval message: {approval_msg}")
+                            
+                            if approval_msg.get('type') == 'approve_step':
+                                if approval_msg.get('step_number') == step.step_number:
+                                    step_approved = True
+                                    logger.info(f"✅ Step {step.step_number} approved - continuing to next step")
+                                else:
+                                    logger.warning(f"⚠️ Approval message for wrong step (expected {step.step_number}, got {approval_msg.get('step_number')})")
+                            
+                            elif approval_msg.get('type') == 'reject_workflow':
+                                workflow_rejected = True
+                                logger.info(f"❌ Workflow rejected at step {step.step_number}")
+                                await websocket.send_text(WebSocketEvent(
+                                    "workflow_rejected",
+                                    {"message": f"Workflow rejected by user at step {step.step_number}", "sequence_id": sequence_id}
+                                ).to_json())
+                                return
+                            
+                            elif approval_msg.get('type') == 'add_info':
+                                # User added info between steps - regenerate remaining steps
+                                additional_info = approval_msg.get('additional_info', '')
+                                original_prompt = approval_msg.get('original_prompt', user_prompt)
+                                
+                                logger.info(f"➕ User added info at step {step.step_number}: {additional_info}")
+                                
+                                # Get previous results
+                                previous_results = self.result_storage.get_sequence_results(sequence_id)
+                                
+                                # Regenerate remaining steps with additional info
+                                remaining_steps = plan.workflow_steps[idx + 1:]
+                                if remaining_steps:
+                                    # Combine original prompt with additional info for remaining steps
+                                    combined_prompt = f"{original_prompt}. Additional requirements for remaining steps: {additional_info}"
+                                    
+                                    # Regenerate workflow and filter to remaining steps
+                                    new_workflow_steps = await self._generate_workflow_with_llm(
+                                        user_prompt=combined_prompt,
+                                        available_files=available_files
+                                    )
+                                    
+                                    # Update plan with new remaining steps
+                                    new_remaining_steps = [
+                                        WorkflowStep(
+                                            step_number=idx + step.step_number + 1,
+                                            atom_id=s.get('atom_id'),
+                                            description=s.get('description', '')
+                                        )
+                                        for idx, s in enumerate(new_workflow_steps)
+                                    ]
+                                    
+                                    # Replace remaining steps in plan
+                                    plan.workflow_steps = plan.workflow_steps[:idx + 1] + new_remaining_steps
+                                    plan.total_steps = len(plan.workflow_steps)
+                                    
+                                    # Send updated plan
+                                    await websocket.send_text(WebSocketEvent(
+                                        "plan_updated",
+                                        {
+                                            "plan": plan.to_dict(),
+                                            "sequence_id": sequence_id,
+                                            "total_steps": plan.total_steps,
+                                            "updated_from_step": step.step_number + 1
+                                        }
+                                    ).to_json())
+                                    
+                                    logger.info(f"✅ Updated workflow: {len(new_remaining_steps)} new steps from step {step.step_number + 1}")
+                                    
+                                    # Continue to next step (which is now updated)
+                                    step_approved = True
+                        except Exception as e:
+                            logger.error(f"❌ Error waiting for step approval: {e}")
+                            break
+                    
+                    if workflow_rejected:
+                        return
             
             # Send workflow completed
             await websocket.send_text(WebSocketEvent(

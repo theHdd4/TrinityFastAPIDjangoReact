@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Circle, ArrowRight, Sparkles, X, Check } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { CheckCircle2, Circle, ArrowRight, Sparkles, X, Check, Plus } from 'lucide-react';
 
 interface WorkflowStep {
   step_number: number;
@@ -15,13 +16,29 @@ interface StreamWorkflowPreviewProps {
   };
   onAccept: () => void;
   onReject: () => void;
+  onAdd?: (additionalInfo: string) => void;
 }
 
 const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
   workflow,
   onAccept,
-  onReject
+  onReject,
+  onAdd
 }) => {
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [additionalInfo, setAdditionalInfo] = useState('');
+
+  const handleAddClick = () => {
+    setShowAddModal(true);
+  };
+
+  const handleSubmitAdd = () => {
+    if (additionalInfo.trim() && onAdd) {
+      onAdd(additionalInfo.trim());
+      setShowAddModal(false);
+      setAdditionalInfo('');
+    }
+  };
   const getAtomIcon = (atomId: string) => {
     const icons: Record<string, string> = {
       'merge': '🔗',
@@ -110,23 +127,87 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-3 pt-4 border-t-2 border-gray-200">
+      <div className="flex gap-2 pt-4 border-t-2 border-gray-200">
         <Button
           onClick={onReject}
           variant="outline"
-          className="flex-1 h-12 border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-semibold font-inter rounded-xl transition-all duration-200"
+          className="flex-1 h-10 border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-medium font-inter rounded-xl transition-all duration-200 text-sm"
         >
-          <X className="w-5 h-5 mr-2" />
+          <X className="w-4 h-4 mr-1" />
           Reject
         </Button>
         <Button
-          onClick={onAccept}
-          className="flex-1 h-12 bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-semibold font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105"
+          onClick={handleAddClick}
+          className="flex-1 h-10 bg-gradient-to-r from-[#FFBD59] to-[#FFA726] hover:from-[#FFA726] hover:to-[#FF9800] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
         >
-          <Check className="w-5 h-5 mr-2" />
-          Accept & Execute
+          <Plus className="w-4 h-4 mr-1" />
+          Add
+        </Button>
+        <Button
+          onClick={onAccept}
+          className="flex-1 h-10 bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
+        >
+          <Check className="w-4 h-4 mr-1" />
+          Accept
         </Button>
       </div>
+      
+      {/* Add Info Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 mt-6">
+          <div className="bg-white rounded-2xl border-2 border-gray-200 shadow-2xl max-w-2xl w-full p-6 space-y-4 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-gray-800 font-inter text-lg">Add Additional Information</h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowAddModal(false);
+                  setAdditionalInfo('');
+                }}
+                className="h-8 w-8 p-0 hover:bg-gray-100 rounded-xl"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-sm text-gray-600 font-inter">
+                Add information to regenerate the entire workflow with your requirements:
+              </p>
+              
+              <Textarea
+                value={additionalInfo}
+                onChange={(e) => setAdditionalInfo(e.target.value)}
+                placeholder="Example: Use inner join for merge, group by year and month, create bar chart with specific colors..."
+                className="min-h-[120px] resize-none font-inter rounded-xl border-2 border-gray-200 focus:border-[#FFBD59] transition-colors"
+                style={{ fontSize: '14px' }}
+              />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                onClick={() => {
+                  setShowAddModal(false);
+                  setAdditionalInfo('');
+                }}
+                variant="outline"
+                className="flex-1 h-11 border-2 border-gray-200 hover:bg-gray-50 font-inter rounded-xl"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSubmitAdd}
+                disabled={!additionalInfo.trim()}
+                className="flex-1 h-11 bg-gradient-to-r from-[#FFBD59] to-[#FFA726] hover:from-[#FFA726] hover:to-[#FF9800] text-white font-semibold font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:hover:scale-100"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add & Regenerate
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Info Banner */}
       <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-3">
