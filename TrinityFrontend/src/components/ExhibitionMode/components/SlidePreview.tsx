@@ -5,7 +5,8 @@ import {
   CANVAS_STAGE_HEIGHT,
   DEFAULT_PRESENTATION_WIDTH,
 } from './SlideCanvas';
-import { type LayoutCard } from '../store/exhibitionStore';
+import { useExhibitionStore, type LayoutCard } from '../store/exhibitionStore';
+import { buildPreviewSlideObjects } from './utils/preview';
 
 const PREVIEW_BASE_WIDTH = DEFAULT_PRESENTATION_WIDTH;
 const PREVIEW_BASE_HEIGHT = CANVAS_STAGE_HEIGHT;
@@ -28,6 +29,13 @@ export const SlidePreview: React.FC<SlidePreviewProps> = React.memo(
   ({ card, index, totalSlides, className }) => {
     const containerRef = React.useRef<HTMLDivElement | null>(null);
     const [scale, setScale] = React.useState<number>(FALLBACK_SCALE);
+    const storeObjects = useExhibitionStore(
+      React.useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
+    );
+    const previewObjects = React.useMemo(
+      () => buildPreviewSlideObjects(card, storeObjects),
+      [card, storeObjects],
+    );
 
     React.useEffect(() => {
       const node = containerRef.current;
@@ -93,6 +101,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = React.memo(
               presentationMode
               presentationPadding={0}
               viewMode="horizontal"
+              previewObjects={previewObjects}
             />
           </div>
         </div>

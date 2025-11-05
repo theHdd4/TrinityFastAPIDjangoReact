@@ -434,6 +434,7 @@ interface SlideCanvasProps {
   onUndo?: () => void;
   presentationMode?: boolean;
   presentationPadding?: number;
+  previewObjects?: SlideObject[];
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -454,6 +455,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onUndo,
   presentationMode = false,
   presentationPadding = PRESENTATION_PADDING,
+  previewObjects,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -512,9 +514,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     return style;
   }, [settings.highContrast, settings.largeText, settings.reducedMotion]);
 
-  const slideObjects = useExhibitionStore(
+  const storeSlideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
   );
+  const slideObjects = previewObjects ?? storeSlideObjects;
   const activeTheme = useExhibitionStore(state => state.activeTheme);
   const bulkUpdateSlideObjects = useExhibitionStore(state => state.bulkUpdateSlideObjects);
   const bringSlideObjectsToFront = useExhibitionStore(state => state.bringSlideObjectsToFront);
