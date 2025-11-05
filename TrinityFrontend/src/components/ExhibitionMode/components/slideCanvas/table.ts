@@ -7,7 +7,7 @@ import {
   type TableCellData,
   type TableCellFormatting,
 } from '../operationsPalette/tables/constants';
-import type { SlideObject } from '../store/exhibitionStore';
+import type { SlideObject } from '../../store/exhibitionStore';
 
 export type TableState = {
   data: TableCellData[][];

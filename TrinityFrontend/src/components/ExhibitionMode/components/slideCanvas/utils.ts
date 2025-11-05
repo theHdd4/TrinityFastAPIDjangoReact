@@ -1,4 +1,4 @@
-import type { SlideObject } from '../store/exhibitionStore';
+import type { SlideObject } from '../../store/exhibitionStore';
 import type { ActiveInteraction, ResizeHandle } from './types';
 
 export const snapToGrid = (value: number, gridSize: number) => Math.round(value / gridSize) * gridSize;

@@ -1,4 +1,4 @@
-import type { DroppedAtom, SlideObject } from '../store/exhibitionStore';
+import type { DroppedAtom, SlideObject } from '../../store/exhibitionStore';
 
 export interface CanvasDropPlacement {
   x: number;

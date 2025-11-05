@@ -1,9 +1,9 @@
 import type { CSSProperties } from 'react';
-import type { PresentationSettings, SlideBackgroundPreset } from '../store/exhibitionStore';
+import type { PresentationSettings, SlideBackgroundPreset } from '../../store/exhibitionStore';
 import {
   DEFAULT_PRESENTATION_SETTINGS,
   type SlideBackgroundColor,
-} from '../store/exhibitionStore';
+} from '../../store/exhibitionStore';
 import {
   GRADIENT_STYLE_MAP,
   isGradientToken,
