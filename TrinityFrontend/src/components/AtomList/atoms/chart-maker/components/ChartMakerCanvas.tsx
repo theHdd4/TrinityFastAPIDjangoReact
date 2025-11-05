@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon, ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
@@ -546,6 +546,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
           chartType: chart.type,
           xAxis: chart.xAxis,
           yAxis: chart.yAxis,
+          secondYAxis: chart.secondYAxis,
+          dualAxisMode: chart.dualAxisMode,
           filters: chart.filters,
           aggregation: chart.aggregation,
           legendField: chart.legendField,
@@ -648,15 +650,19 @@ const renderChart = (
 
   const previewType = previewTypes[chart.id];
   const config = chart.chartConfig || {};
-  const rawType = previewType || config.chart_type || chart.type;
+  // Prioritize chart.type (user selection) over config.chart_type (backend response)
+  // since backend converts stacked_bar to bar, but we want to preserve user's selection
+  const rawType = previewType || chart.type || config.chart_type;
   const typeMap: Record<string, string> = {
     line: 'line_chart',
     bar: 'bar_chart',
+    stacked_bar: 'stacked_bar_chart',
     area: 'area_chart',
     pie: 'pie_chart',
     scatter: 'scatter_chart',
     line_chart: 'line_chart',
     bar_chart: 'bar_chart',
+    stacked_bar_chart: 'stacked_bar_chart',
     area_chart: 'area_chart',
     pie_chart: 'pie_chart',
     scatter_chart: 'scatter_chart',
@@ -707,7 +713,7 @@ const renderChart = (
   const colors = getChartColors(index);
   const rendererProps = {
     key,
-    type: rendererType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+    type: rendererType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart',
     data: chartData,
     xField: xAxisConfig.dataKey,
     yField: traces.length ? traces[0]?.dataKey : yAxisConfig.dataKey,
@@ -726,9 +732,46 @@ const renderChart = (
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
     height: chartHeightValue,
-    sortOrder: chartSortOrder[chart.id] || chart.chartConfig?.sortOrder || null,
-    onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => onChartTypeChange?.(chart.id, newType.replace('_chart', '') as ChartMakerConfig['type']),
-    onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleChartSortOrderChange(chart.id, newSortOrder),
+    sortOrder: chart.chartConfig?.sortOrder || chartSortOrder[chart.id] || null,
+    sortColumn: chart.chartConfig?.sortColumn,
+    onSortColumnChange: (column: string) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, sortColumn: column } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart') => {
+      const mappedType = newType === 'stacked_bar_chart' ? 'stacked_bar' : newType.replace('_chart', '');
+      onChartTypeChange?.(chart.id, mappedType as ChartMakerConfig['type']);
+    },
+    onSortChange: (newSortOrder: 'asc' | 'desc' | null) => {
+      handleChartSortOrderChange(chart.id, newSortOrder);
+      // Also save to chart config for persistence
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, sortOrder: newSortOrder } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    seriesSettings: chart.chartConfig?.seriesSettings || {},
+    onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+      // Defer the update to avoid updating during render
+      // Use setTimeout instead of requestAnimationFrame to ensure it's truly deferred
+      setTimeout(() => {
+        // Get fresh charts from store to avoid stale closure
+        const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+        const currentCharts = (currentAtom?.settings as any)?.charts || charts;
+        const updatedCharts = currentCharts.map((c: any) => 
+          c.id === chart.id 
+            ? { ...c, chartConfig: { ...c.chartConfig, seriesSettings: newSeriesSettings } }
+            : c
+        );
+        updateSettings(atomId, { charts: updatedCharts });
+      }, 0);
+    },
     onThemeChange: (theme: string) => {
       const updatedCharts = charts.map(c => 
         c.id === chart.id 
@@ -785,6 +828,7 @@ const renderChart = (
       );
       updateSettings(atomId, { charts: updatedCharts });
     },
+    forceSingleAxis: chart.dualAxisMode === 'single',
   } as const;
 
   return (
@@ -1109,22 +1153,6 @@ const renderChart = (
                             </div>
                             {/* Hints container - aligned in same row */}
                             <div className="flex items-center gap-2">
-                              {/* Interaction hint for multi-trace charts */}
-                              {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
-                                <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
-                                  {chart.chartConfig.chart_type === 'bar' ? (
-                                    <>
-                                      <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
-                                      <span className="sm:hidden">Click to emphasize</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="hidden sm:inline">Click traces to emphasize</span>
-                                      <span className="sm:hidden">Click to emphasize</span>
-                                    </>
-                                  )}
-                                </div>
-                              )}
                               {/* Expand icon */}
                               <Button
                                 variant="ghost"

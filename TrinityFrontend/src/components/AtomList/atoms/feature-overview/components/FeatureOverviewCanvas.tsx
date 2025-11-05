@@ -561,18 +561,48 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
 
-  // Chart type and theme state for chart type changes
-  const [chartType, setChartType] = useState<string>('line_chart');
-  const [chartTheme, setChartTheme] = useState<string>('default');
-  const [chartSortOrder, setChartSortOrder] = useState<'asc' | 'desc' | null>(null);
+  // Chart type and theme state for chart type changes - initialize from settings if available
+  const [chartType, setChartType] = useState<string>(settings.chartType || 'line_chart');
+  const [chartTheme, setChartTheme] = useState<string>(settings.chartTheme || 'default');
+  const [chartSortOrder, setChartSortOrder] = useState<'asc' | 'desc' | null>(settings.chartSortOrder || null);
   
-  // Chart display options state
-  const [showDataLabels, setShowDataLabels] = useState<boolean>(false);
+  // Chart display options state - initialize from settings if available
+  const [showDataLabels, setShowDataLabels] = useState<boolean>(settings.showDataLabels !== undefined ? settings.showDataLabels : false);
   // const [showAxisLabels, setShowAxisLabels] = useState<boolean>(true);
-  const [showXAxisLabels, setShowXAxisLabels] = useState<boolean>(true);
-  const [showYAxisLabels, setShowYAxisLabels] = useState<boolean>(true);
-  const [showGrid, setShowGrid] = useState<boolean>(true);
-  const [showLegend, setShowLegend] = useState<boolean>(true);
+  const [showXAxisLabels, setShowXAxisLabels] = useState<boolean>(settings.showXAxisLabels !== undefined ? settings.showXAxisLabels : true);
+  const [showYAxisLabels, setShowYAxisLabels] = useState<boolean>(settings.showYAxisLabels !== undefined ? settings.showYAxisLabels : true);
+  const [showGrid, setShowGrid] = useState<boolean>(settings.showGrid !== undefined ? settings.showGrid : true);
+  const [showLegend, setShowLegend] = useState<boolean>(settings.showLegend !== undefined ? settings.showLegend : true);
+
+  // Sync state with settings when settings change (e.g., after loading from MongoDB)
+  useEffect(() => {
+    if (settings.chartType !== undefined) {
+      setChartType(settings.chartType);
+    }
+    if (settings.chartTheme !== undefined) {
+      setChartTheme(settings.chartTheme);
+    }
+    if (settings.chartSortOrder !== undefined) {
+      setChartSortOrder(settings.chartSortOrder);
+    }
+    if (settings.showDataLabels !== undefined) {
+      setShowDataLabels(settings.showDataLabels);
+    }
+    if (settings.showXAxisLabels !== undefined) {
+      setShowXAxisLabels(settings.showXAxisLabels);
+    }
+    if (settings.showYAxisLabels !== undefined) {
+      setShowYAxisLabels(settings.showYAxisLabels);
+    }
+    if (settings.showGrid !== undefined) {
+      setShowGrid(settings.showGrid);
+    }
+    if (settings.showLegend !== undefined) {
+      setShowLegend(settings.showLegend);
+    }
+    // Only depend on settings, not state variables to avoid loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.chartType, settings.chartTheme, settings.chartSortOrder, settings.showDataLabels, settings.showXAxisLabels, settings.showYAxisLabels, settings.showGrid, settings.showLegend]);
 
   // State for managing expanded views
   const [showStatsSummary, setShowStatsSummary] = useState<boolean>(false);
@@ -923,6 +953,20 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     setChartSortOrder(order);
     // Save to global settings to persist configuration
     onUpdateSettings({ chartSortOrder: order });
+  };
+
+  // Handle chart sort column change
+  const handleChartSortColumnChange = (column: string) => {
+    // Save to global settings to persist configuration
+    onUpdateSettings({ chartSortColumn: column });
+  };
+
+  // Handle series settings change
+  const handleSeriesSettingsChange = (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    // Defer the update to avoid updating during render
+    setTimeout(() => {
+      onUpdateSettings({ chartSeriesSettings: newSeriesSettings });
+    }, 0);
   };
 
   // Handle data labels toggle
@@ -2363,8 +2407,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                                     onYAxisLabelsToggle={handleYAxisLabelsToggle}
                                                                     onGridToggle={handleGridToggle}
                                                                     onLegendToggle={handleLegendToggle}
-                                                                    sortOrder={chartSortOrder}
+                                                                    sortOrder={chartSortOrder || settings.chartSortOrder || null}
                                                                     onSortChange={handleChartSortOrderChange}
+                                                                    sortColumn={settings.chartSortColumn}
+                                                                    onSortColumnChange={handleChartSortColumnChange}
+                                                                    seriesSettings={settings.chartSeriesSettings || {}}
+                                                                    onSeriesSettingsChange={handleSeriesSettingsChange}
                                                                   />
                                                                 </div>
                                                               </div>
@@ -2407,8 +2455,12 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                                                               onYAxisLabelsToggle={handleYAxisLabelsToggle}
                                                               onGridToggle={handleGridToggle}
                                                               onLegendToggle={handleLegendToggle}
-                                                              sortOrder={chartSortOrder}
+                                                              sortOrder={chartSortOrder || settings.chartSortOrder || null}
                                                               onSortChange={handleChartSortOrderChange}
+                                                              sortColumn={settings.chartSortColumn}
+                                                              onSortColumnChange={handleChartSortColumnChange}
+                                                              seriesSettings={settings.chartSeriesSettings || {}}
+                                                              onSeriesSettingsChange={handleSeriesSettingsChange}
                                                             />
                                                           </div>
                                                         </div>

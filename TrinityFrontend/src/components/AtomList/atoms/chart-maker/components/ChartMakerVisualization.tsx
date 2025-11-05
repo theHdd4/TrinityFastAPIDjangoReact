@@ -439,6 +439,9 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                               <SelectContent>
                                 <SelectItem value="line">Line Chart</SelectItem>
                                 <SelectItem value="bar">Bar Chart</SelectItem>
+                                {chart.legendField && chart.legendField !== 'aggregate' && (
+                                  <SelectItem value="stacked_bar">Stacked Bar Chart</SelectItem>
+                                )}
                                 <SelectItem value="area">Area Chart</SelectItem>
                                 <SelectItem value="scatter">Scatter Plot</SelectItem>
                                 <SelectItem value="pie">Pie Chart</SelectItem>
@@ -500,6 +503,9 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                               <SelectContent>
                                 <SelectItem value="line">Line Chart</SelectItem>
                                 <SelectItem value="bar">Bar Chart</SelectItem>
+                                {chart.legendField && chart.legendField !== 'aggregate' && (
+                                  <SelectItem value="stacked_bar">Stacked Bar Chart</SelectItem>
+                                )}
                                 <SelectItem value="area">Area Chart</SelectItem>
                                 <SelectItem value="scatter">Scatter Plot</SelectItem>
                                 <SelectItem value="pie">Pie Chart</SelectItem>
@@ -529,21 +535,90 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
                           <div>
                             <Label className="text-xs">Y-Axis</Label>
-                            <Select 
-                              value={chart.yAxis} 
-                              onValueChange={(value) => updateChart(index, { yAxis: value })}
-                            >
-                              <SelectTrigger className="mt-1">
-                                <SelectValue placeholder="Select Y-axis column" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {(settings.uploadedData.numericColumns || settings.uploadedData.columns).map((column) => (
-                                  <SelectItem key={column} value={column}>{column}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <div className="flex gap-1">
+                              <Select 
+                                value={chart.yAxis} 
+                                onValueChange={(value) => updateChart(index, { yAxis: value })}
+                              >
+                                <SelectTrigger className="mt-1 flex-1">
+                                  <SelectValue placeholder="Select Y-axis column">
+                                    {chart.secondYAxis === undefined && chart.yAxis ? chart.yAxis.substring(0, 4) : (chart.yAxis || 'Select Y-axis column')}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {(settings.uploadedData.numericColumns || settings.uploadedData.columns).map((column) => (
+                                    <SelectItem key={column} value={column}>{column}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {chart.secondYAxis === undefined && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="mt-1 h-9 px-2"
+                                  onClick={() => updateChart(index, { secondYAxis: '' })}
+                                  title="Add second Y-axis"
+                                >
+                                  <Plus className="w-4 h-4" />
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         </div>
+
+                        {/* Second Y-Axis if enabled */}
+                        {chart.secondYAxis !== undefined && (
+                          <div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <Label className="text-xs">Axis Mode</Label>
+                                <Select 
+                                  value={chart.dualAxisMode || 'dual'} 
+                                  onValueChange={(value) => updateChart(index, { dualAxisMode: value as 'dual' | 'single' })}
+                                >
+                                  <SelectTrigger className="mt-1">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="dual">Second Axis</SelectItem>
+                                    <SelectItem value="single">First Axis</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <div>
+                                <Label className="text-xs">Second Y-Axis</Label>
+                                <div className="flex gap-1 mt-1">
+                                  <Select 
+                                    value={chart.secondYAxis} 
+                                    onValueChange={(value) => updateChart(index, { secondYAxis: value })}
+                                  >
+                                    <SelectTrigger className="flex-1">
+                                      <SelectValue placeholder="Select second Y-axis column">
+                                        {chart.secondYAxis ? chart.secondYAxis.substring(0, 4) : 'Select second Y-axis column'}
+                                      </SelectValue>
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {(settings.uploadedData.numericColumns || settings.uploadedData.columns).map((column) => (
+                                        <SelectItem key={column} value={column}>{column}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-9 px-2 hover:bg-red-100 hover:text-red-600"
+                                    onClick={() => updateChart(index, { secondYAxis: undefined })}
+                                    title="Remove second Y-axis"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         <div>
                           <Label className="text-xs">Aggregation</Label>
