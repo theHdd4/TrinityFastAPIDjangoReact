@@ -201,7 +201,7 @@ services:
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
     ports:
-      - "8005:8002"
+      - "8002:8002"
     networks:
       - trinity-net
     labels:
