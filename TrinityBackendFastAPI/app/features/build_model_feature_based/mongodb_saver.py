@@ -244,11 +244,34 @@ async def get_atom_list_configuration(
             "mode": mode
         }
         
-        # Get all atom configurations for this project/mode
-        cursor = coll.find(query).sort([("canvas_position", 1), ("atom_positions", 1)])
+        # Exclude workflow metadata documents from atom query
+        # Workflow metadata documents have is_workflow_metadata: True and don't have atom_name
+        query_without_metadata = {
+            **query,
+            "$or": [
+                {"is_workflow_metadata": {"$exists": False}},
+                {"is_workflow_metadata": {"$ne": True}}
+            ]
+        }
+        
+        # Get all atom configurations for this project/mode (excluding workflow metadata)
+        cursor = coll.find(query_without_metadata).sort([("canvas_position", 1), ("atom_positions", 1)])
         atom_configs = await cursor.to_list(length=None)
         
-        if not atom_configs:
+        # Try to get workflow_molecules from a separate document in the same collection
+        # We'll store workflow_molecules as a separate document with a special marker
+        workflow_molecules_doc = await coll.find_one({
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "mode": mode,
+            "is_workflow_metadata": True
+        })
+        
+        # Extract workflow_molecules if available
+        saved_workflow_molecules = workflow_molecules_doc.get("workflow_molecules", []) if workflow_molecules_doc else []
+        
+        if not atom_configs and not saved_workflow_molecules:
             logger.info(f"📦 No atom configurations found for {client_id}/{app_id}/{project_id} in mode {mode}")
             return {
                 "status": "success",
@@ -262,24 +285,42 @@ async def get_atom_list_configuration(
         workflow_molecules_map = {}
         
         for atom_config in atom_configs:
+            # Skip if this document doesn't have atom_name (safety check)
+            if not atom_config.get("atom_name"):
+                logger.warning(f"⚠️ Skipping document without atom_name: {atom_config.get('_id')}")
+                continue
             canvas_pos = atom_config.get("canvas_position", 0)
             atom_pos = atom_config.get("atom_positions", 0)
             
             # Extract molecule information from top-level fields (preferred) or mode_meta (fallback)
             molecule_id = atom_config.get("molecule_id") or atom_config.get("mode_meta", {}).get("molecule_id")
             molecule_title = atom_config.get("molecule_title") or atom_config.get("mode_meta", {}).get("molecule_title")
+            card_order = atom_config.get("order")
+            after_molecule_id = atom_config.get("after_molecule_id")
+            before_molecule_id = atom_config.get("before_molecule_id")
             
             # Create card if it doesn't exist
             if canvas_pos not in cards_map:
-                cards_map[canvas_pos] = {
-                    "id": f"card-{canvas_pos}",
+                card_id = atom_config.get("mode_meta", {}).get("card_id") or f"card-{canvas_pos}"
+                card_data = {
+                    "id": card_id,
                     "atoms": [],
                     "isExhibited": atom_config.get("exhibition_previews") == "yes",
                     "collapsed": atom_config.get("open_cards") == "no",
                     "scroll_position": atom_config.get("scroll_position", 0),
-                    "moleculeId": molecule_id,
-                    "moleculeTitle": molecule_title
                 }
+                # Set molecule and order fields if they exist
+                if molecule_id is not None:
+                    card_data["moleculeId"] = molecule_id
+                if molecule_title is not None:
+                    card_data["moleculeTitle"] = molecule_title
+                if card_order is not None:
+                    card_data["order"] = card_order
+                if after_molecule_id is not None:
+                    card_data["afterMoleculeId"] = after_molecule_id
+                if before_molecule_id is not None:
+                    card_data["beforeMoleculeId"] = before_molecule_id
+                cards_map[canvas_pos] = card_data
             
             # Debug: Log molecule information being retrieved
             logger.info(f"🔍 DEBUG: Retrieving atom {atom_config.get('atom_name')} with molecule_id: {molecule_id}, molecule_title: {molecule_title}")
@@ -328,11 +369,23 @@ async def get_atom_list_configuration(
             molecule["atoms"].sort(key=lambda x: x["order"])
             workflow_molecules.append(molecule)
         
+        # If we have saved workflow_molecules with isActive and moleculeIndex, use those
+        # Otherwise, use the derived ones (for backward compatibility)
+        if saved_workflow_molecules:
+            # Sort saved workflow_molecules by moleculeIndex to preserve order
+            saved_workflow_molecules.sort(key=lambda m: m.get("moleculeIndex", 999999))
+            workflow_molecules = saved_workflow_molecules
+            logger.info(f"📦 Using saved workflow_molecules with isActive and moleculeIndex: {len(workflow_molecules)} molecules")
+            for i, mol in enumerate(workflow_molecules):
+                logger.info(f"🔍 DEBUG: Saved molecule {i}: moleculeId={mol.get('moleculeId')}, isActive={mol.get('isActive')}, moleculeIndex={mol.get('moleculeIndex')}")
+        else:
+            logger.info(f"📦 No saved workflow_molecules found, using derived ones: {len(workflow_molecules)} molecules")
+        
         logger.info(f"📦 Retrieved {len(cards)} cards with {sum(len(card['atoms']) for card in cards)} atoms from atom_list_configuration")
         
         # Debug: Log the structure of retrieved data
         for i, card in enumerate(cards):
-            logger.info(f"🔍 DEBUG: Card {i}: id={card.get('id')}, molecule_id={card.get('moleculeId')}, molecule_title={card.get('moleculeTitle')}, atoms_count={len(card.get('atoms', []))}")
+            logger.info(f"🔍 DEBUG: Card {i}: id={card.get('id')}, molecule_id={card.get('moleculeId')}, molecule_title={card.get('moleculeTitle')}, order={card.get('order')}, atoms_count={len(card.get('atoms', []))}")
             for j, atom in enumerate(card.get('atoms', [])):
                 logger.info(f"🔍 DEBUG:   Atom {j}: atomId={atom.get('atomId')}, moleculeId={atom.get('moleculeId')}, moleculeTitle={atom.get('moleculeTitle')}")
         
@@ -396,6 +449,12 @@ async def save_atom_list_configuration(
             open_card = "no" if card.get("collapsed") else "yes"
             exhibition_preview = "yes" if card.get("isExhibited") else "no"
             scroll_pos = card.get("scroll_position", 0)
+            # Extract molecule and order information from card
+            molecule_id = card.get("moleculeId")
+            molecule_title = card.get("moleculeTitle")
+            card_order = card.get("order")
+            after_molecule_id = card.get("afterMoleculeId")
+            before_molecule_id = card.get("beforeMoleculeId")
             
             for atom_pos, atom in enumerate(card.get("atoms", [])):
                 atom_id = atom.get("atomId") or atom.get("title") or "unknown"
@@ -444,19 +503,22 @@ async def save_atom_list_configuration(
                     "last_edited": timestamp,
                     "version_hash": version_hash,
                     # Molecule information as top-level fields for easier querying
-                    "molecule_id": card.get("moleculeId"),
-                    "molecule_title": card.get("moleculeTitle"),
+                    "molecule_id": molecule_id,
+                    "molecule_title": molecule_title,
+                    "order": card_order,
+                    "after_molecule_id": after_molecule_id,
+                    "before_molecule_id": before_molecule_id,
                     "mode_meta": {
                         "card_id": card.get("id"),
                         "atom_id": atom.get("id"),
-                        "molecule_id": card.get("moleculeId"),
-                        "molecule_title": card.get("moleculeTitle"),
+                        "molecule_id": molecule_id,
+                        "molecule_title": molecule_title,
                     },
                     "isDeleted": False,
                 }
                 
                 # Debug: Log what's being saved for this atom
-                logger.info(f"🔍 DEBUG: Saving atom {atom_id} with molecule_id: {card.get('moleculeId')}, molecule_title: {card.get('moleculeTitle')}")
+                logger.info(f"🔍 DEBUG: Saving atom {atom_id} with molecule_id: {molecule_id}, molecule_title: {molecule_title}, order: {card_order}")
                 logger.info(f"🔍 DEBUG: Saving atom {atom_id} with atom_configs keys: {list(atom_settings.keys())}")
                 if 'roi_config' in atom_settings:
                     logger.info(f"🔍 DEBUG: Saving roi_config: {atom_settings['roi_config']}")
@@ -469,11 +531,41 @@ async def save_atom_list_configuration(
                 
                 docs.append(doc)
         
-        # Insert documents
+        # Insert atom documents
         if docs:
             result = await coll.insert_many(docs)
             logger.info(f"📦 Stored {len(docs)} atom configurations in atom_list_configuration")
+        
+        # Save workflow_molecules as a separate document (if provided)
+        workflow_molecules = atom_config_data.get("workflow_molecules", [])
+        if workflow_molecules:
+            # Create a document to store workflow_molecules with isActive and moleculeIndex
+            workflow_doc = {
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "mode": atom_config_data.get("mode", "build"),
+                "workflow_molecules": workflow_molecules,
+                "last_edited": timestamp,
+                "is_workflow_metadata": True  # Marker to identify this document
+            }
             
+            # Delete existing workflow_molecules document for this project/mode
+            await coll.delete_many({
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+                "mode": atom_config_data.get("mode", "build"),
+                "is_workflow_metadata": True
+            })
+            
+            # Insert the workflow_molecules document
+            await coll.insert_one(workflow_doc)
+            logger.info(f"📦 Stored {len(workflow_molecules)} workflow_molecules with isActive and moleculeIndex")
+            for i, mol in enumerate(workflow_molecules):
+                logger.info(f"🔍 DEBUG: Saved workflow molecule {i}: moleculeId={mol.get('moleculeId')}, isActive={mol.get('isActive')}, moleculeIndex={mol.get('moleculeIndex')}")
+        
+        if docs:
             return {
                 "status": "success", 
                 "mongo_id": f"{client_id}/{app_id}/{project_id}",

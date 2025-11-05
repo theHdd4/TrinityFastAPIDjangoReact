@@ -1594,6 +1594,9 @@ export interface LayoutCard {
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
+  order?: number; // For positioning standalone cards between molecules
+  afterMoleculeId?: string; // Reference to molecule this card is positioned after
+  beforeMoleculeId?: string; // Reference to molecule this card is positioned before
 }
 
 // GroupBy Atom Settings

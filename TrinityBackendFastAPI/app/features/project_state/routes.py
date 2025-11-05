@@ -50,6 +50,7 @@ class LaboratoryProjectStateIn(BaseModel):
     app_name: str = Field(..., min_length=1)
     project_name: str = Field(..., min_length=1)
     cards: List[Dict[str, Any]] = Field(default_factory=list)
+    workflow_molecules: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
     mode: Optional[str] = Field(default=None)
 
 

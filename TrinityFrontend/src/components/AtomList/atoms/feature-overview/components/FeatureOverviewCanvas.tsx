@@ -531,9 +531,6 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
     (ids) => Array.isArray(ids) && ids.length > 0,
   );
   
-  console.log("🔍 hasMappedIdentifiers check:", hasMappedIdentifiers);
-  console.log("🔍 dimensionMap for hasMappedIdentifiers:", dimensionMap);
-  console.log("🔍 Object.values(dimensionMap):", Object.values(dimensionMap));
   const [skuRows, setSkuRows] = useState<any[]>(
     Array.isArray(settings.skuTable) ? settings.skuTable : [],
   );
