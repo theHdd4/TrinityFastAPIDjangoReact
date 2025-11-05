@@ -1636,6 +1636,31 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     }, []);
 
     const objectsMap = useMemo(() => new Map(objects.map(object => [object.id, object])), [objects]);
+    const highestZIndex = useMemo(
+      () =>
+        objects.reduce((max, object) => {
+          const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+          return value > max ? value : max;
+        }, 0),
+      [objects],
+    );
+    const selectedOrderMap = useMemo(() => {
+      const order = new Map<string, number>();
+      selectedIds.forEach((id, index) => {
+        order.set(id, index);
+      });
+      return order;
+    }, [selectedIds]);
+    const elevatedZIndexBase = highestZIndex + 100;
+    const activeInteractionOrderMap = useMemo(() => {
+      if (!activeInteraction) {
+        return new Map<string, number>();
+      }
+      if (activeInteraction.kind === 'move') {
+        return new Map(activeInteraction.objectIds.map((id, index) => [id, index]));
+      }
+      return new Map([[activeInteraction.objectId, 0]]);
+    }, [activeInteraction]);
     useEffect(() => {
       if (!chartEditorTarget) {
         return;
@@ -3169,7 +3194,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           onInteract();
           const uniqueSelection = resolveSelection();
           setSelectedIds(uniqueSelection);
-          onBringToFront(uniqueSelection);
           return;
         }
 
@@ -3201,7 +3225,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
-        onBringToFront(uniqueSelection);
         setActiveInteraction({
           kind: 'move',
           objectIds: Array.from(initialPositions.keys()),
@@ -3210,16 +3233,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           initialPositions,
         });
       },
-      [
-        canEdit,
-        commitEditingText,
-        editingTextState,
-        focusCanvas,
-        onInteract,
-        objectsMap,
-        onBringToFront,
-        selectedIds,
-      ],
+      [canEdit, commitEditingText, editingTextState, focusCanvas, onInteract, objectsMap, selectedIds],
     );
 
     const handleResizeStart = useCallback(
@@ -3240,7 +3254,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
         onInteract();
         setSelectedIds([objectId]);
-        onBringToFront([objectId]);
         setActiveInteraction({
           kind: 'resize',
           objectId,
@@ -3255,7 +3268,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           },
         });
       },
-      [canEdit, focusCanvas, onInteract, objectsMap, onBringToFront],
+      [canEdit, focusCanvas, onInteract, objectsMap],
     );
 
     const handleKeyDown = useCallback(
@@ -3692,7 +3705,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         <div className="relative z-20 h-full w-full">
           {objects.map(object => {
             const isSelected = selectedIds.includes(object.id);
-            const zIndex = typeof object.zIndex === 'number' ? object.zIndex : 1;
+            const baseZIndex = typeof object.zIndex === 'number' ? object.zIndex : 0;
+            const selectionOrderIndex = selectedOrderMap.get(object.id);
+            const interactionOrderIndex = activeInteractionOrderMap.get(object.id);
             const rotation = typeof object.rotation === 'number' ? object.rotation : 0;
             const isAccentImageObject = object.type === 'accent-image';
             const isImageObject = object.type === 'image';
@@ -3704,6 +3719,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               isTextBoxObject &&
               editingTextState?.id === object.id &&
               editingTextState.type === 'text-box';
+            const shouldElevate =
+              isSelected ||
+              isEditingTextBox ||
+              typeof interactionOrderIndex === 'number';
+            const elevationOrder =
+              typeof selectionOrderIndex === 'number'
+                ? selectionOrderIndex
+                : typeof interactionOrderIndex === 'number'
+                  ? interactionOrderIndex
+                  : 0;
+            const zIndex = shouldElevate ? elevatedZIndexBase + elevationOrder : baseZIndex;
             const textBoxFormatting = isTextBoxObject
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
@@ -3732,22 +3758,22 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
             const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
-          const renderObject = () => {
-            return (
-              <div
-                className="absolute group"
-                style={{
-                  left: object.x,
-                  top: object.y,
-                  width: object.width,
-                  height: object.height,
-                  zIndex: isSelected ? zIndex + 100 : zIndex,
-                }}
-                data-exhibition-object-id={object.id}
-                data-exhibition-object-type={object.type}
-                onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
-                onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
-              >
+            const renderObject = () => {
+              return (
+                <div
+                  className="absolute group"
+                  style={{
+                    left: object.x,
+                    top: object.y,
+                    width: object.width,
+                    height: object.height,
+                    zIndex,
+                  }}
+                  data-exhibition-object-id={object.id}
+                  data-exhibition-object-type={object.type}
+                  onPointerDown={canEdit ? event => handleObjectPointerDown(event, object.id) : undefined}
+                  onDoubleClick={canEdit ? event => handleObjectDoubleClick(event, object.id) : undefined}
+                >
               {isSelected && !(isTextBoxObject && isEditingTextBox) && (
                 <div
                   className="pointer-events-none absolute inset-0 z-40 border-2 border-yellow-400 transition-all duration-200"
