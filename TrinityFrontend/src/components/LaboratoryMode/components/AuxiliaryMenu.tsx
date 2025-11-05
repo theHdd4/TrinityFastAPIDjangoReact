@@ -4,15 +4,16 @@ import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
 import ExhibitionPanel from './ExhibitionPanel';
 import { SuperagentAIPanel, TrinityAIIcon } from '@/components/TrinityAI';
-import { Settings, Database, HelpCircle, GalleryHorizontal } from 'lucide-react';
+import { StreamAIPanelWebSocket as StreamAIPanel } from '@/components/StreamAI/StreamAIPanelWebSocket';
+import { Settings, Database, HelpCircle, GalleryHorizontal, Zap } from 'lucide-react';
 
 interface Props {
   selectedAtomId?: string;
   selectedCardId?: string;
   cardExhibited?: boolean;
-  active?: 'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null;
+  active?: 'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | 'exhibition' | null;
   onActiveChange?: (
-    active: 'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null,
+    active: 'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | 'exhibition' | null,
   ) => void;
 }
 
@@ -24,13 +25,13 @@ const AuxiliaryMenu: React.FC<Props> = ({
   onActiveChange
 }) => {
   const [internalActive, setInternalActive] = useState<
-    'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null
+    'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | 'exhibition' | null
   >(null);
   const controlled = activeProp !== undefined;
   const active = controlled ? activeProp : internalActive;
 
   const setActive = (
-    value: 'settings' | 'frames' | 'help' | 'superagent' | 'exhibition' | null,
+    value: 'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | 'exhibition' | null,
   ) => {
     if (controlled) {
       onActiveChange?.(value);
@@ -44,6 +45,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openHelp = () => setActive(active === 'help' ? null : 'help');
   const openExhibition = () => setActive(active === 'exhibition' ? null : 'exhibition');
   const openSuperagent = () => setActive(active === 'superagent' ? null : 'superagent');
+  const openStreamAI = () => setActive(active === 'streamai' ? null : 'streamai');
 
   return (
     <div className="relative z-30 flex h-full">
@@ -80,6 +82,13 @@ const AuxiliaryMenu: React.FC<Props> = ({
         />
       </div>
 
+      {/* Stream AI Panel */}
+      {active === 'streamai' && (
+        <StreamAIPanel
+          onClose={() => setActive(null)}
+        />
+      )}
+
       {active === 'exhibition' && <ExhibitionPanel onToggle={() => setActive(null)} />}
 
       {/* Icons Column - Always visible and stays on the right */}
@@ -97,6 +106,22 @@ const AuxiliaryMenu: React.FC<Props> = ({
             <TrinityAIIcon className="text-purple-500" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Trinity AI
+            </span>
+          </button>
+        </div>
+        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+          <button
+            onClick={openStreamAI}
+            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
+              active === 'streamai' ? 'bg-muted text-foreground' : ''
+            }`}
+            title="Stream AI"
+            data-streamai="true"
+            type="button"
+          >
+            <Zap className="w-4 h-4 text-green-500" />
+            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
+              Stream AI
             </span>
           </button>
         </div>

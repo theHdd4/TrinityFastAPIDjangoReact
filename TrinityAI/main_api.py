@@ -391,6 +391,7 @@ from Agent_dataframe_operations.main_app import router as dataframe_operations_r
 from SUPERAGENT.main_app import router as superagent_router
 from workflow_mode.api import router as workflow_router
 from insight import router as insight_router
+from STREAMAI.main_app import router as streamai_router
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -742,6 +743,50 @@ async def get_environment(
 
 # After defining all endpoints include the router so the app registers them
 app.include_router(api_router)
+
+# Include Stream AI router
+app.include_router(streamai_router)
+
+# =============================================================================
+# Initialize Stream AI WebSocket Components (SuperAgent Pattern)
+# =============================================================================
+try:
+    logger.info("🚀 Initializing Stream AI WebSocket components...")
+    
+    # Get LLM configuration
+    llm_config = get_llm_config()
+    
+    # Initialize components
+    from STREAMAI.result_storage import get_result_storage
+    from STREAMAI.stream_rag_engine import get_stream_rag_engine
+    from STREAMAI.stream_api import router as stream_ws_router, initialize_stream_ai_components
+    
+    # Create instances (simplified for WebSocket)
+    rag_engine = get_stream_rag_engine()
+    result_storage = get_result_storage()
+    
+    # Create minimal parameter generator for WebSocket orchestrator
+    class SimpleParameterGenerator:
+        pass
+    
+    param_gen = SimpleParameterGenerator()
+    
+    # Initialize the stream_api components
+    initialize_stream_ai_components(
+        param_gen=param_gen,
+        rag=rag_engine
+    )
+    
+    # Include the WebSocket API router
+    app.include_router(stream_ws_router)
+    
+    logger.info("✅ Stream AI WebSocket components initialized successfully")
+    
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Stream AI WebSocket components: {e}")
+    import traceback
+    traceback.print_exc()
+    # Continue running without Stream AI functionality
 
 if __name__ == "__main__":
     # Run the FastAPI application. Using the `app` instance directly
