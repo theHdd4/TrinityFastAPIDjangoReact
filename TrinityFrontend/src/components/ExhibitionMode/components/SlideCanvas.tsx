@@ -433,6 +433,8 @@ interface SlideCanvasProps {
   onPositionPanelChange?: (panel: ReactNode | null) => void;
   onUndo?: () => void;
   presentationMode?: boolean;
+  presentationPadding?: number;
+  previewObjects?: SlideObject[];
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -452,6 +454,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onPositionPanelChange,
   onUndo,
   presentationMode = false,
+  presentationPadding = PRESENTATION_PADDING,
+  previewObjects,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
@@ -510,9 +514,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     return style;
   }, [settings.highContrast, settings.largeText, settings.reducedMotion]);
 
-  const slideObjects = useExhibitionStore(
+  const storeSlideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
   );
+  const slideObjects = previewObjects ?? storeSlideObjects;
   const activeTheme = useExhibitionStore(state => state.activeTheme);
   const bulkUpdateSlideObjects = useExhibitionStore(state => state.bulkUpdateSlideObjects);
   const bringSlideObjectsToFront = useExhibitionStore(state => state.bringSlideObjectsToFront);
@@ -625,8 +630,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         return;
       }
 
-      const availableWidth = Math.max(container.clientWidth - PRESENTATION_PADDING, 0);
-      const availableHeight = Math.max(container.clientHeight - PRESENTATION_PADDING, 0);
+      const constrainedPadding = Math.max(0, Math.min(presentationPadding, container.clientWidth, container.clientHeight));
+      const availableWidth = Math.max(container.clientWidth - constrainedPadding, 0);
+      const availableHeight = Math.max(container.clientHeight - constrainedPadding, 0);
       if (availableWidth === 0 || availableHeight === 0) {
         setPresentationScale(1);
         return;
@@ -655,7 +661,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         resizeObserver.disconnect();
       }
     };
-  }, [canvasDimensions.height, canvasDimensions.width, presentationMode]);
+  }, [canvasDimensions.height, canvasDimensions.width, presentationMode, presentationPadding]);
 
   const handleBulkUpdate = useCallback(
     (updates: Record<string, Partial<SlideObject>>) => {
@@ -1385,6 +1391,14 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     settings.reducedMotion && 'transition-none motion-reduce:transition-none',
   );
 
+  const presentationFrameStyle = useMemo<React.CSSProperties | undefined>(() => {
+    if (!presentationMode) {
+      return undefined;
+    }
+    const safePadding = Math.max(0, presentationPadding);
+    return { padding: safePadding / 2 };
+  }, [presentationMode, presentationPadding]);
+
   const slideThemeStyle: React.CSSProperties = useMemo(() => {
     return {
       ...(themeContext.containerStyle ?? {}),
@@ -1410,9 +1424,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
           presentationMode
-            ? 'flex h-full w-full items-center justify-center p-12 bg-neutral-950'
+            ? 'flex h-full w-full items-center justify-center bg-neutral-950'
             : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
         }
+        style={presentationFrameStyle}
       >
         {viewMode === 'vertical' && (
           <div className="mb-4 flex items-center justify-between">
@@ -1659,7 +1674,7 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
 
 export const CANVAS_STAGE_HEIGHT = 520;
 export const DEFAULT_PRESENTATION_WIDTH = 960;
-export const PRESENTATION_PADDING = 160;
+export const PRESENTATION_PADDING = 96;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
