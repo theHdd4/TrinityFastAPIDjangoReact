@@ -12,7 +12,7 @@ import {
   type SlideObject,
   resolveCardTitle,
 } from '../store/exhibitionStore';
-import { SlideCanvas } from '../components/SlideCanvas';
+import { SlideCanvas } from '../components/slideCanvas';
 
 type SlideObjectMap = Record<string, SlideObject[] | undefined>;
 
