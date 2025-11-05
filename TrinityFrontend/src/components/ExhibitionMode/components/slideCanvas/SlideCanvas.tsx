@@ -50,7 +50,7 @@ import {
   CANVAS_SNAP_GRID,
   buildSlideTitleObjectId,
   resolveCardTitle,
-} from '../store/exhibitionStore';
+} from '../../store/exhibitionStore';
 import ExhibitedAtomRenderer from '../ExhibitedAtomRenderer';
 import { SlideTextBoxObject } from '../operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from '../operationsPalette/textBox/constants';
