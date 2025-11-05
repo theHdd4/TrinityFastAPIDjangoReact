@@ -51,31 +51,26 @@ import {
   buildSlideTitleObjectId,
   resolveCardTitle,
 } from '../store/exhibitionStore';
-import ExhibitedAtomRenderer from './ExhibitedAtomRenderer';
-import { SlideTextBoxObject } from './operationsPalette/textBox/TextBox';
-import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from './operationsPalette/textBox/constants';
-import type { TextBoxFormatting } from './operationsPalette/textBox/types';
-import { TextBoxPositionPanel } from './operationsPalette/textBox/TextBoxPositionPanel';
-import { CardFormattingPanel } from './operationsPalette/CardFormattingPanel';
-import { ExhibitionTable } from './operationsPalette/tables/ExhibitionTable';
-import { SlideShapeObject } from './operationsPalette/shapes';
-import type { ShapeObjectProps } from './operationsPalette/shapes/constants';
-import { SlideChart, ChartDataEditor, parseChartObjectProps, isEditableChartType } from './operationsPalette/charts';
-import type { ChartConfig, ChartDataRow } from './operationsPalette/charts';
+import ExhibitedAtomRenderer from '../ExhibitedAtomRenderer';
+import { SlideTextBoxObject } from '../operationsPalette/textBox/TextBox';
+import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from '../operationsPalette/textBox/constants';
+import type { TextBoxFormatting } from '../operationsPalette/textBox/types';
+import { TextBoxPositionPanel } from '../operationsPalette/textBox/TextBoxPositionPanel';
+import { CardFormattingPanel } from '../operationsPalette/CardFormattingPanel';
+import { ExhibitionTable } from '../operationsPalette/tables/ExhibitionTable';
+import { SlideShapeObject } from '../operationsPalette/shapes';
+import type { ShapeObjectProps } from '../operationsPalette/shapes/constants';
+import { SlideChart, ChartDataEditor, parseChartObjectProps, isEditableChartType } from '../operationsPalette/charts';
+import type { ChartConfig, ChartDataRow } from '../operationsPalette/charts';
 import {
-  DEFAULT_TABLE_COLS,
-  DEFAULT_TABLE_ROWS,
   cloneTableHeaders,
   cloneTableMatrix,
   createDefaultHeaderCell,
   createEmptyCell,
   createEmptyTableRow,
-  normaliseTableData,
-  normaliseTableHeaders,
   ensureTableStyleId,
-  type TableCellData,
   type TableCellFormatting,
-} from './operationsPalette/tables/constants';
+} from '../operationsPalette/tables/constants';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -87,328 +82,25 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import SlideObjectContextMenu, { AlignAction } from './SlideObjectContextMenu';
+import SlideObjectContextMenu, { AlignAction } from '../SlideObjectContextMenu';
+import { COLOR_PROP_KEYS, UNTITLED_SLIDE_TEXT } from './constants';
+import {
+  ActiveInteraction,
+  CanvasDropPlacement,
+  EditingTextState,
+  ResizeHandle,
+  isAtomObject,
+} from './types';
+import {
+  cloneValue,
+  generateObjectId,
+  isSlideObjectLocked,
+  snapToGrid,
+} from './utils';
+import { resolveFeatureOverviewTransparency, resolveSlideBackground } from './background';
+import { formattingShallowEqual, readTableState, tableStatesEqual, type TableState } from './table';
 
-interface CanvasDropPlacement {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
 
-const snapToGrid = (value: number, gridSize: number) => Math.round(value / gridSize) * gridSize;
-
-type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
-
-type ActiveInteraction =
-  | {
-      kind: 'move';
-      objectIds: string[];
-      startClientX: number;
-      startClientY: number;
-      initialPositions: Map<string, { x: number; y: number }>;
-    }
-  | {
-      kind: 'resize';
-      objectId: string;
-      handle: ResizeHandle;
-      startClientX: number;
-      startClientY: number;
-      initial: { x: number; y: number; width: number; height: number };
-    };
-
-const COLOR_PROP_KEYS = [
-  'color',
-  'fill',
-  'stroke',
-  'backgroundColor',
-  'textColor',
-  'borderColor',
-  'accentColor',
-] as const;
-
-const cloneValue = <T,>(value: T): T => {
-  const structured = (globalThis as any)?.structuredClone;
-  if (typeof structured === 'function') {
-    try {
-      return structured(value);
-    } catch (error) {
-      console.warn('[Exhibition] Structured clone failed, falling back to JSON clone', error);
-    }
-  }
-
-  try {
-    return JSON.parse(JSON.stringify(value)) as T;
-  } catch {
-    return value;
-  }
-};
-
-const generateObjectId = (fallback: string) => {
-  const globalCrypto: Crypto | undefined =
-    typeof window !== 'undefined'
-      ? window.crypto
-      : typeof globalThis !== 'undefined' && 'crypto' in globalThis
-        ? (globalThis.crypto as Crypto | undefined)
-        : undefined;
-
-  if (globalCrypto && typeof globalCrypto.randomUUID === 'function') {
-    return globalCrypto.randomUUID();
-  }
-
-  const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  return `${fallback || 'slide-object'}-${suffix}`;
-};
-
-const isSlideObjectLocked = (object: SlideObject | undefined | null): boolean => {
-  if (!object) {
-    return false;
-  }
-  const props = (object.props ?? {}) as Record<string, unknown>;
-  return Boolean(props.locked);
-};
-
-interface EditingTextState {
-  id: string;
-  type: 'text-box';
-  value: string;
-  original: string;
-}
-
-const isAtomObject = (
-  object: SlideObject,
-): object is SlideObject & { props: { atom: DroppedAtom } } => {
-  if (object.type !== 'atom') {
-    return false;
-  }
-  const payload = object.props as Record<string, unknown> | undefined;
-  if (!payload || typeof payload !== 'object') {
-    return false;
-  }
-  const candidate = payload.atom as DroppedAtom | undefined;
-  return Boolean(candidate && typeof candidate.id === 'string');
-};
-
-const parseBooleanish = (value: unknown): boolean | null => {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-  if (typeof value === 'string') {
-    const lowered = value.trim().toLowerCase();
-    if (['true', '1', 'yes', 'y', 'on'].includes(lowered)) {
-      return true;
-    }
-    if (['false', '0', 'no', 'n', 'off'].includes(lowered)) {
-      return false;
-    }
-  }
-  return null;
-};
-
-const normaliseHexColor = (value: string): string => {
-  const trimmed = value.trim();
-  if (/^#([0-9a-fA-F]{6})$/.test(trimmed)) {
-    return trimmed.toLowerCase();
-  }
-  if (/^#([0-9a-fA-F]{3})$/.test(trimmed)) {
-    const [, short] = /^#([0-9a-fA-F]{3})$/.exec(trimmed) ?? [];
-    if (short) {
-      return `#${short
-        .split('')
-        .map(char => char + char)
-        .join('')}`.toLowerCase();
-    }
-  }
-  return '#ffffff';
-};
-
-const applyOpacityToHex = (value: string, opacity: number): string => {
-  const safeOpacity = Math.min(100, Math.max(0, opacity));
-  const normalised = normaliseHexColor(value);
-  const hex = normalised.replace('#', '');
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  const alpha = Math.round((safeOpacity / 100) * 100) / 100;
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-};
-
-const slideBackgroundClassNames: Record<SlideBackgroundPreset, string> = {
-  default: 'bg-card',
-  ivory: 'bg-amber-100',
-  slate: 'bg-slate-200',
-  charcoal: 'bg-neutral-300',
-  indigo: 'bg-indigo-100',
-  emerald: 'bg-emerald-100',
-  rose: 'bg-rose-100',
-};
-
-const resolveSlideBackground = (
-  settings: PresentationSettings,
-): { className: string; style: React.CSSProperties | undefined } => {
-  const mode = settings.backgroundMode ?? 'preset';
-  const opacity = Number.isFinite(settings.backgroundOpacity) ? Number(settings.backgroundOpacity) : 100;
-
-  if (mode === 'image' && settings.backgroundImageUrl) {
-    return {
-      className: '',
-      style: {
-        backgroundImage: `url(${settings.backgroundImageUrl})`,
-        backgroundSize: 'cover',
-        backgroundRepeat: 'no-repeat',
-        backgroundPosition: 'center',
-      },
-    };
-  }
-
-  if (mode === 'gradient') {
-    const start = settings.backgroundGradientStart ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientStart;
-    const end = settings.backgroundGradientEnd ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientEnd;
-    const direction = settings.backgroundGradientDirection ?? DEFAULT_PRESENTATION_SETTINGS.backgroundGradientDirection;
-    const startColor = applyOpacityToHex(start, opacity);
-    const endColor = applyOpacityToHex(end, opacity);
-    return {
-      className: '',
-      style: {
-        backgroundImage: `linear-gradient(${direction}, ${startColor}, ${endColor})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-      },
-    };
-  }
-
-  if (mode === 'solid') {
-    const color = settings.backgroundSolidColor ?? DEFAULT_PRESENTATION_SETTINGS.backgroundSolidColor;
-    return {
-      className: '',
-      style: {
-        backgroundColor: applyOpacityToHex(color, opacity),
-      },
-    };
-  }
-
-  const background = settings.backgroundColor;
-  if (isSolidToken(background)) {
-    const color = solidTokenToHex(background);
-    return {
-      className: '',
-      style: {
-        backgroundColor: opacity >= 100 ? color : applyOpacityToHex(color, opacity),
-      },
-    };
-  }
-
-  if (isGradientToken(background)) {
-    const gradient = GRADIENT_STYLE_MAP[background] ?? null;
-    if (gradient) {
-      return {
-        className: '',
-        style: {
-          backgroundImage: gradient,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        },
-      };
-    }
-  }
-
-  const className =
-    slideBackgroundClassNames[(background as SlideBackgroundPreset) ?? 'default'] ??
-    slideBackgroundClassNames.default;
-
-  return { className, style: undefined };
-};
-
-const resolveFeatureOverviewTransparency = (
-  metadata: Record<string, any> | undefined,
-): boolean => {
-  if (!metadata || typeof metadata !== 'object') {
-    return true;
-  }
-
-  const controls = metadata.exhibitionControls;
-  if (!controls || typeof controls !== 'object') {
-    return true;
-  }
-
-  const preference = parseBooleanish((controls as Record<string, unknown>).transparentBackground);
-  return preference ?? true;
-};
-
-const UNTITLED_SLIDE_TEXT = 'Untitled Slide';
-
-type TableState = {
-  data: TableCellData[][];
-  rows: number;
-  cols: number;
-  locked: boolean;
-  showOutline: boolean;
-  headers: TableCellData[];
-  styleId: string;
-};
-
-const coercePositiveInteger = (value: unknown, fallback: number): number => {
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) {
-    return fallback;
-  }
-
-  const integer = Math.floor(numeric);
-  return integer > 0 ? integer : fallback;
-};
-
-const extractTableHeaders = (value: unknown, fallbackCount: number): TableCellData[] => {
-  return normaliseTableHeaders(value, fallbackCount);
-};
-
-const readTableState = (object: SlideObject): TableState => {
-  const props = (object.props ?? {}) as Record<string, unknown> | undefined;
-  const fallbackRows = coercePositiveInteger(props?.rows, DEFAULT_TABLE_ROWS);
-  const fallbackCols = coercePositiveInteger(props?.cols, DEFAULT_TABLE_COLS);
-  const data = normaliseTableData(props?.data, fallbackRows, fallbackCols);
-  const colCount = data[0]?.length ?? 0;
-  const headers = extractTableHeaders(props?.headers, colCount);
-  const styleId = ensureTableStyleId(props?.styleId);
-
-  return {
-    data,
-    rows: data.length,
-    cols: colCount,
-    locked: Boolean(props?.locked),
-    showOutline: props?.showOutline !== false,
-    headers,
-    styleId,
-  };
-};
-
-const tableStatesEqual = (a: TableState, b: TableState) => {
-  return (
-    a.data === b.data &&
-    a.rows === b.rows &&
-    a.cols === b.cols &&
-    a.locked === b.locked &&
-    a.showOutline === b.showOutline &&
-    a.headers === b.headers &&
-    a.styleId === b.styleId
-  );
-};
-
-const formattingShallowEqual = (a: TableCellFormatting, b: TableCellFormatting) => {
-  return (
-    a.fontFamily === b.fontFamily &&
-    a.fontSize === b.fontSize &&
-    a.bold === b.bold &&
-    a.italic === b.italic &&
-    a.underline === b.underline &&
-    a.strikethrough === b.strikethrough &&
-    a.align === b.align &&
-    a.color === b.color
-  );
-};
 
 interface SlideCanvasProps {
   card: LayoutCard;
@@ -513,6 +205,18 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const slideObjects = useExhibitionStore(
     useCallback(state => state.slideObjectsByCardId[card.id] ?? [], [card.id]),
   );
+  const sortedSlideObjects = useMemo(() => {
+    const next = [...slideObjects];
+    next.sort((a, b) => {
+      const aZ = typeof a.zIndex === 'number' ? a.zIndex : 0;
+      const bZ = typeof b.zIndex === 'number' ? b.zIndex : 0;
+      if (aZ !== bZ) {
+        return aZ - bZ;
+      }
+      return a.id.localeCompare(b.id);
+    });
+    return next;
+  }, [slideObjects]);
   const activeTheme = useExhibitionStore(state => state.activeTheme);
   const bulkUpdateSlideObjects = useExhibitionStore(state => state.bulkUpdateSlideObjects);
   const bringSlideObjectsToFront = useExhibitionStore(state => state.bringSlideObjectsToFront);
@@ -1489,7 +1193,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   ref={canvasRef}
                   canEdit={canEdit}
                   isDragOver={Boolean(isDragOver && canEdit && draggedAtom)}
-                  objects={slideObjects}
+                  objects={sortedSlideObjects}
                   showEmptyState={!hasInteracted && nonStructuralObjects.length === 0}
                   layout={settings.cardLayout}
                   cardColor={settings.cardColor}
@@ -4480,4 +4184,5 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
 CanvasStage.displayName = 'CanvasStage';
 
+export type { SlideCanvasProps };
 export default SlideCanvas;

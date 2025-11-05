@@ -3,6 +3,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import django
 
@@ -14,7 +15,7 @@ os.environ.setdefault(
 )
 django.setup()
 
-from apps.registry import signals
+from apps.registry import signals, template_config
 
 
 class FakeResult:
@@ -259,3 +260,34 @@ def test_rename_updates_mongo_documents(monkeypatch):
         "Tenant/app/Old Project/column_classifier_config:demo.csv",
     }
 
+
+def test_normalise_contextual_fields_assigns_slide_object_z_index() -> None:
+    project = SimpleNamespace(name="Demo Project", pk=7)
+    context = {"client_name": "Tenant", "app_name": "App"}
+    timestamp = datetime(2024, 1, 1)
+
+    document = {
+        "_id": "layout-123",
+        "slide_objects": {
+            "slide-1": [
+                {"id": "object-a", "type": "text", "zIndex": "5"},
+                {"id": "object-b", "type": "shape", "z_index": 3},
+                {"id": "object-c", "type": "image"},
+            ]
+        },
+    }
+
+    normalised = template_config._normalise_contextual_fields(
+        document,
+        project=project,
+        context=context,
+        timestamp=timestamp,
+        preserve_id=True,
+    )
+
+    slide_objects = normalised.get("slide_objects", {})
+    assert "slide-1" in slide_objects
+    z_values = [entry["zIndex"] for entry in slide_objects["slide-1"]]
+    assert z_values == [5, 3, 3]
+    for entry in slide_objects["slide-1"]:
+        assert "z_index" not in entry
