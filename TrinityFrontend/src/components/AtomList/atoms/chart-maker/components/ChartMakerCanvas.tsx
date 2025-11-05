@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon, ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
@@ -732,12 +732,46 @@ const renderChart = (
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
     height: chartHeightValue,
-    sortOrder: chartSortOrder[chart.id] || chart.chartConfig?.sortOrder || null,
+    sortOrder: chart.chartConfig?.sortOrder || chartSortOrder[chart.id] || null,
+    sortColumn: chart.chartConfig?.sortColumn,
+    onSortColumnChange: (column: string) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, sortColumn: column } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
     onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart') => {
       const mappedType = newType === 'stacked_bar_chart' ? 'stacked_bar' : newType.replace('_chart', '');
       onChartTypeChange?.(chart.id, mappedType as ChartMakerConfig['type']);
     },
-    onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleChartSortOrderChange(chart.id, newSortOrder),
+    onSortChange: (newSortOrder: 'asc' | 'desc' | null) => {
+      handleChartSortOrderChange(chart.id, newSortOrder);
+      // Also save to chart config for persistence
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, sortOrder: newSortOrder } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    seriesSettings: chart.chartConfig?.seriesSettings || {},
+    onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+      // Defer the update to avoid updating during render
+      // Use setTimeout instead of requestAnimationFrame to ensure it's truly deferred
+      setTimeout(() => {
+        // Get fresh charts from store to avoid stale closure
+        const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+        const currentCharts = (currentAtom?.settings as any)?.charts || charts;
+        const updatedCharts = currentCharts.map((c: any) => 
+          c.id === chart.id 
+            ? { ...c, chartConfig: { ...c.chartConfig, seriesSettings: newSeriesSettings } }
+            : c
+        );
+        updateSettings(atomId, { charts: updatedCharts });
+      }, 0);
+    },
     onThemeChange: (theme: string) => {
       const updatedCharts = charts.map(c => 
         c.id === chart.id 

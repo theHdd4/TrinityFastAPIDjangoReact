@@ -177,6 +177,9 @@ interface Props {
   captureId?: string;
   forceSingleAxis?: boolean; // Force rendering multiple series on single axis instead of dual axes
   stackBars?: boolean; // Enable stacked bar chart when legendField is present
+  // Series settings props for persistence
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>; // Per-series settings from parent
+  onSeriesSettingsChange?: (settings: Record<string, { color?: string; showDataLabels?: boolean }>) => void; // Callback to update series settings
 }
 
 // Excel-like color themes
@@ -193,170 +196,171 @@ const COLOR_THEMES = {
     primary: '#3b82f6',
     secondary: '#60a5fa',
     tertiary: '#dbeafe',
-    palette: ['#1e40af', '#1e3a8a', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe', '#eff6ff', '#0c4a6e', '#075985', '#0369a1', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe', '#f0f9ff', '#164e63', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#0f172a', '#1c4a6e', '#1e4d72', '#2563eb', '#3b82f6']
+    palette: ['#1e40af', '#3b82f6', '#60a5fa', '#93c5fd', '#dbeafe', '#eff6ff', '#1e3a8a', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#0c4a6e', '#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#164e63', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0']
   },
   'green': {
     name: 'Green',
     primary: '#10b981',
     secondary: '#6ee7b7',
     tertiary: '#d1fae5',
-    palette: ['#065f46', '#064e3b', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5', '#022c22', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#99f6e4', '#ccfbf1', '#f0fdfa', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#86efac', '#bbf7d0', '#dcfce7', '#f0fdf4', '#1a365d', '#2d5016', '#365314', '#3f6212', '#4a7c59', '#54875d', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#d9f99d']
+    palette: ['#065f46', '#10b981', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5', '#064e3b', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#022c22', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#84cc16', '#a3e635', '#bef264', '#65a30d', '#365314', '#3f6212']
   },
   'purple': {
     name: 'Purple',
     primary: '#8b5cf6',
     secondary: '#c4b5fd',
     tertiary: '#ede9fe',
-    palette: ['#581c87', '#6b21a8', '#7e22ce', '#9333ea', '#a855f7', '#c084fc', '#d8b4fe', '#e9d5ff', '#f3e8ff', '#4c1d95', '#5b21b6', '#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff', '#3b0764', '#4a044e', '#581c87', '#6b21a8', '#7e22ce', '#9333ea', '#a855f7', '#c084fc', '#d8b4fe', '#e9d5ff', '#f3e8ff', '#4c1d95', '#5b21b6', '#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff']
+    palette: ['#581c87', '#8b5cf6', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff', '#4c1d95', '#5b21b6', '#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#3b0764', '#6b21a8', '#7e22ce', '#9333ea', '#a855f7', '#c084fc', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#831843', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#701a75', '#86198f']
   },
   'orange': {
     name: 'Orange',
     primary: '#f59e0b',
     secondary: '#fcd34d',
     tertiary: '#fef3c7',
-    palette: ['#92400e', '#78350f', '#b45309', '#d97706', '#f59e0b', '#fbbf24', '#fcd34d', '#fde68a', '#fef3c7', '#fffbeb', '#9a3412', '#7c2d12', '#c2410c', '#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa', '#ffedd5', '#713f12', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#fde047', '#fef08a', '#fef9c3', '#7c2d12', '#9a3412', '#c2410c', '#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa', '#ffedd5', '#78350f', '#92400e', '#b45309']
+    palette: ['#92400e', '#f59e0b', '#fcd34d', '#fde68a', '#fef3c7', '#fffbeb', '#78350f', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#713f12', '#b45309', '#d97706', '#f59e0b', '#fbbf24', '#fcd34d', '#9a3412', '#c2410c', '#ea580c', '#f97316', '#fb923c', '#fdba74', '#f59e0b', '#fbbf24', '#fcd34d', '#fde047', '#fef08a', '#fef9c3']
   },
   'red': {
     name: 'Red',
     primary: '#ef4444',
     secondary: '#f87171',
     tertiary: '#fecaca',
-    palette: ['#991b1b', '#7f1d1d', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#fef2f2', '#9f1239', '#881337', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#fff1f2', '#4c0519', '#7f1d1d', '#991b1b', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#fff1f2', '#ffebee']
+    palette: ['#991b1b', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fef2f2', '#7f1d1d', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#881337', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#991b1b', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5']
   },
   'teal': {
     name: 'Teal',
     primary: '#14b8a6',
     secondary: '#5eead4',
     tertiary: '#ccfbf1',
-    palette: ['#134e4a', '#042f2e', '#115e59', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#99f6e4', '#ccfbf1', '#d1fae5', '#f0fdfa', '#083344', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#164e63', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#042f2e', '#134e4a', '#115e59', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#99f6e4', '#ccfbf1', '#f0fdfa']
+    palette: ['#134e4a', '#14b8a6', '#5eead4', '#99f6e4', '#ccfbf1', '#f0fdfa', '#042f2e', '#115e59', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#164e63', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#0c4a6e', '#075985', '#0369a1', '#0284c7', '#0ea5e9', '#38bdf8', '#134e4a', '#115e59', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf']
   },
   'pink': {
     name: 'Pink',
     primary: '#ec4899',
     secondary: '#f9a8d4',
     tertiary: '#fce7f3',
-    palette: ['#831843', '#881337', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#fdf2f8', '#4a044e', '#701a75', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#fae8ff', '#831843', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#881337', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#fdf2f8']
+    palette: ['#831843', '#ec4899', '#f9a8d4', '#fbcfe8', '#fce7f3', '#fdf2f8', '#881337', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#701a75', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#831843', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8']
   },
   'gray': {
     name: 'Gray',
     primary: '#6b7280',
     secondary: '#9ca3af',
     tertiary: '#f3f4f6',
-    palette: ['#374151', '#111827', '#1f2937', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#030712', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa']
+    palette: ['#374151', '#6b7280', '#9ca3af', '#d1d5db', '#f3f4f6', '#f9fafb', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#262626', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4']
   },
   'indigo': {
     name: 'Indigo',
     primary: '#4f46e5',
     secondary: '#818cf8',
     tertiary: '#e0e7ff',
-    palette: ['#312e81', '#1e1b4b', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#eef2ff', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#1e1b4b', '#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff', '#eef2ff', '#312e81', '#4338ca', '#4f46e5', '#818cf8']
+    palette: ['#312e81', '#4f46e5', '#818cf8', '#a5b4fc', '#e0e7ff', '#eef2ff', '#1e1b4b', '#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#3b0764', '#581c87', '#6b21a8', '#7c3aed', '#8b5cf6', '#a78bfa', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc']
   },
   'cyan': {
     name: 'Cyan',
     primary: '#06b6d4',
     secondary: '#67e8f9',
     tertiary: '#cffafe',
-    palette: ['#164e63', '#083344', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#0c4a6e', '#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe', '#164e63', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#083344', '#0e7490', '#0891b2', '#06b6d4']
+    palette: ['#164e63', '#06b6d4', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#083344', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#0c4a6e', '#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#164e63', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#134e4a', '#115e59', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf']
   },
   'lime': {
     name: 'Lime',
     primary: '#84cc16',
     secondary: '#bef264',
     tertiary: '#f7fee7',
-    palette: ['#3f6212', '#365314', '#4a7c59', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#d9f99d', '#f7fee7', '#1a2e05', '#365314', '#3f6212', '#4a7c59', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#d9f99d', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#86efac', '#bbf7d0', '#dcfce7', '#f0fdf4', '#1a2e05', '#365314', '#3f6212', '#4a7c59', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#d9f99d', '#f7fee7', '#ecfdf5']
+    palette: ['#3f6212', '#84cc16', '#bef264', '#d9f99d', '#f7fee7', '#f7fee7', '#365314', '#4a7c59', '#65a30d', '#84cc16', '#a3e635', '#bef264', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#365314', '#3f6212', '#4a7c59', '#65a30d', '#84cc16', '#a3e635', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7']
   },
   'amber': {
     name: 'Amber',
     primary: '#f59e0b',
     secondary: '#fbbf24',
     tertiary: '#fef3c7',
-    palette: ['#78350f', '#713f12', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#fde047', '#fef08a', '#fef9c3', '#92400e', '#b45309', '#d97706', '#f59e0b', '#fbbf24', '#fcd34d', '#fde68a', '#fef3c7', '#fffbeb', '#9a3412', '#c2410c', '#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa', '#ffedd5', '#78350f', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#fde047', '#fef08a', '#fef9c3', '#fffbeb', '#92400e', '#b45309', '#f59e0b']
+    palette: ['#78350f', '#f59e0b', '#fbbf24', '#fcd34d', '#fef3c7', '#fffbeb', '#713f12', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#92400e', '#b45309', '#d97706', '#f59e0b', '#fbbf24', '#fcd34d', '#78350f', '#854d0e', '#a16207', '#ca8a04', '#eab308', '#facc15', '#c2410c', '#ea580c', '#f97316', '#fb923c', '#fdba74', '#fed7aa']
   },
   'emerald': {
     name: 'Emerald',
     primary: '#059669',
     secondary: '#34d399',
     tertiary: '#d1fae5',
-    palette: ['#064e3b', '#022c22', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#86efac', '#bbf7d0', '#dcfce7', '#f0fdf4', '#064e3b', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#022c22', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#6ee7b7', '#a7f3d0', '#d1fae5', '#ecfdf5']
+    palette: ['#064e3b', '#059669', '#34d399', '#6ee7b7', '#d1fae5', '#ecfdf5', '#022c22', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#14532d', '#166534', '#15803d', '#16a34a', '#22c55e', '#4ade80', '#064e3b', '#065f46', '#047857', '#059669', '#10b981', '#34d399', '#0f766e', '#0d9488', '#14b8a6', '#2dd4bf', '#5eead4', '#99f6e4']
   },
   'violet': {
     name: 'Violet',
     primary: '#7c3aed',
     secondary: '#a78bfa',
     tertiary: '#ede9fe',
-    palette: ['#4c1d95', '#3b0764', '#581c87', '#6b21a8', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff', '#4c1d95', '#5b21b6', '#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff', '#3b0764', '#581c87', '#6b21a8', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#4c1d95', '#581c87', '#6b21a8', '#7c3aed', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe', '#ede9fe', '#faf5ff']
+    palette: ['#4c1d95', '#7c3aed', '#a78bfa', '#c4b5fd', '#ede9fe', '#faf5ff', '#3b0764', '#581c87', '#6b21a8', '#7c3aed', '#8b5cf6', '#a78bfa', '#312e81', '#4338ca', '#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#4c1d95', '#5b21b6', '#6d28d9', '#7c3aed', '#8b5cf6', '#a78bfa', '#701a75', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9']
   },
   'fuchsia': {
     name: 'Fuchsia',
     primary: '#d946ef',
     secondary: '#f0abfc',
     tertiary: '#fae8ff',
-    palette: ['#701a75', '#4a044e', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#fae8ff', '#fdf4ff', '#831843', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4', '#fbcfe8', '#fce7f3', '#701a75', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#fae8ff', '#4a044e', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#f0abfc', '#f5d0fe', '#fae8ff', '#fdf4ff', '#831843']
+    palette: ['#701a75', '#d946ef', '#f0abfc', '#f5d0fe', '#fae8ff', '#fdf4ff', '#4a044e', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#831843', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#701a75', '#86198f', '#a21caf', '#c026d3', '#d946ef', '#e879f9', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#f9a8d4']
   },
   'rose': {
     name: 'Rose',
     primary: '#e11d48',
     secondary: '#fb7185',
     tertiary: '#ffe4e6',
-    palette: ['#881337', '#4c0519', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#fff1f2', '#991b1b', '#7f1d1d', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#fecaca', '#fee2e2', '#fef2f2', '#881337', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#4c0519', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#fecdd3', '#ffe4e6', '#fff1f2']
+    palette: ['#881337', '#e11d48', '#fb7185', '#fda4af', '#ffe4e6', '#fff1f2', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185', '#fda4af', '#991b1b', '#b91c1c', '#dc2626', '#ef4444', '#f87171', '#fca5a5', '#831843', '#9f1239', '#be185d', '#db2777', '#ec4899', '#f472b6', '#881337', '#9f1239', '#be123c', '#e11d48', '#f43f5e', '#fb7185']
   },
   'slate': {
     name: 'Slate',
     primary: '#475569',
     secondary: '#94a3b8',
     tertiary: '#f1f5f9',
-    palette: ['#1e293b', '#0f172a', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc']
+    palette: ['#1e293b', '#475569', '#94a3b8', '#cbd5e1', '#f1f5f9', '#f8fafc', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#262626', '#404040', '#525252', '#737373', '#a3a3a3']
   },
   'zinc': {
     name: 'Zinc',
     primary: '#71717a',
     secondary: '#a1a1aa',
     tertiary: '#f4f4f5',
-    palette: ['#27272a', '#18181b', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa']
+    palette: ['#27272a', '#71717a', '#a1a1aa', '#d4d4d8', '#f4f4f5', '#fafafa', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#262626', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4']
   },
   'neutral': {
     name: 'Neutral',
     primary: '#737373',
     secondary: '#a3a3a3',
     tertiary: '#f5f5f5',
-    palette: ['#262626', '#171717', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4', '#e5e5e5', '#f5f5f5', '#fafafa', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#171717', '#262626', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4', '#e5e5e5', '#f5f5f5', '#fafafa']
+    palette: ['#262626', '#737373', '#a3a3a3', '#d4d4d4', '#f5f5f5', '#fafafa', '#171717', '#262626', '#404040', '#525252', '#737373', '#a3a3a3', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db']
   },
   'stone': {
     name: 'Stone',
     primary: '#78716c',
     secondary: '#a8a29e',
     tertiary: '#f5f5f4',
-    palette: ['#292524', '#1c1917', '#44403c', '#57534e', '#78716c', '#a8a29e', '#d6d3d1', '#e7e5e4', '#f5f5f4', '#fafaf9', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#1c1917', '#292524', '#44403c', '#57534e', '#78716c', '#a8a29e', '#d6d3d1', '#e7e5e4', '#f5f5f4', '#fafaf9']
+    palette: ['#292524', '#78716c', '#a8a29e', '#d6d3d1', '#f5f5f4', '#fafaf9', '#1c1917', '#292524', '#44403c', '#57534e', '#78716c', '#a8a29e', '#262626', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db']
   },
   'sky': {
     name: 'Sky',
     primary: '#0ea5e9',
     secondary: '#38bdf8',
     tertiary: '#e0f2fe',
-    palette: ['#0c4a6e', '#082f49', '#075985', '#0369a1', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe', '#f0f9ff', '#164e63', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc', '#cffafe', '#ecfeff', '#1e40af', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#dbeafe', '#eff6ff', '#0c4a6e', '#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe', '#f0f9ff', '#082f49', '#0c4a6e', '#075985']
+    palette: ['#0c4a6e', '#0ea5e9', '#38bdf8', '#7dd3fc', '#e0f2fe', '#f0f9ff', '#164e63', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee', '#0c4a6e', '#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#1e40af', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#164e63', '#0891b2', '#06b6d4', '#22d3ee', '#67e8f9', '#a5f3fc']
   },
   'blue-gray': {
     name: 'Blue Gray',
     primary: '#64748b',
     secondary: '#94a3b8',
     tertiary: '#f1f5f9',
-    palette: ['#334155', '#1e293b', '#0f172a', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#0f172a', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#374151', '#4b5563', '#6b7280', '#9ca3af']
+    palette: ['#334155', '#64748b', '#94a3b8', '#cbd5e1', '#f1f5f9', '#f8fafc', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#0c4a6e', '#075985', '#0284c7', '#0ea5e9', '#38bdf8', '#7dd3fc', '#1e40af', '#2563eb', '#3b82f6', '#60a5fa', '#93c5fd', '#bfdbfe', '#164e63', '#155e75', '#0e7490', '#0891b2', '#06b6d4', '#22d3ee']
   },
   'cool-gray': {
     name: 'Cool Gray',
     primary: '#6b7280',
     secondary: '#9ca3af',
     tertiary: '#f3f4f6',
-    palette: ['#374151', '#1f2937', '#111827', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0', '#f1f5f9', '#f8fafc', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#111827']
+    palette: ['#374151', '#6b7280', '#9ca3af', '#d1d5db', '#f3f4f6', '#f9fafb', '#111827', '#1f2937', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#1e293b', '#334155', '#475569', '#64748b', '#94a3b8', '#cbd5e1', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#262626', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4']
   },
   'warm-gray': {
     name: 'Warm Gray',
     primary: '#78716c',
     secondary: '#a8a29e',
     tertiary: '#f5f5f4',
-    palette: ['#44403c', '#292524', '#1c1917', '#57534e', '#78716c', '#a8a29e', '#d6d3d1', '#e7e5e4', '#f5f5f4', '#fafaf9', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb', '#f3f4f6', '#f9fafb', '#18181b', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#e4e4e7', '#f4f4f5', '#fafafa', '#292524', '#44403c', '#57534e', '#78716c', '#a8a29e', '#d6d3d1', '#e7e5e4', '#f5f5f4', '#fafaf9', '#1c1917', '#292524']
+    palette: ['#44403c', '#78716c', '#a8a29e', '#d6d3d1', '#f5f5f4', '#fafaf9', '#1c1917', '#292524', '#44403c', '#57534e', '#78716c', '#a8a29e', '#262626', '#404040', '#525252', '#737373', '#a3a3a3', '#d4d4d4', '#27272a', '#3f3f46', '#52525b', '#71717a', '#a1a1aa', '#d4d4d8', '#374151', '#4b5563', '#6b7280', '#9ca3af', '#d1d5db', '#e5e7eb']
   }
 };
+
 
 const MODERN_PIE_COLORS = [
   '#8884d8', '#a5b4fc', '#e0e7ff', '#3b82f6', '#f59e0b', '#ef4444', '#06b6d4', '#84cc16', '#f97316', '#ec4899',
@@ -506,16 +510,23 @@ const RechartsChartRenderer: React.FC<Props> = ({
   captureId,
   forceSingleAxis = false,
   stackBars = false,
+  seriesSettings: propSeriesSettings, // Series settings from parent
+  onSeriesSettingsChange, // Callback to update series settings
 }) => {
 
-  // State for color theme - simplified approach
-  const [selectedTheme, setSelectedTheme] = useState<string>('default');
+  // State for color theme - track if user has made a selection
+  const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
   // Use selectedTheme if user has made a choice, otherwise use propTheme
-  const currentTheme = selectedTheme !== 'default' ? selectedTheme : (propTheme || 'default');
+  const currentTheme = selectedTheme !== null ? selectedTheme : (propTheme || 'default');
+  
+  // DEBUG: Log theme changes
+  useEffect(() => {
+    console.log('🎨 Theme changed:', { selectedTheme, propTheme, currentTheme });
+  }, [selectedTheme, propTheme, currentTheme]);
   
   // Update selectedTheme when propTheme changes (but only if user hasn't made a selection)
   useEffect(() => {
-    if (propTheme && selectedTheme === 'default') {
+    if (propTheme && selectedTheme === null) {
       setSelectedTheme(propTheme);
     }
   }, [propTheme, selectedTheme]);
@@ -526,8 +537,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const [showChartTypeSubmenu, setShowChartTypeSubmenu] = useState(false);
   const [showAxisLabelSubmenu, setShowAxisLabelSubmenu] = useState(false);
   const [showAxisToggleSubmenu, setShowAxisToggleSubmenu] = useState(false);
+  const [showSeriesSettingsSubmenu, setShowSeriesSettingsSubmenu] = useState(false);
   const [colorSubmenuPos, setColorSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [sortSubmenuPos, setSortSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [seriesSettingsSubmenuPos, setSeriesSettingsSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [selectedSeriesTab, setSelectedSeriesTab] = useState<string | null>(null);
+  const [seriesTabOffset, setSeriesTabOffset] = useState<number>(0);
   const [internalSortColumn, setInternalSortColumn] = useState<string>('');
   // Use prop sortColumn if provided, otherwise use internal state
   const sortColumn = propSortColumn !== undefined ? propSortColumn : internalSortColumn;
@@ -593,9 +608,41 @@ const RechartsChartRenderer: React.FC<Props> = ({
     color?: string;
     showDataLabels?: boolean;
   }
-  const [seriesSettings, setSeriesSettings] = useState<Record<string, SeriesSettings>>({});
-  const [selectedSeries, setSelectedSeries] = useState<{ dataKey: string; name: string; currentColor: string } | null>(null);
-  const [showSeriesSettingsModal, setShowSeriesSettingsModal] = useState(false);
+  // Use prop seriesSettings if provided, otherwise use local state
+  const [localSeriesSettings, setLocalSeriesSettings] = useState<Record<string, SeriesSettings>>({});
+  const seriesSettings = propSeriesSettings !== undefined ? propSeriesSettings : localSeriesSettings;
+  
+  // Update series settings - use callback if provided, otherwise update local state
+  // Use useCallback to prevent recreating the function and causing render loops
+  const updateSeriesSettings = useCallback((newSettings: Record<string, SeriesSettings> | ((prev: Record<string, SeriesSettings>) => Record<string, SeriesSettings>)) => {
+    if (onSeriesSettingsChange) {
+      // Get current settings from props (or local state if props not provided)
+      const currentSettings = propSeriesSettings !== undefined ? propSeriesSettings : localSeriesSettings;
+      const updated = typeof newSettings === 'function' ? newSettings(currentSettings) : newSettings;
+      // Use requestAnimationFrame to defer state update to avoid updating during render
+      requestAnimationFrame(() => {
+        onSeriesSettingsChange(updated);
+      });
+    } else {
+      setLocalSeriesSettings(newSettings);
+    }
+  }, [propSeriesSettings, localSeriesSettings, onSeriesSettingsChange]);
+  
+  // Handle Series Settings click from context menu
+  const handleSeriesSettingsClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setSeriesSettingsSubmenuPos({ x: rect.right + 4, y: rect.top });
+    setShowSeriesSettingsSubmenu(prev => !prev);
+    setSelectedSeriesTab(null); // Reset to first series when reopening
+    setSeriesTabOffset(0); // Reset tab offset when reopening
+    setShowColorSubmenu(false);
+    setShowSortSubmenu(false);
+    setShowChartTypeSubmenu(false);
+    setShowAxisLabelSubmenu(false);
+    setShowAxisToggleSubmenu(false);
+  };
 
   const resolvedTitle = useMemo(() => {
     const trimmedCustom = customTitle?.trim?.() ?? '';
@@ -685,6 +732,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowChartTypeSubmenu(false);
     setShowAxisLabelSubmenu(false);
     setShowAxisToggleSubmenu(false);
+    setShowSeriesSettingsSubmenu(false);
   };
 
   // Handler for axis label editing submenu
@@ -716,6 +764,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowSortSubmenu(false);
     setShowChartTypeSubmenu(false);
     setShowAxisLabelSubmenu(false);
+    setShowSeriesSettingsSubmenu(false);
   }, []);
 
   // Handler for saving X-axis label
@@ -737,7 +786,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   };
 
 
-  const overlayVisible = showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu || showAxisToggleSubmenu;
+  const overlayVisible = showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu || showAxisToggleSubmenu || showSeriesSettingsSubmenu;
 
   // State for chart options
   const [showGrid, setShowGrid] = useState(true);
@@ -909,12 +958,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return processedData;
   }, [data, type, legendField, sortOrder, yField, sortColumn]);
 
-  // Simple chart render key
-  const chartRenderKey = useMemo(() => {
-    const key = `chart-${type}-${chartDataForRendering.length}`;
-    return key;
-  }, [type, chartDataForRendering]);
-  
   // Use external props if provided, otherwise use internal state
   const currentShowGrid = propShowGrid !== undefined ? propShowGrid : showGrid;
   // Force legend on when using single axis mode with multiple series
@@ -922,7 +965,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   // const currentShowAxisLabels = propShowAxisLabels !== undefined ? propShowAxisLabels : showAxisLabels;
   const currentShowXAxisLabels = propShowXAxisLabels !== undefined ? propShowXAxisLabels : showXAxisLabels;
   const currentShowYAxisLabels = propShowYAxisLabels !== undefined ? propShowYAxisLabels : showYAxisLabels;
-  const currentShowDataLabels = propShowDataLabels !== undefined ? propShowDataLabels : showDataLabels;
+
 
   // Use custom axis labels if provided, otherwise fall back to props
   const effectiveXAxisLabel = customXAxisLabel || xAxisLabel;
@@ -967,9 +1010,37 @@ const RechartsChartRenderer: React.FC<Props> = ({
   }, [currentTheme, theme]);
 
   const palette = useMemo(() => {
-    const themePalette = (colors && colors.length > 0) ? colors : theme.palette;
-    return themePalette && themePalette.length > 0 ? themePalette : DEFAULT_COLORS;
-  }, [colors, currentTheme, theme.palette]);
+    // Get the current theme's palette
+    const currentThemeObj = COLOR_THEMES[currentTheme as keyof typeof COLOR_THEMES] || COLOR_THEMES.default;
+    
+    // CRITICAL FIX: Priority logic - ALWAYS use theme palette by default
+    // 1. Always use the current theme's palette (default theme initially, or user-selected theme)
+    // 2. The colors prop is ignored - themes take precedence for consistency
+    // This ensures charts always start with the default theme palette, and respect user theme selections
+    const themePalette = currentThemeObj.palette;
+    const finalPalette = themePalette && themePalette.length > 0 ? themePalette : DEFAULT_COLORS;
+    
+    // DEBUG: Log palette changes
+    console.log('🎨 Palette recalculated:', { 
+      currentTheme, 
+      selectedTheme,
+      useThemePalette: true,
+      hasColorsProp: !!(colors && colors.length > 0),
+      paletteLength: finalPalette.length,
+      firstColor: finalPalette[0],
+      lastColor: finalPalette[finalPalette.length - 1]
+    });
+    
+    return finalPalette;
+  }, [colors, currentTheme, selectedTheme]);
+  
+  // Chart render key - include theme and palette so React re-renders when theme changes
+  const chartRenderKey = useMemo(() => {
+    // Include first color of palette to ensure re-render when palette changes
+    const paletteKey = palette && palette.length > 0 ? palette[0] : 'default';
+    const key = `chart-${type}-${chartDataForRendering.length}-${currentTheme}-${paletteKey}`;
+    return key;
+  }, [type, chartDataForRendering, currentTheme, palette]);
   
   // Helper function to capitalize first letter of each word
   const capitalizeWords = (text: string): string => {
@@ -1158,6 +1229,48 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return { pivoted: [], uniqueValues: [], actualXKey: xField };
   }, [type, chartDataForRendering, xField, yField, legendField, sortOrder, sortColumn]);
 
+  // Calculate if all series have data labels enabled (for "select all" behavior)
+  const allSeriesDataLabelsEnabled = useMemo(() => {
+    // Collect all available series keys
+    const allSeriesKeys: string[] = [];
+    
+    if (legendField && legendValues && legendValues.length > 0) {
+      legendValues.forEach((key) => {
+        if (!allSeriesKeys.includes(key)) {
+          allSeriesKeys.push(key);
+        }
+      });
+    }
+    
+    if (yFields && yFields.length > 0) {
+      yFields.forEach((key) => {
+        if (!allSeriesKeys.includes(key)) {
+          allSeriesKeys.push(key);
+        }
+      });
+    }
+    
+    if (yField && !allSeriesKeys.includes(yField)) {
+      allSeriesKeys.push(yField);
+    }
+    
+    // If no series, return the current state
+    if (allSeriesKeys.length === 0) {
+      return propShowDataLabels !== undefined ? propShowDataLabels : showDataLabels;
+    }
+    
+    // Check if all series have showDataLabels: true
+    const allEnabled = allSeriesKeys.every(key => {
+      const seriesSetting = seriesSettings[key]?.showDataLabels;
+      return seriesSetting === true; // Must be explicitly true
+    });
+    
+    return allEnabled;
+  }, [legendField, legendValues, yFields, yField, seriesSettings, propShowDataLabels, showDataLabels]);
+  
+  // Use prop if provided, otherwise use calculated "select all" state
+  const currentShowDataLabels = propShowDataLabels !== undefined ? propShowDataLabels : allSeriesDataLabelsEnabled;
+
   // Styling for axis ticks & labels
   const axisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569' } as const;
   const xAxisTickStyle = { fontFamily: FONT_FAMILY, fontSize: 12, fill: '#475569', angle: -45, textAnchor: 'end' } as const;
@@ -1208,6 +1321,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
 
   // Handle theme change
   const handleThemeChange = (themeName: string) => {
+    // DEBUG: Log theme change request
+    console.log('🎨 handleThemeChange called:', { themeName, currentSelectedTheme: selectedTheme });
+    
     // Always update the internal theme when a theme change is requested
     // This allows dynamic theme changes even when a prop theme is provided
     setSelectedTheme(themeName);
@@ -1231,6 +1347,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowColorSubmenu(prevState => !prevState);
     setShowSortSubmenu(false);
     setShowAxisLabelSubmenu(false);
+    setShowSeriesSettingsSubmenu(false);
   };
 
   // Handle sort submenu toggle
@@ -1243,6 +1360,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowColorSubmenu(false);
     setShowChartTypeSubmenu(false);
     setShowAxisLabelSubmenu(false);
+    setShowSeriesSettingsSubmenu(false);
   };
 
   // Handle chart type submenu toggle
@@ -1255,6 +1373,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
     setShowColorSubmenu(false);
     setShowSortSubmenu(false);
     setShowAxisLabelSubmenu(false);
+    setShowSeriesSettingsSubmenu(false);
   };
 
   // Apply selected sort order
@@ -1332,9 +1451,45 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }
   };
 
-  // Handle data labels toggle
+  // Handle data labels toggle - works as "select all"
   const handleDataLabelsToggle = () => {
     const newDataLabelsState = !currentShowDataLabels;
+    
+    // Collect all available series keys
+    const allSeriesKeys: string[] = [];
+    
+    if (legendField && legendValues && legendValues.length > 0) {
+      legendValues.forEach((key) => {
+        if (!allSeriesKeys.includes(key)) {
+          allSeriesKeys.push(key);
+        }
+      });
+    }
+    
+    if (yFields && yFields.length > 0) {
+      yFields.forEach((key) => {
+        if (!allSeriesKeys.includes(key)) {
+          allSeriesKeys.push(key);
+        }
+      });
+    }
+    
+    if (yField && !allSeriesKeys.includes(yField)) {
+      allSeriesKeys.push(yField);
+    }
+    
+    // Set all series' showDataLabels to the new state
+    updateSeriesSettings(prev => {
+      const updated = { ...prev };
+      allSeriesKeys.forEach(key => {
+        updated[key] = {
+          ...updated[key],
+          showDataLabels: newDataLabelsState
+        };
+      });
+      return updated;
+    });
+    
     setShowDataLabels(newDataLabelsState);
     setShowContextMenu(false);
     setShowColorSubmenu(false);
@@ -1374,9 +1529,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
       const isOutsideChartTypeSubmenu = !target.closest('.chart-type-submenu');
       const isOutsideAxisLabelSubmenu = !target.closest('.axis-label-submenu');
       const isOutsideAxisToggleSubmenu = !target.closest('.axis-toggle-submenu');
+      const isOutsideSeriesSettingsSubmenu = !target.closest('.series-settings-submenu');
 
       // Only close menus if click is outside ALL active menus
-      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideSortSubmenu && isOutsideChartTypeSubmenu && isOutsideAxisLabelSubmenu && isOutsideAxisToggleSubmenu) {
+      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideSortSubmenu && isOutsideChartTypeSubmenu && isOutsideAxisLabelSubmenu && isOutsideAxisToggleSubmenu && isOutsideSeriesSettingsSubmenu) {
         // Add a small delay to ensure button clicks are processed first
         setTimeout(() => {
           setShowContextMenu(false);
@@ -1385,11 +1541,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
           setShowChartTypeSubmenu(false);
           setShowAxisLabelSubmenu(false);
           setShowAxisToggleSubmenu(false);
+          setShowSeriesSettingsSubmenu(false);
         }, 50);
       }
     };
 
-    if (showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu || showAxisToggleSubmenu) {
+    if (showContextMenu || showColorSubmenu || showSortSubmenu || showChartTypeSubmenu || showAxisLabelSubmenu || showAxisToggleSubmenu || showSeriesSettingsSubmenu) {
       // Use a longer delay to allow submenu to open properly
       const timeoutId = setTimeout(() => {
         document.addEventListener('click', handleClickOutside, false);
@@ -1400,7 +1557,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         document.removeEventListener('click', handleClickOutside, false);
       };
     }
-  }, [showContextMenu, showColorSubmenu, showSortSubmenu, showChartTypeSubmenu, showAxisLabelSubmenu, showAxisToggleSubmenu]);
+  }, [showContextMenu, showColorSubmenu, showSortSubmenu, showChartTypeSubmenu, showAxisLabelSubmenu, showAxisToggleSubmenu, showSeriesSettingsSubmenu]);
 
   // Context menu component
   const ContextMenu = () => {
@@ -1421,6 +1578,9 @@ const RechartsChartRenderer: React.FC<Props> = ({
           e.stopPropagation();
         }}
       >
+        
+
+
         {/* Color Theme Option */}
         <button
           className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
@@ -1434,6 +1594,49 @@ const RechartsChartRenderer: React.FC<Props> = ({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
         </button>
+
+        
+
+        {/* Data Labels Toggle */}
+        <button
+          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+          onClick={handleDataLabelsToggle}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>Data Labels</span>
+          <div className="ml-auto">
+            <div className={`w-4 h-3 rounded border ${currentShowDataLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
+              {currentShowDataLabels && (
+                <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              )}
+            </div>
+          </div>
+        </button>
+
+
+        {/* Series Settings Option */}
+        <button
+          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
+          onClick={handleSeriesSettingsClick}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zM21 5a2 2 0 00-2-2h-4a2 2 0 00-2 2v12a4 4 0 004 4h4a2 2 0 002-2V5z" />
+          </svg>
+          <span>Series Settings</span>
+          <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+
+        
+
+
+        {/* Separator */}
+        <div className="border-t border-gray-200 my-1"></div>
 
         {/* Chart Type Option */}
         <button
@@ -1497,9 +1700,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
           </svg>
         </button>
 
-        {/* Separator */}
-        <div className="border-t border-gray-200 my-1"></div>
-
         {/* Edit Labels */}
         <button
           className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
@@ -1512,26 +1712,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
           <svg className="w-3 h-3 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
-        </button>
-
-        {/* Data Labels Toggle */}
-        <button
-          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-          onClick={handleDataLabelsToggle}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>Data Labels</span>
-          <div className="ml-auto">
-            <div className={`w-4 h-3 rounded border ${currentShowDataLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
-              {currentShowDataLabels && (
-                <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-          </div>
         </button>
 
         {/* Legend Toggle */}
@@ -1963,6 +2143,456 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return createPortal(submenu, document.body);
   };
 
+  // Use a ref to track if we've initialized for the current menu open state
+  const initializedRef = useRef<string>('');
+  
+  // Initialize data labels to current global setting for all series when submenu opens
+  useEffect(() => {
+    if (showSeriesSettingsSubmenu) {
+      // Create a unique key for this initialization based on series keys
+      const allSeriesKeys: string[] = [];
+      
+      if (legendField && legendValues && legendValues.length > 0) {
+        legendValues.forEach((key) => {
+          if (!allSeriesKeys.includes(key)) {
+            allSeriesKeys.push(key);
+          }
+        });
+      }
+      
+      if (yFields && yFields.length > 0) {
+        yFields.forEach((key) => {
+          if (!allSeriesKeys.includes(key)) {
+            allSeriesKeys.push(key);
+          }
+        });
+      }
+      
+      if (yField && !allSeriesKeys.includes(yField)) {
+        allSeriesKeys.push(yField);
+      }
+      
+      const initKey = `${showSeriesSettingsSubmenu}-${allSeriesKeys.sort().join(',')}`;
+      
+      // Skip if we've already initialized for this state
+      if (initializedRef.current === initKey) {
+        return;
+      }
+      
+      // Initialize showDataLabels to current global setting for any series that doesn't have it set
+      // This only happens when the menu opens (not when global setting changes)
+      const globalDataLabelsValue = currentShowDataLabels;
+      
+      // Check if we actually need to update anything before calling updateSeriesSettings
+      const currentSettings = propSeriesSettings !== undefined ? propSeriesSettings : localSeriesSettings;
+      let needsUpdate = false;
+      const updated = { ...currentSettings };
+      
+      allSeriesKeys.forEach(key => {
+        if (updated[key]?.showDataLabels === undefined) {
+          updated[key] = {
+            ...updated[key],
+            showDataLabels: globalDataLabelsValue
+          };
+          needsUpdate = true;
+        }
+      });
+      
+      // Only update if there's an actual change needed
+      if (needsUpdate) {
+        updateSeriesSettings(updated);
+        initializedRef.current = initKey;
+      } else {
+        // Mark as initialized even if no update needed
+        initializedRef.current = initKey;
+      }
+    } else {
+      // Reset when menu closes
+      initializedRef.current = '';
+    }
+    // Only run when menu opens/closes or series change, not when global setting changes
+    // Note: We intentionally don't include propSeriesSettings/localSeriesSettings in deps to avoid circular updates
+    // The initialization only happens once when menu opens, not when settings change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSeriesSettingsSubmenu, legendField, legendValues, yFields, yField, currentShowDataLabels]);
+
+  // Adjust tab offset when selected tab changes
+  useEffect(() => {
+    if (!showSeriesSettingsSubmenu || !selectedSeriesTab) return;
+    
+    // Collect all available series
+    const allSeriesKeys: string[] = [];
+    
+    if (legendField && legendValues && legendValues.length > 0) {
+      legendValues.forEach((key) => {
+        if (!allSeriesKeys.includes(key)) {
+          allSeriesKeys.push(key);
+        }
+      });
+    }
+    
+    if (yFields && yFields.length > 0) {
+      yFields.forEach((key) => {
+        if (!allSeriesKeys.includes(key)) {
+          allSeriesKeys.push(key);
+        }
+      });
+    }
+    
+    if (yField && !allSeriesKeys.includes(yField)) {
+      allSeriesKeys.push(yField);
+    }
+    
+    if (allSeriesKeys.length > 3) {
+      const selectedIndex = allSeriesKeys.indexOf(selectedSeriesTab);
+      if (selectedIndex >= 0) {
+        const maxVisibleTabs = 3;
+        if (selectedIndex < seriesTabOffset) {
+          // Selected tab is before visible range, adjust offset
+          setSeriesTabOffset(selectedIndex);
+        } else if (selectedIndex >= seriesTabOffset + maxVisibleTabs) {
+          // Selected tab is after visible range, adjust offset
+          setSeriesTabOffset(Math.max(0, selectedIndex - maxVisibleTabs + 1));
+        }
+      }
+    }
+  }, [selectedSeriesTab, showSeriesSettingsSubmenu, legendField, legendValues, yFields, yField]);
+
+
+  // Series Settings Submenu component
+  const SeriesSettingsSubmenu = () => {
+    if (!showSeriesSettingsSubmenu) return null;
+
+    // Use LOCAL STATE for search query (like AxisLabelEditor uses local state)
+    // This prevents parent re-renders on every keystroke, which was causing focus loss
+    const [localSearchQuery, setLocalSearchQuery] = useState<string>('');
+
+    // Get palette - use the exact same logic as chart rendering (from useMemo above)
+    const seriesPalette = palette;
+
+    // Collect all available series
+    const allSeries: Array<{ dataKey: string; name: string; index: number }> = [];
+    
+    // Add series from legendField (multi-series charts)
+    if (legendField && legendValues && legendValues.length > 0) {
+      legendValues.forEach((key, idx) => {
+        if (!allSeries.find(s => s.dataKey === key)) {
+          allSeries.push({ dataKey: key, name: key, index: idx });
+        }
+      });
+    }
+    
+    // Add series from yFields (dual Y-axes)
+    if (yFields && yFields.length > 0) {
+      yFields.forEach((key, idx) => {
+        if (!allSeries.find(s => s.dataKey === key)) {
+          const seriesName = effectiveYAxisLabels?.[idx] || key;
+          allSeries.push({ dataKey: key, name: seriesName, index: idx });
+        }
+      });
+    }
+    
+    // Add primary Y-axis series
+    if (yField && !allSeries.find(s => s.dataKey === yField)) {
+      const seriesName = effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yField;
+      allSeries.push({ dataKey: yField, name: seriesName, index: 0 });
+    }
+
+    // Set default selected tab if none selected
+    const currentSelectedTab = selectedSeriesTab || (allSeries.length > 0 ? allSeries[0].dataKey : null);
+    const selectedSeries = allSeries.find(s => s.dataKey === currentSelectedTab);
+
+    const submenu = (
+      <div
+        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-3 series-settings-submenu"
+        style={{
+          left: seriesSettingsSubmenuPos.x,
+          top: seriesSettingsSubmenuPos.y,
+          width: '400px',
+          maxHeight: '500px',
+          overflowY: 'auto'
+        }}
+      >
+        <div className="px-2 py-2 text-sm font-semibold text-gray-700 mb-3 flex items-center justify-between gap-2">
+          <span>Series Settings</span>
+          {allSeries.length > 5 && (
+            <input
+              type="text"
+              value={localSearchQuery}
+              onChange={(e) => setLocalSearchQuery(e.target.value)}
+              placeholder="Search series..."
+              className="flex-1 max-w-[150px] px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          )}
+        </div>
+        
+        {/* Series Tabs */}
+        {allSeries.length > 0 && (() => {
+          // Filter series based on local search query
+          const filteredSeries = localSearchQuery.trim() 
+            ? allSeries.filter(series => 
+                series.name.toLowerCase().includes(localSearchQuery.toLowerCase())
+              )
+            : allSeries;
+          
+          const maxVisibleTabs = 3;
+          const hasMoreThanThree = filteredSeries.length > maxVisibleTabs;
+          const visibleTabs = hasMoreThanThree 
+            ? filteredSeries.slice(seriesTabOffset, seriesTabOffset + maxVisibleTabs)
+            : filteredSeries;
+          const canGoLeft = seriesTabOffset > 0;
+          const canGoRight = hasMoreThanThree && seriesTabOffset + maxVisibleTabs < filteredSeries.length;
+          
+          return (
+            <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
+              {/* Left Arrow */}
+              {hasMoreThanThree && (
+                <button
+                  onClick={() => setSeriesTabOffset(Math.max(0, seriesTabOffset - 1))}
+                  disabled={!canGoLeft}
+                  className={`px-2 py-1.5 text-gray-600 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed ${
+                    canGoLeft ? 'hover:bg-gray-50' : ''
+                  }`}
+                >
+                  <span className="text-sm">‹</span>
+                </button>
+              )}
+              
+              {/* Visible Tabs */}
+              <div className="flex gap-1 flex-1 min-w-0 overflow-hidden">
+                {visibleTabs.map((series) => {
+                  // Compute color at render time using exact same logic as chart rendering
+                  let seriesColor: string;
+                  if (seriesSettings[series.dataKey]?.color) {
+                    // Use custom color if set
+                    seriesColor = seriesSettings[series.dataKey]!.color!;
+                  } else {
+                    // Match the exact logic from chart rendering
+                    if (legendField && legendValues && legendValues.includes(series.dataKey)) {
+                      // For legendField series: use idx from legendValues array (matches: palette[idx % palette.length])
+                      const legendIdx = legendValues.indexOf(series.dataKey);
+                      seriesColor = seriesPalette[legendIdx % seriesPalette.length];
+                    } else if (yFields && yFields.length > 0) {
+                      // For yFields (dual Y-axes): use index in yFields array
+                      const yFieldIdx = yFields.indexOf(series.dataKey);
+                      if (yFieldIdx >= 0) {
+                        seriesColor = seriesPalette[yFieldIdx % seriesPalette.length];
+                      } else {
+                        // Fallback: use series.index
+                        seriesColor = seriesPalette[series.index % seriesPalette.length];
+                      }
+                    } else if (series.dataKey === yField) {
+                      // For primary yField (single Y-axis): use palette[0]
+                      seriesColor = seriesPalette[0];
+                    } else {
+                      // Check if this is the second Y-axis key from yFields
+                      const secondKey = yFields && yFields.length > 1 ? yFields[1] : null;
+                      if (series.dataKey === secondKey) {
+                        // For secondary Y-axis: use palette[1]
+                        seriesColor = seriesPalette[1];
+                      } else {
+                        // Fallback: use series.index
+                        seriesColor = seriesPalette[series.index % seriesPalette.length];
+                      }
+                    }
+                  }
+                  
+                  const isSelected = currentSelectedTab === series.dataKey;
+                  
+                  return (
+                    <button
+                      key={series.dataKey}
+                      onClick={() => setSelectedSeriesTab(series.dataKey)}
+                      title={series.name}
+                      className={`flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded-t transition-colors min-w-0 flex-1 ${
+                        isSelected
+                          ? 'bg-blue-50 text-blue-700 border-b-2 border-blue-500'
+                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                      }`}
+                      style={{ maxWidth: '100%' }}
+                    >
+                      <div
+                        className="w-3 h-3 rounded-full border border-gray-300 flex-shrink-0"
+                        style={{ backgroundColor: seriesColor }}
+                      />
+                      <span className="truncate min-w-0">{series.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              
+              {/* Right Arrow */}
+              {hasMoreThanThree && (
+                <button
+                  onClick={() => setSeriesTabOffset(Math.min(filteredSeries.length - maxVisibleTabs, seriesTabOffset + 1))}
+                  disabled={!canGoRight}
+                  className={`px-2 py-1.5 text-gray-600 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed ${
+                    canGoRight ? 'hover:bg-gray-50' : ''
+                  }`}
+                >
+                  <span className="text-sm">›</span>
+                </button>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Selected Series Settings */}
+        {selectedSeries && (
+          <div className="space-y-4">
+            {(() => {
+              // Compute color for selected series
+              let seriesColor: string;
+              if (seriesSettings[selectedSeries.dataKey]?.color) {
+                seriesColor = seriesSettings[selectedSeries.dataKey]!.color!;
+              } else {
+                if (legendField && legendValues && legendValues.includes(selectedSeries.dataKey)) {
+                  const legendIdx = legendValues.indexOf(selectedSeries.dataKey);
+                  seriesColor = seriesPalette[legendIdx % seriesPalette.length];
+                } else if (yFields && yFields.length > 0) {
+                  const yFieldIdx = yFields.indexOf(selectedSeries.dataKey);
+                  if (yFieldIdx >= 0) {
+                    seriesColor = seriesPalette[yFieldIdx % seriesPalette.length];
+                  } else {
+                    seriesColor = seriesPalette[selectedSeries.index % seriesPalette.length];
+                  }
+                } else if (selectedSeries.dataKey === yField) {
+                  seriesColor = seriesPalette[0];
+                } else {
+                  const secondKey = yFields && yFields.length > 1 ? yFields[1] : null;
+                  if (selectedSeries.dataKey === secondKey) {
+                    seriesColor = seriesPalette[1];
+                  } else {
+                    seriesColor = seriesPalette[selectedSeries.index % seriesPalette.length];
+                  }
+                }
+              }
+              
+              // Use per-series setting if set, otherwise fall back to global setting
+              const seriesShowDataLabels = seriesSettings[selectedSeries.dataKey]?.showDataLabels !== undefined 
+                ? seriesSettings[selectedSeries.dataKey]?.showDataLabels 
+                : currentShowDataLabels;
+              
+              return (
+                <div>
+                  <div className="text-xs font-medium text-gray-600 mb-2">{selectedSeries.name}</div>
+                  
+                  {/* Color Picker */}
+                  <div className="mb-2">
+                    <label className="block text-xs text-gray-700 mb-1">Color</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={seriesColor}
+                        onChange={(e) => {
+                          updateSeriesSettings(prev => ({
+                            ...prev,
+                            [selectedSeries.dataKey]: {
+                              ...prev[selectedSeries.dataKey],
+                              color: e.target.value
+                            }
+                          }));
+                        }}
+                        className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+                      />
+                      <input
+                        type="text"
+                        value={seriesColor}
+                        onChange={(e) => {
+                          const color = e.target.value;
+                          if (/^#[0-9A-Fa-f]{6}$/.test(color) || /^#[0-9A-Fa-f]{3}$/.test(color)) {
+                            updateSeriesSettings(prev => ({
+                              ...prev,
+                              [selectedSeries.dataKey]: {
+                                ...prev[selectedSeries.dataKey],
+                                color: color
+                              }
+                            }));
+                          }
+                        }}
+                        className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        placeholder={seriesColor}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Data Labels Toggle */}
+                  <div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={seriesShowDataLabels}
+                        onChange={(e) => {
+                          updateSeriesSettings(prev => {
+                            const updated = {
+                              ...prev,
+                              [selectedSeries.dataKey]: {
+                                ...prev[selectedSeries.dataKey],
+                                showDataLabels: e.target.checked
+                              }
+                            };
+                            
+                            // Collect all series keys to check if all are enabled
+                            const allSeriesKeys: string[] = [];
+                            if (legendField && legendValues && legendValues.length > 0) {
+                              legendValues.forEach((key) => {
+                                if (!allSeriesKeys.includes(key)) {
+                                  allSeriesKeys.push(key);
+                                }
+                              });
+                            }
+                            if (yFields && yFields.length > 0) {
+                              yFields.forEach((key) => {
+                                if (!allSeriesKeys.includes(key)) {
+                                  allSeriesKeys.push(key);
+                                }
+                              });
+                            }
+                            if (yField && !allSeriesKeys.includes(yField)) {
+                              allSeriesKeys.push(yField);
+                            }
+                            
+                            // Check if all series are enabled after this change
+                            if (allSeriesKeys.length > 0) {
+                              const allEnabled = allSeriesKeys.every(key => {
+                                const seriesSetting = key === selectedSeries.dataKey 
+                                  ? e.target.checked 
+                                  : updated[key]?.showDataLabels;
+                                return seriesSetting === true;
+                              });
+                              
+                              // Sync internal state with the "select all" state
+                              setShowDataLabels(allEnabled);
+                              if (onDataLabelsToggle) {
+                                onDataLabelsToggle(allEnabled);
+                              }
+                            }
+                            
+                            return updated;
+                          });
+                        }}
+                        className="w-3.5 h-3.5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                      />
+                      <span className="text-xs text-gray-700">Show Data Labels</span>
+                    </label>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+        
+        {allSeries.length === 0 && (
+          <div className="text-sm text-gray-500 text-center py-4">
+            No series available
+          </div>
+        )}
+      </div>
+    );
+
+    return createPortal(submenu, document.body);
+  };
+
   const renderChart = () => {
     // Check if data is empty or invalid (skip check for multi-pie structure)
     if (!chartDataForRendering || chartDataForRendering.length === 0 || !Array.isArray(chartDataForRendering)) {
@@ -1993,9 +2623,21 @@ const RechartsChartRenderer: React.FC<Props> = ({
     }
     
     // Resolve current color scheme and palette based on selected theme
-    const theme = COLOR_THEMES[currentTheme as keyof typeof COLOR_THEMES] || COLOR_THEMES.default;
-    const scheme = theme; // alias for readability
-    const palette = (theme.palette && theme.palette.length > 0) ? theme.palette : DEFAULT_COLORS;
+    // Use the component-level palette (which includes colors prop) instead of recalculating
+    // This ensures the chart uses the same palette as the right-click menu (SeriesSettingsSubmenu)
+    // The component-level palette correctly respects:
+    // 1. The colors prop (if provided)
+    // 2. The selected theme's palette (from COLOR_THEMES[currentTheme])
+    // 3. DEFAULT_COLORS as fallback
+    const renderPalette = palette && palette.length > 0 ? palette : DEFAULT_COLORS;
+    
+    // DEBUG: Log renderChart palette usage
+    console.log('📊 renderChart using palette:', { 
+      currentTheme, 
+      paletteLength: renderPalette.length,
+      firstColor: renderPalette[0],
+      chartType: type
+    });
     
 
     
@@ -2429,7 +3071,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }
                   return null;
                 }}
-                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {currentShowLegend && (
                 <Legend
@@ -2440,7 +3082,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 />
               )}
               {legendValues.map((seriesKey, idx) => {
-                const seriesColor = seriesSettings[seriesKey]?.color || palette[idx % palette.length];
+                const seriesColor = seriesSettings[seriesKey]?.color || renderPalette[idx % renderPalette.length];
                 const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
                   ? seriesSettings[seriesKey]?.showDataLabels 
                   : currentShowDataLabels;
@@ -2453,15 +3095,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     animationDuration={800}
                     animationEasing="ease-out"
                     {...(stackBars ? { stackId: "stack" } : {})}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedSeries({
-                        dataKey: seriesKey,
-                        name: seriesKey,
-                        currentColor: seriesColor
-                      });
-                      setShowSeriesSettingsModal(true);
-                    }}
                     style={{ cursor: 'pointer' }}
                   >
                     {seriesShowDataLabels && (
@@ -2549,7 +3182,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 }
                 return null;
               }}
-              cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+              cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
             />
             {currentShowLegend && (
               <Legend
@@ -2575,17 +3208,17 @@ const RechartsChartRenderer: React.FC<Props> = ({
             )}
             <defs>
               <linearGradient id="barGradient1" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={palette[0]} stopOpacity={0.9} />
-                <stop offset="100%" stopColor={palette[0]} stopOpacity={0.5} />
+                <stop offset="0%" stopColor={renderPalette[0]} stopOpacity={0.9} />
+                <stop offset="100%" stopColor={renderPalette[0]} stopOpacity={0.5} />
               </linearGradient>
               <linearGradient id="barGradient2" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={palette[1]} stopOpacity={0.9} />
-                <stop offset="100%" stopColor={palette[1]} stopOpacity={0.5} />
+                <stop offset="0%" stopColor={renderPalette[1]} stopOpacity={0.9} />
+                <stop offset="100%" stopColor={renderPalette[1]} stopOpacity={0.5} />
               </linearGradient>
             </defs>
             {/* Primary Bar */}
             {(() => {
-              const seriesColor = seriesSettings[yKey]?.color || palette[0];
+              const seriesColor = seriesSettings[yKey]?.color || renderPalette[0];
               const seriesShowDataLabels = seriesSettings[yKey]?.showDataLabels !== undefined 
                 ? seriesSettings[yKey]?.showDataLabels 
                 : currentShowDataLabels;
@@ -2596,15 +3229,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   animationDuration={800} 
                   animationEasing="ease-out" 
                   yAxisId={0}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedSeries({
-                      dataKey: yKey,
-                      name: effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey,
-                      currentColor: seriesColor
-                    });
-                    setShowSeriesSettingsModal(true);
-                  }}
+                  onClick={() => handleSeriesClick(yKey, effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey, seriesColor)}
                   style={{ cursor: 'pointer' }}
                 >
                   {seriesShowDataLabels && (
@@ -2621,7 +3246,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             {/* Secondary Bar - only if we have dual Y-axes */}
             {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (() => {
               const secondKey = yKeys[1] || yFields[1];
-              const seriesColor = seriesSettings[secondKey]?.color || palette[1];
+              const seriesColor = seriesSettings[secondKey]?.color || renderPalette[1];
               const seriesShowDataLabels = seriesSettings[secondKey]?.showDataLabels !== undefined 
                 ? seriesSettings[secondKey]?.showDataLabels 
                 : currentShowDataLabels;
@@ -2632,15 +3257,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   animationDuration={800} 
                   animationEasing="ease-out" 
                   yAxisId={forceSingleAxis ? 0 : 1}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedSeries({
-                      dataKey: secondKey,
-                      name: effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey,
-                      currentColor: seriesColor
-                    });
-                    setShowSeriesSettingsModal(true);
-                  }}
+                  onClick={() => handleSeriesClick(secondKey, effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey, seriesColor)}
                   style={{ cursor: 'pointer' }}
                 >
                   {seriesShowDataLabels && (
@@ -2717,7 +3334,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }
                   return null;
                 }}
-                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {currentShowLegend && (
                 <Legend
@@ -2728,7 +3345,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 />
               )}
               {legendValues.map((seriesKey, idx) => {
-                const seriesColor = seriesSettings[seriesKey]?.color || palette[idx % palette.length];
+                const seriesColor = seriesSettings[seriesKey]?.color || renderPalette[idx % renderPalette.length];
                 const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
                   ? seriesSettings[seriesKey]?.showDataLabels 
                   : currentShowDataLabels;
@@ -2741,15 +3358,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     animationDuration={800}
                     animationEasing="ease-out"
                     stackId="stack"
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedSeries({
-                        dataKey: seriesKey,
-                        name: seriesKey,
-                        currentColor: seriesColor
-                      });
-                      setShowSeriesSettingsModal(true);
-                    }}
                     style={{ cursor: 'pointer' }}
                   >
                     {seriesShowDataLabels && (
@@ -2853,7 +3461,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }
                   return null;
                 }}
-                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {currentShowLegend && (
                 <Legend
@@ -2864,7 +3472,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 />
               )}
               {legendValues.map((seriesKey, idx) => {
-                const seriesColor = seriesSettings[seriesKey]?.color || palette[idx % palette.length];
+                const seriesColor = seriesSettings[seriesKey]?.color || renderPalette[idx % renderPalette.length];
                 const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
                   ? seriesSettings[seriesKey]?.showDataLabels 
                   : currentShowDataLabels;
@@ -2878,15 +3486,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     strokeWidth={2}
                     dot={{ r: 0 }}
                     activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedSeries({
-                        dataKey: seriesKey,
-                        name: seriesKey,
-                        currentColor: seriesColor
-                      });
-                      setShowSeriesSettingsModal(true);
-                    }}
                     style={{ cursor: 'pointer' }}
                   >
                     {seriesShowDataLabels && (
@@ -2984,7 +3583,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }
                   return null;
                 }}
-                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {currentShowLegend && (
                 <Legend
@@ -3010,7 +3609,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               )}
               {/* Primary Line */}
               {(() => {
-                const seriesColor = seriesSettings[yKey]?.color || palette[0];
+                const seriesColor = seriesSettings[yKey]?.color || renderPalette[0];
                 const seriesShowDataLabels = seriesSettings[yKey]?.showDataLabels !== undefined 
                   ? seriesSettings[yKey]?.showDataLabels 
                   : currentShowDataLabels;
@@ -3029,15 +3628,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
                       style: { cursor: 'pointer' }
                     }}
                     yAxisId={0}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedSeries({
-                        dataKey: yKey,
-                        name: effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey,
-                        currentColor: seriesColor
-                      });
-                      setShowSeriesSettingsModal(true);
-                    }}
                     style={{ cursor: 'pointer' }}
                   >
                     {seriesShowDataLabels && (
@@ -3055,7 +3645,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               {/* Secondary Line - only if we have dual Y-axes */}
               {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (() => {
                 const secondKey = yKeys[1] || yFields[1];
-                const seriesColor = seriesSettings[secondKey]?.color || palette[1];
+                const seriesColor = seriesSettings[secondKey]?.color || renderPalette[1];
                 const seriesShowDataLabels = seriesSettings[secondKey]?.showDataLabels !== undefined 
                   ? seriesSettings[secondKey]?.showDataLabels 
                   : currentShowDataLabels;
@@ -3074,15 +3664,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
                       style: { cursor: 'pointer' }
                     }}
                     yAxisId={forceSingleAxis ? 0 : 1}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedSeries({
-                        dataKey: secondKey,
-                        name: effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey,
-                        currentColor: seriesColor
-                      });
-                      setShowSeriesSettingsModal(true);
-                    }}
                     style={{ cursor: 'pointer' }}
                   >
                     {seriesShowDataLabels && (
@@ -3167,7 +3748,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }
                   return null;
                 }}
-                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {currentShowLegend && (
                 <Legend
@@ -3178,7 +3759,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 />
               )}
               {legendValues.map((seriesKey, idx) => {
-                const seriesColor = seriesSettings[seriesKey]?.color || palette[idx % palette.length];
+                const seriesColor = seriesSettings[seriesKey]?.color || renderPalette[idx % renderPalette.length];
                 const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
                   ? seriesSettings[seriesKey]?.showDataLabels 
                   : currentShowDataLabels;
@@ -3190,15 +3771,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
                     name={seriesKey}
                     stroke={seriesColor}
                     fill={seriesColor}
-                    onDoubleClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedSeries({
-                        dataKey: seriesKey,
-                        name: seriesKey,
-                        currentColor: seriesColor
-                      });
-                      setShowSeriesSettingsModal(true);
-                    }}
                     style={{ cursor: 'pointer' }}
                   >
                     {seriesShowDataLabels && (
@@ -3258,7 +3830,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               />
             )}
             {(() => {
-              const seriesColor = seriesSettings[yKey]?.color || palette[0];
+              const seriesColor = seriesSettings[yKey]?.color || renderPalette[0];
               const seriesShowDataLabels = seriesSettings[yKey]?.showDataLabels !== undefined 
                 ? seriesSettings[yKey]?.showDataLabels 
                 : currentShowDataLabels;
@@ -3269,15 +3841,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   stroke={seriesColor} 
                   fill={seriesColor} 
                   yAxisId={0}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedSeries({
-                      dataKey: yKey,
-                      name: effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey,
-                      currentColor: seriesColor
-                    });
-                    setShowSeriesSettingsModal(true);
-                  }}
+                  onClick={() => handleSeriesClick(yKey, effectiveYAxisLabel || effectiveYAxisLabels?.[0] || yKey, seriesColor)}
                   style={{ cursor: 'pointer' }}
                 >
                   {seriesShowDataLabels && (
@@ -3293,7 +3857,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
             })()}
             {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (() => {
               const secondKey = yKeys[1] || yFields[1];
-              const seriesColor = seriesSettings[secondKey]?.color || palette[1];
+              const seriesColor = seriesSettings[secondKey]?.color || renderPalette[1];
               const seriesShowDataLabels = seriesSettings[secondKey]?.showDataLabels !== undefined 
                 ? seriesSettings[secondKey]?.showDataLabels 
                 : currentShowDataLabels;
@@ -3304,15 +3868,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   stroke={seriesColor} 
                   fill={seriesColor} 
                   yAxisId={forceSingleAxis ? 0 : 1}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedSeries({
-                      dataKey: secondKey,
-                      name: effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey,
-                      currentColor: seriesColor
-                    });
-                    setShowSeriesSettingsModal(true);
-                  }}
+                  onClick={() => handleSeriesClick(secondKey, effectiveYAxisLabels?.[1] || yFields?.[1] || secondKey, seriesColor)}
                   style={{ cursor: 'pointer' }}
                 >
                   {seriesShowDataLabels && (
@@ -3409,7 +3965,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 }
                 return null;
               }}
-              cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+              cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
             />
             {legendField && currentShowLegend && (
               <Legend
@@ -3423,7 +3979,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               legendValues.map((seriesKey, idx) => {
                 const seriesData = pivotedLineData.filter(d => d[seriesKey] !== undefined && d[seriesKey] !== null);
                 return (
-                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={palette[idx % palette.length]}>
+                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={renderPalette[idx % renderPalette.length]}>
                     {currentShowDataLabels && (
                       <LabelList 
                         dataKey={seriesKey} 
@@ -3437,7 +3993,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
               })
             ) : (
               <>
-                <Scatter data={transformedChartData} dataKey={yKey} fill={palette[0]} yAxisId={0}>
+                <Scatter data={transformedChartData} dataKey={yKey} fill={renderPalette[0]} yAxisId={0}>
                   {currentShowDataLabels && (
                     <LabelList 
                       dataKey={yKey} 
@@ -3448,7 +4004,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   )}
                 </Scatter>
                 {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                  <Scatter data={transformedChartData} dataKey={yKeys[1] || yFields[1]} fill={palette[1]} yAxisId={forceSingleAxis ? 0 : 1}>
+                  <Scatter data={transformedChartData} dataKey={yKeys[1] || yFields[1]} fill={renderPalette[1]} yAxisId={forceSingleAxis ? 0 : 1}>
                     {currentShowDataLabels && (
                       <LabelList 
                         dataKey={yKeys[1] || yFields[1]} 
@@ -3492,7 +4048,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 <div key={legendValue} className="flex flex-col items-center">
                   <PieChart width={300} height={300}>
                     <defs>
-                      {MODERN_PIE_COLORS.map((color, i) => (
+                      {renderPalette.map((color, i) => (
                         <linearGradient key={i} id={`pieGradient-${i}`} x1="0" y1="0" x2="1" y2="1">
                           <stop offset="0%" stopColor={color} stopOpacity={1} />
                           <stop offset="100%" stopColor={color} stopOpacity={0.8} />
@@ -3520,13 +4076,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
                       {slices.map((entry: any, sliceIdx: number) => (
                         <Cell
                           key={`cell-${sliceIdx}`}
-                          fill={`url(#pieGradient-${sliceIdx % MODERN_PIE_COLORS.length})`}
+                          fill={`url(#pieGradient-${sliceIdx % renderPalette.length})`}
                           style={{ cursor: 'pointer' }}
                         />
                       ))}
                     </Pie>
                     <Tooltip
-                      cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                      cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
                       formatter={(value: any) => (typeof value === 'number' ? formatTooltipNumber(value) : value)}
                     />
                     {showLegend && <Legend />}
@@ -3547,7 +4103,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return (
             <PieChart margin={getPieChartMargins()}>
               <defs>
-                {MODERN_PIE_COLORS.map((color, i) => (
+                {renderPalette.map((color, i) => (
                   <linearGradient key={i} id={`pieGradient-${i}`} x1="0" y1="0" x2="1" y2="1">
                     <stop offset="0%" stopColor={color} stopOpacity={1} />
                     <stop offset="100%" stopColor={color} stopOpacity={0.8} />
@@ -3577,7 +4133,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 {Array.isArray(chartDataForRendering) ? chartDataForRendering.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={`url(#pieGradient-${index % MODERN_PIE_COLORS.length})`}
+                    fill={`url(#pieGradient-${index % renderPalette.length})`}
                     style={{ cursor: 'pointer' }}
                   />
                 )) : []}
@@ -3617,7 +4173,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }
                   return null;
                 }}
-                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {showLegend && (
                 <Legend
@@ -3650,7 +4206,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
           return (
             <PieChart margin={getPieChartMargins()}>
               <defs>
-                {MODERN_PIE_COLORS.map((color, i) => (
+                {renderPalette.map((color, i) => (
                   <linearGradient key={i} id={`pieGradient-${i}`} x1="0" y1="0" x2="1" y2="1">
                     <stop offset="0%" stopColor={color} stopOpacity={1} />
                     <stop offset="100%" stopColor={color} stopOpacity={0.8} />
@@ -3681,7 +4237,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 {Array.isArray(chartDataForRendering) ? chartDataForRendering.map((entry, index) => (
                   <Cell
                     key={`cell-${index}`}
-                    fill={`url(#pieGradient-${index % MODERN_PIE_COLORS.length})`}
+                    fill={`url(#pieGradient-${index % renderPalette.length})`}
                     style={{ cursor: 'pointer' }}
                   />
                 )) : []}
@@ -3721,7 +4277,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   }
                   return null;
                 }}
-                cursor={{ stroke: palette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+                cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
               />
               {showLegend && (
                 <Legend
@@ -3873,6 +4429,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
         <ChartTypeSubmenu />
         <AxisLabelSubmenu />
         <AxisToggleSubmenu />
+        <SeriesSettingsSubmenu />
         
         {/* X-Axis Label Edit Dialog */}
         {showXAxisLabelDialog && (
@@ -3948,99 +4505,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
           </div>
         )}
 
-        {/* Series Settings Modal */}
-        {showSeriesSettingsModal && selectedSeries && (
-          <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[10000]"
-            onClick={() => {
-              setShowSeriesSettingsModal(false);
-              setSelectedSeries(null);
-            }}
-          >
-            <div
-              className="bg-white rounded-lg p-6 w-96 max-w-md mx-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <h3 className="text-lg font-semibold mb-4">Series Settings: {selectedSeries.name}</h3>
-              
-              {/* Color Picker */}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Color
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={seriesSettings[selectedSeries.dataKey]?.color || selectedSeries.currentColor}
-                    onChange={(e) => {
-                      setSeriesSettings(prev => ({
-                        ...prev,
-                        [selectedSeries.dataKey]: {
-                          ...prev[selectedSeries.dataKey],
-                          color: e.target.value
-                        }
-                      }));
-                    }}
-                    className="w-16 h-10 border border-gray-300 rounded cursor-pointer"
-                  />
-                  <input
-                    type="text"
-                    value={seriesSettings[selectedSeries.dataKey]?.color || selectedSeries.currentColor}
-                    onChange={(e) => {
-                      const color = e.target.value;
-                      if (/^#[0-9A-Fa-f]{6}$/.test(color) || /^#[0-9A-Fa-f]{3}$/.test(color)) {
-                        setSeriesSettings(prev => ({
-                          ...prev,
-                          [selectedSeries.dataKey]: {
-                            ...prev[selectedSeries.dataKey],
-                            color: color
-                          }
-                        }));
-                      }
-                    }}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="#000000"
-                  />
-                </div>
-              </div>
-
-              {/* Data Labels Toggle */}
-              <div className="mb-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={seriesSettings[selectedSeries.dataKey]?.showDataLabels !== undefined 
-                      ? seriesSettings[selectedSeries.dataKey]?.showDataLabels 
-                      : currentShowDataLabels}
-                    onChange={(e) => {
-                      setSeriesSettings(prev => ({
-                        ...prev,
-                        [selectedSeries.dataKey]: {
-                          ...prev[selectedSeries.dataKey],
-                          showDataLabels: e.target.checked
-                        }
-                      }));
-                    }}
-                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">Show Data Labels</span>
-                </label>
-              </div>
-
-              <div className="flex justify-end gap-2 mt-4">
-                <button
-                  onClick={() => {
-                    setShowSeriesSettingsModal(false);
-                    setSelectedSeries(null);
-                  }}
-                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

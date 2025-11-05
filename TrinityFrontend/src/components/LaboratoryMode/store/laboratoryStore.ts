@@ -556,7 +556,18 @@ export interface ChartMakerConfig {
   filters: Record<string, string[]>;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
   legendField?: string;
-  chartConfig?: any;
+  chartConfig?: {
+    theme?: string;
+    showLegend?: boolean;
+    showXAxisLabels?: boolean;
+    showYAxisLabels?: boolean;
+    showDataLabels?: boolean;
+    showGrid?: boolean;
+    sortOrder?: 'asc' | 'desc' | null;
+    sortColumn?: string;
+    seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>; // Per-series settings for right-click menu
+    [key: string]: any; // Allow other properties
+  };
   filteredData?: Record<string, any>[];
   chartRendered?: boolean;
   chartLoading?: boolean;
