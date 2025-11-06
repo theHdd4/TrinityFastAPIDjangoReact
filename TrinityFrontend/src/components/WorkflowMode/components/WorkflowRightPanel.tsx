@@ -298,7 +298,9 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                   {filteredAtomCategories.map(category => {
                     const CategoryIcon = category.icon;
                     const isCollapsed = collapsedCategories[category.name];
-                    const availableAtoms = category.atoms.filter(atom => !assignedAtoms.includes(atom.id));
+                    // FIX: Don't filter out assigned atoms - atoms should be reusable
+                    // Atoms can be added to multiple molecules, so they should always be visible in the library
+                    const availableAtoms = category.atoms; // Show all atoms, not just unassigned ones
                 
                 const categoryColor = category.color;
                 
@@ -328,7 +330,8 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
                     {!isCollapsed && (
                       <div className="grid grid-cols-3 gap-3">
                       {category.atoms
-                        .filter(atom => !assignedAtoms.includes(atom.id))
+                        // FIX: Don't filter out assigned atoms - atoms should be reusable
+                        // Atoms can be added to multiple molecules, so they should always be visible
                         .map(atom => {
                         const AtomIcon = atomIconMap[atom.id] || Atom;
                         const isSelected = selectedAtoms.includes(atom.id);

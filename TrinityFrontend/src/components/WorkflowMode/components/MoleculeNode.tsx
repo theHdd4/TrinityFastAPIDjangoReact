@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { X, GripVertical, Settings, Save } from 'lucide-react';
+import { X, GripVertical, Settings, Save, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { CUSTOM_MOLECULES_API } from '@/lib/api';
 import { atomIconMap } from '../utils/atomIconMap';
@@ -115,6 +115,7 @@ export interface MoleculeNodeData {
   onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string) => void;
   onRename?: (moleculeId: string, newName: string) => void;
   onAddToContainer?: (containerId: string, molecule: any) => void; // NEW: Add molecule to container
+  onInsertMolecule?: (referenceMoleculeId: string, position: 'left' | 'right') => void; // NEW: Insert molecule before/after this one
   availableMolecules?: Array<{ id: string; title: string }>;
 }
 
@@ -715,13 +716,53 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
         position={Position.Left} 
         className="w-3.5 h-3.5 !bg-purple-500/70 !border-2 !border-background shadow-md transition-all group-hover:!bg-purple-500 group-hover:scale-125 group-hover:shadow-lg group-hover:shadow-purple-500/30" 
       />
-      <Card
-        className={`relative w-60 select-none ${getTypeColor(data.type)} rounded-xl overflow-hidden group hover:scale-105 transition-all duration-300`}
-        onClick={e => {
-          e.stopPropagation();
-          data.onClick(id);
-        }}
-      >
+      {/* Insert Buttons Container */}
+      <div className="relative group/molecule-wrapper">
+        {/* Left Insert Button */}
+        {data.onInsertMolecule && (
+          <button
+            className="absolute left-0 top-1/2 -translate-x-full -translate-y-1/2 z-50 
+                       opacity-0 group-hover/molecule-wrapper:opacity-100 
+                       bg-blue-500 hover:bg-blue-600 text-white rounded-full p-1.5 
+                       shadow-lg hover:shadow-xl transition-all duration-200 
+                       hover:scale-110 flex items-center justify-center
+                       -ml-2 pointer-events-auto"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onInsertMolecule?.(id, 'left');
+            }}
+            title="Insert molecule before this one"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        )}
+        
+        {/* Right Insert Button */}
+        {data.onInsertMolecule && (
+          <button
+            className="absolute right-0 top-1/2 translate-x-full -translate-y-1/2 z-50 
+                       opacity-0 group-hover/molecule-wrapper:opacity-100 
+                       bg-blue-500 hover:bg-blue-600 text-white rounded-full p-1.5 
+                       shadow-lg hover:shadow-xl transition-all duration-200 
+                       hover:scale-110 flex items-center justify-center
+                       -mr-2 pointer-events-auto"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onInsertMolecule?.(id, 'right');
+            }}
+            title="Insert molecule after this one"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
+        
+        <Card
+          className={`relative w-60 select-none ${getTypeColor(data.type)} rounded-xl overflow-hidden hover:scale-105 transition-all duration-300`}
+          onClick={e => {
+            e.stopPropagation();
+            data.onClick(id);
+          }}
+        >
         {/* Header */}
         <div className="relative">
           
@@ -838,7 +879,6 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                 </span>
               </div>
               <div className="text-center py-2">
-                <p className="text-xs text-muted-foreground mb-1.5">Drag molecules or select atoms</p>
                 <div 
                   className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-3 min-h-[50px] transition-colors hover:border-primary/50 flex items-center justify-center"
                   onDragOver={(e) => {
@@ -868,7 +908,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                     }
                   }}
                 >
-                  <p className="text-sm text-muted-foreground/60 font-medium">Drag QM or custom molecule</p>
+                  <p className="text-xs text-muted-foreground/60 font-medium">drag molecules and select atom</p>
                 </div>
               </div>
             </>
@@ -880,9 +920,9 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
               onPointerDownCapture={e => e.stopPropagation()}
               style={{ scrollbarWidth: 'thin', overflowX: 'visible' }}
             >
-              {data.atomOrder.map((atom) => (
+              {data.atomOrder.map((atom, index) => (
                 <SortableAtomItem
-                  key={atom}
+                  key={`${atom}-${index}`}
                   atom={atom}
                   isSelected={data.selectedAtoms[atom] || false}
                   onToggle={() => handleAtomToggle(atom, !data.selectedAtoms[atom])}
@@ -896,6 +936,7 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
           )}
         </div>
       </Card>
+      </div>
     </div>
   );
 };
