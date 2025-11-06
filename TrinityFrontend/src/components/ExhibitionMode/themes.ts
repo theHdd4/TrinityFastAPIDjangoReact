@@ -1,3 +1,204 @@
+const normaliseHex = (hex: string): string => {
+  const trimmed = hex.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  const prefixed = trimmed.startsWith('#') ? trimmed.slice(1) : trimmed;
+  if (prefixed.length === 3) {
+    return prefixed
+      .split('')
+      .map(char => char + char)
+      .join('')
+      .toLowerCase();
+  }
+
+  return prefixed.slice(0, 6).toLowerCase();
+};
+
+const toSolidToken = (hex: string): `solid-${string}` => {
+  const normalised = normaliseHex(hex);
+  return `solid-${normalised}` as const;
+};
+
+const clamp01 = (value: number): number => {
+  if (Number.isNaN(value)) {
+    return 0;
+  }
+  return Math.min(1, Math.max(0, value));
+};
+
+const hslToHex = (hue: number, saturation: number, lightness: number): string => {
+  const h = ((hue % 360) + 360) % 360;
+  const s = clamp01(saturation / 100);
+  const l = clamp01(lightness / 100);
+
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+
+  if (h < 60) {
+    r = c;
+    g = x;
+    b = 0;
+  } else if (h < 120) {
+    r = x;
+    g = c;
+    b = 0;
+  } else if (h < 180) {
+    r = 0;
+    g = c;
+    b = x;
+  } else if (h < 240) {
+    r = 0;
+    g = x;
+    b = c;
+  } else if (h < 300) {
+    r = x;
+    g = 0;
+    b = c;
+  } else {
+    r = c;
+    g = 0;
+    b = x;
+  }
+
+  const toChannel = (channel: number): string => {
+    const value = Math.round((channel + m) * 255);
+    return value.toString(16).padStart(2, '0');
+  };
+
+  return `#${toChannel(r)}${toChannel(g)}${toChannel(b)}`;
+};
+
+const HEX_COLOR_REGEX = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+const HSL_COLOR_REGEX = /^hsla?\(\s*([0-9.]+)(?:deg)?\s*,\s*([0-9.]+)%\s*,\s*([0-9.]+)%/i;
+
+const parseColorToHex = (value?: string): string | null => {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (HEX_COLOR_REGEX.test(trimmed)) {
+    return `#${normaliseHex(trimmed)}`;
+  }
+
+  const hslMatch = trimmed.match(HSL_COLOR_REGEX);
+  if (hslMatch) {
+    const hue = Number(hslMatch[1]);
+    const saturation = Number(hslMatch[2]);
+    const lightness = Number(hslMatch[3]);
+
+    if ([hue, saturation, lightness].every(component => Number.isFinite(component))) {
+      return hslToHex(hue, saturation, lightness);
+    }
+  }
+
+  return null;
+};
+
+const hexToRgb = (hex: string): [number, number, number] => {
+  const normalised = normaliseHex(hex);
+  const r = parseInt(normalised.slice(0, 2), 16);
+  const g = parseInt(normalised.slice(2, 4), 16);
+  const b = parseInt(normalised.slice(4, 6), 16);
+  return [r, g, b];
+};
+
+const calculateLuminance = (hex: string): number => {
+  const [r, g, b] = hexToRgb(hex).map(channel => {
+    const normalised = channel / 255;
+    return normalised <= 0.03928
+      ? normalised / 12.92
+      : Math.pow((normalised + 0.055) / 1.055, 2.4);
+  });
+
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+export const resolveThemePresentationDefaults = (
+  theme: ExhibitionTheme,
+): NonNullable<ExhibitionTheme['presentation']> => {
+  const overrides: NonNullable<ExhibitionTheme['presentation']> = { ...(theme.presentation ?? {}) };
+
+  const backgroundHex = parseColorToHex(theme.colors.background) ?? '#ffffff';
+  const accentHex =
+    parseColorToHex(theme.colors.accent) ??
+    parseColorToHex(theme.colors.primary) ??
+    backgroundHex;
+
+  if (!overrides.cardColor && accentHex) {
+    overrides.cardColor = toSolidToken(accentHex);
+  }
+
+  if (!overrides.cardLayout) {
+    const luminance = calculateLuminance(backgroundHex);
+    overrides.cardLayout = luminance < 0.32 ? 'full' : 'right';
+  }
+
+  if (!overrides.cardWidth) {
+    overrides.cardWidth = 'L';
+  }
+
+  if (!overrides.contentAlignment) {
+    overrides.contentAlignment = 'center';
+  }
+
+  if (typeof overrides.fullBleed !== 'boolean') {
+    overrides.fullBleed = overrides.cardLayout === 'full';
+  }
+
+  if (!overrides.backgroundMode) {
+    overrides.backgroundMode = 'solid';
+  }
+
+  if (!overrides.backgroundColor && backgroundHex) {
+    overrides.backgroundColor = toSolidToken(backgroundHex);
+  }
+
+  if (!overrides.backgroundSolidColor && backgroundHex) {
+    overrides.backgroundSolidColor = backgroundHex;
+  }
+
+  if (overrides.backgroundMode === 'gradient') {
+    if (!overrides.backgroundGradientStart) {
+      overrides.backgroundGradientStart = backgroundHex;
+    }
+
+    if (!overrides.backgroundGradientEnd) {
+      const mutedHex = parseColorToHex(theme.colors.muted) ?? backgroundHex;
+      overrides.backgroundGradientEnd = mutedHex;
+    }
+
+    if (!overrides.backgroundGradientDirection) {
+      overrides.backgroundGradientDirection = '135deg';
+    }
+  }
+
+  if (typeof overrides.backgroundOpacity !== 'number') {
+    overrides.backgroundOpacity = 100;
+  }
+
+  if (!('accentImage' in overrides)) {
+    overrides.accentImage = null;
+  }
+
+  if (!('accentImageName' in overrides)) {
+    overrides.accentImageName = null;
+  }
+
+  return overrides;
+};
+
 export interface ExhibitionTheme {
   id: string;
   name: string;
@@ -32,6 +233,7 @@ export interface ExhibitionTheme {
     cardWidth?: 'M' | 'L';
     contentAlignment?: 'top' | 'center' | 'bottom';
     fullBleed?: boolean;
+    cardLayout?: 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
     backgroundMode?: 'preset' | 'solid' | 'gradient' | 'image';
     backgroundColor?: string;
     backgroundSolidColor?: string;
@@ -73,10 +275,12 @@ export const DEFAULT_EXHIBITION_THEME: ExhibitionTheme = {
   },
   presentation: {
     cardColor: 'purple',
+    cardLayout: 'right',
     cardWidth: 'L',
     contentAlignment: 'center',
     fullBleed: false,
     backgroundMode: 'gradient',
+    backgroundColor: toSolidToken('#f8fafc'),
     backgroundGradientStart: '#FFFFFF',
     backgroundGradientEnd: '#F8FAFC',
     backgroundGradientDirection: '180deg',
@@ -112,6 +316,17 @@ export const EXHIBITION_THEME_PRESETS: ExhibitionTheme[] = [
       blur: 'blur(8px)',
       glow: 'drop-shadow(0 0 8px hsla(217, 91%, 60%, 0.3))',
     },
+    presentation: {
+      cardColor: toSolidToken('#e2e8f0'),
+      cardLayout: 'right',
+      cardWidth: 'L',
+      contentAlignment: 'center',
+      fullBleed: false,
+      backgroundMode: 'solid',
+      backgroundColor: toSolidToken('#ffffff'),
+      backgroundSolidColor: '#ffffff',
+      backgroundOpacity: 100,
+    },
   },
   {
     id: 'dark-elegance',
@@ -138,6 +353,17 @@ export const EXHIBITION_THEME_PRESETS: ExhibitionTheme[] = [
       borderRadius: '0.75rem',
       blur: 'blur(12px)',
       glow: 'drop-shadow(0 0 20px hsla(38, 92%, 50%, 0.4))',
+    },
+    presentation: {
+      cardColor: toSolidToken('#1f2937'),
+      cardLayout: 'full',
+      cardWidth: 'L',
+      contentAlignment: 'center',
+      fullBleed: true,
+      backgroundMode: 'solid',
+      backgroundColor: toSolidToken('#0f172a'),
+      backgroundSolidColor: '#0f172a',
+      backgroundOpacity: 96,
     },
   },
   {
@@ -166,6 +392,19 @@ export const EXHIBITION_THEME_PRESETS: ExhibitionTheme[] = [
       blur: 'blur(10px)',
       glow: 'drop-shadow(0 0 12px hsla(199, 89%, 48%, 0.35))',
     },
+    presentation: {
+      cardColor: 'gradient-oceanic',
+      cardLayout: 'left',
+      cardWidth: 'L',
+      contentAlignment: 'center',
+      fullBleed: false,
+      backgroundMode: 'gradient',
+      backgroundColor: 'gradient-oceanic',
+      backgroundGradientStart: '#ecfeff',
+      backgroundGradientEnd: '#bae6fd',
+      backgroundGradientDirection: '135deg',
+      backgroundOpacity: 100,
+    },
   },
   {
     id: 'forest-natural',
@@ -193,6 +432,19 @@ export const EXHIBITION_THEME_PRESETS: ExhibitionTheme[] = [
       blur: 'blur(8px)',
       glow: 'drop-shadow(0 0 10px hsla(142, 71%, 45%, 0.3))',
     },
+    presentation: {
+      cardColor: 'gradient-forest',
+      cardLayout: 'left',
+      cardWidth: 'L',
+      contentAlignment: 'center',
+      fullBleed: false,
+      backgroundMode: 'gradient',
+      backgroundColor: 'gradient-forest',
+      backgroundGradientStart: '#f7fee7',
+      backgroundGradientEnd: '#dcfce7',
+      backgroundGradientDirection: '135deg',
+      backgroundOpacity: 100,
+    },
   },
   {
     id: 'sunset-gradient',
@@ -219,6 +471,19 @@ export const EXHIBITION_THEME_PRESETS: ExhibitionTheme[] = [
       borderRadius: '1rem',
       blur: 'blur(12px)',
       glow: 'drop-shadow(0 0 16px hsla(24, 95%, 53%, 0.35))',
+    },
+    presentation: {
+      cardColor: 'gradient-blush',
+      cardLayout: 'top',
+      cardWidth: 'L',
+      contentAlignment: 'center',
+      fullBleed: false,
+      backgroundMode: 'gradient',
+      backgroundColor: 'gradient-tropical',
+      backgroundGradientStart: '#fff7ed',
+      backgroundGradientEnd: '#ffe4e6',
+      backgroundGradientDirection: '135deg',
+      backgroundOpacity: 100,
     },
   },
   {

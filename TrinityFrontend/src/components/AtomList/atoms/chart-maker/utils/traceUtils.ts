@@ -31,17 +31,28 @@ export const migrateLegacyChart = (chart: ChartMakerConfig): ChartMakerConfig =>
   }
 
   // Convert legacy format to traces
-  const legacyTrace: ChartTraceConfig = {
+  const legacyTraces: ChartTraceConfig[] = [{
     yAxis: chart.yAxis,
     name: chart.yAxis,
     filters: chart.filters || {},
     color: DEFAULT_TRACE_COLORS[0],
     aggregation: chart.aggregation || 'sum',
-  };
+  }];
+  
+  // Add second Y-axis if configured
+  if (chart.secondYAxis) {
+    legacyTraces.push({
+      yAxis: chart.secondYAxis,
+      name: chart.secondYAxis,
+      filters: chart.filters || {},
+      color: DEFAULT_TRACE_COLORS[1],
+      aggregation: chart.aggregation || 'sum',
+    });
+  }
 
   return {
     ...chart,
-    traces: [legacyTrace],
+    traces: legacyTraces,
     isAdvancedMode,
   };
 };
@@ -54,24 +65,38 @@ export const buildTracesForAPI = (chart: ChartMakerConfig): ChartTrace[] => {
       x_column: chart.xAxis,
       y_column: trace.yAxis,
       name: trace.name || trace.yAxis,
-      chart_type: chart.type,
+      chart_type: chart.type === 'stacked_bar' ? 'bar' : chart.type,
       aggregation: trace.aggregation || 'sum',
       color: trace.color || DEFAULT_TRACE_COLORS[index % DEFAULT_TRACE_COLORS.length],
       filters: trace.filters || {}, // Include trace-specific filters
     }));
   }
 
-  // Fallback to legacy single trace
+  // Simple mode with dual Y-axis support
   if (!chart.yAxis) return [];
   
-  return [{
+  const traces: ChartTrace[] = [{
     x_column: chart.xAxis,
     y_column: chart.yAxis,
-    name: chart.title,
-    chart_type: chart.type,
+    name: chart.yAxis,
+    chart_type: chart.type === 'stacked_bar' ? 'bar' : chart.type,
     aggregation: chart.aggregation || 'sum',
     legend_field: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined,
   }];
+  
+  // Add second Y-axis if configured
+  if (chart.secondYAxis) {
+    traces.push({
+      x_column: chart.xAxis,
+      y_column: chart.secondYAxis,
+      name: chart.secondYAxis,
+      chart_type: chart.type === 'stacked_bar' ? 'bar' : chart.type,
+      aggregation: chart.aggregation || 'sum',
+      legend_field: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined,
+    });
+  }
+  
+  return traces;
 };
 
 // Merge filters from all traces for API call

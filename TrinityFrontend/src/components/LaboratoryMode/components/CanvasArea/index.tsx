@@ -316,6 +316,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     deletedAtoms: [],
     addedAtoms: []
   });
+  const [atomToDelete, setAtomToDelete] = useState<{cardId: string, atomId: string, atomTitle: string} | null>(null);
+  const [deleteAtomDialogOpen, setDeleteAtomDialogOpen] = useState(false);
   const loadingMessages = useMemo(
     () => [
       'Loading project canvas',
@@ -3040,6 +3042,31 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     }
   };
 
+  const handleDeleteAtomClick = (cardId: string, atomId: string, atomTitle: string) => {
+    setAtomToDelete({ cardId, atomId, atomTitle });
+    setDeleteAtomDialogOpen(true);
+  };
+
+  const confirmDeleteAtom = () => {
+    if (!atomToDelete) return;
+    removeAtom(atomToDelete.cardId, atomToDelete.atomId);
+    setDeleteAtomDialogOpen(false);
+    setAtomToDelete(null);
+  };
+
+  const cancelDeleteAtom = () => {
+    setDeleteAtomDialogOpen(false);
+    setAtomToDelete(null);
+  };
+
+  const handleDeleteAtomDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setDeleteAtomDialogOpen(true);
+    } else {
+      cancelDeleteAtom();
+    }
+  };
+
   const deleteMoleculeContainer = async (moleculeId: string) => {
     // Get all cards associated with this molecule BEFORE updating state
     const arr = Array.isArray(layoutCards) ? layoutCards : [];
@@ -3721,6 +3748,32 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           cancelLabel="Cancel"
           confirmButtonClass="bg-red-500 hover:bg-red-600"
         />
+        <ConfirmationDialog
+          open={deleteAtomDialogOpen}
+          onOpenChange={handleDeleteAtomDialogOpenChange}
+          onConfirm={confirmDeleteAtom}
+          onCancel={cancelDeleteAtom}
+          title="Delete atom?"
+          description={`Are you sure you want to delete "${atomToDelete?.atomTitle || ''}"? This action cannot be undone.`}
+          icon={<Trash2 className="w-6 h-6 text-white" />}
+          iconBgClass="bg-red-500"
+          confirmLabel="Yes, delete"
+          cancelLabel="Cancel"
+          confirmButtonClass="bg-red-500 hover:bg-red-600"
+        />
+        <ConfirmationDialog
+          open={deleteAtomDialogOpen}
+          onOpenChange={handleDeleteAtomDialogOpenChange}
+          onConfirm={confirmDeleteAtom}
+          onCancel={cancelDeleteAtom}
+          title="Delete atom?"
+          description={`Are you sure you want to delete "${atomToDelete?.atomTitle || ''}"? This action cannot be undone.`}
+          icon={<Trash2 className="w-6 h-6 text-white" />}
+          iconBgClass="bg-red-500"
+          confirmLabel="Yes, delete"
+          cancelLabel="Cancel"
+          confirmButtonClass="bg-red-500 hover:bg-red-600"
+        />
       <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
           <div className="p-6 space-y-6">
@@ -3947,7 +4000,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                       <button
                                         onClick={e => {
                                           e.stopPropagation();
-                                          removeAtom(card.id, atom.id);
+                                          handleDeleteAtomClick(card.id, atom.id, atom.title || '');
                                         }}
                                         className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                                       >
@@ -4410,7 +4463,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                removeAtom(card.id, atom.id);
+                                handleDeleteAtomClick(card.id, atom.id, atom.title || '');
                               }}
                               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                             >
@@ -4487,9 +4540,23 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
   }
 
   return (
-    <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
-      <div className={canEdit ? '' : 'pointer-events-none'}>
-      {/* Layout Cards Container */}
+    <>
+      <ConfirmationDialog
+        open={deleteAtomDialogOpen}
+        onOpenChange={handleDeleteAtomDialogOpenChange}
+        onConfirm={confirmDeleteAtom}
+        onCancel={cancelDeleteAtom}
+        title="Delete atom?"
+        description={`Are you sure you want to delete "${atomToDelete?.atomTitle || ''}"? This action cannot be undone.`}
+        icon={<Trash2 className="w-6 h-6 text-white" />}
+        iconBgClass="bg-red-500"
+        confirmLabel="Yes, delete"
+        cancelLabel="Cancel"
+        confirmButtonClass="bg-red-500 hover:bg-red-600"
+      />
+      <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+        <div className={canEdit ? '' : 'pointer-events-none'}>
+        {/* Layout Cards Container */}
       <div className="p-6 space-y-6 w-full">
         {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
           const cardTitle = card.moleculeTitle
@@ -4636,7 +4703,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            removeAtom(card.id, atom.id);
+                            handleDeleteAtomClick(card.id, atom.id, atom.title || '');
                           }}
                           className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
                         >
@@ -4820,7 +4887,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              removeAtom(card.id, atom.id);
+                              handleDeleteAtomClick(card.id, atom.id, atom.title || '');
                             }}
                             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                           >
@@ -4887,6 +4954,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         document.body,
       )}
     </div>
+    </>
   );
 });
 

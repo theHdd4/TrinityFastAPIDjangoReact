@@ -174,7 +174,9 @@ export interface FeatureOverviewVisualizationManifestChart {
   type: string;
   theme?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   xField?: string;
@@ -219,7 +221,9 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   chartType: string;
   theme: string;
   showDataLabels: boolean;
-  showAxisLabels: boolean;
+  // showAxisLabels: boolean;
+  showXAxisLabels: boolean;
+  showYAxisLabels: boolean;
   showGrid: boolean;
   showLegend: boolean;
   xAxisField: string;
@@ -544,13 +548,26 @@ export interface ChartTraceConfig {
 export interface ChartMakerConfig {
   id: string;
   title: string;
-  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter';
+  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter' | 'stacked_bar';
   xAxis: string;
   yAxis: string;
+  secondYAxis?: string;
+  dualAxisMode?: 'dual' | 'single'; // 'dual' = separate axes, 'single' = combined single axis
   filters: Record<string, string[]>;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
   legendField?: string;
-  chartConfig?: any;
+  chartConfig?: {
+    theme?: string;
+    showLegend?: boolean;
+    showXAxisLabels?: boolean;
+    showYAxisLabels?: boolean;
+    showDataLabels?: boolean;
+    showGrid?: boolean;
+    sortOrder?: 'asc' | 'desc' | null;
+    sortColumn?: string;
+    seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>; // Per-series settings for right-click menu
+    [key: string]: any; // Allow other properties
+  };
   filteredData?: Record<string, any>[];
   chartRendered?: boolean;
   chartLoading?: boolean;
@@ -566,6 +583,8 @@ export interface ChartMakerExhibitionSelectionChartState {
   chartType: string;
   xAxis: string;
   yAxis: string;
+  secondYAxis?: string;
+  dualAxisMode?: 'dual' | 'single'; // 'dual' = separate axes, 'single' = combined single axis
   filters: Record<string, string[]>;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
   legendField?: string;

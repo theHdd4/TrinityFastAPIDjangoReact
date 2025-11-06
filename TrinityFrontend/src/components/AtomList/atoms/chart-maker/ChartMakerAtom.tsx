@@ -71,7 +71,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             
             const chartRequest = {
               file_id: (settings as any).dataSource || settings.fileId,
-              chart_type: newType,
+              chart_type: newType === 'stacked_bar' ? 'bar' : newType,
               traces: traces,
               title: updatedChart.title,
               filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
@@ -146,7 +146,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             
             const chartRequest = {
               file_id: (settings as any).dataSource || settings.fileId,
-              chart_type: chart.type,
+              chart_type: chart.type === 'stacked_bar' ? 'bar' : chart.type,
               traces: traces,
               title: chart.title,
               filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
@@ -231,7 +231,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
             
             const chartRequest = {
               file_id: (settings as any).dataSource || settings.fileId,
-              chart_type: chart.type,
+              chart_type: chart.type === 'stacked_bar' ? 'bar' : chart.type,
               traces: traces,
               title: chart.title,
               filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
@@ -414,7 +414,7 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
           
           const chartRequest = {
             file_id: (settings as any).dataSource || settings.fileId,
-            chart_type: chart.type,
+            chart_type: chart.type === 'stacked_bar' ? 'bar' : chart.type,
             traces: traces,
             title: chart.title,
             filters: Object.keys(legacyFilters).length > 0 ? legacyFilters : undefined,
@@ -447,9 +447,17 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
                 : c
             ),
           });
+          let errorMessage = 'Failed to render chart';
+          if (error instanceof Error) {
+            errorMessage = error.message;
+          } else if (error && typeof error === 'object' && 'message' in error) {
+            errorMessage = String(error.message);
+          } else if (error && typeof error === 'string') {
+            errorMessage = error;
+          }
           toast({
             title: 'Rendering failed',
-            description: error instanceof Error ? error.message : 'Failed to render chart',
+            description: errorMessage,
             variant: 'destructive',
           });
         }

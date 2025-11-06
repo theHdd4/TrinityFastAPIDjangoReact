@@ -17,7 +17,7 @@ import {
   buildSlideTitleObjectId,
 } from './store/exhibitionStore';
 import { ExhibitionCatalogue } from './components/ExhibitionCatalogue';
-import { SlideCanvas } from './components/SlideCanvas';
+import { SlideCanvas } from './components/slideCanvas';
 import { OperationsPalette } from './components/operationsPalette';
 import { SlideNavigation } from './components/SlideNavigation';
 import { SlideThumbnails } from './components/SlideThumbnails';
