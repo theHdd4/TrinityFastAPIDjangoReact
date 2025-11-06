@@ -659,7 +659,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onAddRow = noop,
   onAdd2Rows = noop,
   onToolbarStateChange,
-  onInteract,
+  onInteract = noop,
   onStyleChange = noop,
   onBringToFront,
   onBringForward,
@@ -686,6 +686,38 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
 
   const effectiveSelection = selectedCell ?? internalSelection;
   const selectionRegion: SelectionRegion | null = effectiveSelection ? effectiveSelection.region : null;
+
+  const handleBringToFront = useCallback(() => {
+    if (!onBringToFront) {
+      return;
+    }
+    onInteract();
+    onBringToFront();
+  }, [onBringToFront, onInteract]);
+
+  const handleBringForward = useCallback(() => {
+    if (!onBringForward) {
+      return;
+    }
+    onInteract();
+    onBringForward();
+  }, [onBringForward, onInteract]);
+
+  const handleSendBackward = useCallback(() => {
+    if (!onSendBackward) {
+      return;
+    }
+    onInteract();
+    onSendBackward();
+  }, [onInteract, onSendBackward]);
+
+  const handleSendToBack = useCallback(() => {
+    if (!onSendToBack) {
+      return;
+    }
+    onInteract();
+    onSendToBack();
+  }, [onInteract, onSendToBack]);
 
   useEffect(() => {
     if (selectedCell === undefined) {
@@ -1280,10 +1312,10 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
         onAddRow={onAddRow}
         onAdd2Rows={onAdd2Rows}
         onSelectStyle={onStyleChange}
-        onBringToFront={onBringToFront}
-        onBringForward={onBringForward}
-        onSendBackward={onSendBackward}
-        onSendToBack={onSendToBack}
+        onBringToFront={onBringToFront ? handleBringToFront : undefined}
+        onBringForward={onBringForward ? handleBringForward : undefined}
+        onSendBackward={onSendBackward ? handleSendBackward : undefined}
+        onSendToBack={onSendToBack ? handleSendToBack : undefined}
       />
     </ContextMenu>
   );
