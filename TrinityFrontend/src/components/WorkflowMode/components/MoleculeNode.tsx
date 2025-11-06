@@ -920,9 +920,9 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
               onPointerDownCapture={e => e.stopPropagation()}
               style={{ scrollbarWidth: 'thin', overflowX: 'visible' }}
             >
-              {data.atomOrder.map((atom) => (
+              {data.atomOrder.map((atom, index) => (
                 <SortableAtomItem
-                  key={atom}
+                  key={`${atom}-${index}`}
                   atom={atom}
                   isSelected={data.selectedAtoms[atom] || false}
                   onToggle={() => handleAtomToggle(atom, !data.selectedAtoms[atom])}

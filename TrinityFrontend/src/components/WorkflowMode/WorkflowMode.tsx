@@ -55,6 +55,11 @@ const WorkflowMode = () => {
   const [isRightPanelToolVisible, setIsRightPanelToolVisible] = useState(false);
   const [workflowName, setWorkflowName] = useState<string>('Untitled Workflow');
   const [clearConfirmDialogOpen, setClearConfirmDialogOpen] = useState(false);
+  // FIX: Add confirmation dialogs for atom and molecule removal
+  const [atomRemoveConfirmDialogOpen, setAtomRemoveConfirmDialogOpen] = useState(false);
+  const [moleculeRemoveConfirmDialogOpen, setMoleculeRemoveConfirmDialogOpen] = useState(false);
+  const [pendingAtomRemoval, setPendingAtomRemoval] = useState<{ atomId: string; moleculeId: string } | null>(null);
+  const [pendingMoleculeRemoval, setPendingMoleculeRemoval] = useState<string | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -522,14 +527,17 @@ const WorkflowMode = () => {
   };
 
   const handleAtomAssignToMolecule = (atomId: string, moleculeId: string) => {
+    // FIX: Allow duplicate atoms - remove the !atoms.includes(atomId) check
+    // Users can now add the same atom multiple times to show multiple instances
     setCustomMolecules(prev => 
       prev.map(mol => {
         const atoms = Array.isArray(mol.atoms) ? mol.atoms : [];
-        return mol.id === moleculeId && !atoms.includes(atomId)
+        const atomOrder = Array.isArray(mol.atomOrder) ? mol.atomOrder : [];
+        return mol.id === moleculeId
           ? { 
               ...mol, 
               atoms: [...atoms, atomId],
-              atomOrder: [...(Array.isArray(mol.atomOrder) ? mol.atomOrder : []), atomId],
+              atomOrder: [...atomOrder, atomId],
               selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
             }
           : mol;
@@ -540,28 +548,23 @@ const WorkflowMode = () => {
     setCanvasMolecules(prev => 
       prev.map(mol => {
         const atoms = Array.isArray(mol.atoms) ? mol.atoms : [];
-        return mol.id === moleculeId && !atoms.includes(atomId)
+        const atomOrder = Array.isArray(mol.atomOrder) ? mol.atomOrder : [];
+        return mol.id === moleculeId
           ? { 
               ...mol, 
               atoms: [...atoms, atomId],
-              atomOrder: [...(Array.isArray(mol.atomOrder) ? mol.atomOrder : []), atomId],
+              atomOrder: [...atomOrder, atomId],
               selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
             }
           : mol;
       })
     );
-    
-    const molecule = customMolecules.find(m => m.id === moleculeId);
-    toast({
-      title: 'Atom Added',
-      description: `Atom has been added to "${molecule?.title || 'molecule'}"`
-    });
   };
 
   const handleMultipleAtomsAssignToMolecule = (atomIds: string[], moleculeId: string) => {
-    const targetMolecule = customMolecules.find(m => m.id === moleculeId);
-    const targetAtoms = Array.isArray(targetMolecule?.atoms) ? targetMolecule.atoms : [];
-    const newAtomIds = atomIds.filter(id => !targetAtoms.includes(id));
+    // FIX: Allow duplicate atoms - remove the filter that checks for existing atoms
+    // Users can now add the same atom multiple times to show multiple instances
+    const newAtomIds = atomIds; // Add all atoms, including duplicates
     
     setCustomMolecules(prev => 
       prev.map(mol => 
@@ -595,12 +598,6 @@ const WorkflowMode = () => {
           : mol
       )
     );
-    
-    const molecule = customMolecules.find(m => m.id === moleculeId);
-    toast({
-      title: 'Atoms Added',
-      description: `${newAtomIds.length} atoms have been added to "${molecule?.title || 'molecule'}"`
-    });
   };
 
   // Handle moving atom to different molecule
@@ -675,14 +672,24 @@ const WorkflowMode = () => {
     });
   };
 
-  // Handle moving atom back to atom list
+  // Handle moving atom back to atom list - show confirmation dialog first
   const handleMoveAtomToAtomList = (atomId: string, fromMoleculeId: string) => {
-    console.log('Moving atom to atom list:', atomId, 'from molecule:', fromMoleculeId);
+    // Store pending removal data and show confirmation dialog
+    setPendingAtomRemoval({ atomId, moleculeId: fromMoleculeId });
+    setAtomRemoveConfirmDialogOpen(true);
+  };
+
+  // Actually perform atom removal after confirmation
+  const performAtomRemoval = () => {
+    if (!pendingAtomRemoval) return;
+    
+    const { atomId, moleculeId } = pendingAtomRemoval;
+    console.log('Moving atom to atom list:', atomId, 'from molecule:', moleculeId);
     
     // Update customMolecules state
     setCustomMolecules(prev => 
       prev.map(mol => 
-        mol.id === fromMoleculeId
+        mol.id === moleculeId
           ? {
               ...mol,
               atoms: (Array.isArray(mol.atoms) ? mol.atoms : []).filter(id => id !== atomId),
@@ -696,7 +703,7 @@ const WorkflowMode = () => {
     // Update canvasMolecules state
     setCanvasMolecules(prev => 
       prev.map(mol => 
-        mol.id === fromMoleculeId
+        mol.id === moleculeId
           ? {
               ...mol,
               atoms: (Array.isArray(mol.atoms) ? mol.atoms : []).filter(id => id !== atomId),
@@ -707,14 +714,28 @@ const WorkflowMode = () => {
       )
     );
 
+    // Clear pending removal and close dialog
+    setPendingAtomRemoval(null);
+    setAtomRemoveConfirmDialogOpen(false);
+
     toast({
-      title: 'Atom Moved',
-      description: `Atom has been moved back to the Atom List`
+      title: 'Atom Removed',
+      description: `Atom has been removed. Changes will reflect in Laboratory Mode when you save.`
     });
   };
 
-  // Handle molecule removal - mark as isActive: false instead of removing
+  // Handle molecule removal - show confirmation dialog first
   const handleMoleculeRemove = (moleculeId: string) => {
+    // Store pending removal and show confirmation dialog
+    setPendingMoleculeRemoval(moleculeId);
+    setMoleculeRemoveConfirmDialogOpen(true);
+  };
+
+  // Actually perform molecule removal after confirmation
+  const performMoleculeRemoval = () => {
+    if (!pendingMoleculeRemoval) return;
+    
+    const moleculeId = pendingMoleculeRemoval;
     // Get the index of the molecule being deleted BEFORE marking it as inactive
     const deletedIndex = canvasMolecules.findIndex(mol => mol.id === moleculeId);
     
@@ -925,9 +946,13 @@ const WorkflowMode = () => {
       return card;
     }).filter((card): card is NonNullable<typeof card> => card !== null)); // Remove null entries
     
+    // Clear pending removal and close dialog
+    setPendingMoleculeRemoval(null);
+    setMoleculeRemoveConfirmDialogOpen(false);
+
     toast({
       title: 'Molecule Removed',
-      description: 'Molecule has been removed from the canvas'
+      description: 'Molecule has been removed. Changes will reflect in Laboratory Mode when you save.'
     });
   };
 
@@ -2934,6 +2959,52 @@ const WorkflowMode = () => {
         cancelLabel="Cancel"
         iconBgClass="bg-red-500"
         confirmButtonClass="bg-red-500 hover:bg-red-600"
+      />
+
+      {/* Atom Removal Confirmation Dialog */}
+      <ConfirmationDialog
+        open={atomRemoveConfirmDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAtomRemoveConfirmDialogOpen(false);
+            setPendingAtomRemoval(null);
+          }
+        }}
+        onConfirm={performAtomRemoval}
+        onCancel={() => {
+          setAtomRemoveConfirmDialogOpen(false);
+          setPendingAtomRemoval(null);
+        }}
+        title="Remove Atom?"
+        description="This atom will be removed from the molecule. When you save the workflow, this change will reflect in Laboratory Mode."
+        icon={<AlertTriangle className="w-6 h-6 text-white" />}
+        confirmLabel="Yes, Remove"
+        cancelLabel="Cancel"
+        iconBgClass="bg-orange-500"
+        confirmButtonClass="bg-orange-500 hover:bg-orange-600"
+      />
+
+      {/* Molecule Removal Confirmation Dialog */}
+      <ConfirmationDialog
+        open={moleculeRemoveConfirmDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMoleculeRemoveConfirmDialogOpen(false);
+            setPendingMoleculeRemoval(null);
+          }
+        }}
+        onConfirm={performMoleculeRemoval}
+        onCancel={() => {
+          setMoleculeRemoveConfirmDialogOpen(false);
+          setPendingMoleculeRemoval(null);
+        }}
+        title="Remove Molecule?"
+        description={`This molecule will be removed from the workflow. When you save the workflow, this change will reflect in Laboratory Mode.`}
+        icon={<AlertTriangle className="w-6 h-6 text-white" />}
+        confirmLabel="Yes, Remove"
+        cancelLabel="Cancel"
+        iconBgClass="bg-orange-500"
+        confirmButtonClass="bg-orange-500 hover:bg-orange-600"
       />
 
     </div>

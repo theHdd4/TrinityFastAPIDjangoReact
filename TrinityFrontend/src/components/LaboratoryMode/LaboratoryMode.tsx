@@ -355,16 +355,29 @@ const LaboratoryMode = () => {
 
       // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
       // moleculeIndex preserves the original order/position in the array
-      const workflowMoleculesForSave = workflowMolecules.map((molecule, index) => ({
-        moleculeId: molecule.moleculeId,
-        moleculeTitle: molecule.moleculeTitle,
-        atoms: molecule.atoms || [],
-        isActive: molecule.isActive !== false, // Default to true if not specified
-        moleculeIndex: index // Preserve the original index/position
-      }));
+      // FIX: If there are no cards, clear workflow molecules to return to regular laboratory mode
+      const workflowMoleculesForSave = (sortedCards.length === 0) 
+        ? [] // Clear workflow molecules when no cards remain
+        : workflowMolecules.map((molecule, index) => ({
+            moleculeId: molecule.moleculeId,
+            moleculeTitle: molecule.moleculeTitle,
+            atoms: molecule.atoms || [],
+            isActive: molecule.isActive !== false, // Default to true if not specified
+            moleculeIndex: index // Preserve the original index/position
+          }));
+
+      // FIX: Clear workflow-related localStorage items when no cards remain
+      if (sortedCards.length === 0) {
+        localStorage.removeItem('workflow-molecules');
+        localStorage.removeItem('workflow-selected-atoms');
+        localStorage.removeItem('workflow-data');
+        console.info('[Laboratory API] Cleared workflow data from localStorage (no cards remaining)');
+      }
 
       console.info('[Laboratory API] Saving workflow molecules with isActive and moleculeIndex:', {
         workflowMoleculesCount: workflowMoleculesForSave.length,
+        cardsCount: sortedCards.length,
+        willClearWorkflow: sortedCards.length === 0,
         molecules: workflowMoleculesForSave.map(m => ({
           moleculeId: m.moleculeId,
           moleculeTitle: m.moleculeTitle,
@@ -389,7 +402,7 @@ const LaboratoryMode = () => {
           app_name: projectContext.app_name,
           project_name: projectContext.project_name,
           cards: sanitized.cards || [],
-          workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex
+          workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
           mode: 'laboratory',
         };
 

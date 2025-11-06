@@ -1363,8 +1363,19 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           applyInitialCards(mongoData.cards, mongoData.workflowMolecules || [], true); // fromMongoDB = true
           return; // Successfully loaded from MongoDB, no need to check localStorage
         } else {
+          // FIX: If MongoDB returns empty cards array, clear workflow data and return to regular laboratory mode
+          if (mongoData && Array.isArray(mongoData.cards) && mongoData.cards.length === 0) {
+            console.info('[Laboratory API] ⚠️ MongoDB returned empty cards array - clearing workflow data and returning to regular laboratory mode');
+            // Clear workflow-related localStorage items
+            localStorage.removeItem('workflow-molecules');
+            localStorage.removeItem('workflow-selected-atoms');
+            localStorage.removeItem('workflow-data');
+            // Apply empty cards with no workflow molecules to return to regular laboratory mode
+            applyInitialCards([], [], true); // fromMongoDB = true, empty cards and workflow molecules
+            return;
+          }
           console.info('[Laboratory API] ⚠️ MongoDB returned no data, falling back to localStorage');
-          // MongoDB returned empty/null, fall back to localStorage
+          // MongoDB returned null/undefined, fall back to localStorage
           return loadFromLocalStorage();
         }
       })
@@ -1577,77 +1588,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           console.error('Failed to parse stored laboratory layout', e);
           localStorage.removeItem(STORAGE_KEY);
         }
-      } else {
-          // Last resort: Try project registry
-        const current = localStorage.getItem('current-project');
-        if (current) {
-          let projectId: string | undefined;
-          try {
-            projectId = JSON.parse(current).id;
-          } catch {
-            projectId = undefined;
-          }
-
-          if (projectId) {
-            fetch(`${REGISTRY_API}/projects/${projectId}/`, { credentials: 'include' })
-              .then(res => (res.ok ? res.json() : null))
-              .then(async data => {
-                if (!data || !isMounted) {
-                    markLoadingComplete();
-                  return;
-                }
-
-                if (data.environment) {
-                  try {
-                    const env = data.environment || {};
-                    await fetchDimensionMapping();
-                  } catch (err) {
-                    console.warn('config prefetch failed', err);
-                    localStorage.removeItem('column-classifier-config');
-                  }
-                }
-
-                if (data.state && data.state.laboratory_config) {
-                  const cfg = sanitizeLabConfig(data.state.laboratory_config);
-                  const cached = persistLaboratoryConfig(cfg);
-                  if (!cached) {
-                    console.warn('Storage quota exceeded while caching laboratory config from registry.');
-                  }
-
-                  // Check for workflowMolecules in the project state
-                  if (data.state.workflowMolecules && Array.isArray(data.state.workflowMolecules)) {
-                    localStorage.setItem('workflow-molecules', safeStringify(data.state.workflowMolecules));
-                  }
-
-                  const cardsFromConfig = hydrateLayoutCards(cfg.cards);
-                  // Check for workflowMolecules in the project state before applying cards
-                  let projectWorkflow = initialWorkflow;
-                  if (data.state.workflowMolecules && Array.isArray(data.state.workflowMolecules) && !projectWorkflow) {
-                    projectWorkflow = data.state.workflowMolecules;
-                  }
-                    
-                    console.info('[Laboratory API] ✅ Loaded from project registry');
-                  applyInitialCards(cardsFromConfig, projectWorkflow);
-                    return;
-                  }
-                  
-                  // No data in registry either
-                  console.info('[Laboratory API] No data found in any source (MongoDB, localStorage, registry)');
-                      markLoadingComplete();
-                  })
-                  .catch((error) => {
-                  console.error('[Laboratory API] Project registry fetch failed', error);
-                    markLoadingComplete();
-                  });
-              return;
-            }
-          }
-          
-          // No data found anywhere
-          console.info('[Laboratory API] No data found in any source');
-          markLoadingComplete();
-        }
-      } else {
+      }
+      
+      // No data found in MongoDB or localStorage
+      console.info('[Laboratory API] No data found in MongoDB or localStorage');
+      markLoadingComplete();
+    } else {
         // We have initialCards from workflow data, but need to check for workflow molecules
       if (!initialWorkflow) {
         const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
@@ -3768,7 +3714,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           onConfirm={confirmDeleteMoleculeContainer}
           onCancel={cancelDeleteMoleculeContainer}
           title="Delete molecule container?"
-          description={`Deleting "${moleculeToDelete?.moleculeTitle || ''}" will remove the container and all its associated atoms. This action cannot be undone.`}
+          description={`Deleting "${moleculeToDelete?.moleculeTitle || ''}" will remove the container and all its associated atoms. When you save, this change will reflect in Workflow Mode.`}
           icon={<Trash2 className="w-6 h-6 text-white" />}
           iconBgClass="bg-red-500"
           confirmLabel="Yes, delete"
