@@ -78,6 +78,7 @@ interface SlideObjectContextMenuProps {
   disableApplyColors?: boolean;
   renderAdditionalContent?: (closeMenu: () => void) => React.ReactNode;
   renderLayerExtras?: (closeMenu: () => void) => React.ReactNode;
+  renderPostLockContent?: (closeMenu: () => void) => React.ReactNode;
 }
 
 const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
@@ -118,6 +119,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   disableApplyColors = false,
   renderAdditionalContent,
   renderLayerExtras,
+  renderPostLockContent,
 }) => {
   const [open, setOpen] = useState(false);
   const closeMenu = useCallback(() => setOpen(false), []);
@@ -132,6 +134,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
 
   const additionalContent = renderAdditionalContent?.(closeMenu);
   const layerExtras = renderLayerExtras?.(closeMenu);
+  const postLockContent = renderPostLockContent?.(closeMenu);
 
   return (
     <ContextMenu open={open} onOpenChange={setOpen}>
@@ -207,6 +210,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
           {lockLabel}
           <ContextMenuShortcut>Alt+Shift+L</ContextMenuShortcut>
         </ContextMenuItem>
+        {postLockContent}
         <ContextMenuSub>
           <ContextMenuSubTrigger disabled={!canEdit || !canLayer}>
             <Layers className="mr-2 h-4 w-4" />

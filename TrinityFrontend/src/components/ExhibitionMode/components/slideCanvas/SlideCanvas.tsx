@@ -252,10 +252,17 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     if (!positionPanelTarget) {
       return null;
     }
-    const match = slideObjects.find(
-      object => object.id === positionPanelTarget.objectId && object.type === 'text-box',
-    );
-    return match ?? null;
+
+    const match = slideObjects.find(object => object.id === positionPanelTarget.objectId);
+    if (!match) {
+      return null;
+    }
+
+    if (match.type === 'text-box' || match.type === 'image') {
+      return match;
+    }
+
+    return null;
   }, [positionPanelTarget, slideObjects]);
 
   useLayoutEffect(() => {
@@ -835,6 +842,90 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [canEdit, handleBulkUpdate, handleCanvasInteraction, slideObjects],
   );
 
+  const updateImageGeometry = useCallback(
+    (
+      objectId: string,
+      updates: { width?: number; height?: number; x?: number; y?: number; rotation?: number },
+    ) => {
+      if (!canEdit) {
+        return;
+      }
+
+      const target = slideObjects.find(object => object.id === objectId && object.type === 'image');
+      if (!target) {
+        return;
+      }
+
+      const canvas = canvasRef.current;
+
+      const rawWidth = updates.width;
+      const rawHeight = updates.height;
+
+      let nextWidth =
+        typeof rawWidth === 'number' && Number.isFinite(rawWidth) ? rawWidth : target.width;
+      let nextHeight =
+        typeof rawHeight === 'number' && Number.isFinite(rawHeight) ? rawHeight : target.height;
+
+      nextWidth = Math.max(MIN_IMAGE_OBJECT_WIDTH, nextWidth);
+      nextHeight = Math.max(MIN_IMAGE_OBJECT_HEIGHT, nextHeight);
+
+      if (canvas) {
+        nextWidth = Math.max(MIN_IMAGE_OBJECT_WIDTH, Math.min(nextWidth, canvas.clientWidth));
+        nextHeight = Math.max(MIN_IMAGE_OBJECT_HEIGHT, Math.min(nextHeight, canvas.clientHeight));
+      }
+
+      const rawX = updates.x;
+      const rawY = updates.y;
+
+      let nextX = typeof rawX === 'number' && Number.isFinite(rawX) ? rawX : target.x;
+      let nextY = typeof rawY === 'number' && Number.isFinite(rawY) ? rawY : target.y;
+
+      if (canvas) {
+        const maxX = Math.max(0, canvas.clientWidth - nextWidth);
+        const maxY = Math.max(0, canvas.clientHeight - nextHeight);
+        nextX = Math.min(Math.max(0, nextX), maxX);
+        nextY = Math.min(Math.max(0, nextY), maxY);
+      } else {
+        nextX = Math.max(0, nextX);
+        nextY = Math.max(0, nextY);
+      }
+
+      const currentRotation = typeof target.rotation === 'number' ? target.rotation : 0;
+      let nextRotation = currentRotation;
+      if (typeof updates.rotation === 'number' && Number.isFinite(updates.rotation)) {
+        nextRotation = updates.rotation;
+      }
+
+      const payload: Partial<SlideObject> = {};
+
+      if (nextWidth !== target.width) {
+        payload.width = nextWidth;
+      }
+      if (nextHeight !== target.height) {
+        payload.height = nextHeight;
+      }
+      if (nextX !== target.x) {
+        payload.x = nextX;
+      }
+      if (nextY !== target.y) {
+        payload.y = nextY;
+      }
+      if (nextRotation !== currentRotation) {
+        payload.rotation = nextRotation;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        return;
+      }
+
+      handleCanvasInteraction();
+      handleBulkUpdate({
+        [objectId]: payload,
+      });
+    },
+    [canEdit, handleBulkUpdate, handleCanvasInteraction, slideObjects],
+  );
+
   const alignTextBoxToCanvas = useCallback(
     (objectId: string, alignment: 'top' | 'middle' | 'bottom' | 'left' | 'center' | 'right') => {
       const canvas = canvasRef.current;
@@ -872,6 +963,43 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [slideObjects, updateTextBoxGeometry],
   );
 
+  const alignImageToCanvas = useCallback(
+    (objectId: string, alignment: 'top' | 'middle' | 'bottom' | 'left' | 'center' | 'right') => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+
+      const target = slideObjects.find(object => object.id === objectId && object.type === 'image');
+      if (!target) {
+        return;
+      }
+
+      const updates: { x?: number; y?: number } = {};
+
+      if (alignment === 'top') {
+        updates.y = 0;
+      } else if (alignment === 'middle') {
+        updates.y = (canvas.clientHeight - target.height) / 2;
+      } else if (alignment === 'bottom') {
+        updates.y = canvas.clientHeight - target.height;
+      } else if (alignment === 'left') {
+        updates.x = 0;
+      } else if (alignment === 'center') {
+        updates.x = (canvas.clientWidth - target.width) / 2;
+      } else if (alignment === 'right') {
+        updates.x = canvas.clientWidth - target.width;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return;
+      }
+
+      updateImageGeometry(objectId, updates);
+    },
+    [slideObjects, updateImageGeometry],
+  );
+
   const closePositionPanel = useCallback(() => {
     setPositionPanelTarget(null);
   }, []);
@@ -881,19 +1009,39 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       return null;
     }
 
-    return (
-      <TextBoxPositionPanel
-        object={positionPanelObject}
-        onClose={closePositionPanel}
-        onBringForward={() => handleBringForward(positionPanelObject.id)}
-        onSendBackward={() => handleSendBackward(positionPanelObject.id)}
-        onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
-        onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
-        onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
-        onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
-      />
-    );
+    if (positionPanelObject.type === 'text-box') {
+      return (
+        <TextBoxPositionPanel
+          object={positionPanelObject}
+          onClose={closePositionPanel}
+          onBringForward={() => handleBringForward(positionPanelObject.id)}
+          onSendBackward={() => handleSendBackward(positionPanelObject.id)}
+          onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
+          onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
+          onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
+          onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
+        />
+      );
+    }
+
+    if (positionPanelObject.type === 'image') {
+      return (
+        <TextBoxPositionPanel
+          object={positionPanelObject}
+          onClose={closePositionPanel}
+          onBringForward={() => handleBringForward(positionPanelObject.id)}
+          onSendBackward={() => handleSendBackward(positionPanelObject.id)}
+          onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
+          onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
+          onAlign={alignment => alignImageToCanvas(positionPanelObject.id, alignment)}
+          onGeometryChange={updates => updateImageGeometry(positionPanelObject.id, updates)}
+        />
+      );
+    }
+
+    return null;
   }, [
+    alignImageToCanvas,
     alignTextBoxToCanvas,
     canEdit,
     closePositionPanel,
@@ -902,6 +1050,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     handlePanelSendToBack,
     handleSendBackward,
     positionPanelObject,
+    updateImageGeometry,
     updateTextBoxGeometry,
   ]);
 
@@ -1338,6 +1487,8 @@ const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;
 const MIN_TEXT_OBJECT_WIDTH = 140;
 const MIN_TEXT_OBJECT_HEIGHT = 60;
+const MIN_IMAGE_OBJECT_WIDTH = 160;
+const MIN_IMAGE_OBJECT_HEIGHT = 120;
 
 const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
   if (isSolidToken(color)) {
@@ -2042,6 +2193,124 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         selectedObjects,
         unlockedSelectedObjects,
       ],
+    );
+
+    const updateImageProps = useCallback(
+      (
+        objectId: string,
+        updater: (props: Record<string, unknown>) => Record<string, unknown> | null | undefined,
+      ) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'image') {
+          return;
+        }
+
+        if (isSlideObjectLocked(object)) {
+          toast({
+            title: 'Image locked',
+            description: 'Unlock the image to modify its properties.',
+          });
+          return;
+        }
+
+        const nextProps = updater({ ...(object.props ?? {}) } as Record<string, unknown>);
+        if (!nextProps) {
+          return;
+        }
+
+        handleCanvasInteraction();
+        handleBulkUpdate({
+          [objectId]: {
+            props: nextProps,
+          },
+        });
+      },
+      [handleBulkUpdate, handleCanvasInteraction, objectsMap],
+    );
+
+    const handleToggleImageFit = useCallback(
+      (objectId: string) => {
+        updateImageProps(objectId, props => {
+          const rawFit = typeof props.fit === 'string' ? props.fit.toLowerCase() : '';
+          const currentFit = rawFit === 'contain' ? 'contain' : 'cover';
+          return { ...props, fit: currentFit === 'cover' ? 'contain' : 'cover' };
+        });
+      },
+      [updateImageProps],
+    );
+
+    const handleToggleImageFlip = useCallback(
+      (objectId: string) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          flipHorizontal: !(props.flipHorizontal === true),
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleToggleImageAnimation = useCallback(
+      (objectId: string) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          animate: !(props.animate === true),
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleReplaceImage = useCallback(
+      (objectId: string) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'image') {
+          return;
+        }
+
+        if (isSlideObjectLocked(object)) {
+          toast({
+            title: 'Image locked',
+            description: 'Unlock the image to replace it.',
+          });
+          return;
+        }
+
+        if (typeof window === 'undefined') {
+          toast({
+            title: 'Replace image unavailable',
+            description: 'Image replacement is only available in a browser environment.',
+          });
+          return;
+        }
+
+        const currentSrc = typeof object.props?.src === 'string' ? object.props.src : '';
+        const input = window.prompt('Enter the URL of the new image', currentSrc);
+        if (input === null) {
+          return;
+        }
+
+        const trimmed = input.trim();
+        if (trimmed.length === 0) {
+          toast({
+            title: 'No image provided',
+            description: 'Provide an image URL to replace the current image.',
+          });
+          return;
+        }
+
+        updateImageProps(objectId, props => {
+          const next = { ...props, src: trimmed, source: 'custom-url' } as Record<string, unknown>;
+          if (typeof next.name !== 'string' || next.name.trim().length === 0) {
+            next.name = 'Custom image';
+          }
+          return next;
+        });
+
+        toast({
+          title: 'Image updated',
+          description: 'Replaced the selected image.',
+        });
+      },
+      [objectsMap, updateImageProps],
     );
 
     const handleToggleImageFullBleed = useCallback(
@@ -3756,6 +4025,13 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isFullBleedImage = isImageObject
               ? Boolean((object.props as Record<string, unknown>)?.fullBleed)
               : false;
+            const rawImageProps = (object.props ?? {}) as Record<string, unknown>;
+            const imageFitMode =
+              isImageObject && typeof rawImageProps.fit === 'string' && rawImageProps.fit.toLowerCase() === 'contain'
+                ? 'contain'
+                : 'cover';
+            const isImageFlipped = isImageObject && rawImageProps.flipHorizontal === true;
+            const isImageAnimated = isImageObject && rawImageProps.animate === true;
             const isEditingTextBox =
               isTextBoxObject &&
               editingTextState?.id === object.id &&
@@ -3980,8 +4256,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                           : null
                       }
                       fullBleed={isFullBleedImage}
+                      fitMode={imageFitMode}
+                      isFlipped={isImageFlipped}
+                      isAnimated={isImageAnimated}
                       onInteract={onInteract}
                       onToolbarStateChange={handleTextToolbarStateChange}
+                      onToggleFit={() => handleToggleImageFit(object.id)}
+                      onToggleFlip={() => handleToggleImageFlip(object.id)}
+                      onToggleAnimate={() => handleToggleImageAnimation(object.id)}
+                      onRequestPositionPanel={() => handleRequestPositionPanel(object.id)}
+                      onRequestReplace={() => handleReplaceImage(object.id)}
                       onBringForward={() => handleLayerAction('forward', [object.id])}
                       onSendBackward={() => handleLayerAction('backward', [object.id])}
                       onBringToFront={() => handleLayerAction('front', [object.id])}
@@ -4092,28 +4376,25 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           const contextAllImagesFullBleed =
             contextSupportsImageFullBleed &&
             contextTargets.every(target => Boolean((target.props as Record<string, unknown>).fullBleed));
-          const renderLayerExtras = contextSupportsImageFullBleed
+          const renderPostLockContent = contextSupportsImageFullBleed
             ? (closeMenu: () => void) => (
-                <>
-                  <ContextMenuSeparator />
-                  <ContextMenuCheckboxItem
-                    checked={contextAllImagesFullBleed}
-                    disabled={!canEdit || !contextHasUnlocked}
-                    onCheckedChange={value => {
-                      const resolved = value === true;
-                      closeMenu();
-                      if (resolved === contextAllImagesFullBleed) {
-                        return;
-                      }
-                      handleToggleImageFullBleed(contextTargetIds, resolved);
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Maximize2 className="h-4 w-4" />
-                      <span>Full bleed image</span>
-                    </div>
-                  </ContextMenuCheckboxItem>
-                </>
+                <ContextMenuCheckboxItem
+                  checked={contextAllImagesFullBleed}
+                  disabled={!canEdit || !contextHasUnlocked}
+                  onCheckedChange={value => {
+                    const resolved = value === true;
+                    closeMenu();
+                    if (resolved === contextAllImagesFullBleed) {
+                      return;
+                    }
+                    handleToggleImageFullBleed(contextTargetIds, resolved);
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Maximize2 className="h-4 w-4" />
+                    <span>Full bleed card</span>
+                  </div>
+                </ContextMenuCheckboxItem>
               )
             : undefined;
 
@@ -4192,7 +4473,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     )
                   : undefined
               }
-              renderLayerExtras={renderLayerExtras}
+              renderPostLockContent={renderPostLockContent}
             >
               {renderObject()}
             </SlideObjectContextMenu>

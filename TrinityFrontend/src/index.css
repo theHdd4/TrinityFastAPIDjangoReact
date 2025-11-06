@@ -184,6 +184,27 @@
   will-change: opacity, transform;
 }
 
+.slide-image-visual {
+  --image-flip-scale: 1;
+  transform: scaleX(var(--image-flip-scale));
+  transition: transform 0.45s ease, filter 0.45s ease;
+}
+
+@keyframes slide-image-float {
+  0%,
+  100% {
+    transform: scaleX(var(--image-flip-scale)) translateY(0) scale(1);
+  }
+
+  50% {
+    transform: scaleX(var(--image-flip-scale)) translateY(-6px) scale(1.02);
+  }
+}
+
+.animate-slide-image {
+  animation: slide-image-float 8s ease-in-out infinite;
+}
+
 body.lab-transition-prep [data-lab-header],
 body.lab-transition-prep [data-lab-toolbar],
 body.lab-transition-prep [data-lab-sidebar],
