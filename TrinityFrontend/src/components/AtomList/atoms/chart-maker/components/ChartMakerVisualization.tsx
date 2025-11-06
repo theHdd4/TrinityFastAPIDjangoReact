@@ -650,7 +650,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="aggregate">Show Aggregate</SelectItem>
-                            {getCategoricalColumns().map((column) => (
+                            {getAvailableFilterColumns().map((column) => (
                               <SelectItem key={column} value={column}>{column}</SelectItem>
                             ))}
                           </SelectContent>

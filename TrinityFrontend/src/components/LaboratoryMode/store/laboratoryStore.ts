@@ -187,6 +187,7 @@ export interface FeatureOverviewVisualizationManifestChart {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewVisualizationManifestTable {
@@ -233,6 +234,7 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewExhibitionSelectionContext {
