@@ -23,13 +23,36 @@ export interface CreateImageObjectOptions {
   source?: string | null;
 }
 
+export interface CreateImageSlideObjectOptions extends CreateImageObjectOptions {
+  existingObjects?: SlideObject[];
+  overrides?: Partial<SlideObject>;
+}
+
+const resolveNextZIndex = (objects: SlideObject[] | undefined): number => {
+  if (!Array.isArray(objects) || objects.length === 0) {
+    return 1;
+  }
+
+  const max = objects.reduce((acc, object) => {
+    const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+    return value > acc ? value : acc;
+  }, 0);
+
+  return Math.round(max) + 1;
+};
+
 export const createImageSlideObject = (
   id: string,
   src: string,
-  options: CreateImageObjectOptions = {},
-  overrides: Partial<SlideObject> = {},
+  options: CreateImageSlideObjectOptions = {},
 ): SlideObject => {
-  const { props: overrideProps, ...restOverrides } = overrides;
+  const { existingObjects = [], overrides = {}, name = null, source = null } = options;
+  const { props: overrideProps = {}, zIndex: overrideZIndex, ...restOverrides } = overrides;
+
+  const zIndex =
+    typeof overrideZIndex === 'number' && Number.isFinite(overrideZIndex)
+      ? Math.round(overrideZIndex)
+      : resolveNextZIndex(existingObjects);
 
   return {
     id,
@@ -38,13 +61,13 @@ export const createImageSlideObject = (
     y: DEFAULT_IMAGE_OBJECT_Y,
     width: DEFAULT_IMAGE_OBJECT_WIDTH,
     height: DEFAULT_IMAGE_OBJECT_HEIGHT,
-    zIndex: 1,
+    zIndex,
     rotation: 0,
     groupId: null,
     props: {
       src,
-      name: options.name ?? null,
-      source: options.source ?? null,
+      name,
+      source,
       ...(overrideProps ?? {}),
     },
     ...restOverrides,

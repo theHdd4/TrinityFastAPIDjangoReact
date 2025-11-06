@@ -20,6 +20,8 @@ interface SlideShapeObjectProps {
   onDelete?: () => void;
   onRequestPositionPanel?: () => void;
   onBringToFront: () => void;
+  onBringForward: () => void;
+  onSendBackward: () => void;
   onSendToBack: () => void;
   onInteract: () => void;
 }
@@ -42,6 +44,8 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
   onDelete,
   onRequestPositionPanel,
   onBringToFront,
+  onBringForward,
+  onSendBackward,
   onSendToBack,
   onInteract,
 }) => {
@@ -99,10 +103,20 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
     onBringToFront();
   }, [onBringToFront, onInteract]);
 
+  const handleBringForward = useCallback(() => {
+    onInteract();
+    onBringForward();
+  }, [onBringForward, onInteract]);
+
   const handleSendToBack = useCallback(() => {
     onInteract();
     onSendToBack();
   }, [onInteract, onSendToBack]);
+
+  const handleSendBackward = useCallback(() => {
+    onInteract();
+    onSendBackward();
+  }, [onInteract, onSendBackward]);
 
   const toolbar = useMemo(() => {
     if (!canEdit || !definition) {
@@ -124,6 +138,8 @@ export const SlideShapeObject: React.FC<SlideShapeObjectProps> = ({
         onStrokeStyleChange={handleStrokeStyleChange}
         onOpacityChange={handleOpacityChange}
         onBringToFront={handleBringToFront}
+        onBringForward={handleBringForward}
+        onSendBackward={handleSendBackward}
         onSendToBack={handleSendToBack}
         onRequestAnimate={() => {}}
         onRequestPosition={onRequestPositionPanel}

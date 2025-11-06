@@ -595,16 +595,56 @@ export interface TableObjectProps {
   showOutline?: boolean;
 }
 
+const resolveNextZIndex = (objects: SlideObject[] | undefined): number => {
+  if (!Array.isArray(objects) || objects.length === 0) {
+    return 1;
+  }
+
+  const max = objects.reduce((acc, object) => {
+    const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+    return value > acc ? value : acc;
+  }, 0);
+
+  return Math.round(max) + 1;
+};
+
+export interface CreateTableSlideObjectOptions extends Partial<TableObjectProps> {
+  existingObjects?: SlideObject[];
+  overrides?: Partial<SlideObject>;
+}
+
 export const createTableSlideObject = (
   id: string,
-  overrides: Partial<SlideObject> = {},
-  options: Partial<TableObjectProps> = {},
+  options: CreateTableSlideObjectOptions = {},
 ): SlideObject => {
-  const baseRows = Number.isFinite(options.rows) && options.rows ? Math.max(1, Math.floor(options.rows)) : DEFAULT_TABLE_ROWS;
-  const baseCols = Number.isFinite(options.cols) && options.cols ? Math.max(1, Math.floor(options.cols)) : DEFAULT_TABLE_COLS;
-  const data = normaliseTableData(options.data, baseRows, baseCols);
+  const { existingObjects = [], overrides = {}, ...tableOptions } = options;
+  const { props: overrideProps = {}, zIndex: overrideZIndex, ...restOverrides } = overrides;
+
+  const baseRows =
+    Number.isFinite(tableOptions.rows) && tableOptions.rows
+      ? Math.max(1, Math.floor(tableOptions.rows))
+      : DEFAULT_TABLE_ROWS;
+  const baseCols =
+    Number.isFinite(tableOptions.cols) && tableOptions.cols
+      ? Math.max(1, Math.floor(tableOptions.cols))
+      : DEFAULT_TABLE_COLS;
+  const data = normaliseTableData(tableOptions.data, baseRows, baseCols);
   const rows = data.length;
   const cols = data[0]?.length ?? 0;
+
+  const zIndex =
+    typeof overrideZIndex === 'number' && Number.isFinite(overrideZIndex)
+      ? Math.round(overrideZIndex)
+      : resolveNextZIndex(existingObjects);
+
+  const props: Record<string, unknown> = {
+    data,
+    rows,
+    cols,
+    locked: Boolean(tableOptions.locked),
+    showOutline: tableOptions.showOutline !== false,
+    ...(overrideProps ?? {}),
+  };
 
   return {
     id,
@@ -613,16 +653,10 @@ export const createTableSlideObject = (
     y: 144,
     width: DEFAULT_TABLE_WIDTH,
     height: DEFAULT_TABLE_HEIGHT,
-    zIndex: 1,
+    zIndex,
     rotation: 0,
     groupId: null,
-    props: {
-      data,
-      rows,
-      cols,
-      locked: Boolean(options.locked),
-      showOutline: options.showOutline !== false,
-    },
-    ...overrides,
+    props,
+    ...restOverrides,
   };
 };

@@ -60,8 +60,10 @@ import { CardFormattingPanel } from '../operationsPalette/CardFormattingPanel';
 import { ExhibitionTable } from '../operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from '../operationsPalette/shapes';
 import type { ShapeObjectProps } from '../operationsPalette/shapes/constants';
-import { SlideChart, ChartDataEditor, parseChartObjectProps, isEditableChartType } from '../operationsPalette/charts';
+import { ChartDataEditor, parseChartObjectProps, isEditableChartType } from '../operationsPalette/charts';
+import { SlideChartObject } from '../operationsPalette/charts/SlideChartObject';
 import type { ChartConfig, ChartDataRow } from '../operationsPalette/charts';
+import { SlideImageObject } from '../operationsPalette/images/SlideImageObject';
 import {
   cloneTableHeaders,
   cloneTableMatrix,
@@ -3861,6 +3863,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                         onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
                       }
                       onContextMenu={event => handleContextMenuRequest(event, object.id)}
+                      onBringToFront={() => handleLayerAction('front', [object.id])}
+                      onBringForward={() => handleLayerAction('forward', [object.id])}
+                      onSendBackward={() => handleLayerAction('backward', [object.id])}
+                      onSendToBack={() => handleLayerAction('back', [object.id])}
                     />
                   ) : isTableObject && tableState ? (
                     <ExhibitionTable
@@ -3916,15 +3922,56 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                         onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
                       }
                       onBringToFront={() => onBringToFront([object.id])}
+                      onBringForward={() => handleLayerAction('forward', [object.id])}
+                      onSendBackward={() => handleLayerAction('backward', [object.id])}
                       onSendToBack={() => onSendToBack([object.id])}
                       onInteract={onInteract}
                     />
+                  ) : isImageObject ? (
+                    <SlideImageObject
+                      id={object.id}
+                      canEdit={canEdit}
+                      isSelected={isSelected}
+                      src={typeof object.props?.src === 'string' ? object.props.src : null}
+                      name={
+                        typeof object.props?.name === 'string' && object.props.name.trim().length > 0
+                          ? object.props.name
+                          : null
+                      }
+                      onInteract={onInteract}
+                      onToolbarStateChange={handleTextToolbarStateChange}
+                      onBringForward={() => handleLayerAction('forward', [object.id])}
+                      onSendBackward={() => handleLayerAction('backward', [object.id])}
+                      onBringToFront={() => handleLayerAction('front', [object.id])}
+                      onSendToBack={() => handleLayerAction('back', [object.id])}
+                      onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
+                    />
                   ) : isChartObject && chartProps ? (
-                    <SlideChart
+                    <SlideChartObject
+                      id={object.id}
+                      canEdit={canEdit}
+                      isSelected={isSelected}
                       data={chartProps.chartData}
                       config={chartProps.chartConfig}
-                      className="h-full w-full"
                       captureId={object.id}
+                      onToolbarStateChange={handleTextToolbarStateChange}
+                      onBringForward={() => handleLayerAction('forward', [object.id])}
+                      onSendBackward={() => handleLayerAction('backward', [object.id])}
+                      onBringToFront={() => handleLayerAction('front', [object.id])}
+                      onSendToBack={() => handleLayerAction('back', [object.id])}
+                      onRequestEdit={
+                        canEdit
+                          ? () => {
+                              handleCanvasInteraction();
+                              setChartEditorTarget({
+                                objectId: object.id,
+                                data: chartProps.chartData,
+                                config: chartProps.chartConfig,
+                              });
+                            }
+                          : undefined
+                      }
+                      onInteract={onInteract}
                     />
                   ) : (
                     <div
@@ -4001,7 +4048,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               key={object.id}
               canEdit={canEdit}
               canAlign={hasSelection && !selectionLocked}
-              canLayer={hasSelection && !selectionLocked}
+              canLayer={contextHasUnlocked}
               canApplyColors={canApplyColorsGlobally}
               canAddAltText={selectedSupportsAltText}
               hasClipboard={hasClipboardItems}
