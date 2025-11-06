@@ -88,6 +88,7 @@ interface SlideImageObjectProps {
   isSelected: boolean;
   src: string | null;
   name: string | null;
+  fullBleed?: boolean;
   onInteract: () => void;
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
   onBringForward: () => void;
@@ -103,6 +104,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   isSelected,
   src,
   name,
+  fullBleed = false,
   onInteract,
   onToolbarStateChange,
   onBringForward,
@@ -174,7 +176,13 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   const resolvedName = name && name.trim().length > 0 ? name : 'Slide image';
 
   return (
-    <div className={cn('relative h-full w-full overflow-hidden rounded-2xl', canEdit ? 'group' : undefined)}>
+    <div
+      className={cn(
+        'relative h-full w-full overflow-hidden',
+        canEdit ? 'group' : undefined,
+        fullBleed ? 'rounded-none' : 'rounded-2xl',
+      )}
+    >
       {src ? (
         <img src={src} alt={resolvedName} className="h-full w-full object-cover" />
       ) : (

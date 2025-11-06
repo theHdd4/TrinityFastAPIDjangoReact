@@ -23,6 +23,7 @@ import {
   Unlock,
   MessageSquarePlus,
   Edit3,
+  Maximize2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -77,6 +78,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuCheckboxItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
   ContextMenuSub,
@@ -2042,6 +2044,40 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       ],
     );
 
+    const handleToggleImageFullBleed = useCallback(
+      (targetIds: string[], nextValue: boolean) => {
+        if (!Array.isArray(targetIds) || targetIds.length === 0) {
+          return;
+        }
+
+        const updates: Record<string, Partial<SlideObject>> = {};
+
+        targetIds.forEach(id => {
+          const object = objectsMap.get(id);
+          if (!object || object.type !== 'image' || isSlideObjectLocked(object)) {
+            return;
+          }
+
+          const nextProps = {
+            ...(object.props ?? {}),
+            fullBleed: nextValue,
+          } as Record<string, unknown>;
+
+          updates[object.id] = {
+            props: nextProps,
+          };
+        });
+
+        if (Object.keys(updates).length === 0) {
+          return;
+        }
+
+        onInteract();
+        onBulkUpdate(updates);
+      },
+      [objectsMap, onBulkUpdate, onInteract],
+    );
+
     const handleLinkSelection = useCallback(() => {
       if (selectedObjects.length === 0) {
         toast({
@@ -3717,6 +3753,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isTableObject = object.type === 'table';
             const isChartObject = object.type === 'chart';
             const isShapeObject = object.type === 'shape';
+            const isFullBleedImage = isImageObject
+              ? Boolean((object.props as Record<string, unknown>)?.fullBleed)
+              : false;
             const isEditingTextBox =
               isTextBoxObject &&
               editingTextState?.id === object.id &&
@@ -3755,6 +3794,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               isTextBoxObject ||
               isTableObject ||
               isChartObject ||
+              isFullBleedImage ||
               (isFeatureOverviewAtom && featureOverviewTransparentBackground);
             const isChartMakerAtom = atomId === 'chart-maker';
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
@@ -3792,6 +3832,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   isShapeObject && 'border-none bg-transparent shadow-none overflow-visible',
                   (isTextBoxObject || isTableObject || isChartObject) &&
                     'overflow-hidden border-transparent bg-transparent shadow-none',
+                  isFullBleedImage && 'rounded-none border-0 bg-transparent shadow-none',
                   (() => {
                     const shouldShowCardChrome =
                       !suppressCardChrome &&
@@ -3938,6 +3979,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                           ? object.props.name
                           : null
                       }
+                      fullBleed={isFullBleedImage}
                       onInteract={onInteract}
                       onToolbarStateChange={handleTextToolbarStateChange}
                       onBringForward={() => handleLayerAction('forward', [object.id])}
@@ -4042,6 +4084,38 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const target = objectsMap.get(id);
             return target ? !isSlideObjectLocked(target) : false;
           });
+          const contextTargets = contextTargetIds
+            .map(id => objectsMap.get(id))
+            .filter((target): target is SlideObject => Boolean(target));
+          const contextSupportsImageFullBleed =
+            contextTargets.length > 0 && contextTargets.every(target => target.type === 'image');
+          const contextAllImagesFullBleed =
+            contextSupportsImageFullBleed &&
+            contextTargets.every(target => Boolean((target.props as Record<string, unknown>).fullBleed));
+          const renderLayerExtras = contextSupportsImageFullBleed
+            ? (closeMenu: () => void) => (
+                <>
+                  <ContextMenuSeparator />
+                  <ContextMenuCheckboxItem
+                    checked={contextAllImagesFullBleed}
+                    disabled={!canEdit || !contextHasUnlocked}
+                    onCheckedChange={value => {
+                      const resolved = value === true;
+                      closeMenu();
+                      if (resolved === contextAllImagesFullBleed) {
+                        return;
+                      }
+                      handleToggleImageFullBleed(contextTargetIds, resolved);
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Maximize2 className="h-4 w-4" />
+                      <span>Full bleed image</span>
+                    </div>
+                  </ContextMenuCheckboxItem>
+                </>
+              )
+            : undefined;
 
           return (
             <SlideObjectContextMenu
@@ -4118,6 +4192,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     )
                   : undefined
               }
+              renderLayerExtras={renderLayerExtras}
             >
               {renderObject()}
             </SlideObjectContextMenu>

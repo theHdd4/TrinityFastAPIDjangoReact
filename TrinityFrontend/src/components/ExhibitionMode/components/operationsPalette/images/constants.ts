@@ -21,6 +21,7 @@ export const generateImageObjectId = () => resolveId('image');
 export interface CreateImageObjectOptions {
   name?: string | null;
   source?: string | null;
+  fullBleed?: boolean;
 }
 
 export interface CreateImageSlideObjectOptions extends CreateImageObjectOptions {
@@ -46,13 +47,18 @@ export const createImageSlideObject = (
   src: string,
   options: CreateImageSlideObjectOptions = {},
 ): SlideObject => {
-  const { existingObjects = [], overrides = {}, name = null, source = null } = options;
+  const { existingObjects = [], overrides = {}, name = null, source = null, fullBleed = false } = options;
   const { props: overrideProps = {}, zIndex: overrideZIndex, ...restOverrides } = overrides;
+  const propsOverrides = (overrideProps ?? {}) as Record<string, unknown>;
+  const { fullBleed: overrideFullBleedValue, ...restPropOverrides } = propsOverrides;
 
   const zIndex =
     typeof overrideZIndex === 'number' && Number.isFinite(overrideZIndex)
       ? Math.round(overrideZIndex)
       : resolveNextZIndex(existingObjects);
+
+  const resolvedFullBleed =
+    typeof overrideFullBleedValue === 'boolean' ? overrideFullBleedValue : Boolean(fullBleed);
 
   return {
     id,
@@ -68,7 +74,8 @@ export const createImageSlideObject = (
       src,
       name,
       source,
-      ...(overrideProps ?? {}),
+      fullBleed: resolvedFullBleed,
+      ...restPropOverrides,
     },
     ...restOverrides,
   };

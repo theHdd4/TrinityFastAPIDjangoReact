@@ -77,6 +77,7 @@ interface SlideObjectContextMenuProps {
   disableComment?: boolean;
   disableApplyColors?: boolean;
   renderAdditionalContent?: (closeMenu: () => void) => React.ReactNode;
+  renderLayerExtras?: (closeMenu: () => void) => React.ReactNode;
 }
 
 const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
@@ -116,6 +117,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   disableComment = false,
   disableApplyColors = false,
   renderAdditionalContent,
+  renderLayerExtras,
 }) => {
   const [open, setOpen] = useState(false);
   const closeMenu = useCallback(() => setOpen(false), []);
@@ -129,6 +131,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   );
 
   const additionalContent = renderAdditionalContent?.(closeMenu);
+  const layerExtras = renderLayerExtras?.(closeMenu);
 
   return (
     <ContextMenu open={open} onOpenChange={setOpen}>
@@ -254,6 +257,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
               <ArrowDownToLine className="mr-2 h-4 w-4" />
               Send to back
             </ContextMenuItem>
+            {layerExtras}
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSub>
