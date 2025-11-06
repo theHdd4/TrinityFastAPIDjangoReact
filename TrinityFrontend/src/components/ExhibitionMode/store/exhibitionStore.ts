@@ -1306,6 +1306,15 @@ const normaliseSavedSlideObject = (value: unknown): SlideObject | null => {
     return Number.isFinite(parsed) ? parsed : fallback;
   };
 
+  const toInteger = (input: unknown, fallback: number): number => {
+    const numeric = toNumber(input, fallback);
+    if (!Number.isFinite(numeric)) {
+      return fallback;
+    }
+    const rounded = Math.round(numeric);
+    return Number.isFinite(rounded) ? rounded : fallback;
+  };
+
   const props = isRecord(value.props) ? { ...value.props } : {};
 
   const groupId = isNonEmptyString(value.groupId) ? value.groupId.trim() : null;
@@ -1317,7 +1326,7 @@ const normaliseSavedSlideObject = (value: unknown): SlideObject | null => {
     y: toNumber(value.y, 0),
     width: toNumber(value.width, DEFAULT_CANVAS_OBJECT_WIDTH),
     height: toNumber(value.height, DEFAULT_CANVAS_OBJECT_HEIGHT),
-    zIndex: toNumber(value.zIndex, 1),
+    zIndex: toInteger(value.zIndex, 1),
     rotation: toNumber(value.rotation, 0),
     groupId,
     props,
@@ -1805,7 +1814,10 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
       const maxZ = existing.reduce((acc, entry) => Math.max(acc, entry.zIndex ?? 0), 0);
       const prepared: SlideObject = {
         ...object,
-        zIndex: typeof object.zIndex === 'number' ? object.zIndex : maxZ + 1,
+        zIndex:
+          typeof object.zIndex === 'number' && Number.isFinite(object.zIndex)
+            ? Math.round(object.zIndex)
+            : Math.round(maxZ) + 1,
       };
       const index = existing.findIndex(entry => entry.id === prepared.id);
       const nextList =
@@ -1831,7 +1843,11 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
           return object;
         }
         changed = true;
-        return { ...object, ...patch };
+        const merged: SlideObject = { ...object, ...patch };
+        if (typeof merged.zIndex === 'number' && Number.isFinite(merged.zIndex)) {
+          merged.zIndex = Math.round(merged.zIndex);
+        }
+        return merged;
       });
 
       if (!changed) {

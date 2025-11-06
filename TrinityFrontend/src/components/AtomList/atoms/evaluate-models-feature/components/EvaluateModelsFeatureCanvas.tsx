@@ -191,6 +191,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
 }) => {
   // Get atom from store for exhibition functionality
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
+  // Get fresh settings from atom store to ensure we have latest values (especially for seriesSettings)
+  const atomSettings = (atom?.settings as any) || {};
+  // Merge props settings with atom settings (atom settings takes precedence for latest values)
+  const effectiveSettings = { ...settings, ...atomSettings };
   
   // Get input file name for clickable subtitle
   const inputFileName = data.selectedDataframe || '';
@@ -812,6 +816,56 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     fetchScope();
   }, [data.selectedDataframe]);
+
+  // Sync chart themes and types from settings when settings change (e.g., after loading from MongoDB)
+  useEffect(() => {
+    // Sync all chart themes from settings
+    const allCombinations = selectedCombinations || [];
+    const themeKeys = [
+      'waterfallChartThemes',
+      'contributionChartThemes',
+      'roiChartThemes',
+      'actualVsPredictedChartThemes',
+      'betaCoefficientsChartThemes',
+      'elasticityChartThemes',
+      'averagesChartThemes'
+    ];
+    
+    allCombinations.forEach((combinationName: string) => {
+      themeKeys.forEach(themeKey => {
+        const settingsKey = `${themeKey}_${combinationName}`;
+        const savedTheme = settings[settingsKey];
+        if (savedTheme !== undefined) {
+          // Update the corresponding state
+          switch (themeKey) {
+            case 'waterfallChartThemes':
+              setWaterfallChartThemes(prev => ({ ...prev, [combinationName]: savedTheme }));
+              break;
+            case 'contributionChartThemes':
+              setContributionChartThemes(prev => ({ ...prev, [combinationName]: savedTheme }));
+              break;
+            case 'roiChartThemes':
+              setRoiChartThemes(prev => ({ ...prev, [combinationName]: savedTheme }));
+              break;
+            case 'actualVsPredictedChartThemes':
+              setActualVsPredictedChartThemes(prev => ({ ...prev, [combinationName]: savedTheme }));
+              break;
+            case 'betaCoefficientsChartThemes':
+              setBetaCoefficientsChartThemes(prev => ({ ...prev, [combinationName]: savedTheme }));
+              break;
+            case 'elasticityChartThemes':
+              setElasticityChartThemes(prev => ({ ...prev, [combinationName]: savedTheme }));
+              break;
+            case 'averagesChartThemes':
+              setAveragesChartThemes(prev => ({ ...prev, [combinationName]: savedTheme }));
+              break;
+          }
+        }
+      });
+    });
+    // Only depend on settings and selectedCombinations, not state variables
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings, selectedCombinations]);
 
   // Fetch YoY growth data when dataset and combinations are selected
   useEffect(() => {
@@ -1470,6 +1524,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: newTheme
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`contributionChartThemes_${combinationName}`]: newTheme });
   };
 
   // Handle actual vs predicted chart type change
@@ -1486,6 +1542,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: newTheme
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`actualVsPredictedChartThemes_${combinationName}`]: newTheme });
   };
 
   // Handle beta coefficients chart type change
@@ -1502,6 +1560,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: newTheme
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`betaCoefficientsChartThemes_${combinationName}`]: newTheme });
   };
 
   // Handle elasticity chart type change
@@ -1518,6 +1578,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: newTheme
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`elasticityChartThemes_${combinationName}`]: newTheme });
   };
 
   // Handle ROI chart type change
@@ -1534,6 +1596,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: newTheme
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`roiChartThemes_${combinationName}`]: newTheme });
   };
 
   // Handle averages chart type change
@@ -1550,6 +1614,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: newTheme
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`averagesChartThemes_${combinationName}`]: newTheme });
   };
 
   // Handle waterfall chart type change
@@ -1566,6 +1632,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: newTheme
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`waterfallChartThemes_${combinationName}`]: newTheme });
   };
 
   // Handle waterfall chart grid toggle
@@ -1816,6 +1884,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: sortOrder
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`contributionChartSortOrder_${combinationName}`]: sortOrder });
   };
 
   const handleActualVsPredictedChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
@@ -1823,6 +1893,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: sortOrder
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`actualVsPredictedChartSortOrder_${combinationName}`]: sortOrder });
   };
 
   const handleBetaCoefficientsChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
@@ -1830,6 +1902,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: sortOrder
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`betaCoefficientsChartSortOrder_${combinationName}`]: sortOrder });
   };
 
   const handleElasticityChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
@@ -1837,6 +1911,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: sortOrder
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`elasticityChartSortOrder_${combinationName}`]: sortOrder });
   };
 
   const handleRoiChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
@@ -1844,6 +1920,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: sortOrder
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`roiChartSortOrder_${combinationName}`]: sortOrder });
   };
 
   const handleAveragesChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
@@ -1851,6 +1929,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: sortOrder
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`averagesChartSortOrder_${combinationName}`]: sortOrder });
   };
 
   const handleWaterfallChartSortOrderChange = (combinationName: string, sortOrder: 'asc' | 'desc' | null) => {
@@ -1858,6 +1938,66 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       ...prev,
       [combinationName]: sortOrder
     }));
+    // Save to settings for persistence
+    updateSettings(atomId, { [`waterfallChartSortOrder_${combinationName}`]: sortOrder });
+  };
+
+  // Handle sort column changes for each chart type
+  const handleWaterfallChartSortColumnChange = (combinationName: string, column: string) => {
+    updateSettings(atomId, { [`waterfallChartSortColumn_${combinationName}`]: column });
+  };
+
+  const handleContributionChartSortColumnChange = (combinationName: string, column: string) => {
+    updateSettings(atomId, { [`contributionChartSortColumn_${combinationName}`]: column });
+  };
+
+  const handleActualVsPredictedChartSortColumnChange = (combinationName: string, column: string) => {
+    updateSettings(atomId, { [`actualVsPredictedChartSortColumn_${combinationName}`]: column });
+  };
+
+  const handleBetaCoefficientsChartSortColumnChange = (combinationName: string, column: string) => {
+    updateSettings(atomId, { [`betaCoefficientsChartSortColumn_${combinationName}`]: column });
+  };
+
+  const handleElasticityChartSortColumnChange = (combinationName: string, column: string) => {
+    updateSettings(atomId, { [`elasticityChartSortColumn_${combinationName}`]: column });
+  };
+
+  const handleRoiChartSortColumnChange = (combinationName: string, column: string) => {
+    updateSettings(atomId, { [`roiChartSortColumn_${combinationName}`]: column });
+  };
+
+  const handleAveragesChartSortColumnChange = (combinationName: string, column: string) => {
+    updateSettings(atomId, { [`averagesChartSortColumn_${combinationName}`]: column });
+  };
+
+  // Handle series settings changes for each chart type
+  const handleWaterfallChartSeriesSettingsChange = (combinationName: string, newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    updateSettings(atomId, { [`waterfallChartSeriesSettings_${combinationName}`]: newSeriesSettings });
+  };
+
+  const handleContributionChartSeriesSettingsChange = (combinationName: string, newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    updateSettings(atomId, { [`contributionChartSeriesSettings_${combinationName}`]: newSeriesSettings });
+  };
+
+  const handleActualVsPredictedChartSeriesSettingsChange = (combinationName: string, newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    updateSettings(atomId, { [`actualVsPredictedChartSeriesSettings_${combinationName}`]: newSeriesSettings });
+  };
+
+  const handleBetaCoefficientsChartSeriesSettingsChange = (combinationName: string, newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    updateSettings(atomId, { [`betaCoefficientsChartSeriesSettings_${combinationName}`]: newSeriesSettings });
+  };
+
+  const handleElasticityChartSeriesSettingsChange = (combinationName: string, newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    updateSettings(atomId, { [`elasticityChartSeriesSettings_${combinationName}`]: newSeriesSettings });
+  };
+
+  const handleRoiChartSeriesSettingsChange = (combinationName: string, newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    updateSettings(atomId, { [`roiChartSeriesSettings_${combinationName}`]: newSeriesSettings });
+  };
+
+  const handleAveragesChartSeriesSettingsChange = (combinationName: string, newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+    updateSettings(atomId, { [`averagesChartSeriesSettings_${combinationName}`]: newSeriesSettings });
   };
 
   // Ensure graphs data is available with defaults
@@ -1966,9 +2106,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     console.log('🔍 DEBUG: Waterfall chart data:', chartData);
     
-    // Get chart type and theme for this combination
-    const chartType = waterfallChartTypes[combinationName] || 'bar_chart';
-    const chartTheme = waterfallChartThemes[combinationName] || 'default';
+    // Get chart type and theme for this combination - prioritize settings over state
+    const chartType = settings[`waterfallChartTypes_${combinationName}`] || waterfallChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = settings[`waterfallChartThemes_${combinationName}`] || waterfallChartThemes[combinationName] || 'default';
     const showDataLabels = waterfallChartDataLabels[combinationName] !== undefined ? waterfallChartDataLabels[combinationName] : true;
     const sortOrder = waterfallChartSortOrder[combinationName] || null;
     const showGrid = waterfallChartGridToggle[combinationName] !== undefined ? waterfallChartGridToggle[combinationName] : true;
@@ -1995,16 +2135,14 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       showGrid: showGrid,
       showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
-      onThemeChange: (newTheme: string) => {
-        handleWaterfallChartThemeChange(combinationName, newTheme);
-        // Save to global settings for exhibition
-        updateSettings(atomId, { 
-          [`waterfallChartThemes_${combinationName}`]: newTheme 
-        });
-      },
+      onThemeChange: (newTheme: string) => handleWaterfallChartThemeChange(combinationName, newTheme),
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleWaterfallChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleWaterfallChartDataLabelsChange(combinationName, newShowDataLabels),
       onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleWaterfallChartSortOrderChange(combinationName, newSortOrder),
+      sortColumn: settings[`waterfallChartSortColumn_${combinationName}`],
+      onSortColumnChange: (column: string) => handleWaterfallChartSortColumnChange(combinationName, column),
+      seriesSettings: effectiveSettings[`waterfallChartSeriesSettings_${combinationName}`] || {},
+      onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => handleWaterfallChartSeriesSettingsChange(combinationName, newSeriesSettings),
       onGridToggle: (enabled: boolean) => handleWaterfallChartGridToggle(combinationName, enabled),
       onLegendToggle: (enabled: boolean) => handleWaterfallChartLegendToggle(combinationName, enabled),
       onAxisLabelsToggle: (enabled: boolean) => handleWaterfallChartAxisLabelsToggle(combinationName, enabled)
@@ -2084,9 +2222,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     // console.log('🔍 DEBUG: Contribution chart data for', combinationName, ':', contributionChartData);
     
-    // Get chart type and theme for this combination (default to pie_chart)
-    const chartType = contributionChartTypes[combinationName] || 'pie_chart';
-    const chartTheme = contributionChartThemes[combinationName] || 'default';
+    // Get chart type and theme for this combination (default to pie_chart) - prioritize settings over state
+    const chartType = settings[`contributionChartTypes_${combinationName}`] || contributionChartTypes[combinationName] || 'pie_chart';
+    const chartTheme = settings[`contributionChartThemes_${combinationName}`] || contributionChartThemes[combinationName] || 'default';
     const showDataLabels = contributionChartDataLabels[combinationName] !== undefined ? contributionChartDataLabels[combinationName] : false;
     const sortOrder = contributionChartSortOrder[combinationName] || null;
     const showGrid = contributionChartGridToggle[combinationName] !== undefined ? contributionChartGridToggle[combinationName] : true;
@@ -2118,6 +2256,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleContributionChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleContributionChartDataLabelsChange(combinationName, newShowDataLabels),
       onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleContributionChartSortOrderChange(combinationName, newSortOrder),
+      sortColumn: settings[`contributionChartSortColumn_${combinationName}`],
+      onSortColumnChange: (column: string) => handleContributionChartSortColumnChange(combinationName, column),
+      seriesSettings: effectiveSettings[`contributionChartSeriesSettings_${combinationName}`] || {},
+      onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => handleContributionChartSeriesSettingsChange(combinationName, newSeriesSettings),
       onGridToggle: (enabled: boolean) => handleContributionChartGridToggle(combinationName, enabled),
       onLegendToggle: (enabled: boolean) => handleContributionChartLegendToggle(combinationName, enabled),
       onAxisLabelsToggle: (enabled: boolean) => handleContributionChartAxisLabelsToggle(combinationName, enabled)
@@ -2197,8 +2339,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
     
     // Get chart type and theme for this combination (default to bar_chart)
-    const chartType = roiChartTypes[combinationName] || 'bar_chart';
-    const chartTheme = roiChartThemes[combinationName] || 'default';
+    const chartType = settings[`roiChartTypes_${combinationName}`] || roiChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = settings[`roiChartThemes_${combinationName}`] || roiChartThemes[combinationName] || 'default';
     const showDataLabels = roiChartDataLabels[combinationName] !== undefined ? roiChartDataLabels[combinationName] : false;
     const sortOrder = roiChartSortOrder[combinationName] || null;
     const showGrid = roiChartGridToggle[combinationName] !== undefined ? roiChartGridToggle[combinationName] : true;
@@ -2230,6 +2372,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleRoiChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleRoiChartDataLabelsChange(combinationName, newShowDataLabels),
       onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleRoiChartSortOrderChange(combinationName, newSortOrder),
+      sortColumn: settings[`roiChartSortColumn_${combinationName}`],
+      onSortColumnChange: (column: string) => handleRoiChartSortColumnChange(combinationName, column),
+      seriesSettings: effectiveSettings[`roiChartSeriesSettings_${combinationName}`] || {},
+      onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => handleRoiChartSeriesSettingsChange(combinationName, newSeriesSettings),
       onGridToggle: (enabled: boolean) => handleRoiChartGridToggle(combinationName, enabled),
       onLegendToggle: (enabled: boolean) => handleRoiChartLegendToggle(combinationName, enabled),
       onAxisLabelsToggle: (enabled: boolean) => handleRoiChartAxisLabelsToggle(combinationName, enabled)
@@ -2322,8 +2468,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     console.log('🔍 DEBUG: Actual vs Predicted chart data:', chartData);
     
     // Get chart type and theme for this combination (default to line_chart)
-    const chartType = actualVsPredictedChartTypes[combinationName] || 'line_chart';
-    const chartTheme = actualVsPredictedChartThemes[combinationName] || 'default';
+    const chartType = settings[`actualVsPredictedChartTypes_${combinationName}`] || actualVsPredictedChartTypes[combinationName] || 'line_chart';
+    const chartTheme = settings[`actualVsPredictedChartThemes_${combinationName}`] || actualVsPredictedChartThemes[combinationName] || 'default';
     const showDataLabels = actualVsPredictedChartDataLabels[combinationName] !== undefined ? actualVsPredictedChartDataLabels[combinationName] : false;
     const sortOrder = actualVsPredictedChartSortOrder[combinationName] || null;
     const showGrid = actualVsPredictedChartGridToggle[combinationName] !== undefined ? actualVsPredictedChartGridToggle[combinationName] : true;
@@ -2356,6 +2502,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleActualVsPredictedChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleActualVsPredictedChartDataLabelsChange(combinationName, newShowDataLabels),
       onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleActualVsPredictedChartSortOrderChange(combinationName, newSortOrder),
+      sortColumn: settings[`actualVsPredictedChartSortColumn_${combinationName}`],
+      onSortColumnChange: (column: string) => handleActualVsPredictedChartSortColumnChange(combinationName, column),
+      seriesSettings: effectiveSettings[`actualVsPredictedChartSeriesSettings_${combinationName}`] || {},
+      onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => handleActualVsPredictedChartSeriesSettingsChange(combinationName, newSeriesSettings),
       onGridToggle: (enabled: boolean) => handleActualVsPredictedChartGridToggle(combinationName, enabled),
       onLegendToggle: (enabled: boolean) => handleActualVsPredictedChartLegendToggle(combinationName, enabled),
       onAxisLabelsToggle: (enabled: boolean) => handleActualVsPredictedChartAxisLabelsToggle(combinationName, enabled)
@@ -2437,8 +2587,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
     
     // Get chart type and theme for this combination
-    const chartType = betaCoefficientsChartTypes[combinationName] || 'bar_chart';
-    const chartTheme = betaCoefficientsChartThemes[combinationName] || 'default';
+    const chartType = settings[`betaCoefficientsChartTypes_${combinationName}`] || betaCoefficientsChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = settings[`betaCoefficientsChartThemes_${combinationName}`] || betaCoefficientsChartThemes[combinationName] || 'default';
     const showDataLabels = betaCoefficientsChartDataLabels[combinationName] !== undefined ? betaCoefficientsChartDataLabels[combinationName] : true;
     const sortOrder = betaCoefficientsChartSortOrder[combinationName] || null;
     const showGrid = betaCoefficientsChartGridToggle[combinationName] !== undefined ? betaCoefficientsChartGridToggle[combinationName] : true;
@@ -2469,6 +2619,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleBetaCoefficientsChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleBetaCoefficientsChartDataLabelsChange(combinationName, newShowDataLabels),
       onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleBetaCoefficientsChartSortOrderChange(combinationName, newSortOrder),
+      sortColumn: settings[`betaCoefficientsChartSortColumn_${combinationName}`],
+      onSortColumnChange: (column: string) => handleBetaCoefficientsChartSortColumnChange(combinationName, column),
+      seriesSettings: effectiveSettings[`betaCoefficientsChartSeriesSettings_${combinationName}`] || {},
+      onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => handleBetaCoefficientsChartSeriesSettingsChange(combinationName, newSeriesSettings),
       onGridToggle: (enabled: boolean) => handleBetaCoefficientsChartGridToggle(combinationName, enabled),
       onLegendToggle: (enabled: boolean) => handleBetaCoefficientsChartLegendToggle(combinationName, enabled),
       onAxisLabelsToggle: (enabled: boolean) => handleBetaCoefficientsChartAxisLabelsToggle(combinationName, enabled)
@@ -2545,8 +2699,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
     
     // Get chart type and theme for this combination
-    const chartType = elasticityChartTypes[combinationName] || 'bar_chart';
-    const chartTheme = elasticityChartThemes[combinationName] || 'default';
+    const chartType = settings[`elasticityChartTypes_${combinationName}`] || elasticityChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = settings[`elasticityChartThemes_${combinationName}`] || elasticityChartThemes[combinationName] || 'default';
     const showDataLabels = elasticityChartDataLabels[combinationName] !== undefined ? elasticityChartDataLabels[combinationName] : true;
     const sortOrder = elasticityChartSortOrder[combinationName] || null;
     const showGrid = elasticityChartGridToggle[combinationName] !== undefined ? elasticityChartGridToggle[combinationName] : true;
@@ -2577,6 +2731,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleElasticityChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleElasticityChartDataLabelsChange(combinationName, newShowDataLabels),
       onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleElasticityChartSortOrderChange(combinationName, newSortOrder),
+      sortColumn: settings[`elasticityChartSortColumn_${combinationName}`],
+      onSortColumnChange: (column: string) => handleElasticityChartSortColumnChange(combinationName, column),
+      seriesSettings: effectiveSettings[`elasticityChartSeriesSettings_${combinationName}`] || {},
+      onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => handleElasticityChartSeriesSettingsChange(combinationName, newSeriesSettings),
       onGridToggle: (enabled: boolean) => handleElasticityChartGridToggle(combinationName, enabled),
       onLegendToggle: (enabled: boolean) => handleElasticityChartLegendToggle(combinationName, enabled),
       onAxisLabelsToggle: (enabled: boolean) => handleElasticityChartAxisLabelsToggle(combinationName, enabled)
@@ -2815,8 +2973,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }));
     
     // Get chart type and theme for this combination
-    const chartType = averagesChartTypes[combinationName] || 'bar_chart';
-    const chartTheme = averagesChartThemes[combinationName] || 'default';
+    const chartType = settings[`averagesChartTypes_${combinationName}`] || averagesChartTypes[combinationName] || 'bar_chart';
+    const chartTheme = settings[`averagesChartThemes_${combinationName}`] || averagesChartThemes[combinationName] || 'default';
     const showDataLabels = averagesChartDataLabels[combinationName] !== undefined ? averagesChartDataLabels[combinationName] : true;
     const sortOrder = averagesChartSortOrder[combinationName] || null;
     const showGrid = averagesChartGridToggle[combinationName] !== undefined ? averagesChartGridToggle[combinationName] : true;
@@ -2847,6 +3005,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleAveragesChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleAveragesChartDataLabelsChange(combinationName, newShowDataLabels),
       onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleAveragesChartSortOrderChange(combinationName, newSortOrder),
+      sortColumn: settings[`averagesChartSortColumn_${combinationName}`],
+      onSortColumnChange: (column: string) => handleAveragesChartSortColumnChange(combinationName, column),
+      seriesSettings: effectiveSettings[`averagesChartSeriesSettings_${combinationName}`] || {},
+      onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => handleAveragesChartSeriesSettingsChange(combinationName, newSeriesSettings),
       onGridToggle: (enabled: boolean) => handleAveragesChartGridToggle(combinationName, enabled),
       onLegendToggle: (enabled: boolean) => handleAveragesChartLegendToggle(combinationName, enabled),
       onAxisLabelsToggle: (enabled: boolean) => handleAveragesChartAxisLabelsToggle(combinationName, enabled)

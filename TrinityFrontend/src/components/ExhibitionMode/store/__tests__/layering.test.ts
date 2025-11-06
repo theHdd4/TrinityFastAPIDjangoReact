@@ -136,4 +136,23 @@ describe('exhibitionStore layering actions', () => {
     const result = readOrder();
     expect(result?.map(entry => entry.id)).toEqual(['obj-a', 'obj-b', 'obj-c', 'obj-d']);
   });
+
+  it('normalises z-index values to integers after reordering', () => {
+    useExhibitionStore.setState(state => ({
+      ...state,
+      slideObjectsByCardId: {
+        ...state.slideObjectsByCardId,
+        [CARD_ID]: baseObjects.map((object, index) => ({
+          ...object,
+          zIndex: index + 1.25,
+        })),
+      },
+    }));
+
+    useExhibitionStore.getState().bringSlideObjectsToFront(CARD_ID, ['obj-c']);
+
+    const result = readOrder();
+    expect(result?.map(entry => entry.id)).toEqual(['obj-a', 'obj-b', 'obj-d', 'obj-c']);
+    expect(result?.every(entry => Number.isInteger(entry.zIndex ?? 0))).toBe(true);
+  });
 });
