@@ -51,12 +51,12 @@ def save_atom_list_configuration(
             getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
         )
         db = mc["trinity_db"]
-        coll = db["atom_list_configuration"]
+        coll = db["django_atom_list_configuration"]
 
         # Drop legacy collection from previous `trinity_prod` database if it exists
         try:
             legacy_db = mc["trinity_prod"]
-            legacy_db.drop_collection("atom_list_configuration")
+            legacy_db.drop_collection("django_atom_list_configuration")
         except Exception:  # pragma: no cover - best effort cleanup
             pass
 
@@ -75,6 +75,12 @@ def save_atom_list_configuration(
             open_card = "no" if card.get("collapsed") else "yes"
             exhibition_preview = "yes" if card.get("isExhibited") else "no"
             scroll_pos = card.get("scroll_position", 0)
+            # Extract molecule and order information from card
+            molecule_id = card.get("moleculeId")
+            molecule_title = card.get("moleculeTitle")
+            card_order = card.get("order")
+            after_molecule_id = card.get("afterMoleculeId")
+            before_molecule_id = card.get("beforeMoleculeId")
             for atom_pos, atom in enumerate(card.get("atoms", [])):
                 atom_id = atom.get("atomId") or atom.get("title") or "unknown"
                 atom_title = atom.get("title") or atom_id
@@ -103,9 +109,17 @@ def save_atom_list_configuration(
                         "notes": atom_settings.get("notes", ""),
                         "last_edited": timestamp,
                         "version_hash": version_hash,
+                        # Molecule information as top-level fields for easier querying
+                        "molecule_id": molecule_id,
+                        "molecule_title": molecule_title,
+                        "order": card_order,
+                        "after_molecule_id": after_molecule_id,
+                        "before_molecule_id": before_molecule_id,
                         "mode_meta": {
                             "card_id": card.get("id"),
                             "atom_id": atom.get("id"),
+                            "molecule_id": molecule_id,
+                            "molecule_title": molecule_title,
                         },
                         "isDeleted": False,
                     }
@@ -129,7 +143,7 @@ def load_atom_list_configuration(
         mc = MongoClient(
             getattr(settings, "MONGO_URI", "mongodb://mongo:27017/trinity_db")
         )
-        coll = mc["trinity_db"]["atom_list_configuration"]
+        coll = mc["trinity_db"]["django_atom_list_configuration"]
         cursor = coll.find(
             {
                 "client_id": client_id,
@@ -143,6 +157,13 @@ def load_atom_list_configuration(
         cards: Dict[int, Dict[str, Any]] = {}
         for doc in cursor:
             cpos = doc.get("canvas_position", 0)
+            # Get molecule info from top-level fields or fallback to mode_meta (for backward compatibility)
+            molecule_id = doc.get("molecule_id") or (doc.get("mode_meta") or {}).get("molecule_id")
+            molecule_title = doc.get("molecule_title") or (doc.get("mode_meta") or {}).get("molecule_title")
+            card_order = doc.get("order")
+            after_molecule_id = doc.get("after_molecule_id")
+            before_molecule_id = doc.get("before_molecule_id")
+            
             card = cards.setdefault(
                 cpos,
                 {
@@ -153,6 +174,18 @@ def load_atom_list_configuration(
                     "atoms": [],
                 },
             )
+            # Set molecule and order fields if they exist
+            if molecule_id is not None:
+                card["moleculeId"] = molecule_id
+            if molecule_title is not None:
+                card["moleculeTitle"] = molecule_title
+            if card_order is not None:
+                card["order"] = card_order
+            if after_molecule_id is not None:
+                card["afterMoleculeId"] = after_molecule_id
+            if before_molecule_id is not None:
+                card["beforeMoleculeId"] = before_molecule_id
+                
             atom_slug = doc.get("atom_name")
             atom_title = doc.get("atom_title") or atom_slug
             card["atoms"].append(
