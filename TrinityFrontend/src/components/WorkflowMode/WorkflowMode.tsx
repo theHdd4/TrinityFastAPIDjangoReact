@@ -38,6 +38,8 @@ const WorkflowMode = () => {
     id: string; 
     atomId: string; 
     title: string; 
+    // Order field for sorting (moleculeIndex * 1000 + subOrder)
+    order?: number;
     // New explicit molecule references
     betweenMolecules?: [string, string]; // [moleculeId1, moleculeId2] - atom is between these two molecules
     afterLastMolecule?: boolean; // true if atom is after the last molecule
@@ -203,7 +205,11 @@ const WorkflowMode = () => {
       // Check if there are standalone chips that should appear immediately before this molecule
       // Chips with betweenMolecules where the second molecule is the reference
       // OR chips with beforeMoleculeId matching the reference
-      // OR chips with beforeFirstMolecule if reference is the first molecule
+      // OR chips with beforeFirstMolecule if reference is the first ACTIVE molecule
+      const activeMolecules = canvasMolecules.filter(mol => mol.isActive !== false);
+      const referenceActiveIndex = activeMolecules.findIndex(mol => mol.id === referenceMoleculeId);
+      const isReferenceFirstActive = referenceActiveIndex === 0;
+      
       chipsBeforeReference = standaloneCards.filter(chip => {
         // Chip is between previous molecule and reference
         if (chip.betweenMolecules && Array.isArray(chip.betweenMolecules) && chip.betweenMolecules.length === 2) {
@@ -213,8 +219,8 @@ const WorkflowMode = () => {
         if (chip.beforeMoleculeId === referenceMoleculeId) {
           return true;
         }
-        // Chip is before first molecule and reference is the first molecule
-        if (chip.beforeFirstMolecule && referenceIndex === 0) {
+        // Chip is before first molecule and reference is the first ACTIVE molecule
+        if (chip.beforeFirstMolecule && isReferenceFirstActive) {
           return true;
         }
         return false;
@@ -222,11 +228,11 @@ const WorkflowMode = () => {
       
       if (chipsBeforeReference.length > 0) {
         // There are chips that should appear immediately before the reference molecule
-        // Insert the new molecule right before the reference (after the chips)
-        // The chips will still be positioned before the reference, but will appear before the new molecule visually
-        // So the visual order will be: previous molecule, chips, NEW_MOLECULE, reference
+        // Insert the new molecule right before the reference (at referenceIndex)
+        // Chips will be updated to reference the new molecule (beforeMoleculeId: newMoleculeId)
+        // So the visual order will be: chips, NEW_MOLECULE, reference
         insertIndex = referenceIndex;
-        console.log(`📍 Inserting "${finalName}" before "${canvasMolecules[referenceIndex]?.title}" (${chipsBeforeReference.length} standalone chips will precede)`);
+        console.log(`📍 Inserting "${finalName}" before "${canvasMolecules[referenceIndex]?.title}" (${chipsBeforeReference.length} standalone chips will be updated to reference new molecule)`);
       } else {
         // No chips immediately before reference - insert normally
         insertIndex = referenceIndex;
@@ -236,6 +242,8 @@ const WorkflowMode = () => {
       // Check if there are standalone chips that should appear immediately after this molecule
       // Chips with betweenMolecules where the first molecule is the reference
       // OR chips with afterMoleculeId matching the reference (and not afterLastMolecule)
+      // OR chips with afterLastMolecule: true (if reference is the last molecule)
+      const isLastMolecule = referenceIndex === canvasMolecules.length - 1;
       chipsAfterReference = standaloneCards.filter(chip => {
         // Chip is between reference and another molecule
         if (chip.betweenMolecules && Array.isArray(chip.betweenMolecules) && chip.betweenMolecules.length === 2) {
@@ -243,6 +251,10 @@ const WorkflowMode = () => {
         }
         // Chip is after the reference molecule (and not after last molecule)
         if (chip.afterMoleculeId === referenceMoleculeId && !chip.afterLastMolecule) {
+          return true;
+        }
+        // Chip is after last molecule (if reference is the last molecule)
+        if (chip.afterLastMolecule && isLastMolecule) {
           return true;
         }
         return false;
@@ -270,9 +282,29 @@ const WorkflowMode = () => {
     });
     
     // Update standalone chips that reference molecules around the insertion point
+    // When updating chips, we need to use the active molecules list BEFORE insertion
+    // (since the new molecule hasn't been inserted in the active list yet)
+    // So we compute active molecules from the current canvasMolecules state
+    const activeMoleculesBeforeInsertion = canvasMolecules.filter(mol => mol.isActive !== false);
+    
     if (position === 'right' && chipsAfterReference.length > 0) {
-      // Chips that were "between reference and nextMolecule" should now be "between NEW_MOLECULE and nextMolecule"
+      const isLastMolecule = referenceIndex === canvasMolecules.length - 1;
+      // When INSERTING (not creating), the new molecule should appear BEFORE standalone chips
+      // So chips that were "after last molecule" should now be "after NEW_MOLECULE" (which becomes the new last)
       setStandaloneCards(prev => prev.map(chip => {
+        // Update chips that were after last molecule (if reference is the last molecule)
+        if (chip.afterLastMolecule && isLastMolecule) {
+          // Chip should now be after NEW_MOLECULE (which becomes the new last molecule)
+          // Keep afterLastMolecule: true, but update afterMoleculeId to point to new molecule
+          return {
+            ...chip,
+            afterMoleculeId: moleculeId, // Update to point to new molecule (which will be the new last)
+            // Keep afterLastMolecule: true (will be updated by sync logic)
+            // Clear betweenMolecules if it exists
+            betweenMolecules: undefined,
+            beforeMoleculeId: undefined
+          };
+        }
         // Update chips that were between reference and another molecule
         if (chip.betweenMolecules && Array.isArray(chip.betweenMolecules) && chip.betweenMolecules.length === 2) {
           const [firstId, secondId] = chip.betweenMolecules;
@@ -304,7 +336,7 @@ const WorkflowMode = () => {
         }
         return chip;
       }));
-      console.log(`🔄 Updated ${chipsAfterReference.length} standalone chip references to position after new molecule "${finalName}"`);
+      console.log(`🔄 Updated ${chipsAfterReference.length} standalone chip references: chips remain after last molecule (now NEW_MOLECULE)`);
     } else if (position === 'left' && chipsBeforeReference.length > 0) {
       // Chips that were "between previousMolecule and reference" should now be "between previousMolecule and NEW_MOLECULE"
       setStandaloneCards(prev => prev.map(chip => {
@@ -323,22 +355,28 @@ const WorkflowMode = () => {
           }
         }
         // Update chips that were before reference
+        // When inserting LEFT of reference, chips should now be before NEW_MOLECULE
+        // This ensures: chips, NEW_MOLECULE, reference (M2)
         if (chip.beforeMoleculeId === referenceMoleculeId) {
-          // Find the previous molecule before reference
-          const previousMoleculeIndex = referenceIndex - 1; // Before insertion, previous was at referenceIndex - 1
-          if (previousMoleculeIndex >= 0) {
-            const previousMolecule = canvasMolecules[previousMoleculeIndex];
-            if (previousMolecule) {
-              // Chip should now be between previousMolecule and NEW_MOLECULE
+          // Find the previous ACTIVE molecule before reference (not just array neighbor)
+          // Use activeMoleculesBeforeInsertion (computed before molecule insertion)
+          const referenceActiveIndex = activeMoleculesBeforeInsertion.findIndex(mol => mol.id === referenceMoleculeId);
+          const previousActiveMolecule = referenceActiveIndex > 0 ? activeMoleculesBeforeInsertion[referenceActiveIndex - 1] : null;
+          const isReferenceFirstActive = referenceActiveIndex === 0;
+          
+          if (previousActiveMolecule) {
+            // There's a previous active molecule - chip should be between previousActiveMolecule and NEW_MOLECULE
+            // This ensures: previousActiveMolecule, chips, NEW_MOLECULE, reference
               return {
                 ...chip,
-                betweenMolecules: [previousMolecule.id, moleculeId] as [string, string],
-                afterMoleculeId: previousMolecule.id,
-                beforeMoleculeId: moleculeId
-              };
-            }
+              betweenMolecules: [previousActiveMolecule.id, moleculeId] as [string, string],
+              afterMoleculeId: previousActiveMolecule.id,
+              beforeMoleculeId: moleculeId,
+              beforeFirstMolecule: false
+            };
           } else {
-            // Reference was the first molecule - chip should now be before NEW_MOLECULE (which becomes first)
+            // Reference is the first active molecule - chip should now be before NEW_MOLECULE (which becomes first active)
+            // This ensures: chips, NEW_MOLECULE, reference
             return {
               ...chip,
               beforeFirstMolecule: true,
@@ -348,14 +386,21 @@ const WorkflowMode = () => {
             };
           }
         }
-        // Update chips that were before first molecule (and reference is first)
-        if (chip.beforeFirstMolecule && referenceIndex === 0) {
-          // Chip should now be before NEW_MOLECULE (which becomes first)
+        // Update chips that were before first molecule (and reference is first active)
+        // Check if reference is the first ACTIVE molecule, not just array index 0
+        if (chip.beforeFirstMolecule) {
+          // Use activeMoleculesBeforeInsertion (computed before molecule insertion)
+          const referenceActiveIndex = activeMoleculesBeforeInsertion.findIndex(mol => mol.id === referenceMoleculeId);
+          const isReferenceFirstActive = referenceActiveIndex === 0;
+          
+          if (isReferenceFirstActive) {
+            // Chip should now be before NEW_MOLECULE (which becomes first active)
           return {
             ...chip,
             beforeFirstMolecule: true,
             beforeMoleculeId: moleculeId
           };
+          }
         }
         return chip;
       }));
@@ -422,6 +467,31 @@ const WorkflowMode = () => {
       atomOrder: [],
       containedMolecules: [] // NEW: Track molecules inside this container
     };
+    
+    // When CREATING (adding) a new molecule, it should appear AFTER standalone chips
+    // So we need to update chips that were afterLastMolecule to be between last molecule and new molecule
+    const activeMolecules = canvasMolecules.filter(mol => mol.isActive !== false);
+    const lastMolecule = activeMolecules.length > 0 ? activeMolecules[activeMolecules.length - 1] : null;
+    const atomsAfterLast = standaloneCards.filter(chip => chip.afterLastMolecule);
+    
+    if (atomsAfterLast.length > 0 && lastMolecule) {
+      // Update atoms that were after last molecule to be between last molecule and new molecule
+      // This ensures: M1, chips, NEW_M2 (new molecule appears after chips)
+      setStandaloneCards(prev => prev.map(chip => {
+        if (chip.afterLastMolecule) {
+          return {
+            ...chip,
+            betweenMolecules: [lastMolecule.id, moleculeId] as [string, string],
+            afterMoleculeId: lastMolecule.id,
+            beforeMoleculeId: moleculeId,
+            afterLastMolecule: false // No longer after last molecule
+          };
+        }
+        return chip;
+      }));
+      console.log(`🔄 Updated ${atomsAfterLast.length} standalone atoms from "after last molecule" to "between last molecule and new molecule" (CREATE)`);
+    }
+    
     setCanvasMolecules(prev => [...prev, canvasMolecule]);
     
     console.log(`✅ Created new container molecule "${finalName}" - ready to accept QM and custom molecules`);
@@ -647,8 +717,31 @@ const WorkflowMode = () => {
   const handleMoleculeRemove = (moleculeId: string) => {
     // Get the index of the molecule being deleted BEFORE marking it as inactive
     const deletedIndex = canvasMolecules.findIndex(mol => mol.id === moleculeId);
+    
+    // Find PREVIOUS and NEXT ACTIVE molecules (not just array neighbors)
+    // This is critical because chips should reference active molecules, not inactive ones
+    const activeMolecules = canvasMolecules.filter(mol => mol.isActive !== false);
+    const deletedActiveIndex = activeMolecules.findIndex(mol => mol.id === moleculeId);
+    
+    // Find previous ACTIVE molecule (before deleted one in active list)
+    let previousActiveMolecule: typeof activeMolecules[0] | null = null;
+    if (deletedActiveIndex > 0) {
+      previousActiveMolecule = activeMolecules[deletedActiveIndex - 1];
+    }
+    
+    // Find next ACTIVE molecule (after deleted one in active list)
+    let nextActiveMolecule: typeof activeMolecules[0] | null = null;
+    if (deletedActiveIndex >= 0 && deletedActiveIndex < activeMolecules.length - 1) {
+      nextActiveMolecule = activeMolecules[deletedActiveIndex + 1];
+    }
+    
+    // Also get array neighbors for position checks (but prefer active molecules for chip references)
     const moleculeBeforeDeleted = deletedIndex > 0 ? canvasMolecules[deletedIndex - 1] : null;
     const moleculeAfterDeleted = deletedIndex < canvasMolecules.length - 1 ? canvasMolecules[deletedIndex + 1] : null;
+    
+    // Check if deleted molecule was the first or last active molecule
+    const wasFirstActive = deletedActiveIndex === 0;
+    const wasLastActive = deletedActiveIndex === activeMolecules.length - 1;
     
     // Mark as inactive instead of removing (preserves position to prevent m2 from taking m1's place)
     // Keep all molecules in state (active and inactive) - filtering happens only when rendering/displaying
@@ -665,8 +758,10 @@ const WorkflowMode = () => {
     ));
     
     console.log(`🗑️ Marked molecule ${moleculeId} as inactive (isActive: false) - position preserved in MongoDB`);
+    console.log(`📊 Active molecule context: previous=${previousActiveMolecule?.id || 'none'}, next=${nextActiveMolecule?.id || 'none'}, wasFirst=${wasFirstActive}, wasLast=${wasLastActive}`);
     
     // Update standalone chips that reference the deleted molecule
+    // Use ACTIVE molecules to ensure chips reference the correct molecules
     setStandaloneCards(prev => prev.map(card => {
       // Case 1: Chip is between two molecules and one is deleted
       if (card.betweenMolecules && Array.isArray(card.betweenMolecules)) {
@@ -677,18 +772,19 @@ const WorkflowMode = () => {
           // Remove the chip as it has no valid position
           return null;
         } else if (firstId === moleculeId) {
-          // Deleted molecule was the first - chip should be between moleculeBeforeDeleted and secondId
-          if (moleculeBeforeDeleted && moleculeBeforeDeleted.id !== secondId) {
+          // Deleted molecule was the first in betweenMolecules
+          // Chip should be between previousActiveMolecule and secondId
+          if (previousActiveMolecule && previousActiveMolecule.id !== secondId) {
             return {
               ...card,
-              betweenMolecules: [moleculeBeforeDeleted.id, secondId] as [string, string],
-              afterMoleculeId: moleculeBeforeDeleted.id,
+              betweenMolecules: [previousActiveMolecule.id, secondId] as [string, string],
+              afterMoleculeId: previousActiveMolecule.id,
               beforeMoleculeId: secondId
             };
           } else {
-            // No molecule before deleted one - place before secondId
-            const willBeFirstMolecule = deletedIndex === 0;
-            if (willBeFirstMolecule) {
+            // No active molecule before deleted one - place before secondId
+            // If secondId is now the first active molecule, set beforeFirstMolecule
+            if (wasFirstActive && nextActiveMolecule && nextActiveMolecule.id === secondId) {
               return {
                 ...card,
                 beforeFirstMolecule: true,
@@ -701,25 +797,26 @@ const WorkflowMode = () => {
                 ...card,
                 beforeMoleculeId: secondId,
                 betweenMolecules: undefined,
-                afterMoleculeId: undefined
+                afterMoleculeId: undefined,
+                beforeFirstMolecule: false
               };
             }
           }
         } else if (secondId === moleculeId) {
-          // Deleted molecule was the second - chip should be between firstId and moleculeAfterDeleted
-          if (moleculeAfterDeleted && moleculeAfterDeleted.id !== firstId) {
+          // Deleted molecule was the second in betweenMolecules
+          // Chip should be between firstId and nextActiveMolecule
+          if (nextActiveMolecule && nextActiveMolecule.id !== firstId) {
             return {
               ...card,
-              betweenMolecules: [firstId, moleculeAfterDeleted.id] as [string, string],
+              betweenMolecules: [firstId, nextActiveMolecule.id] as [string, string],
               afterMoleculeId: firstId,
-              beforeMoleculeId: moleculeAfterDeleted.id
+              beforeMoleculeId: nextActiveMolecule.id
             };
           } else {
-            // No molecule after deleted one - place after firstId
-            const willBeLastMolecule = deletedIndex === canvasMolecules.length - 1;
+            // No active molecule after deleted one - place after firstId
             return {
               ...card,
-              afterLastMolecule: true,
+              afterLastMolecule: wasLastActive,
               afterMoleculeId: firstId,
               betweenMolecules: undefined,
               beforeMoleculeId: undefined
@@ -728,24 +825,35 @@ const WorkflowMode = () => {
         }
       }
       
-      // Case 2: Chip is after the deleted molecule
-      if (card.afterMoleculeId === moleculeId) {
-        if (moleculeBeforeDeleted) {
-          const willBeLastMolecule = deletedIndex === canvasMolecules.length - 1;
+      // Case 2: Chip is after the deleted molecule (or has afterLastMolecule referencing deleted molecule)
+      if (card.afterMoleculeId === moleculeId || (card.afterLastMolecule && card.afterMoleculeId === moleculeId)) {
+        if (previousActiveMolecule) {
+          // Chip should now be after the previous active molecule
+          // If there's a next active molecule, it's between molecules
+          if (nextActiveMolecule && nextActiveMolecule.id !== previousActiveMolecule.id) {
           return {
             ...card,
-            afterMoleculeId: moleculeBeforeDeleted.id,
-            afterLastMolecule: willBeLastMolecule,
-            betweenMolecules: moleculeAfterDeleted && moleculeAfterDeleted.id !== moleculeBeforeDeleted.id
-              ? [moleculeBeforeDeleted.id, moleculeAfterDeleted.id] as [string, string]
-              : undefined
-          };
-        } else if (moleculeAfterDeleted) {
-          // Deleted was first molecule - chip should now be before the next one
+              betweenMolecules: [previousActiveMolecule.id, nextActiveMolecule.id] as [string, string],
+              afterMoleculeId: previousActiveMolecule.id,
+              beforeMoleculeId: nextActiveMolecule.id,
+              afterLastMolecule: false
+            };
+          } else {
+            // No next active molecule - it's after the last active molecule
+            return {
+              ...card,
+              afterMoleculeId: previousActiveMolecule.id,
+              afterLastMolecule: wasLastActive,
+              betweenMolecules: undefined,
+              beforeMoleculeId: undefined
+            };
+          }
+        } else if (nextActiveMolecule) {
+          // Deleted was first active molecule - chip should now be before the next active one
           return {
             ...card,
             beforeFirstMolecule: true,
-            beforeMoleculeId: moleculeAfterDeleted.id,
+            beforeMoleculeId: nextActiveMolecule.id,
             afterMoleculeId: undefined,
             afterLastMolecule: false,
             betweenMolecules: undefined
@@ -755,27 +863,62 @@ const WorkflowMode = () => {
       
       // Case 3: Chip is before the deleted molecule
       if (card.beforeMoleculeId === moleculeId) {
-        if (moleculeAfterDeleted) {
+        if (nextActiveMolecule) {
+          // Chip should now be before the next active molecule
+          // Check if nextActiveMolecule is now the first active molecule (deleted was first active)
+          const isNextFirstActive = wasFirstActive;
+          
+          // If chip was originally beforeFirstMolecule, it should remain beforeFirstMolecule
+          // OR if there's no previous active molecule, it's before the first active molecule
+          if (card.beforeFirstMolecule || isNextFirstActive) {
+            // Chip should be before the first active molecule
           return {
             ...card,
-            beforeMoleculeId: moleculeAfterDeleted.id,
-            beforeFirstMolecule: deletedIndex === 0,
-            betweenMolecules: moleculeBeforeDeleted && moleculeBeforeDeleted.id !== moleculeAfterDeleted.id
-              ? [moleculeBeforeDeleted.id, moleculeAfterDeleted.id] as [string, string]
-              : undefined
+              beforeFirstMolecule: true,
+              beforeMoleculeId: nextActiveMolecule.id,
+              betweenMolecules: undefined,
+              afterMoleculeId: undefined
+            };
+          } else if (previousActiveMolecule && previousActiveMolecule.id !== nextActiveMolecule.id) {
+            // There's a previous active molecule - chip is between molecules
+            return {
+              ...card,
+              betweenMolecules: [previousActiveMolecule.id, nextActiveMolecule.id] as [string, string],
+              afterMoleculeId: previousActiveMolecule.id,
+              beforeMoleculeId: nextActiveMolecule.id,
+              beforeFirstMolecule: false
           };
         } else {
-          // Deleted was last molecule - chip should now be after the previous one
-          const willBeLastMolecule = deletedIndex === canvasMolecules.length - 1;
+            // No previous active molecule - it's before the first active molecule
+            return {
+              ...card,
+              beforeFirstMolecule: isNextFirstActive,
+              beforeMoleculeId: nextActiveMolecule.id,
+              betweenMolecules: undefined,
+              afterMoleculeId: undefined
+            };
+          }
+        } else if (previousActiveMolecule) {
+          // Deleted was last active molecule - chip should now be after the previous active one
           return {
             ...card,
             afterLastMolecule: true,
-            afterMoleculeId: moleculeBeforeDeleted?.id,
+            afterMoleculeId: previousActiveMolecule.id,
             beforeMoleculeId: undefined,
             beforeFirstMolecule: false,
             betweenMolecules: undefined
           };
         }
+      }
+      
+      // Case 4: Chip has beforeFirstMolecule flag but references deleted molecule
+      if (card.beforeFirstMolecule && card.beforeMoleculeId === moleculeId && nextActiveMolecule) {
+        // Chip should remain before first, but now points to the next active molecule
+        return {
+          ...card,
+          beforeMoleculeId: nextActiveMolecule.id,
+          beforeFirstMolecule: true
+        };
       }
       
       // No references to deleted molecule - keep card as is
@@ -905,8 +1048,27 @@ const WorkflowMode = () => {
         .replace(/[^a-z0-9-]/g, '');
     };
 
+    // FIX 1: Use FULL molecule list (active + inactive) for consistent indexing
+    // This ensures that moleculeIndex calculations match between Lab and Workflow modes
+    // The full list preserves positions for inactive molecules (isActive: false)
+    const allMoleculesForIndexing = canvasMolecules; // Includes both active and inactive
+    const activeMoleculesForRendering = moleculesWithAtoms; // Only active molecules for rendering
+    
+    // Create a map of ALL molecule IDs to their indices in the FULL list (for consistent order calculation)
+    const fullMoleculeIdToIndexMap = new Map<string, number>();
+    allMoleculesForIndexing.forEach((mol, index) => {
+      fullMoleculeIdToIndexMap.set(mol.id, index);
+    });
+    
+    // Create a map of active molecule IDs to their indices in the active list (for rendering)
+    const activeMoleculeIdToIndexMap = new Map<string, number>();
+    activeMoleculesForRendering.forEach((mol, index) => {
+      activeMoleculeIdToIndexMap.set(mol.id, index);
+    });
+
     // Prepare workflow molecules in the format expected by the helper function
-    const workflowMolecules = moleculesWithAtoms.map(mol => ({
+    // Use active molecules for rendering (only these have atoms)
+    const workflowMolecules = activeMoleculesForRendering.map(mol => ({
         id: mol.id,
         title: mol.title,
       atoms: mol.atoms.map(atomName => convertAtomNameToId(atomName)),
@@ -914,6 +1076,7 @@ const WorkflowMode = () => {
     }));
 
     console.log('🔄 Converting workflow molecules to Laboratory cards format...');
+    console.log(`📊 Molecule indexing: ${allMoleculesForIndexing.length} total (${activeMoleculesForRendering.length} active, ${allMoleculesForIndexing.length - activeMoleculesForRendering.length} inactive)`);
     
     // Convert workflow molecules to Laboratory cards format
     const workflowCards = convertWorkflowMoleculesToLaboratoryCards(workflowMolecules);
@@ -932,12 +1095,6 @@ const WorkflowMode = () => {
     };
 
     const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
-    
-    // Create a map of molecule IDs to their indices for calculating order
-    const moleculeIdToIndexMap = new Map<string, number>();
-    workflowMolecules.forEach((mol, index) => {
-      moleculeIdToIndexMap.set(mol.id, index);
-    });
 
     const standaloneCardsForLab: LayoutCard[] = standaloneCards.map((standaloneChip, chipIndex) => {
       // Find atom info
@@ -962,13 +1119,16 @@ const WorkflowMode = () => {
       };
 
       // Calculate order based on position relative to molecules
+      // FIX 1: Use FULL molecule list for consistent indexing (accounts for inactive molecules)
       // Use grid approach: order = (moleculeIndex * 1000) + subOrder
+      // moleculeIndex is based on FULL list position (including inactive molecules)
       let order: number | undefined;
       
       if (standaloneChip.betweenMolecules && Array.isArray(standaloneChip.betweenMolecules) && standaloneChip.betweenMolecules.length === 2) {
         // Between two molecules: place after the first molecule
         const [firstMoleculeId] = standaloneChip.betweenMolecules;
-        const moleculeIndex = moleculeIdToIndexMap.get(firstMoleculeId);
+        // Use FULL molecule list index for consistent positioning
+        const moleculeIndex = fullMoleculeIdToIndexMap.get(firstMoleculeId);
         if (moleculeIndex !== undefined) {
           // Find subOrder by counting existing standalone chips after this molecule
           const existingChipsAfterMolecule = standaloneCards
@@ -983,11 +1143,12 @@ const WorkflowMode = () => {
         }
       } else if (standaloneChip.afterMoleculeId) {
         // After a specific molecule
-        const moleculeIndex = moleculeIdToIndexMap.get(standaloneChip.afterMoleculeId);
+        // Use FULL molecule list index for consistent positioning
+        const moleculeIndex = fullMoleculeIdToIndexMap.get(standaloneChip.afterMoleculeId);
         if (moleculeIndex !== undefined) {
           if (standaloneChip.afterLastMolecule) {
-            // After last molecule
-            order = (workflowMolecules.length * 1000) + chipIndex + 1;
+            // After last molecule - use FULL list length
+            order = (allMoleculesForIndexing.length * 1000) + chipIndex + 1;
           } else {
             // Between molecules: after this molecule, before the next
             const existingChipsAfterMolecule = standaloneCards
@@ -998,14 +1159,16 @@ const WorkflowMode = () => {
         }
       } else if (standaloneChip.beforeMoleculeId) {
         // Before a specific molecule: place after the previous molecule
-        const moleculeIndex = moleculeIdToIndexMap.get(standaloneChip.beforeMoleculeId);
+        // Use FULL molecule list index for consistent positioning
+        const moleculeIndex = fullMoleculeIdToIndexMap.get(standaloneChip.beforeMoleculeId);
         if (moleculeIndex !== undefined && moleculeIndex > 0) {
           const previousMoleculeIndex = moleculeIndex - 1;
           const existingChipsAfterPrevious = standaloneCards
             .slice(0, chipIndex)
             .filter(chip => {
               if (chip.afterMoleculeId) {
-                const chipMoleculeIndex = moleculeIdToIndexMap.get(chip.afterMoleculeId);
+                // Use FULL list index for comparison
+                const chipMoleculeIndex = fullMoleculeIdToIndexMap.get(chip.afterMoleculeId);
                 return chipMoleculeIndex === previousMoleculeIndex;
               }
               return false;
@@ -1019,18 +1182,20 @@ const WorkflowMode = () => {
         // Before first molecule
         order = chipIndex;
       } else if (standaloneChip.afterLastMolecule) {
-        // After last molecule
-        order = (workflowMolecules.length * 1000) + chipIndex + 1;
+        // After last molecule - use FULL list length
+        order = (allMoleculesForIndexing.length * 1000) + chipIndex + 1;
       } else if (typeof standaloneChip.position === 'number') {
         // Legacy position-based: convert to order
         const position = standaloneChip.position;
         if (position < 0 || (position >= 0 && position < 1)) {
           order = chipIndex;
-        } else if (position >= workflowMolecules.length) {
-          order = (workflowMolecules.length * 1000) + chipIndex + 1;
+        } else if (position >= allMoleculesForIndexing.length) {
+          // Use FULL list length
+          order = (allMoleculesForIndexing.length * 1000) + chipIndex + 1;
         } else {
           // Between molecules: position in range [i+1, i+2) means after molecule i
-          for (let i = 0; i < workflowMolecules.length; i++) {
+          // Use FULL list for position calculation
+          for (let i = 0; i < allMoleculesForIndexing.length; i++) {
             if (position >= (i + 1) && position < (i + 2)) {
               const existingChipsAfterMolecule = standaloneCards
                 .slice(0, chipIndex)
@@ -1047,11 +1212,12 @@ const WorkflowMode = () => {
           }
         }
       } else {
-        // Default: after last molecule
-        order = (workflowMolecules.length * 1000) + chipIndex + 1;
+        // Default: after last molecule - use FULL list length
+        order = (allMoleculesForIndexing.length * 1000) + chipIndex + 1;
       }
 
       // Determine afterMoleculeId and beforeMoleculeId from standaloneChip
+      // FIX 1: Use FULL molecule list to find next/previous molecules (includes inactive)
       let afterMoleculeId: string | undefined = undefined;
       let beforeMoleculeId: string | undefined = undefined;
       
@@ -1062,16 +1228,18 @@ const WorkflowMode = () => {
       } else if (standaloneChip.afterMoleculeId) {
         // After a specific molecule
         afterMoleculeId = standaloneChip.afterMoleculeId;
-        // Find next molecule for beforeMoleculeId if possible
-        const moleculeIndex = moleculeIdToIndexMap.get(standaloneChip.afterMoleculeId);
-        if (moleculeIndex !== undefined && moleculeIndex + 1 < workflowMolecules.length) {
-          beforeMoleculeId = workflowMolecules[moleculeIndex + 1].id;
+        // Find next ACTIVE molecule for beforeMoleculeId if possible
+        // Use active list for finding next active molecule
+        const activeMoleculeIndex = activeMoleculeIdToIndexMap.get(standaloneChip.afterMoleculeId);
+        if (activeMoleculeIndex !== undefined && activeMoleculeIndex + 1 < workflowMolecules.length) {
+          beforeMoleculeId = workflowMolecules[activeMoleculeIndex + 1].id;
         }
       } else if (standaloneChip.beforeMoleculeId) {
-        // Before a specific molecule: find previous molecule for afterMoleculeId
-        const moleculeIndex = moleculeIdToIndexMap.get(standaloneChip.beforeMoleculeId);
-        if (moleculeIndex !== undefined && moleculeIndex > 0) {
-          afterMoleculeId = workflowMolecules[moleculeIndex - 1].id;
+        // Before a specific molecule: find previous ACTIVE molecule for afterMoleculeId
+        // Use active list for finding previous active molecule
+        const activeMoleculeIndex = activeMoleculeIdToIndexMap.get(standaloneChip.beforeMoleculeId);
+        if (activeMoleculeIndex !== undefined && activeMoleculeIndex > 0) {
+          afterMoleculeId = workflowMolecules[activeMoleculeIndex - 1].id;
         }
         beforeMoleculeId = standaloneChip.beforeMoleculeId;
       } else if (standaloneChip.afterLastMolecule && workflowMolecules.length > 0) {
@@ -1134,8 +1302,10 @@ const WorkflowMode = () => {
       // 1. Start with ALL existing cards (preserves all Laboratory changes)
       // 2. For workflow molecules: Update existing cards, add missing workflow atoms
       // 3. Preserve standalone cards and molecules not in workflow
+      // FIX 4: Use FULL molecule list (active + inactive) to check if cards should be preserved
       
-      const workflowMoleculeIds = new Set(workflowMolecules.map(m => m.id));
+      const workflowMoleculeIds = new Set(workflowMolecules.map(m => m.id)); // Active molecules only
+      const allMoleculeIds = new Set(allMoleculesForIndexing.map(m => m.id)); // All molecules (active + inactive)
       const finalCards: LayoutCard[] = [];
       
       // Step 1: Start with ALL existing cards (preserves all Laboratory changes)
@@ -1214,11 +1384,12 @@ const WorkflowMode = () => {
       });
 
       // Step 3: Filter out deleted atoms, molecules, and standalone cards
+      // FIX 4: Preserve cards for inactive molecules (they exist in allMoleculeIds but not workflowMoleculeIds)
       // Create set of standalone card IDs from current workflow state
       const standaloneCardIds = new Set(standaloneCards.map(card => card.id));
       
       // Remove atoms that are no longer in workflow molecules
-      // Remove cards for molecules that no longer exist in workflow
+      // Remove cards for molecules that no longer exist in workflow (not even as inactive)
       // Remove standalone cards that were deleted from workflow
       const filteredCards = finalCards.filter(card => {
         // For standalone cards: only keep if they exist in current workflow state
@@ -1231,13 +1402,21 @@ const WorkflowMode = () => {
           }
         }
 
-        // If molecule doesn't exist in workflow, remove it
-        if (!workflowMoleculeIds.has(card.moleculeId)) {
-          console.log(`🗑️ Removed card for deleted molecule: ${card.moleculeId}`);
+        // FIX 4: Check against ALL molecules (active + inactive) first
+        // If molecule doesn't exist at all (not even as inactive), remove it
+        if (!allMoleculeIds.has(card.moleculeId)) {
+          console.log(`🗑️ Removed card for deleted molecule (not in all molecules): ${card.moleculeId}`);
           return false;
         }
 
-        // If molecule exists in workflow, check if atom is still in workflow
+        // FIX: Remove cards for inactive molecules - they shouldn't appear in Laboratory Mode
+        // The position preservation is handled by the order field recalculation, not by keeping the cards
+        if (!workflowMoleculeIds.has(card.moleculeId)) {
+          console.log(`🗑️ Removed card for inactive/deleted molecule: ${card.moleculeId}`);
+          return false; // Remove card for inactive molecule - it shouldn't appear in Laboratory Mode
+        }
+
+        // If molecule is active and exists in workflow, check if atom is still in workflow
         const workflowAtoms = workflowAtomMap.get(card.moleculeId);
         if (workflowAtoms) {
           const atomId = card.atoms[0]?.atomId;
@@ -1279,15 +1458,135 @@ const WorkflowMode = () => {
         const workflowCards = cardsToSort.filter(card => card.moleculeId);
         const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
 
-        // Create a map of moleculeId to moleculeIndex for quick lookup
+        // FIX 1: Create a map of moleculeId to moleculeIndex using FULL list (includes inactive)
+        // This ensures consistent indexing with Laboratory Mode
         const moleculeIndexMap = new Map<string, number>();
-        molecules.forEach((molecule, index) => {
+        allMoleculesForIndexing.forEach((molecule, index) => {
           moleculeIndexMap.set(molecule.id, index);
         });
 
-        // Process each molecule in workflow order (preserves inserted molecule positions)
-        molecules.forEach((molecule, moleculeIndex) => {
-          // Add all workflow cards for this molecule first (maintain their relative order)
+        // Also create active molecule index map for filtering
+        const activeMoleculeIndexMap = new Map<string, number>();
+        molecules.forEach((molecule, index) => {
+          activeMoleculeIndexMap.set(molecule.id, index);
+        });
+
+        // Group standalone cards by their molecule references (PRIORITIZE REFERENCES)
+        const chipsBeforeFirst: typeof standaloneCards = [];
+        const chipsAfterMolecules: Array<{ card: LayoutCard, afterMoleculeIndex: number, subOrder: number }> = [];
+        const chipsAfterLast: typeof standaloneCards = [];
+
+        standaloneCards.forEach((card, cardIndex) => {
+          // PRIORITY 1: Check betweenMolecules (most explicit)
+          if (card.betweenMolecules && Array.isArray(card.betweenMolecules) && card.betweenMolecules.length === 2) {
+            const [firstMoleculeId] = card.betweenMolecules;
+            const firstIndex = moleculeIndexMap.get(firstMoleculeId);
+            if (firstIndex !== undefined) {
+              const subOrder = typeof card.order === 'number' ? (card.order % 1000) : cardIndex + 1;
+              chipsAfterMolecules.push({ card, afterMoleculeIndex: firstIndex, subOrder });
+              return;
+            }
+          }
+
+          // PRIORITY 2: Check afterMoleculeId
+          if (card.afterMoleculeId) {
+            const afterIndex = moleculeIndexMap.get(card.afterMoleculeId);
+            if (afterIndex !== undefined) {
+              // Check if it's after the last molecule
+              const isLastMolecule = afterIndex === allMoleculesForIndexing.length - 1 || 
+                                     (workflowMoleculeIds.has(card.afterMoleculeId) && 
+                                      activeMoleculeIndexMap.get(card.afterMoleculeId) === molecules.length - 1);
+              
+              if (card.afterLastMolecule || isLastMolecule) {
+                chipsAfterLast.push(card);
+              } else {
+                const subOrder = typeof card.order === 'number' ? (card.order % 1000) : cardIndex + 1;
+                chipsAfterMolecules.push({ card, afterMoleculeIndex: afterIndex, subOrder });
+              }
+              return;
+            }
+          }
+
+          // PRIORITY 3: Check beforeMoleculeId
+          if (card.beforeMoleculeId) {
+            const beforeIndex = moleculeIndexMap.get(card.beforeMoleculeId);
+            if (beforeIndex !== undefined) {
+              const isFirstMolecule = beforeIndex === 0 || 
+                                     (workflowMoleculeIds.has(card.beforeMoleculeId) && 
+                                      activeMoleculeIndexMap.get(card.beforeMoleculeId) === 0);
+              
+              if ((card.beforeFirstMolecule || isFirstMolecule) && beforeIndex === 0) {
+                chipsBeforeFirst.push(card);
+              } else if (beforeIndex > 0) {
+                // Before a molecule means after the previous molecule
+                const subOrder = typeof card.order === 'number' ? (card.order % 1000) : cardIndex + 1;
+                chipsAfterMolecules.push({ card, afterMoleculeIndex: beforeIndex - 1, subOrder });
+              }
+              return;
+            }
+          }
+
+          // PRIORITY 4: Check beforeFirstMolecule flag
+          if (card.beforeFirstMolecule) {
+            chipsBeforeFirst.push(card);
+            return;
+          }
+
+          // PRIORITY 5: Check afterLastMolecule flag
+          if (card.afterLastMolecule) {
+            chipsAfterLast.push(card);
+            return;
+          }
+
+          // FALLBACK: Use order field if no references
+          if (card.order !== undefined && typeof card.order === 'number') {
+            const cardMoleculeIndex = Math.floor(card.order / 1000);
+            if (cardMoleculeIndex < 0) {
+              // Before first molecule
+              chipsBeforeFirst.push(card);
+            } else if (cardMoleculeIndex >= allMoleculesForIndexing.length) {
+              // After last molecule
+              chipsAfterLast.push(card);
+            } else {
+              // Between molecules
+              const subOrder = card.order % 1000;
+              chipsAfterMolecules.push({ card, afterMoleculeIndex: cardMoleculeIndex, subOrder });
+            }
+          } else {
+            // No references and no order - default to after last molecule
+            chipsAfterLast.push(card);
+          }
+        });
+
+        // Sort chipsAfterMolecules by afterMoleculeIndex, then by subOrder
+        chipsAfterMolecules.sort((a, b) => {
+          if (a.afterMoleculeIndex !== b.afterMoleculeIndex) {
+            return a.afterMoleculeIndex - b.afterMoleculeIndex;
+          }
+          return a.subOrder - b.subOrder;
+        });
+
+        // Sort chipsBeforeFirst and chipsAfterLast by order field
+        chipsBeforeFirst.sort((a, b) => {
+          const orderA = typeof a.order === 'number' ? (a.order % 1000) : 0;
+          const orderB = typeof b.order === 'number' ? (b.order % 1000) : 0;
+          return orderA - orderB;
+        });
+
+        chipsAfterLast.sort((a, b) => {
+          const orderA = typeof a.order === 'number' ? a.order : Infinity;
+          const orderB = typeof b.order === 'number' ? b.order : Infinity;
+          return orderA - orderB;
+        });
+
+        // FIX 1: Process molecules in FULL list order (includes inactive) to preserve positions
+        // This ensures standalone cards are placed correctly relative to inactive molecules
+        allMoleculesForIndexing.forEach((molecule, fullMoleculeIndex) => {
+          // Only add cards for active molecules (molecules that are in the workflow)
+          const isActiveMolecule = workflowMoleculeIds.has(molecule.id);
+          
+          if (isActiveMolecule) {
+            // Add all workflow cards for this active molecule first (maintain their relative order)
           const moleculeCards = workflowCards
             .filter(card => card.moleculeId === molecule.id)
             .sort((a, b) => {
@@ -1297,36 +1596,53 @@ const WorkflowMode = () => {
               return indexA - indexB;
             });
           sortedCards.push(...moleculeCards);
+          }
 
-          // Find standalone cards that should appear after this molecule
-          // Based on order field: order = (moleculeIndex * 1000) + subOrder
-          const cardsAfterThisMolecule = standaloneCards.filter(card => {
-            if (card.order !== undefined && typeof card.order === 'number') {
-              const cardMoleculeIndex = Math.floor(card.order / 1000);
-              return cardMoleculeIndex === moleculeIndex;
-            }
-            return false;
+          // Add standalone cards that should appear after this molecule (based on references)
+          const cardsAfterThisMolecule = chipsAfterMolecules
+            .filter(item => item.afterMoleculeIndex === fullMoleculeIndex)
+            .map(item => item.card);
+
+          // Update order field for these cards based on their position
+          cardsAfterThisMolecule.forEach((card, index) => {
+            const subOrder = typeof card.order === 'number' ? (card.order % 1000) : (index + 1);
+            // Update order field based on current molecule index
+            card.order = (fullMoleculeIndex * 1000) + subOrder;
           });
 
-          // Sort standalone cards by subOrder
-          cardsAfterThisMolecule.sort((a, b) => {
-            const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
-            const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
-            return subOrderA - subOrderB;
-          });
-
-          // Add standalone cards that appear after this molecule (between molecules)
           sortedCards.push(...cardsAfterThisMolecule);
         });
 
-        // Add standalone cards that should appear after the last molecule (orphans)
-        const placedStandaloneIds = new Set(sortedCards.map(c => c.id));
-        const orphanCards = standaloneCards.filter(card => !placedStandaloneIds.has(card.id));
-        sortedCards.push(...orphanCards);
+        // Add chips before first molecule (update their order to 0 or negative)
+        chipsBeforeFirst.forEach((card, index) => {
+          const subOrder = typeof card.order === 'number' ? (card.order % 1000) : index;
+          card.order = subOrder; // Before first molecule: order = subOrder (0-999)
+        });
+        sortedCards.unshift(...chipsBeforeFirst); // Add at the beginning
+
+        // Add chips after last molecule (update their order)
+        const lastMoleculeIndex = allMoleculesForIndexing.length > 0 ? allMoleculesForIndexing.length - 1 : 0;
+        chipsAfterLast.forEach((card, index) => {
+          const subOrder = typeof card.order === 'number' ? (card.order % 1000) : (index + 1);
+          // Update order field: after last molecule uses last index + 1
+          card.order = ((lastMoleculeIndex + 1) * 1000) + subOrder;
+        });
+        sortedCards.push(...chipsAfterLast);
 
         // Add any remaining workflow cards that weren't in any molecule (shouldn't happen, but safety check)
+        // FIX: Filter out cards for inactive molecules - they shouldn't be added
         const allProcessedIds = new Set(sortedCards.map(c => c.id));
-        const remaining = cardsToSort.filter(c => !allProcessedIds.has(c.id));
+        const remaining = cardsToSort.filter(c => {
+          if (!allProcessedIds.has(c.id)) {
+            // Only include if it's a standalone card OR if it's an active molecule card
+            if (!c.moleculeId) {
+              return true; // Standalone cards
+            }
+            // For molecule cards, only include if molecule is active
+            return workflowMoleculeIds.has(c.moleculeId);
+          }
+          return false;
+        });
         sortedCards.push(...remaining);
 
         return sortedCards;
@@ -1348,83 +1664,139 @@ const WorkflowMode = () => {
           }))
       });
 
-      // Update afterMoleculeId and beforeMoleculeId for all standalone cards based on current molecule positions
-      // This ensures that when molecules are inserted/deleted, standalone card references are updated correctly
-      const updatedStandaloneCards = sortedFinalCards.map(card => {
+      // FIX: ALWAYS calculate fresh order and references based on card's position in sorted list
+      // This ensures consistency with Lab → Workflow sync which always recalculates order
+      // Handle case where previous molecule is inactive (removed) - card should appear before next active molecule
+      const updatedStandaloneCards = sortedFinalCards.map((card, cardIndex) => {
         if (!card.moleculeId) {
-          // This is a standalone card - update its molecule references
+          // This is a standalone card - calculate fresh order and references based on its position
           let afterMoleculeId: string | undefined = undefined;
           let beforeMoleculeId: string | undefined = undefined;
+          let recalculatedOrder: number | undefined = undefined;
+          const subOrder = typeof card.order === 'number' ? (card.order % 1000) : 1;
 
-          if (card.order !== undefined && typeof card.order === 'number') {
-            const order = card.order;
-            const moleculeIndex = Math.floor(order / 1000);
+          // First, check the original order to understand which molecule position this card was after
+          // This helps handle cases where the previous molecule was removed (inactive)
+          const originalOrder = typeof card.order === 'number' ? card.order : -1;
+          const originalMoleculeIndex = originalOrder >= 0 ? Math.floor(originalOrder / 1000) : -1;
+          const originalMolecule = originalMoleculeIndex >= 0 && originalMoleculeIndex < allMoleculesForIndexing.length
+            ? allMoleculesForIndexing[originalMoleculeIndex]
+            : undefined;
+          const originalMoleculeIsActive = originalMolecule ? workflowMoleculeIds.has(originalMolecule.id) : false;
 
-            if (moleculeIndex < 0) {
-              // Before first molecule
-              if (workflowMolecules.length > 0) {
-                beforeMoleculeId = workflowMolecules[0].id;
+          // Find the next ACTIVE molecule in sortedFinalCards (this is what we'll see in Lab Mode)
+          let nextActiveMoleculeInSorted: typeof allMoleculesForIndexing[0] | undefined = undefined;
+          let nextActiveMoleculeIndex = -1;
+          for (let i = cardIndex + 1; i < sortedFinalCards.length; i++) {
+            const nextCard = sortedFinalCards[i];
+            if (nextCard.moleculeId && workflowMoleculeIds.has(nextCard.moleculeId)) {
+              // Found an active molecule card - find its index in the FULL list
+              nextActiveMoleculeIndex = allMoleculesForIndexing.findIndex(m => m.id === nextCard.moleculeId);
+              if (nextActiveMoleculeIndex >= 0) {
+                nextActiveMoleculeInSorted = allMoleculesForIndexing[nextActiveMoleculeIndex];
+                break;
               }
-            } else if (moleculeIndex >= workflowMolecules.length) {
-              // After last molecule
-              if (workflowMolecules.length > 0) {
-                afterMoleculeId = workflowMolecules[workflowMolecules.length - 1].id;
-              }
-            } else {
-              // Between molecules: after moleculeIndex, before moleculeIndex + 1
-              if (moleculeIndex >= 0 && moleculeIndex < workflowMolecules.length) {
-                afterMoleculeId = workflowMolecules[moleculeIndex].id;
-              }
-              if (moleculeIndex + 1 < workflowMolecules.length) {
-                beforeMoleculeId = workflowMolecules[moleculeIndex + 1].id;
-              }
-            }
-          } else {
-            // Fallback: use existing references or calculate from position
-            // If card has existing afterMoleculeId, try to preserve it if molecule still exists
-            if (card.afterMoleculeId) {
-              const moleculeExists = workflowMolecules.some(m => m.id === card.afterMoleculeId);
-              if (moleculeExists) {
-                afterMoleculeId = card.afterMoleculeId;
-                // Find next molecule for beforeMoleculeId
-                const moleculeIndex = workflowMolecules.findIndex(m => m.id === card.afterMoleculeId);
-                if (moleculeIndex >= 0 && moleculeIndex + 1 < workflowMolecules.length) {
-                  beforeMoleculeId = workflowMolecules[moleculeIndex + 1].id;
-                }
-              } else if (workflowMolecules.length > 0) {
-                // Molecule was deleted, default to after last molecule
-                afterMoleculeId = workflowMolecules[workflowMolecules.length - 1].id;
-              }
-            } else if (card.beforeMoleculeId) {
-              const moleculeExists = workflowMolecules.some(m => m.id === card.beforeMoleculeId);
-              if (moleculeExists) {
-                beforeMoleculeId = card.beforeMoleculeId;
-                // Find previous molecule for afterMoleculeId
-                const moleculeIndex = workflowMolecules.findIndex(m => m.id === card.beforeMoleculeId);
-                if (moleculeIndex > 0) {
-                  afterMoleculeId = workflowMolecules[moleculeIndex - 1].id;
-                }
-              } else if (workflowMolecules.length > 0) {
-                // Molecule was deleted, default to after last molecule
-                afterMoleculeId = workflowMolecules[workflowMolecules.length - 1].id;
-              }
-            } else if (workflowMolecules.length > 0) {
-              // No references, default to after last molecule
-              afterMoleculeId = workflowMolecules[workflowMolecules.length - 1].id;
             }
           }
 
+          // Find the previous ACTIVE molecule in sortedFinalCards
+          let previousActiveMoleculeInSorted: typeof allMoleculesForIndexing[0] | undefined = undefined;
+          let previousActiveMoleculeIndex = -1;
+          for (let i = cardIndex - 1; i >= 0; i--) {
+            const prevCard = sortedFinalCards[i];
+            if (prevCard.moleculeId && workflowMoleculeIds.has(prevCard.moleculeId)) {
+              // Found an active molecule card - find its index in the FULL list
+              previousActiveMoleculeIndex = allMoleculesForIndexing.findIndex(m => m.id === prevCard.moleculeId);
+              if (previousActiveMoleculeIndex >= 0) {
+                previousActiveMoleculeInSorted = allMoleculesForIndexing[previousActiveMoleculeIndex];
+                break;
+              }
+            }
+          }
+
+          // Calculate fresh references based on position and original order
+          if (previousActiveMoleculeInSorted && nextActiveMoleculeInSorted) {
+            // Card is between two ACTIVE molecules
+            afterMoleculeId = previousActiveMoleculeInSorted.id;
+            beforeMoleculeId = nextActiveMoleculeInSorted.id;
+            recalculatedOrder = (previousActiveMoleculeIndex * 1000) + subOrder;
+          } else if (previousActiveMoleculeInSorted) {
+            // Card is after the last ACTIVE molecule
+            afterMoleculeId = previousActiveMoleculeInSorted.id;
+            recalculatedOrder = (previousActiveMoleculeIndex * 1000) + subOrder;
+            // No beforeMoleculeId - it's after the last molecule
+          } else if (nextActiveMoleculeInSorted) {
+            // Card is before the first ACTIVE molecule (previous molecule was removed/inactive)
+            // This is the case: m0 (removed), a1, m1 -> a1 should appear before m1
+            beforeMoleculeId = nextActiveMoleculeInSorted.id;
+            
+            // If original molecule was inactive (removed), place before first active molecule
+            if (!originalMoleculeIsActive && originalMoleculeIndex >= 0) {
+              // Find the previous active molecule before the original molecule's position
+              let foundPreviousActive = false;
+              for (let i = originalMoleculeIndex - 1; i >= 0; i--) {
+                const prevActiveMolecule = allMoleculesForIndexing[i];
+                if (prevActiveMolecule && workflowMoleculeIds.has(prevActiveMolecule.id)) {
+                  afterMoleculeId = prevActiveMolecule.id;
+                  recalculatedOrder = (i * 1000) + subOrder;
+                  foundPreviousActive = true;
+                  break;
+                }
+              }
+              
+              // If no previous active molecule found (original was at index 0), place before first
+              if (!foundPreviousActive) {
+                recalculatedOrder = 0; // Before first active molecule
+                // No afterMoleculeId - it's before the first active molecule
+              }
+            } else {
+              // Original molecule position is valid, use it
+              recalculatedOrder = (nextActiveMoleculeIndex * 1000) - 1; // Just before next molecule
+            }
+          } else {
+            // No active molecules found (shouldn't happen, but handle gracefully)
+            // Default to after last molecule if any molecules exist
+            if (workflowMolecules.length > 0) {
+              const lastMolecule = workflowMolecules[workflowMolecules.length - 1];
+              afterMoleculeId = lastMolecule.id;
+              const lastFullIndex = allMoleculesForIndexing.findIndex(m => m.id === lastMolecule.id);
+              if (lastFullIndex >= 0) {
+                recalculatedOrder = (lastFullIndex * 1000) + subOrder;
+              }
+            }
+          }
+
+          // Preserve betweenMolecules if both after and before are set
+          const finalBetweenMolecules = (afterMoleculeId && beforeMoleculeId) 
+            ? [afterMoleculeId, beforeMoleculeId] as [string, string]
+            : undefined;
+
           return {
-            ...card,
+            ...card, // Preserve all card properties (atoms, configuration, etc.)
             afterMoleculeId,
-            beforeMoleculeId
+            beforeMoleculeId,
+            betweenMolecules: finalBetweenMolecules,
+            order: recalculatedOrder !== undefined ? recalculatedOrder : (card.order || 0) // Always use recalculated order
           };
         }
         return card;
       });
 
+      // FIX: Ensure updatedStandaloneCards is an array (contains ALL cards, not just standalone)
+      if (!Array.isArray(updatedStandaloneCards)) {
+        console.error('❌ updatedStandaloneCards is not an array after map:', updatedStandaloneCards);
+        toast({
+          title: 'Save Error',
+          description: 'Failed to process cards. Cannot save to Laboratory configuration.',
+          variant: 'destructive'
+        });
+        return;
+      }
+
       console.log('🔄 Updated standalone card molecule references:', {
+        totalCards: updatedStandaloneCards.length,
         standaloneCount: updatedStandaloneCards.filter(c => !c.moleculeId).length,
+        moleculeCardsCount: updatedStandaloneCards.filter(c => c.moleculeId).length,
         updates: updatedStandaloneCards
           .filter(c => !c.moleculeId)
           .map(c => ({
@@ -1437,12 +1809,26 @@ const WorkflowMode = () => {
 
       // Save merged cards to MongoDB atom_list_configuration
       console.log('💾 Saving merged Laboratory configuration to MongoDB...');
+      
+      // FIX: Ensure cards is always an array
+      const cardsToSave = Array.isArray(updatedStandaloneCards) ? updatedStandaloneCards : [];
+      
+      if (!Array.isArray(updatedStandaloneCards)) {
+        console.error('❌ updatedStandaloneCards is not an array:', updatedStandaloneCards);
+        toast({
+          title: 'Save Error',
+          description: 'Cards data is invalid. Cannot save to Laboratory configuration.',
+          variant: 'destructive'
+        });
+        return;
+      }
+      
       const saveUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
       const savePayload = {
         client_name: projectContext.client_name,
         app_name: projectContext.app_name,
         project_name: projectContext.project_name,
-        cards: updatedStandaloneCards, // Use updated cards with refreshed molecule references
+        cards: cardsToSave, // Use updated cards with refreshed molecule references
         mode: 'laboratory',
       };
 
@@ -1497,6 +1883,498 @@ const WorkflowMode = () => {
     }
   }, [canvasMolecules, customMolecules, standaloneCards, workflowName, toast, navigate]);
 
+  // Helper function to sync Workflow Mode to Laboratory Mode
+  // This performs the same sync logic as handleRenderWorkflow but without navigation
+  const syncWorkflowToLaboratory = useCallback(async (): Promise<boolean> => {
+    try {
+      // Check if all molecules have at least one atom (only active molecules)
+      const moleculesWithAtoms = canvasMolecules.filter(mol => mol.isActive !== false && mol.atoms && mol.atoms.length > 0);
+      
+      if (moleculesWithAtoms.length === 0) {
+        console.warn('⚠️ No molecules with atoms - skipping Laboratory sync');
+        return false; // Skip sync if no molecules with atoms
+      }
+
+      // Function to convert atom names to atom IDs for Laboratory mode
+      const convertAtomNameToId = (atomName: string) => {
+        return atomName
+          .toLowerCase()
+          .replace(/\s+/g, '-')
+          .replace(/[^a-z0-9-]/g, '');
+      };
+
+      // Use FULL molecule list (active + inactive) for consistent indexing
+      const allMoleculesForIndexing = canvasMolecules; // Includes both active and inactive
+      const activeMoleculesForRendering = moleculesWithAtoms; // Only active molecules for rendering
+      
+      // Create a map of ALL molecule IDs to their indices in the FULL list
+      const fullMoleculeIdToIndexMap = new Map<string, number>();
+      allMoleculesForIndexing.forEach((mol, index) => {
+        fullMoleculeIdToIndexMap.set(mol.id, index);
+      });
+      
+      // Create a map of active molecule IDs to their indices in the active list
+      const activeMoleculeIdToIndexMap = new Map<string, number>();
+      activeMoleculesForRendering.forEach((mol, index) => {
+        activeMoleculeIdToIndexMap.set(mol.id, index);
+      });
+
+      // Prepare workflow molecules
+      const workflowMolecules = activeMoleculesForRendering.map(mol => ({
+        id: mol.id,
+        title: mol.title,
+        atoms: mol.atoms.map(atomName => convertAtomNameToId(atomName)),
+        atomOrder: (mol.atomOrder || mol.atoms).map(atomName => convertAtomNameToId(atomName))
+      }));
+
+      // Convert workflow molecules to Laboratory cards format
+      const workflowCards = convertWorkflowMoleculesToLaboratoryCards(workflowMolecules);
+
+      // Convert standalone chips to Laboratory Mode cards format
+      const LLM_MAP: Record<string, string> = {
+        concat: 'Agent Concat',
+        'chart-maker': 'Agent Chart Maker',
+        merge: 'Agent Merge',
+        'create-column': 'Agent Create Transform',
+        'groupby-wtg-avg': 'Agent GroupBy',
+        'explore': 'Agent Explore',
+        'dataframe-operations': 'Agent DataFrame Operations',
+      };
+
+      const normalize = (s: string) => s.toLowerCase().replace(/[\s_-]/g, '');
+      const workflowMoleculeIds = new Set(workflowMolecules.map(m => m.id));
+      const allMoleculeIds = new Set(allMoleculesForIndexing.map(m => m.id));
+
+      // [Rest of the sync logic from handleRenderWorkflow - lines 944-1616]
+      // This includes: converting standalone cards, merging with existing cards, recalculating order, saving to MongoDB
+      // For brevity, I'll reference the existing logic in handleRenderWorkflow
+      
+      // Get project context
+      const projectContext = getActiveProjectContext();
+      if (!projectContext) {
+        console.warn('⚠️ Project context missing - skipping Laboratory sync');
+        return false;
+      }
+
+      // Fetch existing Laboratory cards
+      const fetchUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+      const fetchResponse = await fetch(fetchUrl, {
+        method: 'GET',
+        credentials: 'include',
+      });
+
+      let existingCards: LayoutCard[] = [];
+      if (fetchResponse.ok) {
+        const fetchData = await fetchResponse.json();
+        if (fetchData.status === 'ok' && Array.isArray(fetchData.cards)) {
+          existingCards = fetchData.cards;
+        }
+      }
+
+      // Convert standalone chips to Laboratory cards
+      const standaloneCardsForLab: LayoutCard[] = standaloneCards.map((standaloneChip, chipIndex) => {
+        const atomInfo = allAtoms.find(
+          a =>
+            normalize(a.id) === normalize(standaloneChip.atomId) ||
+            normalize(a.title) === normalize(standaloneChip.atomId) ||
+            normalize(a.title) === normalize(standaloneChip.title),
+        ) || ({} as any);
+
+        const resolvedAtomId = atomInfo.id || standaloneChip.atomId;
+        const droppedAtom: DroppedAtom = {
+          id: `${resolvedAtomId}-${Date.now()}-${Math.random()}-${chipIndex}`,
+          atomId: resolvedAtomId,
+          title: atomInfo.title || standaloneChip.title || standaloneChip.atomId,
+          category: atomInfo.category || 'Atom',
+          color: atomInfo.color || 'bg-gray-400',
+          source: 'manual',
+          llm: LLM_MAP[resolvedAtomId],
+        };
+
+        // Calculate order and references (same logic as handleRenderWorkflow)
+        let order: number | undefined;
+        let afterMoleculeId: string | undefined = undefined;
+        let beforeMoleculeId: string | undefined = undefined;
+
+        if (standaloneChip.betweenMolecules && Array.isArray(standaloneChip.betweenMolecules) && standaloneChip.betweenMolecules.length === 2) {
+          const [firstMoleculeId] = standaloneChip.betweenMolecules;
+          const moleculeIndex = fullMoleculeIdToIndexMap.get(firstMoleculeId);
+          if (moleculeIndex !== undefined) {
+            const existingChipsAfterMolecule = standaloneCards
+              .slice(0, chipIndex)
+              .filter(chip => {
+                if (chip.betweenMolecules && Array.isArray(chip.betweenMolecules) && chip.betweenMolecules[0] === firstMoleculeId) {
+                  return true;
+                }
+                return chip.afterMoleculeId === firstMoleculeId;
+              }).length;
+            order = (moleculeIndex * 1000) + (existingChipsAfterMolecule + 1);
+            afterMoleculeId = firstMoleculeId;
+            beforeMoleculeId = standaloneChip.betweenMolecules[1];
+          }
+        } else if (standaloneChip.afterMoleculeId) {
+          const moleculeIndex = fullMoleculeIdToIndexMap.get(standaloneChip.afterMoleculeId);
+          if (moleculeIndex !== undefined) {
+            if (standaloneChip.afterLastMolecule) {
+              order = (allMoleculesForIndexing.length * 1000) + chipIndex + 1;
+            } else {
+              const existingChipsAfterMolecule = standaloneCards
+                .slice(0, chipIndex)
+                .filter(chip => chip.afterMoleculeId === standaloneChip.afterMoleculeId && !chip.afterLastMolecule).length;
+              order = (moleculeIndex * 1000) + (existingChipsAfterMolecule + 1);
+            }
+            afterMoleculeId = standaloneChip.afterMoleculeId;
+            const activeMoleculeIndex = activeMoleculeIdToIndexMap.get(standaloneChip.afterMoleculeId);
+            if (activeMoleculeIndex !== undefined && activeMoleculeIndex + 1 < workflowMolecules.length) {
+              beforeMoleculeId = workflowMolecules[activeMoleculeIndex + 1].id;
+            }
+          }
+        } else if (standaloneChip.beforeMoleculeId) {
+          const moleculeIndex = fullMoleculeIdToIndexMap.get(standaloneChip.beforeMoleculeId);
+          if (moleculeIndex !== undefined && moleculeIndex > 0) {
+            const previousMoleculeIndex = moleculeIndex - 1;
+            const existingChipsAfterPrevious = standaloneCards
+              .slice(0, chipIndex)
+              .filter(chip => {
+                if (chip.afterMoleculeId) {
+                  const chipMoleculeIndex = fullMoleculeIdToIndexMap.get(chip.afterMoleculeId);
+                  return chipMoleculeIndex === previousMoleculeIndex;
+                }
+                return false;
+              }).length;
+            order = (previousMoleculeIndex * 1000) + (existingChipsAfterPrevious + 1);
+            const activeMoleculeIndex = activeMoleculeIdToIndexMap.get(standaloneChip.beforeMoleculeId);
+            if (activeMoleculeIndex !== undefined && activeMoleculeIndex > 0) {
+              afterMoleculeId = workflowMolecules[activeMoleculeIndex - 1].id;
+            }
+            beforeMoleculeId = standaloneChip.beforeMoleculeId;
+          } else if (moleculeIndex === 0 && standaloneChip.beforeFirstMolecule) {
+            order = chipIndex;
+            beforeMoleculeId = standaloneChip.beforeMoleculeId;
+          }
+        } else if (standaloneChip.beforeFirstMolecule) {
+          order = chipIndex;
+          if (workflowMolecules.length > 0) {
+            beforeMoleculeId = workflowMolecules[0].id;
+          }
+        } else if (standaloneChip.afterLastMolecule) {
+          order = (allMoleculesForIndexing.length * 1000) + chipIndex + 1;
+          if (workflowMolecules.length > 0) {
+            afterMoleculeId = workflowMolecules[workflowMolecules.length - 1].id;
+          }
+        } else {
+          order = (allMoleculesForIndexing.length * 1000) + chipIndex + 1;
+        }
+
+        return {
+          id: standaloneChip.id,
+          atoms: [droppedAtom],
+          isExhibited: false,
+          order: order,
+          afterMoleculeId: afterMoleculeId,
+          beforeMoleculeId: beforeMoleculeId,
+        } as LayoutCard;
+      });
+
+      // Merge workflow cards with existing cards (same logic as handleRenderWorkflow)
+      const finalCards: LayoutCard[] = [];
+      const existingCardMap = new Map<string, LayoutCard>();
+      existingCards.forEach(card => {
+        if (card.moleculeId && card.atoms[0]?.atomId) {
+          const key = `${card.moleculeId}:${card.atoms[0].atomId}`;
+          existingCardMap.set(key, card);
+        }
+        finalCards.push(card);
+      });
+
+      const workflowAtomMap = new Map<string, Set<string>>();
+      workflowMolecules.forEach(molecule => {
+        const atomSet = new Set<string>(molecule.atoms);
+        workflowAtomMap.set(molecule.id, atomSet);
+        
+        molecule.atoms.forEach(atomId => {
+          const key = `${molecule.id}:${atomId}`;
+          const existingCard = existingCardMap.get(key);
+          
+          if (existingCard) {
+            const cardIndex = finalCards.findIndex(c => c.id === existingCard.id);
+            if (cardIndex >= 0) {
+              finalCards[cardIndex] = {
+                ...existingCard,
+                moleculeTitle: molecule.title,
+              };
+            }
+          } else {
+            const newCard = workflowCards.find(
+              card => card.moleculeId === molecule.id && card.atoms[0]?.atomId === atomId
+            );
+            if (newCard) {
+              finalCards.push(newCard);
+            }
+          }
+        });
+      });
+
+      // Add standalone cards
+      const existingStandaloneCardMap = new Map<string, LayoutCard>();
+      finalCards.filter(card => !card.moleculeId).forEach(card => {
+        existingStandaloneCardMap.set(card.id, card);
+      });
+
+      standaloneCardsForLab.forEach(standaloneCard => {
+        const existingCard = existingStandaloneCardMap.get(standaloneCard.id);
+        if (existingCard) {
+          const cardIndex = finalCards.findIndex(c => c.id === standaloneCard.id);
+          if (cardIndex >= 0) {
+            finalCards[cardIndex] = {
+              ...existingCard,
+              order: standaloneCard.order,
+            };
+          }
+        } else {
+          finalCards.push(standaloneCard);
+        }
+      });
+
+      // Filter out deleted atoms/molecules
+      const standaloneCardIds = new Set(standaloneCards.map(card => card.id));
+      const filteredCards = finalCards.filter(card => {
+        if (!card.moleculeId) {
+          return standaloneCardIds.has(card.id);
+        }
+        if (!allMoleculeIds.has(card.moleculeId)) {
+          return false;
+        }
+        if (!workflowMoleculeIds.has(card.moleculeId)) {
+          return false;
+        }
+        const workflowAtoms = workflowAtomMap.get(card.moleculeId);
+        if (workflowAtoms) {
+          const atomId = card.atoms[0]?.atomId;
+          if (atomId && !workflowAtoms.has(atomId)) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      const uniqueFinalCards = Array.from(
+        new Map(filteredCards.map(card => [card.id, card])).values()
+      );
+
+      // Sort cards (same logic as handleRenderWorkflow)
+      const sortCardsByWorkflowOrder = (cardsToSort: LayoutCard[], molecules: typeof workflowMolecules): LayoutCard[] => {
+        if (!molecules || molecules.length === 0) {
+          return [...cardsToSort].sort((a, b) => {
+            const orderA = typeof a.order === 'number' ? a.order : Infinity;
+            const orderB = typeof b.order === 'number' ? b.order : Infinity;
+            return orderA - orderB;
+          });
+        }
+
+        const sortedCards: LayoutCard[] = [];
+        const workflowCards = cardsToSort.filter(card => card.moleculeId);
+        const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
+
+        const moleculeIndexMap = new Map<string, number>();
+        allMoleculesForIndexing.forEach((molecule, index) => {
+          moleculeIndexMap.set(molecule.id, index);
+        });
+
+        allMoleculesForIndexing.forEach((molecule, fullMoleculeIndex) => {
+          const isActiveMolecule = workflowMoleculeIds.has(molecule.id);
+          
+          if (isActiveMolecule) {
+            const moleculeCards = workflowCards
+              .filter(card => card.moleculeId === molecule.id)
+              .sort((a, b) => {
+                const indexA = cardsToSort.findIndex(c => c.id === a.id);
+                const indexB = cardsToSort.findIndex(c => c.id === b.id);
+                return indexA - indexB;
+              });
+            sortedCards.push(...moleculeCards);
+          }
+
+          const cardsAfterThisMolecule = standaloneCards.filter(card => {
+            if (card.order !== undefined && typeof card.order === 'number') {
+              const cardMoleculeIndex = Math.floor(card.order / 1000);
+              return cardMoleculeIndex === fullMoleculeIndex;
+            }
+            return false;
+          });
+
+          cardsAfterThisMolecule.sort((a, b) => {
+            const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
+            const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
+            return subOrderA - subOrderB;
+          });
+
+          sortedCards.push(...cardsAfterThisMolecule);
+        });
+
+        const placedStandaloneIds = new Set(sortedCards.map(c => c.id));
+        const orphanCards = standaloneCards.filter(card => !placedStandaloneIds.has(card.id));
+        sortedCards.push(...orphanCards);
+
+        const allProcessedIds = new Set(sortedCards.map(c => c.id));
+        const remaining = cardsToSort.filter(c => {
+          if (!allProcessedIds.has(c.id)) {
+            if (!c.moleculeId) {
+              return true;
+            }
+            return workflowMoleculeIds.has(c.moleculeId);
+          }
+          return false;
+        });
+        sortedCards.push(...remaining);
+
+        return sortedCards;
+      };
+
+      const sortedFinalCards = sortCardsByWorkflowOrder(uniqueFinalCards, workflowMolecules);
+
+      // Recalculate order and references (same logic as handleRenderWorkflow)
+      const updatedStandaloneCards = sortedFinalCards.map((card, cardIndex) => {
+        if (!card.moleculeId) {
+          let afterMoleculeId: string | undefined = undefined;
+          let beforeMoleculeId: string | undefined = undefined;
+          let recalculatedOrder: number | undefined = undefined;
+          const subOrder = typeof card.order === 'number' ? (card.order % 1000) : 1;
+
+          const originalOrder = typeof card.order === 'number' ? card.order : -1;
+          const originalMoleculeIndex = originalOrder >= 0 ? Math.floor(originalOrder / 1000) : -1;
+          const originalMolecule = originalMoleculeIndex >= 0 && originalMoleculeIndex < allMoleculesForIndexing.length
+            ? allMoleculesForIndexing[originalMoleculeIndex]
+            : undefined;
+          const originalMoleculeIsActive = originalMolecule ? workflowMoleculeIds.has(originalMolecule.id) : false;
+
+          let nextActiveMoleculeInSorted: typeof allMoleculesForIndexing[0] | undefined = undefined;
+          let nextActiveMoleculeIndex = -1;
+          for (let i = cardIndex + 1; i < sortedFinalCards.length; i++) {
+            const nextCard = sortedFinalCards[i];
+            if (nextCard.moleculeId && workflowMoleculeIds.has(nextCard.moleculeId)) {
+              nextActiveMoleculeIndex = allMoleculesForIndexing.findIndex(m => m.id === nextCard.moleculeId);
+              if (nextActiveMoleculeIndex >= 0) {
+                nextActiveMoleculeInSorted = allMoleculesForIndexing[nextActiveMoleculeIndex];
+                break;
+              }
+            }
+          }
+
+          let previousActiveMoleculeInSorted: typeof allMoleculesForIndexing[0] | undefined = undefined;
+          let previousActiveMoleculeIndex = -1;
+          for (let i = cardIndex - 1; i >= 0; i--) {
+            const prevCard = sortedFinalCards[i];
+            if (prevCard.moleculeId && workflowMoleculeIds.has(prevCard.moleculeId)) {
+              previousActiveMoleculeIndex = allMoleculesForIndexing.findIndex(m => m.id === prevCard.moleculeId);
+              if (previousActiveMoleculeIndex >= 0) {
+                previousActiveMoleculeInSorted = allMoleculesForIndexing[previousActiveMoleculeIndex];
+                break;
+              }
+            }
+          }
+
+          if (previousActiveMoleculeInSorted && nextActiveMoleculeInSorted) {
+            afterMoleculeId = previousActiveMoleculeInSorted.id;
+            beforeMoleculeId = nextActiveMoleculeInSorted.id;
+            recalculatedOrder = (previousActiveMoleculeIndex * 1000) + subOrder;
+          } else if (previousActiveMoleculeInSorted) {
+            afterMoleculeId = previousActiveMoleculeInSorted.id;
+            recalculatedOrder = (previousActiveMoleculeIndex * 1000) + subOrder;
+          } else if (nextActiveMoleculeInSorted) {
+            beforeMoleculeId = nextActiveMoleculeInSorted.id;
+            
+            if (!originalMoleculeIsActive && originalMoleculeIndex >= 0) {
+              let foundPreviousActive = false;
+              for (let i = originalMoleculeIndex - 1; i >= 0; i--) {
+                const prevActiveMolecule = allMoleculesForIndexing[i];
+                if (prevActiveMolecule && workflowMoleculeIds.has(prevActiveMolecule.id)) {
+                  afterMoleculeId = prevActiveMolecule.id;
+                  recalculatedOrder = (i * 1000) + subOrder;
+                  foundPreviousActive = true;
+                  break;
+                }
+              }
+              
+              if (!foundPreviousActive) {
+                recalculatedOrder = 0;
+              }
+            } else {
+              recalculatedOrder = (nextActiveMoleculeIndex * 1000) - 1;
+            }
+          } else {
+            if (workflowMolecules.length > 0) {
+              const lastMolecule = workflowMolecules[workflowMolecules.length - 1];
+              afterMoleculeId = lastMolecule.id;
+              const lastFullIndex = allMoleculesForIndexing.findIndex(m => m.id === lastMolecule.id);
+              if (lastFullIndex >= 0) {
+                recalculatedOrder = (lastFullIndex * 1000) + subOrder;
+              }
+            }
+          }
+
+          const finalBetweenMolecules = (afterMoleculeId && beforeMoleculeId) 
+            ? [afterMoleculeId, beforeMoleculeId] as [string, string]
+            : undefined;
+
+          return {
+            ...card,
+            afterMoleculeId,
+            beforeMoleculeId,
+            betweenMolecules: finalBetweenMolecules,
+            order: recalculatedOrder !== undefined ? recalculatedOrder : (card.order || 0)
+          };
+        }
+        return card;
+      });
+
+      if (!Array.isArray(updatedStandaloneCards)) {
+        console.error('❌ updatedStandaloneCards is not an array');
+        return false;
+      }
+
+      // Save to MongoDB
+      const saveUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+      const savePayload = {
+        client_name: projectContext.client_name,
+        app_name: projectContext.app_name,
+        project_name: projectContext.project_name,
+        cards: updatedStandaloneCards,
+        mode: 'laboratory',
+      };
+
+      const saveResponse = await fetch(saveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(savePayload),
+      });
+
+      if (!saveResponse.ok) {
+        const message = await saveResponse.text();
+        console.error('❌ Failed to save Laboratory configuration:', message);
+        return false;
+      }
+
+      // Save workflow molecules to localStorage
+      const workflowMoleculesForLab = workflowMolecules.map(mol => ({
+        moleculeId: mol.id,
+        moleculeTitle: mol.title,
+        atoms: mol.atoms.map((atomId, index) => ({
+          atomName: atomId,
+          order: index
+        }))
+      }));
+      localStorage.setItem('workflow-molecules', JSON.stringify(workflowMoleculesForLab));
+
+      console.log('✅ Laboratory configuration synced successfully');
+      return true;
+    } catch (error) {
+      console.error('❌ Error syncing to Laboratory:', error);
+      return false;
+    }
+  }, [canvasMolecules, standaloneCards]);
+
   // Function to save workflow configuration
   const saveWorkflowConfiguration = async () => {
     try {
@@ -1532,9 +2410,16 @@ const WorkflowMode = () => {
 
       if (response.ok) {
         const result = await response.json();
+        
+        // FIX: Also sync to Laboratory Mode when saving
+        console.log('🔄 Syncing to Laboratory Mode...');
+        const syncSuccess = await syncWorkflowToLaboratory();
+        
         toast({
           title: "Workflow Saved",
-          description: `Workflow configuration has been saved successfully`,
+          description: syncSuccess 
+            ? "Workflow configuration has been saved and synced to Laboratory mode successfully" 
+            : "Workflow configuration saved, but Laboratory sync had issues",
         });
         console.log('Workflow saved:', result);
       } else {

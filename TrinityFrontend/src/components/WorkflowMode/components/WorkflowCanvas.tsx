@@ -38,6 +38,8 @@ interface WorkflowCanvasProps {
     id: string; 
     atomId: string; 
     title: string; 
+    // Order field for sorting (moleculeIndex * 1000 + subOrder)
+    order?: number;
     // New explicit molecule references
     betweenMolecules?: [string, string]; // [moleculeId1, moleculeId2] - atom is between these two molecules
     afterLastMolecule?: boolean; // true if atom is after the last molecule
@@ -723,27 +725,31 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       } else if (chip.afterMoleculeId) {
         // Chip is after a specific molecule
         const afterIndex = moleculeIdToIndex.get(chip.afterMoleculeId);
+        
+        // FIX: Place chip after its referenced molecule (afterMoleculeId), not after all molecules
+        // This ensures that when a new molecule is added, it will appear AFTER chips that were
+        // "after last molecule", because the chips are placed after their specific molecule reference
         if (afterIndex !== undefined) {
-          if (chip.afterLastMolecule && afterIndex === moleculeNodes.length - 1) {
-            // After last molecule
-            chipsAfterLast.push(chipNode);
-          } else if (!chip.afterLastMolecule && afterIndex < moleculeNodes.length - 1) {
-            // Between molecules (afterIndex and afterIndex+1)
-            chipsAfterMolecules.push({ chip: chipNode, afterIndex });
-          } else if (chip.afterLastMolecule) {
-            // After last molecule (even if not the very last index)
-            chipsAfterLast.push(chipNode);
-          }
-        } else if (chip.afterLastMolecule) {
-          // afterMoleculeId doesn't exist (molecule was deleted), but chip should be after last molecule
-          // Place it in chipsAfterLast so it appears after all molecules (or first if no molecules exist)
+          // Place chip after the molecule it references
+          // This works even if afterLastMolecule is true - the chip goes after the specific molecule
+          // and new molecules added later will appear after these chips
+          chipsAfterMolecules.push({ chip: chipNode, afterIndex });
+        } else {
+          // afterMoleculeId doesn't exist (molecule was deleted)
+          // Default to after last molecule
           chipsAfterLast.push(chipNode);
         }
       } else if (chip.beforeMoleculeId) {
         // Chip is before a specific molecule
         const beforeIndex = moleculeIdToIndex.get(chip.beforeMoleculeId);
         if (beforeIndex !== undefined) {
-          if (beforeIndex === 0 && chip.beforeFirstMolecule) {
+          // FIX: Check if order = 0 and beforeMoleculeId points to first molecule (even if beforeFirstMolecule not set)
+          // This handles the case where m0 is removed and a1 should appear before m1
+          const isOrderZeroAndBeforeFirst = (typeof chip.order === 'number' && chip.order === 0) && 
+                                            beforeIndex === 0 && 
+                                            !chip.afterMoleculeId;
+          
+          if ((beforeIndex === 0 && chip.beforeFirstMolecule) || isOrderZeroAndBeforeFirst) {
             // Before first molecule
             chipsBeforeFirst.push(chipNode);
           } else if (beforeIndex > 0) {
@@ -757,6 +763,10 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       } else if (chip.afterLastMolecule) {
         // Chip is after the last molecule
         chipsAfterLast.push(chipNode);
+      } else if (typeof chip.order === 'number' && chip.order === 0 && !chip.afterMoleculeId) {
+        // FIX: If order = 0 and no afterMoleculeId, place before first molecule
+        // This handles the case where WorkflowMode sets order = 0 for chips before first molecule
+        chipsBeforeFirst.push(chipNode);
       } else if (typeof chip.position === 'number') {
         // FALLBACK: Use position-based logic for backward compatibility
         const position = chip.position;
@@ -782,19 +792,37 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       }
     });
     
-    // Sort chipsAfterMolecules by afterIndex, then by original chip order to maintain stable ordering
-    // This ensures chips with the same afterIndex maintain their relative positions
-    const chipOriginalOrder = new Map<string, number>();
-    standaloneChips.forEach((chip, index) => {
-      chipOriginalOrder.set(chip.id, index);
-    });
+    // FIX: Sort chips by order field (primary) and then by afterIndex (secondary)
+    // This ensures correct display order based on the order field from Laboratory Mode
+    const getChipOrder = (chipId: string): number => {
+      const chip = standaloneChips.find(c => c.id === chipId);
+      if (chip && typeof chip.order === 'number') {
+        return chip.order;
+      }
+      return Infinity; // Chips without order go to end
+    };
+    
+    // Sort chipsAfterMolecules: first by afterIndex (molecule position), then by order field
     chipsAfterMolecules.sort((a, b) => {
       if (a.afterIndex !== b.afterIndex) {
         return a.afterIndex - b.afterIndex;
       }
-      // Same afterIndex - maintain original chip order
-      const orderA = chipOriginalOrder.get(a.chip.data.id) ?? 0;
-      const orderB = chipOriginalOrder.get(b.chip.data.id) ?? 0;
+      // Same afterIndex - sort by order field
+      const orderA = getChipOrder(a.chip.data.id);
+      const orderB = getChipOrder(b.chip.data.id);
+      return orderA - orderB;
+    });
+    
+    // Also sort chipsBeforeFirst and chipsAfterLast by order field
+    chipsBeforeFirst.sort((a, b) => {
+      const orderA = getChipOrder(a.data.id);
+      const orderB = getChipOrder(b.data.id);
+      return orderA - orderB;
+    });
+    
+    chipsAfterLast.sort((a, b) => {
+      const orderA = getChipOrder(a.data.id);
+      const orderB = getChipOrder(b.data.id);
       return orderA - orderB;
     });
     
@@ -808,11 +836,13 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     
     // Add molecules and their associated chips
     let chipsAfterIndex = 0;
+    const lastMoleculeIndex = moleculeNodes.length - 1;
+    
     for (let i = 0; i < moleculeNodes.length; i++) {
       // Add molecule
       allNodes.push({ node: moleculeNodes[i], originalIndex: i, isChip: false });
       
-      // Add any chips that should appear after this molecule
+      // Add any chips that should appear after this molecule (between molecules)
       while (chipsAfterIndex < chipsAfterMolecules.length && chipsAfterMolecules[chipsAfterIndex].afterIndex === i) {
         const { chip: chipNode } = chipsAfterMolecules[chipsAfterIndex];
         if (!allNodes.find(an => an.node.id === chipNode.id)) {
@@ -820,9 +850,12 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         }
         chipsAfterIndex++;
       }
+      
     }
     
-    // Add chips after last molecule
+    // Add chips after last molecule (orphans that don't have a specific molecule reference)
+    // These are chips that were marked as "after last molecule" but their afterMoleculeId doesn't exist
+    // or chips with no references at all
     chipsAfterLast.forEach(chipNode => {
       if (!allNodes.find(an => an.node.id === chipNode.id)) {
         allNodes.push({ node: chipNode, originalIndex: -1, isChip: true });

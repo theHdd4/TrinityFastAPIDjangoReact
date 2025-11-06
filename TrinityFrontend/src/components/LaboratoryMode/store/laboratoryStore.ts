@@ -1597,6 +1597,9 @@ export interface LayoutCard {
   order?: number; // For positioning standalone cards between molecules
   afterMoleculeId?: string; // Reference to molecule this card is positioned after
   beforeMoleculeId?: string; // Reference to molecule this card is positioned before
+  betweenMolecules?: [string, string]; // [moleculeId1, moleculeId2] - card is between these two molecules
+  afterLastMolecule?: boolean; // true if card is after the last molecule (converted to betweenMolecules when new molecule added)
+  beforeFirstMolecule?: boolean; // true if card is before the first molecule
 }
 
 // GroupBy Atom Settings
@@ -1687,6 +1690,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
   auxPanelActive: null,
   setCards: (cards: LayoutCard[]) => {
+    // FIX: Ensure cards is always an array
+    if (!Array.isArray(cards)) {
+      console.error('[Laboratory Store] setCards called with non-array:', cards);
+      set({ cards: [] });
+      return;
+    }
     set({ cards });
   },
   
@@ -1700,9 +1709,15 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     // console.log('Store: settings to update:', settings);
     
     set((state) => {
+      // FIX: Ensure cards is always an array
+      if (!Array.isArray(state.cards)) {
+        console.error('[Laboratory Store] state.cards is not an array in updateAtomSettings:', state.cards);
+        return { cards: [] };
+      }
+      
       const updatedCards = state.cards.map((card) => ({
         ...card,
-        atoms: card.atoms.map((atom) =>
+        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) =>
           atom.id === atomId
             ? { 
                 ...atom, 
@@ -1712,7 +1727,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
                 } 
               }
             : atom,
-        ),
+        ) : [],
       }));
       
       return { cards: updatedCards };
@@ -1721,7 +1736,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   getAtom: (atomId: string) => {
     const state = get();
-    return state.cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
+    // FIX: Ensure cards is always an array
+    if (!Array.isArray(state.cards)) {
+      console.error('[Laboratory Store] state.cards is not an array in getAtom:', state.cards);
+      return undefined;
+    }
+    return state.cards.flatMap(card => Array.isArray(card.atoms) ? card.atoms : []).find(atom => atom.id === atomId);
   },
 
   reset: () => {

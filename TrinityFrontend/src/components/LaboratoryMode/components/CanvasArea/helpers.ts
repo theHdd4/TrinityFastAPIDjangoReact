@@ -124,8 +124,13 @@ export const buildUnifiedRenderArray = (
   // Separate cards
   const standaloneCards = layoutCards.filter(card => !card.moleculeId);
   
+  // Find active molecules (for beforeMoleculeId checks)
+  const activeMolecules = workflowMolecules.filter(m => m.isActive !== false);
+  const activeMoleculeIds = new Set(activeMolecules.map(m => m.moleculeId));
+  
   console.log('🔍 [buildUnifiedRenderArray] Starting build:', {
     totalMolecules: workflowMolecules.length,
+    activeMolecules: activeMolecules.length,
     totalStandaloneCards: standaloneCards.length,
     molecules: workflowMolecules.map((m, idx) => ({
       index: idx,
@@ -137,9 +142,60 @@ export const buildUnifiedRenderArray = (
     standaloneCards: standaloneCards.map(c => ({
       id: c.id,
       order: c.order,
+      beforeMoleculeId: c.beforeMoleculeId,
+      afterMoleculeId: c.afterMoleculeId,
       moleculeIndex: c.order !== undefined ? Math.floor(c.order / 1000) : 'none',
       subOrder: c.order !== undefined ? c.order % 1000 : 'none'
     }))
+  });
+  
+  // FIX: Handle cards that should appear BEFORE the first active molecule
+  // These cards have beforeMoleculeId pointing to the first active molecule (index 0)
+  // or order = 0 with no afterMoleculeId
+  const cardsBeforeFirstMolecule = standaloneCards.filter(card => {
+    // Check if card has beforeMoleculeId pointing to first active molecule
+    if (card.beforeMoleculeId && activeMolecules.length > 0) {
+      const firstActiveMolecule = activeMolecules[0];
+      if (card.beforeMoleculeId === firstActiveMolecule.moleculeId) {
+        // Also check if order is 0 (before first molecule)
+        const cardOrder = typeof card.order === 'number' ? card.order : -1;
+        if (cardOrder === 0 || !card.afterMoleculeId) {
+          return true;
+        }
+      }
+    }
+    // Check if order is 0 and no afterMoleculeId (should be before first)
+    if (card.order === 0 && !card.afterMoleculeId) {
+      return true;
+    }
+    return false;
+  });
+  
+  // Sort cards before first molecule by subOrder
+  cardsBeforeFirstMolecule.sort((a, b) => {
+    const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
+    const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
+    return subOrderA - subOrderB;
+  });
+  
+  // Add cards before first molecule with negative order (so they appear before molecule at order 0)
+  cardsBeforeFirstMolecule.forEach((standalone, index) => {
+    result.push({
+      type: 'standalone-card',
+      order: -1 - index, // Negative order to appear before molecule at order 0
+      moleculeIndex: -1, // Special marker for "before first molecule"
+      subOrder: standalone.order !== undefined ? standalone.order % 1000 : index,
+      cardId: standalone.id,
+      cardData: standalone
+    });
+    
+    console.log(`  ✅ Added standalone card BEFORE first molecule:`, {
+      cardId: standalone.id,
+      beforeMoleculeId: standalone.beforeMoleculeId,
+      order: standalone.order,
+      renderOrder: -1 - index,
+      position: `before first active molecule`
+    });
   });
   
   // Process ALL molecules (both active and inactive) in order
@@ -182,9 +238,22 @@ export const buildUnifiedRenderArray = (
     // Works for both active and inactive molecules
     // Cards reference the original moleculeIndex, so they stay in the same position
     // CRITICAL: We must preserve the EXACT original order value from the card
+    // EXCEPT: Skip cards that are already placed before the first molecule
+    const placedCardIds = new Set(result.map(r => r.cardId));
     const cardsAfterThisMolecule = standaloneCards.filter(card => {
+      // Skip if already placed before first molecule
+      if (placedCardIds.has(card.id)) {
+        return false;
+      }
       // Parse the order field to determine moleculeIndex
+      // BUT: Skip cards with order = 0 that should be before first molecule
       if (card.order !== undefined && typeof card.order === 'number') {
+        // Skip cards that are before first molecule (order = 0, no afterMoleculeId, beforeMoleculeId = first active)
+        if (card.order === 0 && !card.afterMoleculeId) {
+          if (card.beforeMoleculeId && activeMolecules.length > 0 && card.beforeMoleculeId === activeMolecules[0].moleculeId) {
+            return false; // Already handled above
+          }
+        }
         const cardMoleculeIndex = Math.floor(card.order / 1000);
         return cardMoleculeIndex === moleculeIndex;
       }
@@ -256,6 +325,7 @@ export const buildUnifiedRenderArray = (
   
   // Sort by order to ensure correct rendering order
   // This maintains absolute positions: m2 is always at 1000, m3 at 2000, etc.
+  // Cards before first molecule have negative order, so they appear first
   const sorted = result.sort((a, b) => a.order - b.order);
   
   console.log('📊 [buildUnifiedRenderArray] Final sorted render order:', 
