@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Plus, Play, X, Settings2, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info, DollarSign } from 'lucide-react';
+import { Plus, Play, X, Target, Zap, ChevronDown, ChevronRight, BarChart3, TrendingUp, AlertTriangle, Calculator, Minimize2, Maximize2, ArrowUp, ArrowDown, Filter as FilterIcon, Info, DollarSign } from 'lucide-react';
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BUILD_MODEL_API } from '@/lib/api';
@@ -43,7 +43,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
   onClose,
   atomId
 }) => {
-  const [scopeSectionExpanded, setScopeSectionExpanded] = useState(true);
   const [modelingSectionExpanded, setModelingSectionExpanded] = useState(true);
   const [minimizedCombinations, setMinimizedCombinations] = useState<Set<number>>(new Set());
   const [constraintSettingsOpen, setConstraintSettingsOpen] = useState(false);
@@ -534,14 +533,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     handleDataChange({ transformations: updatedTransformations });
   };
 
-  // Handle combination deselection from canvas
-  const removeCombination = (combinationToRemove: string) => {
-    const updatedCombinations = (finalData?.selectedCombinations || []).filter(
-      combination => combination !== combinationToRemove
-    );
-    handleDataChange({ selectedCombinations: updatedCombinations });
-  };
-
   // Handle opening combination file in new tab
   const handleOpenCombinationFile = async (combinationId: string) => {
     // Get the actual file path from the backend
@@ -1023,73 +1014,6 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
 
   return (
     <div className="w-full h-full bg-background p-6 overflow-y-auto">
-
-      {/* Scope Selected */}
-      <Card className="mb-6">
-        <div className="py-2 px-4 border-b bg-muted/30">
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-foreground flex items-center gap-2">
-              <Settings2 className="w-4 h-4 text-primary" />
-              Scope Selected
-            </h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setScopeSectionExpanded(!scopeSectionExpanded)}
-              className="h-6 w-6 p-0"
-            >
-              {scopeSectionExpanded ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronRight className="w-4 h-4" />
-              )}
-            </Button>
-          </div>
-        </div>
-                {scopeSectionExpanded && (
-          <div className="p-4">
-            <div className="grid grid-cols-3 gap-6">
-              {/* Selected Scope */}
-              <div className="col-span-1">
-                <h4 className="text-sm font-medium text-muted-foreground mb-2">Selected Scope:</h4>
-                {finalData?.selectedScope ? (
-                  <Badge variant="default" className="px-3 py-1">
-                    Scope {finalData.selectedScope}
-                  </Badge>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No scope selected</p>
-                )}
-              </div>
-
-              {/* Selected Combinations */}
-              <div className="col-span-2">
-                <h4 className="text-sm font-medium text-muted-foreground mb-2">Selected Combinations:</h4>
-                {finalData?.selectedCombinations && finalData.selectedCombinations.length > 0 ? (
-                  <div className="max-h-32 max-w-full overflow-y-auto overflow-x-auto border rounded p-2">
-                    <div className="flex flex-col gap-2">
-                    {finalData.selectedCombinations.map((combination, index) => (
-                        <Badge key={index} variant="secondary" className="px-3 py-1 flex items-center gap-1 whitespace-nowrap">
-                        {combination}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeCombination(combination)}
-                          className="h-4 w-4 p-0 ml-1 hover:bg-transparent"
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      </Badge>
-                    ))}
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No combinations selected</p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-      </Card>
 
       {/* Modeling */}
       <Card className="mb-6">
