@@ -3921,6 +3921,25 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 onAddAtom={(id, atom) => addAtomByName(id, atom)}
                                 disabled={card.atoms.length > 0}
                               />
+                              {card.atoms.length > 0 && (
+                                <button
+                                  onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                                  className="p-1 hover:bg-gray-100 rounded"
+                                  title="Card Settings"
+                                >
+                                  <Settings className="w-4 h-4 text-gray-400" />
+                                </button>
+                              )}
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  refreshCardAtoms(card.id);
+                                }}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Refresh Atom"
+                              >
+                                <RefreshCcw className="w-4 h-4 text-gray-400" />
+                              </button>
                             </div>
                             <div className="flex items-center space-x-2">
                               <button
@@ -4046,6 +4065,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                       <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                                     ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                                       <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'clustering' ? (
+                                      <ClusteringAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'scenario-planner' ? (
+                                      <ScenarioPlannerAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
