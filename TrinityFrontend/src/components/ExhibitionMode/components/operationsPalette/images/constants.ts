@@ -76,6 +76,9 @@ export const createImageSlideObject = (
       source,
       fullBleed: resolvedFullBleed,
       fit: 'cover',
+      flipX: false,
+      flipY: false,
+      // Legacy flags retained for compatibility with previously saved layouts.
       flipHorizontal: false,
       flipVertical: false,
       animate: false,
