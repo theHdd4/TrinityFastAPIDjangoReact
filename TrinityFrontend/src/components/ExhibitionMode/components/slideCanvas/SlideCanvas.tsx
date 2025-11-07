@@ -24,6 +24,8 @@ import {
   MessageSquarePlus,
   Edit3,
   Maximize2,
+  Crop,
+  ImagePlus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -104,6 +106,45 @@ import {
 import { resolveFeatureOverviewTransparency, resolveSlideBackground } from './background';
 import { formattingShallowEqual, readTableState, tableStatesEqual, type TableState } from './table';
 
+interface ImageCropInsets {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+const clampCropPercent = (value: number) => Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 95);
+
+const sanitizeImageCrop = (value: unknown): ImageCropInsets => {
+  if (!value || typeof value !== 'object') {
+    return { top: 0, right: 0, bottom: 0, left: 0 };
+  }
+
+  const candidate = value as Partial<ImageCropInsets>;
+  const top = clampCropPercent(candidate.top ?? 0);
+  const right = clampCropPercent(candidate.right ?? 0);
+  const bottom = clampCropPercent(candidate.bottom ?? 0);
+  const left = clampCropPercent(candidate.left ?? 0);
+
+  const minVisible = 5;
+  const maxTop = Math.max(0, 100 - minVisible - bottom);
+  const resolvedTop = Math.min(top, maxTop);
+  const maxBottom = Math.max(0, 100 - minVisible - resolvedTop);
+  const resolvedBottom = Math.min(bottom, maxBottom);
+  const maxLeft = Math.max(0, 100 - minVisible - right);
+  const resolvedLeft = Math.min(left, maxLeft);
+  const maxRight = Math.max(0, 100 - minVisible - resolvedLeft);
+  const resolvedRight = Math.min(right, maxRight);
+
+  const round = (input: number) => Math.round(input * 100) / 100;
+  return {
+    top: round(resolvedTop),
+    right: round(resolvedRight),
+    bottom: round(resolvedBottom),
+    left: round(resolvedLeft),
+  };
+};
+
 
 
 interface SlideCanvasProps {
@@ -157,6 +198,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }));
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
+  const [activeImageCropId, setActiveImageCropId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
   const [canvasDimensions, setCanvasDimensions] = useState({
@@ -2239,14 +2281,69 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [updateImageProps],
     );
 
-    const handleToggleImageFlip = useCallback(
-      (objectId: string) => {
+    const handleFlipImage = useCallback(
+      (objectId: string, axis: 'horizontal' | 'vertical') => {
         updateImageProps(objectId, props => ({
           ...props,
-          flipHorizontal: !(props.flipHorizontal === true),
+          flipHorizontal:
+            axis === 'horizontal' ? !(props.flipHorizontal === true) : props.flipHorizontal === true,
+          flipVertical:
+            axis === 'vertical' ? !(props.flipVertical === true) : props.flipVertical === true,
         }));
       },
       [updateImageProps],
+    );
+
+    const handleSetImageOpacity = useCallback(
+      (objectId: string, value: number) => {
+        const clamped = Math.min(Math.max(Number.isFinite(value) ? value : 1, 0), 1);
+        updateImageProps(objectId, props => ({
+          ...props,
+          opacity: clamped,
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleSetImageCrop = useCallback(
+      (objectId: string, nextCrop: ImageCropInsets) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          crop: sanitizeImageCrop(nextCrop),
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleResetImageCrop = useCallback(
+      (objectId: string) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          crop: sanitizeImageCrop({ top: 0, right: 0, bottom: 0, left: 0 }),
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleToggleImageCrop = useCallback(
+      (objectId: string) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'image') {
+          return;
+        }
+
+        if (isSlideObjectLocked(object)) {
+          toast({
+            title: 'Image locked',
+            description: 'Unlock the image to crop it.',
+          });
+          return;
+        }
+
+        setActiveImageCropId(prev => (prev === objectId ? null : objectId));
+        onInteract();
+      },
+      [objectsMap, onInteract],
     );
 
     const handleToggleImageAnimation = useCallback(
@@ -2639,6 +2736,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         onTextToolbarChange?.(null);
       };
     }, [onTextToolbarChange]);
+
+    useEffect(() => {
+      if (!activeImageCropId) {
+        return;
+      }
+
+      const target = objectsMap.get(activeImageCropId);
+      if (!target || target.type !== 'image' || !selectedIds.includes(activeImageCropId) || !canEdit) {
+        setActiveImageCropId(null);
+      }
+    }, [activeImageCropId, canEdit, objectsMap, selectedIds]);
 
     const handleTextToolbarStateChange = useCallback(
       (objectId: string, node: ReactNode | null) => {
@@ -4030,12 +4138,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               isImageObject && typeof rawImageProps.fit === 'string' && rawImageProps.fit.toLowerCase() === 'contain'
                 ? 'contain'
                 : 'cover';
-            const isImageFlipped = isImageObject && rawImageProps.flipHorizontal === true;
+            const imageFlipHorizontal = isImageObject && rawImageProps.flipHorizontal === true;
+            const imageFlipVertical = isImageObject && rawImageProps.flipVertical === true;
+            const imageOpacity = isImageObject && typeof rawImageProps.opacity === 'number'
+              ? Math.min(Math.max(rawImageProps.opacity, 0), 1)
+              : 1;
+            const imageCropInsets = isImageObject
+              ? sanitizeImageCrop((rawImageProps as { crop?: unknown }).crop)
+              : sanitizeImageCrop(null);
             const isImageAnimated = isImageObject && rawImageProps.animate === true;
+            const isCroppingImage = isImageObject && activeImageCropId === object.id;
             const isEditingTextBox =
               isTextBoxObject &&
               editingTextState?.id === object.id &&
               editingTextState.type === 'text-box';
+            const objectLocked = isSlideObjectLocked(object);
             const shouldElevate =
               isSelected ||
               isEditingTextBox ||
@@ -4257,15 +4374,23 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       }
                       fullBleed={isFullBleedImage}
                       fitMode={imageFitMode}
-                      isFlipped={isImageFlipped}
+                      isCropping={isCroppingImage}
+                      flipHorizontal={imageFlipHorizontal}
+                      flipVertical={imageFlipVertical}
                       isAnimated={isImageAnimated}
+                      opacity={imageOpacity}
+                      cropInsets={imageCropInsets}
                       onInteract={onInteract}
                       onToolbarStateChange={handleTextToolbarStateChange}
                       onToggleFit={() => handleToggleImageFit(object.id)}
-                      onToggleFlip={() => handleToggleImageFlip(object.id)}
+                      onToggleCrop={() => handleToggleImageCrop(object.id)}
+                      onFlipHorizontal={() => handleFlipImage(object.id, 'horizontal')}
+                      onFlipVertical={() => handleFlipImage(object.id, 'vertical')}
                       onToggleAnimate={() => handleToggleImageAnimation(object.id)}
                       onRequestPositionPanel={() => handleRequestPositionPanel(object.id)}
-                      onRequestReplace={() => handleReplaceImage(object.id)}
+                      onOpacityChange={value => handleSetImageOpacity(object.id, value)}
+                      onCropChange={next => handleSetImageCrop(object.id, next)}
+                      onResetCrop={() => handleResetImageCrop(object.id)}
                       onBringForward={() => handleLayerAction('forward', [object.id])}
                       onSendBackward={() => handleLayerAction('backward', [object.id])}
                       onBringToFront={() => handleLayerAction('front', [object.id])}
@@ -4342,7 +4467,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 )}
               </div>
 
-              {canEdit && isSelected && !isEditingTextBox && !isSlideObjectLocked(object) &&
+              {canEdit &&
+                isSelected &&
+                !isEditingTextBox &&
+                !objectLocked &&
+                !(isImageObject && activeImageCropId === object.id) &&
                 handleDefinitions.map(definition => (
                   <span
                     key={definition.handle}
@@ -4398,6 +4527,89 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               )
             : undefined;
 
+          const additionalMenuItems: Array<{ key: string; render: (closeMenu: () => void) => React.ReactNode }> = [];
+
+          if (isImageObject) {
+            additionalMenuItems.push({
+              key: 'replace-image',
+              render: closeMenu => (
+                <ContextMenuItem
+                  disabled={!canEdit || objectLocked}
+                  onSelect={event => {
+                    event.preventDefault();
+                    closeMenu();
+                    if (!canEdit || objectLocked) {
+                      return;
+                    }
+                    handleReplaceImage(object.id);
+                  }}
+                  className="gap-3"
+                >
+                  <ImagePlus className="h-4 w-4" />
+                  Replace image
+                </ContextMenuItem>
+              ),
+            });
+
+            additionalMenuItems.push({
+              key: 'toggle-crop',
+              render: closeMenu => (
+                <ContextMenuItem
+                  disabled={!canEdit || objectLocked}
+                  onSelect={event => {
+                    event.preventDefault();
+                    closeMenu();
+                    handleToggleImageCrop(object.id);
+                  }}
+                  className="gap-3"
+                >
+                  <Crop className="h-4 w-4" />
+                  {isCroppingImage ? 'Exit crop mode' : 'Crop image'}
+                </ContextMenuItem>
+              ),
+            });
+          }
+
+          if (isChartObject) {
+            additionalMenuItems.push({
+              key: 'edit-chart',
+              render: closeMenu => (
+                <ContextMenuItem
+                  disabled={
+                    !canEdit ||
+                    !chartProps ||
+                    !isEditableChartType(chartProps.chartConfig.type)
+                  }
+                  onSelect={event => {
+                    event.preventDefault();
+                    const isValidTarget =
+                      canEdit &&
+                      chartProps &&
+                      isEditableChartType(chartProps.chartConfig.type);
+                    const payload = isValidTarget
+                      ? {
+                          objectId: object.id,
+                          data: chartProps.chartData,
+                          config: chartProps.chartConfig,
+                        }
+                      : null;
+                    closeMenu();
+                    if (!payload) {
+                      return;
+                    }
+                    setTimeout(() => {
+                      setChartEditorTarget(payload);
+                    }, 0);
+                  }}
+                  className="gap-3"
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Edit chart data
+                </ContextMenuItem>
+              ),
+            });
+          }
+
           return (
             <SlideObjectContextMenu
               key={object.id}
@@ -4436,41 +4648,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               disableComment={selectionLocked}
               disableApplyColors={!canApplyColorsGlobally}
               renderAdditionalContent={
-                isChartObject
-                  ? closeMenu => (
-                      <ContextMenuItem
-                        disabled={
-                          !canEdit ||
-                          !chartProps ||
-                          !isEditableChartType(chartProps.chartConfig.type)
-                        }
-                        onSelect={event => {
-                          event.preventDefault();
-                          const isValidTarget =
-                            canEdit &&
-                            chartProps &&
-                            isEditableChartType(chartProps.chartConfig.type);
-                          const payload = isValidTarget
-                            ? {
-                                objectId: object.id,
-                                data: chartProps.chartData,
-                                config: chartProps.chartConfig,
-                              }
-                            : null;
-                          closeMenu();
-                          if (!payload) {
-                            return;
-                          }
-                          setTimeout(() => {
-                            setChartEditorTarget(payload);
-                          }, 0);
-                        }}
-                        className="gap-3"
-                      >
-                        <Edit3 className="h-4 w-4" />
-                        Edit chart data
-                      </ContextMenuItem>
-                    )
+                additionalMenuItems.length > 0
+                  ? closeMenu =>
+                      additionalMenuItems.map(item => (
+                        <React.Fragment key={item.key}>{item.render(closeMenu)}</React.Fragment>
+                      ))
                   : undefined
               }
               renderPostLockContent={renderPostLockContent}

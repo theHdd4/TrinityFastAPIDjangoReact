@@ -185,19 +185,20 @@
 }
 
 .slide-image-visual {
-  --image-flip-scale: 1;
-  transform: scaleX(var(--image-flip-scale));
-  transition: transform 0.45s ease, filter 0.45s ease;
+  --image-flip-scale-x: 1;
+  --image-flip-scale-y: 1;
+  transform: scaleX(var(--image-flip-scale-x)) scaleY(var(--image-flip-scale-y));
+  transition: transform 0.45s ease, filter 0.45s ease, clip-path 0.35s ease;
 }
 
 @keyframes slide-image-float {
   0%,
   100% {
-    transform: scaleX(var(--image-flip-scale)) translateY(0) scale(1);
+    transform: scaleX(var(--image-flip-scale-x)) scaleY(var(--image-flip-scale-y)) translateY(0) scale(1);
   }
 
   50% {
-    transform: scaleX(var(--image-flip-scale)) translateY(-6px) scale(1.02);
+    transform: scaleX(var(--image-flip-scale-x)) scaleY(var(--image-flip-scale-y)) translateY(-6px) scale(1.02);
   }
 }
 
