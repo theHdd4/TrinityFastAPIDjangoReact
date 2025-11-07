@@ -2218,14 +2218,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
-        handleCanvasInteraction();
+        onInteract();
         onBulkUpdate({
           [objectId]: {
             props: nextProps,
           },
         });
       },
-      [onBulkUpdate, handleCanvasInteraction, objectsMap],
+        [onBulkUpdate, onInteract, objectsMap],
     );
 
     const handleToggleImageFit = useCallback(
@@ -4288,7 +4288,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onRequestEdit={
                         canEdit
                           ? () => {
-                              handleCanvasInteraction();
+                              onInteract();
                               setChartEditorTarget({
                                 objectId: object.id,
                                 data: chartProps.chartData,
