@@ -198,7 +198,6 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   }));
   const [activeTextToolbar, setActiveTextToolbar] = useState<ReactNode | null>(null);
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
-  const [activeImageCropId, setActiveImageCropId] = useState<string | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
   const [canvasDimensions, setCanvasDimensions] = useState({
@@ -1815,6 +1814,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     );
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [activeImageCropId, setActiveImageCropId] = useState<string | null>(null);
     const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
     const [editingTextState, setEditingTextState] = useState<EditingTextState | null>(null);
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
