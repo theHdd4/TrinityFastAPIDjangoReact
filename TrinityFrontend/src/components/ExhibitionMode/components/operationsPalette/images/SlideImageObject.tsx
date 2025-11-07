@@ -115,6 +115,7 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
 }) => {
   const handleToolbarMouseDown = (event: React.MouseEvent) => {
     event.preventDefault();
+    event.stopPropagation();
   };
 
   const controlChipClasses = (active?: boolean) =>
@@ -414,6 +415,31 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   } | null>(null);
   const [isCropDragging, setIsCropDragging] = useState(false);
   const normalizedCrop = useMemo(() => normalizeCropInsets(cropInsets), [cropInsets]);
+  const [localFitMode, setLocalFitMode] = useState<'cover' | 'contain'>(fitMode);
+  const [localFlipHorizontal, setLocalFlipHorizontal] = useState<boolean>(flipHorizontal);
+  const [localFlipVertical, setLocalFlipVertical] = useState<boolean>(flipVertical);
+  const [localAnimated, setLocalAnimated] = useState<boolean>(isAnimated);
+  const [localOpacity, setLocalOpacity] = useState<number>(clampOpacity(opacity));
+
+  useEffect(() => {
+    setLocalFitMode(fitMode);
+  }, [fitMode]);
+
+  useEffect(() => {
+    setLocalFlipHorizontal(flipHorizontal);
+  }, [flipHorizontal]);
+
+  useEffect(() => {
+    setLocalFlipVertical(flipVertical);
+  }, [flipVertical]);
+
+  useEffect(() => {
+    setLocalAnimated(isAnimated);
+  }, [isAnimated]);
+
+  useEffect(() => {
+    setLocalOpacity(clampOpacity(opacity));
+  }, [opacity]);
 
   const handleBringForward = useCallback(() => {
     onInteract();
@@ -439,9 +465,11 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     if (!onToggleFit) {
       return;
     }
+    const nextFit = localFitMode === 'contain' ? 'cover' : 'contain';
+    setLocalFitMode(nextFit);
     onInteract();
     onToggleFit();
-  }, [onInteract, onToggleFit]);
+  }, [localFitMode, onInteract, onToggleFit]);
 
   const handleToggleCrop = useCallback(() => {
     if (!onToggleCrop) {
@@ -455,6 +483,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     if (!onFlipHorizontal) {
       return;
     }
+    setLocalFlipHorizontal(previous => !previous);
     onInteract();
     onFlipHorizontal();
   }, [onFlipHorizontal, onInteract]);
@@ -463,6 +492,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     if (!onFlipVertical) {
       return;
     }
+    setLocalFlipVertical(previous => !previous);
     onInteract();
     onFlipVertical();
   }, [onFlipVertical, onInteract]);
@@ -472,8 +502,10 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       if (!onOpacityChange) {
         return;
       }
+      const clamped = clampOpacity(value);
+      setLocalOpacity(clamped);
       onInteract();
-      onOpacityChange(value);
+      onOpacityChange(clamped);
     },
     [onInteract, onOpacityChange],
   );
@@ -482,6 +514,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     if (!onToggleAnimate) {
       return;
     }
+    setLocalAnimated(previous => !previous);
     onInteract();
     onToggleAnimate();
   }, [onInteract, onToggleAnimate]);
@@ -623,12 +656,12 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       <ImageToolbar
         name={name}
         previewSrc={src}
-        fitMode={fitMode}
+        fitMode={localFitMode}
         isCropping={isCropping}
-        flipHorizontal={flipHorizontal}
-        flipVertical={flipVertical}
-        isAnimated={isAnimated}
-        opacity={opacity}
+        flipHorizontal={localFlipHorizontal}
+        flipVertical={localFlipVertical}
+        isAnimated={localAnimated}
+        opacity={localOpacity}
         onToggleFit={onToggleFit ? handleToggleFit : undefined}
         onToggleCrop={onToggleCrop ? handleToggleCrop : undefined}
         onFlipHorizontal={onFlipHorizontal ? handleFlipHorizontal : undefined}
@@ -645,7 +678,6 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     );
   }, [
     canEdit,
-    fitMode,
     handleBringForward,
     handleSendBackward,
     handleBringToFront,
@@ -657,11 +689,12 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     handleFlipVertical,
     handleOpacityChange,
     handleRequestPosition,
-    isAnimated,
-    flipHorizontal,
-    flipVertical,
+    localAnimated,
+    localFlipHorizontal,
+    localFlipVertical,
+    localFitMode,
     isCropping,
-    opacity,
+    localOpacity,
     name,
     onRequestPositionPanel,
     onToggleAnimate,
@@ -719,12 +752,12 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
 
   const imageStyle = useMemo<React.CSSProperties>(
     () => ({
-      '--image-flip-scale-x': flipHorizontal ? -1 : 1,
-      '--image-flip-scale-y': flipVertical ? -1 : 1,
-      opacity: clampOpacity(opacity),
+      '--image-flip-scale-x': localFlipHorizontal ? -1 : 1,
+      '--image-flip-scale-y': localFlipVertical ? -1 : 1,
+      opacity: clampOpacity(localOpacity),
       clipPath: clipPathValue,
     }),
-    [clipPathValue, flipHorizontal, flipVertical, opacity],
+    [clipPathValue, localFlipHorizontal, localFlipVertical, localOpacity],
   );
 
   const cropCornerHandles = useMemo(
@@ -763,8 +796,8 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
             alt={resolvedName}
             className={cn(
               'slide-image-visual h-full w-full object-cover',
-              fitMode === 'contain' ? 'object-contain' : 'object-cover',
-              isAnimated && 'animate-slide-image',
+              localFitMode === 'contain' ? 'object-contain' : 'object-cover',
+              localAnimated && 'animate-slide-image',
             )}
             style={imageStyle}
           />
