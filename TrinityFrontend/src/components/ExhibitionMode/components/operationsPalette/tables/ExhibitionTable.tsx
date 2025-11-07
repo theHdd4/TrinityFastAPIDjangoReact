@@ -18,6 +18,9 @@ import {
   type TableSelectionPoint,
   type TableStyleDefinition,
   DEFAULT_TABLE_STYLE_ID,
+  DEFAULT_TABLE_COLUMN_WIDTH,
+  MIN_TABLE_COLUMN_WIDTH,
+  MAX_TABLE_COLUMN_WIDTH,
 } from './constants';
 import { ExhibitionTableTray } from './ExhibitionTableTray';
 
@@ -29,6 +32,7 @@ export interface ExhibitionTableProps {
   showOutline?: boolean;
   rows?: number;
   cols?: number;
+  columnWidths?: number[];
   selectedCell?: TableSelection | null;
   onCellSelect?: (selection: TableSelection | null) => void;
   onUpdateCell?: (row: number, col: number, value: string) => void;
@@ -53,6 +57,7 @@ export interface ExhibitionTableProps {
   onToolbarStateChange?: (toolbar: React.ReactNode | null) => void;
   onInteract?: () => void;
   onStyleChange?: (styleId: string) => void;
+  onUpdateColumnWidth?: (colIndex: number, width: number) => void;
   onBringToFront?: () => void;
   onBringForward?: () => void;
   onSendBackward?: () => void;
@@ -116,6 +121,42 @@ const stripListPrefix = (line: string): string => {
     return line.replace(NUMBERED_PATTERN, '');
   }
   return line;
+};
+
+const clampColumnWidthValue = (value: number | undefined): number => {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_TABLE_COLUMN_WIDTH;
+  }
+
+  const rounded = Math.round(value!);
+  if (!Number.isFinite(rounded)) {
+    return DEFAULT_TABLE_COLUMN_WIDTH;
+  }
+  if (rounded < MIN_TABLE_COLUMN_WIDTH) {
+    return MIN_TABLE_COLUMN_WIDTH;
+  }
+  if (rounded > MAX_TABLE_COLUMN_WIDTH) {
+    return MAX_TABLE_COLUMN_WIDTH;
+  }
+  return rounded;
+};
+
+const buildColumnWidthsForCount = (count: number, source?: number[]): number[] => {
+  if (count <= 0) {
+    return [];
+  }
+
+  return Array.from({ length: count }, (_, index) => clampColumnWidthValue(source?.[index]));
+};
+
+const columnWidthArraysEqual = (a: number[], b: number[]): boolean => {
+  if (a === b) {
+    return true;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
 };
 
 const toggleBulletedListContent = (value: string): string => {
@@ -428,6 +469,9 @@ interface EditableTableCellProps {
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
   onInteract?: () => void;
+  columnWidth?: number;
+  minColumnWidth?: number;
+  maxColumnWidth?: number;
 }
 
 const EditableTableCell: React.FC<EditableTableCellProps> = ({
@@ -446,6 +490,9 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   onChange,
   onCommit,
   onInteract,
+  columnWidth,
+  minColumnWidth,
+  maxColumnWidth,
 }) => {
   const editable = canEdit && !locked;
 
@@ -500,6 +547,9 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
         textAlign: formatting.align,
         backgroundColor: isActive ? undefined : backgroundColor,
         borderColor: showOutline ? borderColor : 'transparent',
+        width: columnWidth,
+        minWidth: minColumnWidth,
+        maxWidth: maxColumnWidth,
       }}
       onPointerDown={handlePointerDown}
       onPointerEnter={handlePointerEnter}
@@ -537,6 +587,11 @@ interface EditableHeaderCellProps {
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
   onInteract?: () => void;
+  columnWidth?: number;
+  minColumnWidth?: number;
+  maxColumnWidth?: number;
+  canResize?: boolean;
+  onResizeStart?: (event: React.PointerEvent<HTMLDivElement>) => void;
 }
 
 const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
@@ -554,8 +609,14 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
   onChange,
   onCommit,
   onInteract,
+  columnWidth,
+  minColumnWidth,
+  maxColumnWidth,
+  canResize,
+  onResizeStart,
 }) => {
   const editable = canEdit && !locked;
+  const enableResizeHandle = Boolean(canResize && onResizeStart);
 
   const selectionTarget = useMemo<SelectionTarget>(
     () => ({ region: 'header', row: -1, col: colIndex }),
@@ -599,7 +660,7 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
   return (
     <th
       className={cn(
-        'align-middle transition-colors border',
+        'group relative align-middle transition-colors border',
         editable ? 'cursor-text' : 'cursor-default',
         isActive && 'outline outline-2 outline-primary/60',
       )}
@@ -607,6 +668,9 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
         textAlign: formatting.align,
         backgroundColor: isActive ? undefined : backgroundColor,
         borderColor: showOutline ? borderColor : 'transparent',
+        width: columnWidth,
+        minWidth: minColumnWidth,
+        maxWidth: maxColumnWidth,
       }}
       onPointerDown={handlePointerDown}
       onPointerEnter={handlePointerEnter}
@@ -616,6 +680,16 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
         }
       }}
     >
+      {enableResizeHandle && (
+        <div
+          role="presentation"
+          className="absolute inset-y-0 right-0 z-20 w-3 translate-x-1/2 cursor-col-resize touch-none"
+          data-exhibition-table-resizer="true"
+          onPointerDown={event => onResizeStart?.(event)}
+        >
+          <span className="pointer-events-none absolute left-1/2 top-1/2 hidden h-6 w-px -translate-x-1/2 -translate-y-1/2 bg-border group-hover:block" />
+        </div>
+      )}
       <ContentEditableCell
         value={cell?.content ?? ''}
         formatting={formatting}
@@ -638,6 +712,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   canEdit = true,
   rows,
   cols,
+  columnWidths: columnWidthsProp,
   selectedCell,
   onCellSelect = noop,
   onUpdateCell,
@@ -661,6 +736,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onToolbarStateChange,
   onInteract = noop,
   onStyleChange = noop,
+  onUpdateColumnWidth,
   onBringToFront,
   onBringForward,
   onSendBackward,
@@ -794,6 +870,161 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
     const dataCount = data[0]?.length ?? 0;
     return Math.max(headerCount, dataCount);
   }, [cols, headers, data]);
+
+  const [columnWidthState, setColumnWidthState] = useState<number[]>(() =>
+    buildColumnWidthsForCount(colCount, columnWidthsProp),
+  );
+  const columnWidthsRef = useRef<number[]>(columnWidthState);
+  const resizingColumnRef = useRef<
+    { index: number; startX: number; startWidth: number; pointerId: number; target: Element | null } | null
+  >(null);
+  const pendingColumnWidthRef = useRef<{ index: number; width: number } | null>(null);
+  const activeResizeHandlersRef = useRef<{ move: (event: PointerEvent) => void; up: () => void } | null>(null);
+
+  useEffect(() => {
+    columnWidthsRef.current = columnWidthState;
+  }, [columnWidthState]);
+
+  useEffect(() => {
+    if (resizingColumnRef.current) {
+      return;
+    }
+
+    const nextWidths = buildColumnWidthsForCount(colCount, columnWidthsProp);
+    if (!columnWidthArraysEqual(columnWidthsRef.current, nextWidths)) {
+      columnWidthsRef.current = nextWidths;
+      setColumnWidthState(nextWidths);
+    }
+  }, [colCount, columnWidthsProp]);
+
+  useEffect(() => {
+    return () => {
+      const handlers = activeResizeHandlersRef.current;
+      if (handlers && typeof window !== 'undefined') {
+        window.removeEventListener('pointermove', handlers.move);
+        window.removeEventListener('pointerup', handlers.up);
+      }
+
+      if (typeof document !== 'undefined') {
+        document.body.style.cursor = '';
+      }
+
+      const resizeState = resizingColumnRef.current;
+      if (resizeState?.target && typeof resizeState.target.releasePointerCapture === 'function') {
+        try {
+          resizeState.target.releasePointerCapture(resizeState.pointerId);
+        } catch {
+          // Ignore release errors
+        }
+      }
+
+      activeResizeHandlersRef.current = null;
+      resizingColumnRef.current = null;
+      pendingColumnWidthRef.current = null;
+    };
+  }, []);
+
+  const handleColumnResizeStart = useCallback(
+    (colIndex: number, pointerEvent: React.PointerEvent<HTMLDivElement>) => {
+      if (!canEdit || locked) {
+        return;
+      }
+
+      pointerEvent.preventDefault();
+      pointerEvent.stopPropagation();
+
+      const startWidth = clampColumnWidthValue(columnWidthsRef.current[colIndex]);
+      const startX = pointerEvent.clientX;
+
+      const targetElement = pointerEvent.currentTarget instanceof Element ? pointerEvent.currentTarget : null;
+      resizingColumnRef.current = {
+        index: colIndex,
+        startX,
+        startWidth,
+        pointerId: pointerEvent.pointerId,
+        target: targetElement,
+      };
+      pendingColumnWidthRef.current = { index: colIndex, width: startWidth };
+
+      onInteract();
+
+      const moveListener = (event: PointerEvent) => {
+        const resizeState = resizingColumnRef.current;
+        if (!resizeState) {
+          return;
+        }
+
+        const delta = event.clientX - resizeState.startX;
+        const nextWidth = clampColumnWidthValue(resizeState.startWidth + delta);
+        pendingColumnWidthRef.current = { index: resizeState.index, width: nextWidth };
+
+        setColumnWidthState(prev => {
+          if (prev[resizeState.index] === nextWidth) {
+            return prev;
+          }
+          const next = [...prev];
+          next[resizeState.index] = nextWidth;
+          columnWidthsRef.current = next;
+          return next;
+        });
+      };
+
+      const stopResizing = () => {
+        if (typeof document !== 'undefined') {
+          document.body.style.cursor = '';
+        }
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('pointermove', moveListener);
+          window.removeEventListener('pointerup', stopResizing);
+        }
+        activeResizeHandlersRef.current = null;
+
+        const resizeState = resizingColumnRef.current;
+        if (resizeState?.target && typeof resizeState.target.releasePointerCapture === 'function') {
+          try {
+            resizeState.target.releasePointerCapture(resizeState.pointerId);
+          } catch {
+            // Ignore release errors
+          }
+        }
+
+        const pendingWidth = pendingColumnWidthRef.current;
+        if (pendingWidth && pendingWidth.index === colIndex) {
+          onUpdateColumnWidth?.(pendingWidth.index, pendingWidth.width);
+        }
+
+        pendingColumnWidthRef.current = null;
+        resizingColumnRef.current = null;
+      };
+
+      if (typeof document !== 'undefined') {
+        document.body.style.cursor = 'col-resize';
+      }
+
+      if (typeof window !== 'undefined') {
+        const handlers = activeResizeHandlersRef.current;
+        if (handlers) {
+          window.removeEventListener('pointermove', handlers.move);
+          window.removeEventListener('pointerup', handlers.up);
+        }
+
+        window.addEventListener('pointermove', moveListener);
+        window.addEventListener('pointerup', stopResizing);
+        activeResizeHandlersRef.current = { move: moveListener, up: stopResizing };
+      }
+
+      if (targetElement && typeof targetElement.setPointerCapture === 'function') {
+        try {
+          targetElement.setPointerCapture(pointerEvent.pointerId);
+        } catch {
+          // Ignore capture errors
+        }
+      }
+    },
+    [canEdit, locked, onInteract, onUpdateColumnWidth],
+  );
+
+  const allowColumnResize = canEdit && !locked;
 
   const tableData = useMemo(() => {
     return Array.from({ length: rowCount }, (_, rowIndex) => {
@@ -1189,6 +1420,20 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
             }}
             data-table-id={id}
           >
+            {columnWidthState.length > 0 && (
+              <colgroup>
+                {columnWidthState.map((width, colIndex) => (
+                  <col
+                    key={`${id}-col-${colIndex}`}
+                    style={{
+                      width: `${width}px`,
+                      minWidth: `${MIN_TABLE_COLUMN_WIDTH}px`,
+                      maxWidth: `${MAX_TABLE_COLUMN_WIDTH}px`,
+                    }}
+                  />
+                ))}
+              </colgroup>
+            )}
             {headerCells.length > 0 && (
               <thead className="bg-transparent">
                 <tr>
@@ -1218,6 +1463,15 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                         onChange={value => handleHeaderInput(headerIndex, value)}
                         onCommit={value => handleHeaderCommit(headerIndex, value)}
                         onInteract={onInteract}
+                        columnWidth={columnWidthState[headerIndex]}
+                        minColumnWidth={MIN_TABLE_COLUMN_WIDTH}
+                        maxColumnWidth={MAX_TABLE_COLUMN_WIDTH}
+                        canResize={allowColumnResize}
+                        onResizeStart={
+                          allowColumnResize
+                            ? event => handleColumnResizeStart(headerIndex, event)
+                            : undefined
+                        }
                       />
                     );
                   })}
@@ -1259,6 +1513,9 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                           onChange={value => handleBodyCellInput(rowIndex, colIndex, value)}
                           onCommit={value => handleBodyCellCommit(rowIndex, colIndex, value)}
                           onInteract={onInteract}
+                          columnWidth={columnWidthState[colIndex]}
+                          minColumnWidth={MIN_TABLE_COLUMN_WIDTH}
+                          maxColumnWidth={MAX_TABLE_COLUMN_WIDTH}
                         />
                       );
                     })}

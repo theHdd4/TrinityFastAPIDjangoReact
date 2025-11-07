@@ -74,6 +74,9 @@ import {
   createEmptyCell,
   createEmptyTableRow,
   ensureTableStyleId,
+  DEFAULT_TABLE_COLUMN_WIDTH,
+  MIN_TABLE_COLUMN_WIDTH,
+  MAX_TABLE_COLUMN_WIDTH,
   type TableCellFormatting,
 } from '../operationsPalette/tables/constants';
 import {
@@ -2811,6 +2814,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               showOutline: nextState.showOutline,
               headers: nextState.headers,
               styleId: nextState.styleId,
+              columnWidths: nextState.columnWidths,
             },
           },
         });
@@ -2940,6 +2944,49 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [mutateTableState],
     );
 
+    const updateTableColumnWidth = useCallback(
+      (objectId: string, colIndex: number, width: number) => {
+        mutateTableState(objectId, state => {
+          if (colIndex < 0 || colIndex >= state.cols) {
+            return state;
+          }
+
+          const numericWidth = Number(width);
+          const roundedWidth = Number.isFinite(numericWidth)
+            ? Math.round(numericWidth)
+            : DEFAULT_TABLE_COLUMN_WIDTH;
+          const clampedWidth = Math.min(
+            Math.max(roundedWidth, MIN_TABLE_COLUMN_WIDTH),
+            MAX_TABLE_COLUMN_WIDTH,
+          );
+
+          const nextColumnWidths = Array.from({ length: state.cols }, (_, index) => {
+            const existing = state.columnWidths[index];
+            if (!Number.isFinite(existing)) {
+              return DEFAULT_TABLE_COLUMN_WIDTH;
+            }
+            const rounded = Math.round(existing);
+            if (!Number.isFinite(rounded)) {
+              return DEFAULT_TABLE_COLUMN_WIDTH;
+            }
+            return Math.min(Math.max(rounded, MIN_TABLE_COLUMN_WIDTH), MAX_TABLE_COLUMN_WIDTH);
+          });
+
+          if (nextColumnWidths[colIndex] === clampedWidth) {
+            return state;
+          }
+
+          nextColumnWidths[colIndex] = clampedWidth;
+
+          return {
+            ...state,
+            columnWidths: nextColumnWidths,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
     const toggleTableLock = useCallback(
       (objectId: string) => {
         mutateTableState(objectId, state => ({
@@ -3016,12 +3063,15 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           );
           const nextHeaders = [...existingHeaders, ...headerAdditions];
           const nextCols = nextHeaders.length;
+          const widthAdditions = Array.from({ length: count }, () => DEFAULT_TABLE_COLUMN_WIDTH);
+          const nextColumnWidths = [...state.columnWidths, ...widthAdditions];
 
           return {
             ...state,
             data: nextData,
             cols: nextCols,
             headers: nextHeaders,
+            columnWidths: nextColumnWidths,
           };
         });
       },
@@ -3086,6 +3136,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           const nextHeaders = remainingHeaders.filter(
             (_, index) => index < safeStart || index >= safeStart + actualCount,
           );
+          const nextColumnWidths = state.columnWidths.filter(
+            (_, index) => index < safeStart || index >= safeStart + actualCount,
+          );
           const nextCols = nextHeaders.length;
 
           return {
@@ -3093,6 +3146,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             data: nextData,
             cols: nextCols,
             headers: nextHeaders,
+            columnWidths: nextColumnWidths,
           };
         });
       },
@@ -4297,10 +4351,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                         onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
                       }
                       onContextMenu={event => handleContextMenuRequest(event, object.id)}
-                      onBringToFront={() => handleLayerAction('front', [object.id])}
-                      onBringForward={() => handleLayerAction('forward', [object.id])}
-                      onSendBackward={() => handleLayerAction('backward', [object.id])}
-                      onSendToBack={() => handleLayerAction('back', [object.id])}
                     />
                   ) : isTableObject && tableState ? (
                     <ExhibitionTable
@@ -4309,6 +4359,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       data={tableState.data}
                       rows={tableState.rows}
                       cols={tableState.cols}
+                      columnWidths={tableState.columnWidths}
                       locked={tableState.locked}
                       showOutline={tableState.showOutline}
                       styleId={tableState.styleId}
@@ -4322,6 +4373,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onUpdateHeader={(col, value) => updateTableHeaderContent(object.id, col, value)}
                       onUpdateHeaderFormatting={(col, updates) =>
                         updateTableHeaderFormatting(object.id, col, updates)
+                      }
+                      onUpdateColumnWidth={(col, width) =>
+                        updateTableColumnWidth(object.id, col, width)
                       }
                       onToggleLock={() => toggleTableLock(object.id)}
                       onToggleOutline={() => toggleTableOutline(object.id)}

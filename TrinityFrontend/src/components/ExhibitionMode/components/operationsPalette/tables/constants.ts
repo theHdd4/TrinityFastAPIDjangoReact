@@ -5,6 +5,9 @@ export const DEFAULT_TABLE_ROWS = 3;
 export const DEFAULT_TABLE_COLS = 3;
 export const DEFAULT_TABLE_WIDTH = 420;
 export const DEFAULT_TABLE_HEIGHT = 260;
+export const DEFAULT_TABLE_COLUMN_WIDTH = 150;
+export const MIN_TABLE_COLUMN_WIDTH = 72;
+export const MAX_TABLE_COLUMN_WIDTH = 640;
 
 export type TableTextAlign = 'left' | 'center' | 'right';
 
@@ -104,6 +107,31 @@ const isRecord = (value: unknown): value is Record<string, unknown> => {
 const parseNumber = (value: unknown): number | undefined => {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : undefined;
+};
+
+const clampColumnWidth = (value: unknown): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_TABLE_COLUMN_WIDTH;
+  }
+
+  const rounded = Math.round(numeric);
+  if (rounded < MIN_TABLE_COLUMN_WIDTH) {
+    return MIN_TABLE_COLUMN_WIDTH;
+  }
+  if (rounded > MAX_TABLE_COLUMN_WIDTH) {
+    return MAX_TABLE_COLUMN_WIDTH;
+  }
+  return rounded;
+};
+
+export const normaliseTableColumnWidths = (value: unknown, count: number): number[] => {
+  if (count <= 0) {
+    return [];
+  }
+
+  const source = Array.isArray(value) ? value : [];
+  return Array.from({ length: count }, (_, index) => clampColumnWidth(source[index]));
 };
 
 const normaliseAlign = (value: unknown): TableTextAlign => {
@@ -643,8 +671,11 @@ export const createTableSlideObject = (
     cols,
     locked: Boolean(tableOptions.locked),
     showOutline: tableOptions.showOutline !== false,
+    columnWidths: normaliseTableColumnWidths(tableOptions.columnWidths, cols),
     ...(overrideProps ?? {}),
   };
+
+  props.columnWidths = normaliseTableColumnWidths(props.columnWidths, cols);
 
   return {
     id,
