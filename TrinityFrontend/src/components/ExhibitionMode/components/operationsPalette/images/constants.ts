@@ -77,6 +77,7 @@ export const createImageSlideObject = (
       fullBleed: resolvedFullBleed,
       fit: 'cover',
       flipHorizontal: false,
+      flipVertical: false,
       animate: false,
       ...restPropOverrides,
     },
