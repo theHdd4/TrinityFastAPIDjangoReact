@@ -2219,13 +2219,13 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
 
         handleCanvasInteraction();
-        handleBulkUpdate({
+        onBulkUpdate({
           [objectId]: {
             props: nextProps,
           },
         });
       },
-      [handleBulkUpdate, handleCanvasInteraction, objectsMap],
+      [onBulkUpdate, handleCanvasInteraction, objectsMap],
     );
 
     const handleToggleImageFit = useCallback(
