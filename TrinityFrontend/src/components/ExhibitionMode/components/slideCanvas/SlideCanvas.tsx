@@ -58,7 +58,7 @@ import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from '../operationsPa
 import type { TextBoxFormatting } from '../operationsPalette/textBox/types';
 import { TextBoxPositionPanel } from '../operationsPalette/textBox/TextBoxPositionPanel';
 import { CardFormattingPanel } from '../operationsPalette/CardFormattingPanel';
-import { ExhibitionTable } from '../operationsPalette/tables/ExhibitionTable';
+import { ExhibitionTable, type TableCellEditTarget } from '../operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from '../operationsPalette/shapes';
 import type { ShapeObjectProps } from '../operationsPalette/shapes/constants';
 import { ChartDataEditor, parseChartObjectProps, isEditableChartType } from '../operationsPalette/charts';
@@ -2859,7 +2859,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const handleEditingValueChange = useCallback(
       (value: string) => {
         setEditingTextState(prev => {
-          if (!prev || prev.value === value) {
+          if (!prev || prev.type !== 'text-box' || prev.value === value) {
             return prev;
           }
           onInteract();
@@ -2867,6 +2867,74 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         });
       },
       [onInteract],
+    );
+
+    const beginEditingTableCell = useCallback(
+      (objectId: string, target: TableCellEditTarget) => {
+        if (!canEdit) {
+          return;
+        }
+
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'table') {
+          return;
+        }
+
+        onInteract();
+        setSelectedIds(prev => {
+          if (prev.length === 1 && prev[0] === objectId) {
+            return prev;
+          }
+          return [objectId];
+        });
+
+        setEditingTextState(prev => {
+          if (
+            prev &&
+            prev.type === 'table-cell' &&
+            prev.id === objectId &&
+            prev.region === target.region &&
+            prev.row === target.row &&
+            prev.col === target.col
+          ) {
+            return prev;
+          }
+
+          return {
+            id: objectId,
+            type: 'table-cell',
+            region: target.region,
+            row: target.row,
+            col: target.col,
+          };
+        });
+      },
+      [canEdit, objectsMap, onInteract],
+    );
+
+    const endEditingTableCell = useCallback(
+      (objectId: string, target: TableCellEditTarget) => {
+        setEditingTextState(prev => {
+          if (!prev || prev.type !== 'table-cell') {
+            return prev;
+          }
+
+          if (prev.id !== objectId) {
+            return prev;
+          }
+
+          if (
+            prev.region !== target.region ||
+            prev.row !== target.row ||
+            prev.col !== target.col
+          ) {
+            return prev;
+          }
+
+          return null;
+        });
+      },
+      [],
     );
 
     const handleObjectDoubleClick = useCallback(
@@ -3264,6 +3332,15 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         const targetElement = event.target instanceof Element ? event.target : null;
         const editableTableCell = targetElement?.closest('[data-exhibition-table-cell-content="true"]');
+        const tableCellContainer = targetElement?.closest('[data-exhibition-table-cell-region]');
+        const cellRegionAttr = tableCellContainer?.getAttribute('data-exhibition-table-cell-region');
+        const cellRowAttr = tableCellContainer?.getAttribute('data-exhibition-table-cell-row');
+        const cellColAttr = tableCellContainer?.getAttribute('data-exhibition-table-cell-col');
+        const parsedRow = typeof cellRowAttr === 'string' ? Number(cellRowAttr) : null;
+        const parsedCol = typeof cellColAttr === 'string' ? Number(cellColAttr) : null;
+        const hasValidRow = parsedRow !== null && !Number.isNaN(parsedRow);
+        const hasValidCol = parsedCol !== null && !Number.isNaN(parsedCol);
+        const parsedRegion = cellRegionAttr === 'header' || cellRegionAttr === 'body' ? cellRegionAttr : null;
 
         const targetObject = objectsMap.get(objectId);
         const isLocked = isSlideObjectLocked(targetObject);
@@ -3280,7 +3357,15 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         if (editableTableCell) {
           event.stopPropagation();
-          if (editingTextState) {
+          const isEditingSameCell =
+            editingTextState?.type === 'table-cell' &&
+            editingTextState.id === objectId &&
+            parsedRegion === editingTextState.region &&
+            hasValidRow &&
+            hasValidCol &&
+            editingTextState.row === parsedRow &&
+            editingTextState.col === parsedCol;
+          if (editingTextState && !isEditingSameCell) {
             commitEditingText();
           }
           onInteract();
@@ -3829,6 +3914,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
             const tableState = isTableObject ? readTableState(object) : null;
+            const editingTableCell =
+              isTableObject &&
+              editingTextState?.type === 'table-cell' &&
+              editingTextState.id === object.id
+                ? {
+                    region: editingTextState.region,
+                    row: editingTextState.row,
+                    col: editingTextState.col,
+                  }
+                : null;
             const chartProps = isChartObject
               ? parseChartObjectProps(object.props as Record<string, unknown> | undefined)
               : null;
@@ -4002,6 +4097,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onBringForward={() => handleLayerAction('forward', [object.id])}
                       onSendBackward={() => handleLayerAction('backward', [object.id])}
                       onSendToBack={() => handleLayerAction('back', [object.id])}
+                      onBeginCellTextEdit={target => beginEditingTableCell(object.id, target)}
+                      onEndCellTextEdit={target => endEditingTableCell(object.id, target)}
+                      editingCell={editingTableCell}
                       className="h-full w-full"
                     />
                   ) : isShapeObject ? (

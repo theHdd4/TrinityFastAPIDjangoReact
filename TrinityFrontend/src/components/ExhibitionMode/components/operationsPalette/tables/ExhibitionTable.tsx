@@ -62,6 +62,9 @@ export interface ExhibitionTableProps {
   onBringForward?: () => void;
   onSendBackward?: () => void;
   onSendToBack?: () => void;
+  onBeginCellTextEdit?: (target: TableCellEditTarget) => void;
+  onEndCellTextEdit?: (target: TableCellEditTarget) => void;
+  editingCell?: TableCellEditTarget | null;
 }
 
 const noop = () => {};
@@ -229,7 +232,13 @@ const applyStyleTextColor = (
   };
 };
 
-type SelectionRegion = TableSelection['region'];
+export type SelectionRegion = TableSelection['region'];
+
+export interface TableCellEditTarget {
+  region: SelectionRegion;
+  row: number;
+  col: number;
+}
 
 interface SelectionTarget {
   region: SelectionRegion;
@@ -334,6 +343,7 @@ interface ContentEditableCellProps {
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
   onInteract?: () => void;
+  onBlur?: () => void;
 }
 
 const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
@@ -344,6 +354,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
   onChange,
   onCommit,
   onInteract,
+  onBlur,
 }) => {
   const elementRef = useRef<HTMLDivElement | null>(null);
   const lastValueRef = useRef<string>('');
@@ -405,7 +416,8 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
       return;
     }
     emitCommit();
-  }, [editable, emitCommit]);
+    onBlur?.();
+  }, [editable, emitCommit, onBlur]);
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
@@ -472,6 +484,9 @@ interface EditableTableCellProps {
   columnWidth?: number;
   minColumnWidth?: number;
   maxColumnWidth?: number;
+  onEnterEditMode?: (target: SelectionTarget) => void;
+  onExitEditMode?: (target: SelectionTarget) => void;
+  isEditing?: boolean;
 }
 
 const EditableTableCell: React.FC<EditableTableCellProps> = ({
@@ -493,6 +508,9 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   columnWidth,
   minColumnWidth,
   maxColumnWidth,
+  onEnterEditMode,
+  onExitEditMode,
+  isEditing,
 }) => {
   const editable = canEdit && !locked;
 
@@ -508,7 +526,8 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
       }
 
       const targetElement = event.target as HTMLElement | null;
-      if (!event.shiftKey && targetElement?.dataset.exhibitionTableCellContent !== 'true') {
+      const isDoubleClick = event.detail > 1;
+      if (!event.shiftKey && !isDoubleClick && targetElement?.dataset.exhibitionTableCellContent !== 'true') {
         event.preventDefault();
       }
 
@@ -535,6 +554,43 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
     }
   }, [editable, onInteract, onSelectionStart, selectionTarget]);
 
+  const handleDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLTableCellElement>) => {
+      if (!editable) {
+        return;
+      }
+
+      event.stopPropagation();
+      onSelectionStart(selectionTarget);
+      onEnterEditMode?.(selectionTarget);
+      onInteract?.();
+
+      const content = event.currentTarget.querySelector<HTMLElement>(
+        '[data-exhibition-table-cell-content="true"]',
+      );
+      if (content && typeof content.focus === 'function') {
+        content.focus({ preventScroll: true });
+        const ownerDocument = content.ownerDocument;
+        if (
+          ownerDocument &&
+          typeof ownerDocument.createRange === 'function' &&
+          typeof ownerDocument.getSelection === 'function'
+        ) {
+          try {
+            const range = ownerDocument.createRange();
+            range.selectNodeContents(content);
+            const selection = ownerDocument.getSelection();
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          } catch {
+            // Ignore selection errors
+          }
+        }
+      }
+    },
+    [editable, onEnterEditMode, onInteract, onSelectionStart, selectionTarget],
+  );
+
   return (
     <td
       className={cn(
@@ -543,6 +599,9 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
         isActive && 'outline outline-2 outline-primary/60',
       )}
       data-exhibition-table-cell={editable ? 'editable' : 'readonly'}
+      data-exhibition-table-cell-row={rowIndex}
+      data-exhibition-table-cell-col={colIndex}
+      data-exhibition-table-cell-region="body"
       style={{
         textAlign: formatting.align,
         backgroundColor: isActive ? undefined : backgroundColor,
@@ -558,6 +617,7 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
           onInteract?.();
         }
       }}
+      onDoubleClick={handleDoubleClick}
     >
       <ContentEditableCell
         value={cell?.content ?? ''}
@@ -567,6 +627,11 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
         onChange={onChange}
         onCommit={onCommit}
         onInteract={onInteract}
+        onBlur={() => {
+          if (editable && isEditing) {
+            onExitEditMode?.(selectionTarget);
+          }
+        }}
       />
     </td>
   );
@@ -592,6 +657,9 @@ interface EditableHeaderCellProps {
   maxColumnWidth?: number;
   canResize?: boolean;
   onResizeStart?: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onEnterEditMode?: (target: SelectionTarget) => void;
+  onExitEditMode?: (target: SelectionTarget) => void;
+  isEditing?: boolean;
 }
 
 const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
@@ -614,6 +682,9 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
   maxColumnWidth,
   canResize,
   onResizeStart,
+  onEnterEditMode,
+  onExitEditMode,
+  isEditing,
 }) => {
   const editable = canEdit && !locked;
   const enableResizeHandle = Boolean(canResize && onResizeStart);
@@ -630,7 +701,8 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
       }
 
       const targetElement = event.target as HTMLElement | null;
-      if (!event.shiftKey && targetElement?.dataset.exhibitionTableCellContent !== 'true') {
+      const isDoubleClick = event.detail > 1;
+      if (!event.shiftKey && !isDoubleClick && targetElement?.dataset.exhibitionTableCellContent !== 'true') {
         event.preventDefault();
       }
 
@@ -657,6 +729,43 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
     }
   }, [editable, onInteract, onSelectionStart, selectionTarget]);
 
+  const handleDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLTableCellElement>) => {
+      if (!editable) {
+        return;
+      }
+
+      event.stopPropagation();
+      onSelectionStart(selectionTarget);
+      onEnterEditMode?.(selectionTarget);
+      onInteract?.();
+
+      const content = event.currentTarget.querySelector<HTMLElement>(
+        '[data-exhibition-table-cell-content="true"]',
+      );
+      if (content && typeof content.focus === 'function') {
+        content.focus({ preventScroll: true });
+        const ownerDocument = content.ownerDocument;
+        if (
+          ownerDocument &&
+          typeof ownerDocument.createRange === 'function' &&
+          typeof ownerDocument.getSelection === 'function'
+        ) {
+          try {
+            const range = ownerDocument.createRange();
+            range.selectNodeContents(content);
+            const selection = ownerDocument.getSelection();
+            selection?.removeAllRanges();
+            selection?.addRange(range);
+          } catch {
+            // Ignore selection errors
+          }
+        }
+      }
+    },
+    [editable, onEnterEditMode, onInteract, onSelectionStart, selectionTarget],
+  );
+
   return (
     <th
       className={cn(
@@ -679,6 +788,10 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
           onInteract?.();
         }
       }}
+      onDoubleClick={handleDoubleClick}
+      data-exhibition-table-cell-row={-1}
+      data-exhibition-table-cell-col={colIndex}
+      data-exhibition-table-cell-region="header"
     >
       {enableResizeHandle && (
         <div
@@ -698,6 +811,11 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
         onChange={onChange}
         onCommit={onCommit}
         onInteract={onInteract}
+        onBlur={() => {
+          if (editable && isEditing) {
+            onExitEditMode?.(selectionTarget);
+          }
+        }}
       />
     </th>
   );
@@ -741,6 +859,9 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onBringForward,
   onSendBackward,
   onSendToBack,
+  onBeginCellTextEdit,
+  onEndCellTextEdit,
+  editingCell = null,
 }) => {
   const [internalSelection, setInternalSelection] = useState<TableSelection | null>(null);
   const [toolbarFormatting, setToolbarFormatting] = useState<TableCellFormatting>(DEFAULT_CELL_FORMATTING);
@@ -1472,6 +1593,15 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                             ? event => handleColumnResizeStart(headerIndex, event)
                             : undefined
                         }
+                        onEnterEditMode={onBeginCellTextEdit}
+                        onExitEditMode={onEndCellTextEdit}
+                        isEditing={
+                          Boolean(
+                            editingCell &&
+                              editingCell.region === 'header' &&
+                              editingCell.col === headerIndex,
+                          )
+                        }
                       />
                     );
                   })}
@@ -1516,6 +1646,16 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                           columnWidth={columnWidthState[colIndex]}
                           minColumnWidth={MIN_TABLE_COLUMN_WIDTH}
                           maxColumnWidth={MAX_TABLE_COLUMN_WIDTH}
+                          onEnterEditMode={onBeginCellTextEdit}
+                          onExitEditMode={onEndCellTextEdit}
+                          isEditing={
+                            Boolean(
+                              editingCell &&
+                                editingCell.region === 'body' &&
+                                editingCell.row === rowIndex &&
+                                editingCell.col === colIndex,
+                            )
+                          }
                         />
                       );
                     })}
