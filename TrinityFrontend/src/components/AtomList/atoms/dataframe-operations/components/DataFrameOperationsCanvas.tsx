@@ -50,6 +50,8 @@ import {
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
 import FormularBar from './FormularBar';
+import CollapsibleFormulaBar from './CollapsibleFormulaBar';
+import DataFrameCardinalityView from './DataFrameCardinalityView';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 
 interface DataFrameOperationsCanvasProps {
@@ -3543,7 +3545,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       />
 
       <div id={`atom-${atomId}`} ref={containerRef} className="w-full h-full p-6 overflow-y-auto" style={{position: 'relative'}}>
-        <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm w-full">
+        <style>{`
+          #atom-${atomId} .table-base th,
+          #atom-${atomId} .table-base td {
+            min-width: 3rem !important;
+          }
+        `}</style>
+        <div className="mx-auto w-full rounded-2xl border border-slate-200 bg-white shadow-sm">
         {/* File name display in separate blue header section */}
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
@@ -3557,6 +3565,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
+        {/* Cardinality view (aligned with Column Classifier) */}
+        {data && data.headers && data.headers.length > 0 && (
+          <div className="border-b border-slate-200 px-5 py-4">
+            <DataFrameCardinalityView data={data} atomId={atomId} />
+          </div>
+        )}
+
         {/* Controls section */}
             <div 
               className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3"
@@ -3747,31 +3762,22 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 }}
               >
                 <div className="flex-1 min-w-0">
-                  <div className="relative w-full" style={{ position: 'relative', zIndex: 1 }}>
-                    <FormularBar
-                      data={data}
-                      selectedCell={selectedCell}
-                      selectedColumn={selectedColumn}
-                      formulaInput={formulaInput}
-                      isFormulaMode={isFormulaMode}
-                      isFormulaBarFrozen={isFormulaBarFrozen}
-                      formulaValidationError={formulaValidationError}
-                      onSelectedCellChange={setSelectedCell}
-                      onSelectedColumnChange={setSelectedColumn}
-                      onFormulaInputChange={setFormulaInput}
-                      onFormulaModeChange={setIsFormulaMode}
-                      onFormulaSubmit={handleFormulaSubmit}
-                      onValidationError={showValidationError}
-                    />
-                    {formulaLoading && (
-                      <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10">
-                        <div className="flex items-center space-x-2 text-sm text-slate-700">
-                          <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                          <span>Processing formula...</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <CollapsibleFormulaBar
+                    data={data}
+                    selectedCell={selectedCell}
+                    selectedColumn={selectedColumn}
+                    formulaInput={formulaInput}
+                    isFormulaMode={isFormulaMode}
+                    isFormulaBarFrozen={isFormulaBarFrozen}
+                    formulaValidationError={formulaValidationError}
+                    onSelectedCellChange={setSelectedCell}
+                    onSelectedColumnChange={setSelectedColumn}
+                    onFormulaInputChange={setFormulaInput}
+                    onFormulaModeChange={setIsFormulaMode}
+                    onFormulaSubmit={handleFormulaSubmit}
+                    onValidationError={showValidationError}
+                    formulaLoading={formulaLoading}
+                  />
                 </div>
                 <button
                   onClick={() => setFindReplaceModalOpen(true)}
