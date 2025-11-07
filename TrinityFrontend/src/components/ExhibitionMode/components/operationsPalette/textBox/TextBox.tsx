@@ -22,10 +22,6 @@ interface SlideTextBoxObjectProps {
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
   onRequestPositionPanel?: () => void;
   onContextMenu?: (event: React.MouseEvent<HTMLDivElement>) => void;
-  onBringForward?: () => void;
-  onSendBackward?: () => void;
-  onBringToFront?: () => void;
-  onSendToBack?: () => void;
 }
 
 const clampFontSize = (value: number) => Math.min(Math.max(value, 8), 200);
@@ -154,10 +150,6 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   onInteract,
   onToolbarStateChange,
   onRequestPositionPanel,
-  onBringForward,
-  onSendBackward,
-  onBringToFront,
-  onSendToBack,
 }) => {
   const textRef = useRef<HTMLDivElement | null>(null);
   const selectionRangeRef = useRef<Range | null>(null);
@@ -456,26 +448,6 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     [hasEditableSelection, isEditing, onInteract, runCommand, updateFormatting],
   );
 
-  const handleBringForward = useCallback(() => {
-    onInteract();
-    onBringForward?.();
-  }, [onBringForward, onInteract]);
-
-  const handleSendBackward = useCallback(() => {
-    onInteract();
-    onSendBackward?.();
-  }, [onInteract, onSendBackward]);
-
-  const handleBringToFront = useCallback(() => {
-    onInteract();
-    onBringToFront?.();
-  }, [onBringToFront, onInteract]);
-
-  const handleSendToBack = useCallback(() => {
-    onInteract();
-    onSendToBack?.();
-  }, [onInteract, onSendToBack]);
-
   const handleIncreaseFontSize = useCallback(() => {
     const next = clampFontSize(localFormatting.fontSize + 2);
     if (applyFontSizeToSelection(next)) {
@@ -580,10 +552,6 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
         onRequestAnimate={() => {}}
         onRequestPosition={() => onRequestPositionPanel?.()}
         onDelete={onDelete}
-        onBringForward={handleBringForward}
-        onSendBackward={handleSendBackward}
-        onBringToFront={handleBringToFront}
-        onSendToBack={handleSendToBack}
       />
     ),
     [
@@ -596,10 +564,6 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       handleNumberedList,
       handleIncreaseFontSize,
       handleToggle,
-      handleBringForward,
-      handleSendBackward,
-      handleBringToFront,
-      handleSendToBack,
       localFormatting.align,
       localFormatting.bold,
       localFormatting.color,

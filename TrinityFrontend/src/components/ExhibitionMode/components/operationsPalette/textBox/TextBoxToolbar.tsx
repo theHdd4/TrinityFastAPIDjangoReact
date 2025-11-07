@@ -3,10 +3,7 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
-  ArrowBigDown,
-  ArrowBigUp,
   Bold,
-  BringToFront,
   Check,
   ChevronDown,
   FileText,
@@ -19,7 +16,6 @@ import {
   Move,
   Plus,
   Search,
-  SendToBack,
   Sparkles,
   Strikethrough,
   Trash2,
@@ -107,10 +103,6 @@ interface TextBoxToolbarProps {
   onRequestAnimate?: () => void;
   onRequestPosition?: () => void;
   onDelete?: () => void;
-  onBringForward?: () => void;
-  onSendBackward?: () => void;
-  onBringToFront?: () => void;
-  onSendToBack?: () => void;
 }
 
 export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
@@ -138,10 +130,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   onRequestAnimate,
   onRequestPosition,
   onDelete,
-  onBringForward,
-  onSendBackward,
-  onBringToFront,
-  onSendToBack,
 }) => {
   const [activeFilter, setActiveFilter] = useState<FontFilterChipId | null>(null);
   const [activeTab, setActiveTab] = useState<'font' | 'styles'>('font');
@@ -191,17 +179,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         ? 'bg-emerald-500 text-white shadow-sm'
         : 'bg-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground',
     );
-
-  const layerButtons = useMemo(
-    () =>
-      [
-        { id: 'forward', icon: ArrowBigUp, handler: onBringForward },
-        { id: 'backward', icon: ArrowBigDown, handler: onSendBackward },
-        { id: 'front', icon: BringToFront, handler: onBringToFront },
-        { id: 'back', icon: SendToBack, handler: onSendToBack },
-      ].filter(entry => typeof entry.handler === 'function'),
-    [onBringForward, onSendBackward, onBringToFront, onSendToBack],
-  );
 
   const controlChipClasses = 'h-8 shrink-0 rounded-full px-2.5 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40';
   const tabButtonClasses = (tab: 'font' | 'styles') =>
@@ -697,30 +674,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
           Position
         </Button>
       </div>
-
-      {layerButtons.length > 0 && (
-        <>
-          <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
-          <div className="flex items-center gap-1">
-            {layerButtons.map(entry => {
-              const Icon = entry.icon;
-              return (
-                <Button
-                  key={entry.id}
-                  variant="ghost"
-                  size="icon"
-                  type="button"
-                  className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-                  onClick={entry.handler as () => void}
-                  onMouseDown={handleToolbarMouseDown}
-                >
-                  <Icon className="h-4 w-4" />
-                </Button>
-              );
-            })}
-          </div>
-        </>
-      )}
 
       {onDelete && (
         <>
