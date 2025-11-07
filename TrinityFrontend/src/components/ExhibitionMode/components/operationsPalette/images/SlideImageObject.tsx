@@ -751,12 +751,18 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   }, [hasCrop, normalizedCrop.bottom, normalizedCrop.left, normalizedCrop.right, normalizedCrop.top]);
 
   const imageStyle = useMemo<React.CSSProperties>(
-    () => ({
-      '--image-flip-scale-x': localFlipHorizontal ? -1 : 1,
-      '--image-flip-scale-y': localFlipVertical ? -1 : 1,
-      opacity: clampOpacity(localOpacity),
-      clipPath: clipPathValue,
-    }),
+    () => {
+      const scaleX = localFlipHorizontal ? -1 : 1;
+      const scaleY = localFlipVertical ? -1 : 1;
+
+      return {
+        '--image-flip-scale-x': `${scaleX}`,
+        '--image-flip-scale-y': `${scaleY}`,
+        transform: `scaleX(${scaleX}) scaleY(${scaleY})`,
+        opacity: clampOpacity(localOpacity),
+        clipPath: clipPathValue,
+      } as React.CSSProperties;
+    },
     [clipPathValue, localFlipHorizontal, localFlipVertical, localOpacity],
   );
 
