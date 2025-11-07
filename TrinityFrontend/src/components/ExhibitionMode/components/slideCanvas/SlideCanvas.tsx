@@ -2283,13 +2283,30 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
     const handleFlipImage = useCallback(
       (objectId: string, axis: 'horizontal' | 'vertical') => {
-        updateImageProps(objectId, props => ({
-          ...props,
-          flipHorizontal:
-            axis === 'horizontal' ? !(props.flipHorizontal === true) : props.flipHorizontal === true,
-          flipVertical:
-            axis === 'vertical' ? !(props.flipVertical === true) : props.flipVertical === true,
-        }));
+        updateImageProps(objectId, props => {
+          const currentFlipX = props.flipX === true || props.flipHorizontal === true;
+          const currentFlipY = props.flipY === true || props.flipVertical === true;
+
+          if (axis === 'horizontal') {
+            const nextFlipX = !currentFlipX;
+            return {
+              ...props,
+              flipX: nextFlipX,
+              flipHorizontal: nextFlipX,
+              flipY: currentFlipY,
+              flipVertical: currentFlipY,
+            };
+          }
+
+          const nextFlipY = !currentFlipY;
+          return {
+            ...props,
+            flipX: currentFlipX,
+            flipHorizontal: currentFlipX,
+            flipY: nextFlipY,
+            flipVertical: nextFlipY,
+          };
+        });
       },
       [updateImageProps],
     );
@@ -4138,8 +4155,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               isImageObject && typeof rawImageProps.fit === 'string' && rawImageProps.fit.toLowerCase() === 'contain'
                 ? 'contain'
                 : 'cover';
-            const imageFlipHorizontal = isImageObject && rawImageProps.flipHorizontal === true;
-            const imageFlipVertical = isImageObject && rawImageProps.flipVertical === true;
+            const imageFlipHorizontal =
+              isImageObject && (rawImageProps.flipX === true || rawImageProps.flipHorizontal === true);
+            const imageFlipVertical =
+              isImageObject && (rawImageProps.flipY === true || rawImageProps.flipVertical === true);
             const imageOpacity = isImageObject && typeof rawImageProps.opacity === 'number'
               ? Math.min(Math.max(rawImageProps.opacity, 0), 1)
               : 1;

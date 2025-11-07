@@ -759,6 +759,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
         '--image-flip-scale-x': `${scaleX}`,
         '--image-flip-scale-y': `${scaleY}`,
         transform: `scaleX(${scaleX}) scaleY(${scaleY})`,
+        transformOrigin: 'center center',
         opacity: clampOpacity(localOpacity),
         clipPath: clipPathValue,
       } as React.CSSProperties;
