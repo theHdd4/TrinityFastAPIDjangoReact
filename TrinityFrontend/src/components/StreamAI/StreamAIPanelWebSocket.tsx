@@ -784,16 +784,29 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                 if (handler && handler.handleSuccess) {
                   console.log(`✅ Calling ${data.atom_id} handler.handleSuccess`);
                   
-                  const handlerContext = {
-                    atomId: atomInstanceId,
-                    atomType: data.atom_id,
-                    atomTitle: atomInfo?.title || data.atom_id,
-                    updateAtomSettings: (id: string, settings: any) => {
-                      useLaboratoryStore.getState().updateAtomSettings(id, settings);
-                    },
-                    setMessages: () => {},
-                    sessionId: data.sequence_id
-                  };
+                const handlerContext = {
+                  atomId: atomInstanceId,
+                  atomType: data.atom_id,
+                  atomTitle: atomInfo?.title || data.atom_id,
+                  updateAtomSettings: (id: string, settings: any) => {
+                    useLaboratoryStore.getState().updateAtomSettings(id, settings);
+                  },
+                  setMessages: (updater: (prev: any[]) => any[]) => {
+                    setMessages(prev => {
+                      const next = updater(prev);
+                      if (!Array.isArray(next)) {
+                        console.warn('Handler setMessages updater did not return an array. Skipping message update.');
+                        return prev;
+                      }
+                      return next.map(msg => ({
+                        ...msg,
+                        timestamp: msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp),
+                      }));
+                    });
+                  },
+                  sessionId: data.sequence_id,
+                  isStreamMode: false,
+                };
                   
                   await handler.handleSuccess(data.result, handlerContext);
                   

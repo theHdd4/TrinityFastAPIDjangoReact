@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { X, Check, Plus } from 'lucide-react';
+import { X, Check, Plus, FastForward } from 'lucide-react';
 
 interface StreamStepApprovalProps {
   stepNumber: number;
@@ -10,6 +10,8 @@ interface StreamStepApprovalProps {
   onAccept: () => void;
   onReject: () => void;
   onAdd: (additionalInfo: string) => void;
+  onRunAll: () => void;
+  isAutoRunning: boolean;
 }
 
 const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
@@ -18,7 +20,9 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
   stepDescription,
   onAccept,
   onReject,
-  onAdd
+  onAdd,
+  onRunAll,
+  isAutoRunning
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [additionalInfo, setAdditionalInfo] = useState('');
@@ -57,32 +61,51 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex gap-2 pt-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
           <Button
             onClick={onReject}
             variant="outline"
-            className="flex-1 h-10 border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-medium font-inter rounded-xl transition-all duration-200 text-sm"
+            className="h-11 w-full border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-medium font-inter rounded-xl transition-all duration-200 text-sm"
           >
             <X className="w-4 h-4 mr-1" />
             Reject
           </Button>
-          
+
           <Button
             onClick={handleAddClick}
-            className="flex-1 h-10 bg-gradient-to-r from-[#FFBD59] to-[#FFA726] hover:from-[#FFA726] hover:to-[#FF9800] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
+            className="h-11 w-full bg-gradient-to-r from-[#FFBD59] to-[#FFA726] hover:from-[#FFA726] hover:to-[#FF9800] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
           >
             <Plus className="w-4 h-4 mr-1" />
             Add
           </Button>
-          
+
           <Button
             onClick={onAccept}
-            className="flex-1 h-10 bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
+            className="h-11 w-full bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
           >
             <Check className="w-4 h-4 mr-1" />
             Continue
           </Button>
+
+          <Button
+            onClick={() => {
+              if (!isAutoRunning) {
+                onRunAll();
+              }
+            }}
+            className="h-11 w-full bg-gradient-to-r from-[#458EE2] to-[#3C7CC5] hover:from-[#3C7CC5] hover:to-[#356CB0] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm disabled:opacity-70 disabled:hover:scale-100"
+            disabled={isAutoRunning}
+          >
+            <FastForward className="w-4 h-4 mr-1" />
+            {isAutoRunning ? 'Auto-running' : 'Run All'}
+          </Button>
         </div>
+
+        {isAutoRunning && (
+          <p className="text-xs text-[#458EE2] font-inter font-medium text-center">
+            Auto-run in progress. Steps advance automatically.
+          </p>
+        )}
       </div>
 
       {/* Add Info Modal */}
