@@ -54,11 +54,11 @@ spec:
           mountPath: /var/lib/postgresql/data
         resources:
           requests:
-            memory: "512Mi"      # Optimized: Buffer pool minimum
-            cpu: "500m"          # Baseline for query processing
+            memory: "1Gi"
+            cpu: "1000m"
           limits:
-            memory: "2Gi"        # Increased for query cache
-            cpu: "2000m"         # 2 CPU for complex queries
+            memory: "4Gi"
+            cpu: "3000m"
         livenessProbe:
           exec:
             command:

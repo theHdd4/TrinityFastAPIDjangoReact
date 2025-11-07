@@ -4,7 +4,7 @@ metadata:
   name: celery-staging
   namespace: trinity-staging
 spec:
-  replicas: 1  # Reduced for Docker Desktop memory constraints
+  replicas: 2
   selector:
     matchLabels:
       app: celery-staging
@@ -76,11 +76,11 @@ spec:
               key: minio-secret-key
         resources:
           requests:
-            memory: "512Mi"      # Optimized: Task processing memory
-            cpu: "250m"          # Low baseline for workers
+            memory: "1024Mi"
+            cpu: "500m"
           limits:
-            memory: "1Gi"        # Headroom for heavy tasks
-            cpu: "1000m"         # 1 CPU for compute tasks
+            memory: "2Gi"
+            cpu: "1500m"
         livenessProbe:
           exec:
             command:
@@ -91,6 +91,7 @@ spec:
             - ping
           initialDelaySeconds: 60
           periodSeconds: 30
+          timeoutSeconds: 5
         readinessProbe:
           exec:
             command:
@@ -101,4 +102,5 @@ spec:
             - ping
           initialDelaySeconds: 30
           periodSeconds: 10
+          timeoutSeconds: 5
 ---

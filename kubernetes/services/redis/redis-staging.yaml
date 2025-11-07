@@ -37,11 +37,11 @@ spec:
           mountPath: /data
         resources:
           requests:
-            memory: "256Mi"      # Optimized: Cache + queue data
-            cpu: "100m"          # Redis is CPU-efficient (single-threaded)
+            memory: "512Mi"
+            cpu: "200m"
           limits:
-            memory: "1Gi"        # Headroom for large queues
-            cpu: "500m"          # Limited benefit from more CPU
+            memory: "1536Mi"
+            cpu: "1000m"
         livenessProbe:
           exec:
             command:

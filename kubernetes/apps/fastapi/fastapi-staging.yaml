@@ -4,7 +4,7 @@ metadata:
   name: fastapi-staging
   namespace: trinity-staging
 spec:
-  replicas: 1  # Reduced for Docker Desktop memory constraints
+  replicas: 2
   selector:
     matchLabels:
       app: fastapi-staging
@@ -106,11 +106,11 @@ spec:
               key: minio-secret-key
         resources:
           requests:
-            memory: "512Mi"      # Optimized: FastAPI lighter than Django
-            cpu: "500m"          # 0.5 CPU baseline
+            memory: "1024Mi"
+            cpu: "1000m"
           limits:
-            memory: "1536Mi"     # 1.5Gi for data operations
-            cpu: "2000m"         # 2 CPU for burst capacity
+            memory: "3Gi"
+            cpu: "3000m"
         livenessProbe:
           httpGet:
             path: /docs

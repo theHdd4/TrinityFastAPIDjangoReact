@@ -74,11 +74,11 @@ spec:
           mountPath: /data
         resources:
           requests:
-            memory: "1Gi"        # Optimized: Object metadata + cache
-            cpu: "500m"          # Baseline for I/O operations
+            memory: "2Gi"
+            cpu: "1000m"
           limits:
-            memory: "2Gi"        # Large file operations
-            cpu: "2000m"         # 2 CPU for parallel uploads
+            memory: "4Gi"
+            cpu: "3000m"
         livenessProbe:
           httpGet:
             path: /minio/health/live

@@ -4,7 +4,7 @@ metadata:
   name: frontend-staging
   namespace: trinity-staging
 spec:
-  replicas: 1  # Reduced for Docker Desktop memory constraints
+  replicas: 2
   selector:
     matchLabels:
       app: frontend-staging
@@ -22,11 +22,11 @@ spec:
         - containerPort: 80
         resources:
           requests:
-            memory: "64Mi"       # Optimized: Nginx is very lightweight
-            cpu: "50m"           # Minimal CPU for static serving
+            memory: "128Mi"
+            cpu: "100m"
           limits:
-            memory: "128Mi"      # Static file serving
-            cpu: "200m"          # Small burst capacity
+            memory: "256Mi"
+            cpu: "500m"
         livenessProbe:
           httpGet:
             path: /

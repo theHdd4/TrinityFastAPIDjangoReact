@@ -44,11 +44,11 @@ spec:
               key: minio-secret-key
         resources:
           requests:
-            memory: "1Gi"        # Optimized: Arrow data in memory
-            cpu: "500m"          # Baseline for data transfer
+            memory: "2Gi"
+            cpu: "1000m"
           limits:
-            memory: "2Gi"        # Large dataset transfers
-            cpu: "1500m"         # 1.5 CPU for parallel transfers
+            memory: "4Gi"
+            cpu: "3000m"
         livenessProbe:
           tcpSocket:
             port: 8817

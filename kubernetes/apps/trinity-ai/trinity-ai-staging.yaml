@@ -36,6 +36,8 @@ spec:
             configMapKeyRef:
               name: trinity-staging-config
               key: CLASSIFY_MONGO_URI
+        - name: VALIDATE_API_URL
+          value: "fastapi-service:8001"
         - name: MINIO_ENDPOINT
           valueFrom:
             configMapKeyRef:
@@ -53,20 +55,20 @@ spec:
               key: minio-secret-key
         resources:
           requests:
-            memory: "2Gi"        # Optimized: ML models need more memory
-            cpu: "1000m"         # 1 CPU baseline for AI workloads
+            memory: "4Gi"
+            cpu: "2000m"
           limits:
-            memory: "6Gi"        # Increased for model inference
-            cpu: "4000m"         # 4 CPU for AI processing
+            memory: "12Gi"
+            cpu: "6000m"
         livenessProbe:
           httpGet:
-            path: /trinityai/
+            path: /trinityai/health
             port: 8002
           initialDelaySeconds: 60
           periodSeconds: 30
         readinessProbe:
           httpGet:
-            path: /trinityai/
+            path: /trinityai/health
             port: 8002
           initialDelaySeconds: 30
           periodSeconds: 10

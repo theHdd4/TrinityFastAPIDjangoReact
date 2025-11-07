@@ -49,11 +49,11 @@ spec:
           mountPath: /data/db
         resources:
           requests:
-            memory: "512Mi"      # Optimized: WiredTiger cache
-            cpu: "500m"          # Baseline for operations
+            memory: "1Gi"
+            cpu: "1000m"
           limits:
-            memory: "2Gi"        # Document cache + operations
-            cpu: "2000m"         # 2 CPU for aggregations
+            memory: "4Gi"
+            cpu: "3000m"
         livenessProbe:
           exec:
             command:

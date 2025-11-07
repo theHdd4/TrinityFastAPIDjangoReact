@@ -79,15 +79,15 @@ kubectl rollout restart deployment/frontend-staging -n trinity-staging
 ## Architecture
 
 ### Services
-- **Django** (1 replica) - REST API & Admin
-- **FastAPI** (1 replica) - Data operations & microservices
-- **Frontend** (1 replica) - React SPA with Nginx proxy
+- **Django** (2 replicas, HPA-ready) - REST API & Admin
+- **FastAPI** (2 replicas, HPA-ready) - Data operations & microservices
+- **Frontend** (2 replicas) - React SPA with Nginx proxy
 - **PostgreSQL** - Multi-tenant database (20 Gi)
 - **MongoDB** - Document storage (20 Gi)
 - **Redis** - Cache & Celery queue (5 Gi)
 - **MinIO** - Object storage (50 Gi)
 - **Flight** - Apache Arrow data server
-- **Celery** - Background task workers
+- **Celery** - Background task workers (2 replicas)
 
 ### Networking
 ```
@@ -229,9 +229,27 @@ kubectl exec deployment/redis-staging -n trinity-staging -- redis-cli ping
 ## Important Notes
 
 ### Resource Requirements
-- **Minimum:** 8 CPU, 16 GB RAM
-- **Current:** Running with 1 replica per service
-- **To scale:** Increase Docker Desktop resources first
+- **Minimum:** 12 CPU, 24 GB RAM (light testing)
+- **Recommended for 10+ users:** 24 CPU, 32 GB RAM equivalent
+- **Current:** 2 replicas for Django/FastAPI/Frontend/Celery with upgraded resource requests
+- **To scale:** Increase Docker Desktop resources first (WSL2 VM currently 32 vCPU / ~97 GB RAM)
+
+### Staging Resource Plan
+
+| Component | Replicas | Requests | Limits |
+|-----------|----------|----------|--------|
+| Django | 2 | 1 CPU / 1.5 Gi | 3 CPU / 4 Gi |
+| FastAPI | 2 | 1 CPU / 1 Gi | 3 CPU / 3 Gi |
+| Celery | 2 | 0.5 CPU / 1 Gi | 1.5 CPU / 2 Gi |
+| Frontend | 2 | 0.1 CPU / 128 Mi | 0.5 CPU / 256 Mi |
+| Trinity-AI | 1 | 2 CPU / 4 Gi | 6 CPU / 12 Gi |
+| Flight | 1 | 1 CPU / 2 Gi | 3 CPU / 4 Gi |
+| PostgreSQL | 1 | 1 CPU / 1 Gi | 3 CPU / 4 Gi |
+| MongoDB | 1 | 1 CPU / 1 Gi | 3 CPU / 4 Gi |
+| Redis | 1 | 0.2 CPU / 512 Mi | 1 CPU / 1.5 Gi |
+| MinIO | 1 | 1 CPU / 2 Gi | 3 CPU / 4 Gi |
+
+> **Next:** introduce HPAs for Django/FastAPI/Celery and hook up Prometheus + Grafana once functional validation is complete.
 
 ### Port Configuration
 - **NodePort:** 30085 (stable, always accessible)
