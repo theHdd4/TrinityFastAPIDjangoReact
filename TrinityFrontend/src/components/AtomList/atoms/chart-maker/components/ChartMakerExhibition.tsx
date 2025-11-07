@@ -130,27 +130,11 @@ const ChartMakerExhibition = React.forwardRef<
       setIsSaving(true);
       const { client_name, app_name, project_name } = context;
 
-      console.info(
-        `[Exhibition] Accessing exhibition_catalogue collection in trinity_db for project ${client_name}/${app_name}/${project_name}`,
-      );
       try {
         let existingConfig: Awaited<ReturnType<typeof fetchExhibitionConfiguration>> | null = null;
         try {
           existingConfig = await fetchExhibitionConfiguration(context);
-          if (existingConfig) {
-            console.info(
-              `[Exhibition] exhibition_catalogue collection found for project ${client_name}/${app_name}/${project_name}`,
-            );
-          } else {
-            console.info(
-              `[Exhibition] exhibition_catalogue collection not found for project ${client_name}/${app_name}/${project_name}. Creating a new entry in trinity_db.`,
-            );
-          }
         } catch (error) {
-          console.warn('Unable to fetch existing exhibition configuration', error);
-          console.info(
-            `[Exhibition] Proceeding to create exhibition_catalogue entry for project ${client_name}/${app_name}/${project_name}`,
-          );
         }
 
         const existingAtoms = Array.isArray(existingConfig?.atoms) ? existingConfig.atoms : [];
@@ -199,15 +183,11 @@ const ChartMakerExhibition = React.forwardRef<
 
         await saveExhibitionConfiguration(payload);
         await loadSavedConfiguration(context);
-        console.info(
-          `[Exhibition] exhibition_catalogue collection successfully updated for project ${client_name}/${app_name}/${project_name} with ${selections.length} exhibited chart(s)`,
-        );
         toast({
           title: 'Exhibition catalogue updated',
           description: 'Your selected charts are now ready to be exhibited.',
         });
       } catch (error) {
-        console.error('Failed to save exhibit catalogue entry', error);
         toast({
           title: 'Unable to exhibit selections',
           description:

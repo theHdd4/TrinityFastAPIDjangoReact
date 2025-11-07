@@ -218,6 +218,10 @@ services:
     build:
       context: ./TrinityFrontend
       dockerfile: Dockerfile
+      args:
+        - NODE_ENV=development  # 👈 keeps console.log for development
+    environment:
+      - NODE_ENV=development
     ports:
       - "8081:80"
     networks:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
-from datetime import datetime
 from copy import deepcopy
+from datetime import datetime
+from numbers import Number
 from typing import Any, Dict, Iterable, List, Tuple
 
 from django.conf import settings
@@ -99,6 +101,65 @@ def _clone_documents(documents: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]
     return cloned
 
 
+def _coerce_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+
+    if isinstance(value, Number):
+        if isinstance(value, complex):
+            return None
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            return None
+        return int(round(numeric))
+
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            numeric = float(cleaned)
+        except ValueError:
+            return None
+        if not math.isfinite(numeric):
+            return None
+        return int(round(numeric))
+
+    return None
+
+
+def _normalise_slide_objects(slide_objects: Any) -> Dict[str, List[Dict[str, Any]]]:
+    if not isinstance(slide_objects, dict):
+        return {}
+
+    sanitised: Dict[str, List[Dict[str, Any]]] = {}
+
+    for key, value in slide_objects.items():
+        if not isinstance(key, str) or not isinstance(value, Iterable):
+            continue
+
+        objects: List[Dict[str, Any]] = []
+        for index, entry in enumerate(value):
+            if not isinstance(entry, dict):
+                continue
+
+            candidate = dict(entry)
+            raw_z_index = candidate.pop("z_index", None)
+            if raw_z_index is None and "zIndex" in candidate:
+                raw_z_index = candidate.get("zIndex")
+
+            resolved = _coerce_int(raw_z_index)
+            if resolved is None:
+                resolved = index + 1
+
+            candidate["zIndex"] = resolved
+            objects.append(candidate)
+
+        sanitised[key] = objects
+
+    return sanitised
+
+
 def _generate_molecule_identifier(old_identifier: str, context: Dict[str, str], project: Project) -> str:
     base = context.get("project_id") or f"{project.name}_{project.pk}"
     safe_old = old_identifier.replace("/", "-") if old_identifier else "molecule"
@@ -167,6 +228,9 @@ def _normalise_contextual_fields(
     updated: Dict[str, Any] = {}
     for key, value in document.items():
         if key == "_id" and not preserve_id:
+            continue
+        if key == "slide_objects":
+            updated[key] = _normalise_slide_objects(value)
             continue
         updated[key] = deepcopy(value)
 
@@ -287,11 +351,11 @@ def store_template_configuration(*, project: Project, template: Template, state:
             }
             if atom_filter:
                 atom_filter["isDeleted"] = {"$ne": True}
-                atom_cursor = database["atom_list_configuration"].find(atom_filter)
+                atom_cursor = database["django_atom_list_configuration"].find(atom_filter)
                 atom_docs = _serialise_docs(list(atom_cursor))
         except Exception as exc:  # pragma: no cover - network/driver errors only
             logger.error(
-                "Failed to fetch atom_list_configuration for template %s: %s",
+                "Failed to fetch django_atom_list_configuration for template %s: %s",
                 template.pk,
                 exc,
             )
@@ -465,7 +529,7 @@ def apply_template_configuration(*, project: Project, template: Template) -> Non
             scope_keys=("client_name", "app_name", "project_name", "document_type"),
         )
 
-        atom_collection = database["atom_list_configuration"]
+        atom_collection = database["django_atom_list_configuration"]
         _persist_collection_documents(
             atom_collection,
             documents=prepared_atoms,

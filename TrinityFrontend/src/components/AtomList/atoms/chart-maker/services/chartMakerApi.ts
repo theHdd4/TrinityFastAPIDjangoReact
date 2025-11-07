@@ -69,7 +69,6 @@ class ChartMakerApiService {
   private baseUrl = CHART_MAKER_API;
 
   constructor() {
-    console.log('ChartMakerApiService initialized with baseUrl:', this.baseUrl);
   }
 
   async uploadFile(file: File): Promise<UploadCSVResponse> {
@@ -140,7 +139,6 @@ class ChartMakerApiService {
   }
 
   async getUniqueValues(fileId: string, columns: string[]): Promise<UniqueValuesResponse> {
-    console.log('[ChartMakerApi] getUniqueValues called with fileId:', fileId, 'columns:', columns);
     const response = await fetch(`${this.baseUrl}/unique-values/${fileId}`, {
       method: 'POST',
       headers: {
@@ -151,13 +149,10 @@ class ChartMakerApiService {
 
     if (!response.ok) {
       const error = await response.json();
-      console.error('[ChartMakerApi] getUniqueValues error:', error);
       throw new Error(error.detail || 'Failed to get unique values');
     }
 
     const result = await response.json();
-    console.log('[ChartMakerApi] getUniqueValues response - columns with unique values:', Object.keys(result.values || {}));
-    console.log('[ChartMakerApi] getUniqueValues response - full result:', result);
     return result;
   }
 
@@ -190,7 +185,6 @@ class ChartMakerApiService {
   }
 
   async generateChart(request: ChartRequest): Promise<ChartResponse> {
-    console.log('[ChartMakerApi] Calling generateChart with request:', request);
     const response = await fetch(`${this.baseUrl}/charts`, {
       method: 'POST',
       headers: {

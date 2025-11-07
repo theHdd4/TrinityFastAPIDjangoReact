@@ -83,7 +83,9 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
     colors: config.colors || DEFAULT_COLORS,
     height: config.height || DEFAULT_CHART_HEIGHT,
     showLegend: config.showLegend !== undefined ? config.showLegend : true,
-    showAxisLabels: config.showAxisLabels !== undefined ? config.showAxisLabels : true,
+    // showAxisLabels: config.showAxisLabels !== undefined ? config.showAxisLabels : true,
+    showXAxisLabels: config.showXAxisLabels !== undefined ? config.showXAxisLabels : true,
+    showYAxisLabels: config.showYAxisLabels !== undefined ? config.showYAxisLabels : true,
     showDataLabels: config.showDataLabels !== undefined ? config.showDataLabels : false,
     showGrid: config.showGrid !== undefined ? config.showGrid : true,
     theme: config.theme || 'default',
@@ -92,7 +94,7 @@ const TrendAnalysisChart: React.FC<{ config: ChartRendererConfig }> = ({ config 
 
   return (
     <div 
-      className="space-y-4"
+      className="space-y-4 w-full max-w-full min-w-0"
       onContextMenu={(e) => {
         // Prevent context menu in ExhibitionMode to match ChartMaker behavior
         e.preventDefault();

@@ -18,7 +18,9 @@ export interface ChartRendererConfig {
   xAxisLabel?: string;
   yAxisLabel?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   sortOrder?: 'asc' | 'desc' | null;
@@ -51,7 +53,7 @@ export const DEFAULT_FEATURE_OVERVIEW_TREND_METADATA: FeatureOverviewMetadata = 
     yAxisField: 'salesvalue',
     legendField: 'series',
     showLegend: true,
-    showAxisLabels: true,
+    // showAxisLabels: true,
     showGrid: true,
     colorPalette: ['#6366F1'],
     xAxisLabel: 'Date',
@@ -109,7 +111,6 @@ const safeParseJson = (value: string): unknown => {
   try {
     return JSON.parse(value);
   } catch (error) {
-    console.warn('[FeatureOverview] Failed to parse JSON payload', error);
     return undefined;
   }
 };
@@ -253,8 +254,12 @@ const normaliseChartState = (value: unknown) => {
 
   const showLegend = asBoolean(value.showLegend ?? value['show_legend']);
   if (showLegend !== undefined) chartState.showLegend = showLegend;
-  const showAxisLabels = asBoolean(value.showAxisLabels ?? value['show_axis_labels']);
-  if (showAxisLabels !== undefined) chartState.showAxisLabels = showAxisLabels;
+  // const showAxisLabels = asBoolean(value.showAxisLabels ?? value['show_axis_labels']);
+  // if (showAxisLabels !== undefined) chartState.showAxisLabels = showAxisLabels;
+  const showXAxisLabels = asBoolean(value.showXAxisLabels ?? value['show_x_axis_labels']);
+  if (showXAxisLabels !== undefined) chartState.showXAxisLabels = showXAxisLabels;
+  const showYAxisLabels = asBoolean(value.showYAxisLabels ?? value['show_y_axis_labels']);
+  if (showYAxisLabels !== undefined) chartState.showYAxisLabels = showYAxisLabels;
   const showDataLabels = asBoolean(value.showDataLabels ?? value['show_data_labels']);
   if (showDataLabels !== undefined) chartState.showDataLabels = showDataLabels;
   const showGrid = asBoolean(value.showGrid ?? value['show_grid']);
@@ -623,7 +628,7 @@ const buildDefaultTrendChartConfig = (variant: FeatureOverviewComponentProps['va
   xAxisLabel: 'Date',
   yAxisLabel: 'SalesValue',
   showLegend: true,
-  showAxisLabels: true,
+  // showAxisLabels: true,
   showDataLabels: false,
   showGrid: true,
   sortOrder: null,
@@ -830,7 +835,9 @@ const parseDirectChartRendererConfig = (
   if (typeof candidate.yAxisLabel === 'string') config.yAxisLabel = candidate.yAxisLabel;
 
   if (typeof candidate.showLegend === 'boolean') config.showLegend = candidate.showLegend;
-  if (typeof candidate.showAxisLabels === 'boolean') config.showAxisLabels = candidate.showAxisLabels;
+  // if (typeof candidate.showAxisLabels === 'boolean') config.showAxisLabels = candidate.showAxisLabels;
+  if (typeof candidate.showXAxisLabels === 'boolean') config.showXAxisLabels = candidate.showXAxisLabels;
+  if (typeof candidate.showYAxisLabels === 'boolean') config.showYAxisLabels = candidate.showYAxisLabels;
   if (typeof candidate.showDataLabels === 'boolean') config.showDataLabels = candidate.showDataLabels;
   if (typeof candidate.showGrid === 'boolean') config.showGrid = candidate.showGrid;
 
@@ -872,7 +879,9 @@ const createChartRendererConfig = (
     xAxisLabel: chartState.xAxisLabel ?? chartState.xAxisField,
     yAxisLabel: chartState.yAxisLabel ?? chartState.yAxisField ?? metadata.metric,
     showLegend: chartState.showLegend,
-    showAxisLabels: chartState.showAxisLabels,
+    // showAxisLabels: chartState.showAxisLabels,
+    showXAxisLabels: chartState.showXAxisLabels,
+    showYAxisLabels: chartState.showYAxisLabels,
     showDataLabels: chartState.showDataLabels,
     showGrid: chartState.showGrid,
     sortOrder: chartState.sortOrder ?? null,

@@ -12,6 +12,11 @@ import {
   Grid3x3,
   Palette,
   Check,
+  Layers,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import {
   ContextMenuContent,
@@ -144,6 +149,10 @@ export interface ExhibitionTableTrayProps {
   onAddRow: () => void;
   onAdd2Rows: () => void;
   onSelectStyle?: (styleId: string) => void;
+  onBringToFront?: () => void;
+  onBringForward?: () => void;
+  onSendBackward?: () => void;
+  onSendToBack?: () => void;
 }
 
 export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
@@ -166,6 +175,10 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   onAddRow,
   onAdd2Rows,
   onSelectStyle = noop,
+  onBringToFront,
+  onBringForward,
+  onSendBackward,
+  onSendToBack,
 }) => {
   const columnSelection = useMemo(() => deriveColumnSelectionBounds(selectedCell, cols), [cols, selectedCell]);
   const rowSelection = useMemo(() => deriveRowSelectionBounds(selectedCell, rows), [rows, selectedCell]);
@@ -174,6 +187,7 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   const hasColumnSelection = Boolean(columnSelection);
   const hasBodySelection = Boolean(rowSelection);
   const disableStyleSelection = locked || !canEdit;
+  const layerActionsDisabled = locked || !canEdit;
   const doubleColumnRemoval = Math.max(2, selectedColumnCount || 0);
   const doubleRowRemoval = Math.max(2, selectedRowCount || 0);
   const remainingColumnsAfterDelete = cols - selectedColumnCount;
@@ -344,6 +358,63 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
               </div>
             </div>
           ))}
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+
+      <ContextMenuSub>
+        <ContextMenuSubTrigger disabled={layerActionsDisabled}>
+          <Layers className="mr-2 h-4 w-4" />
+          Layer
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-52">
+          <ContextMenuItem
+            disabled={layerActionsDisabled}
+            onSelect={() => {
+              if (layerActionsDisabled || !onBringToFront) {
+                return;
+              }
+              onBringToFront();
+            }}
+          >
+            <ArrowUpToLine className="mr-2 h-4 w-4" />
+            Bring to front
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={layerActionsDisabled}
+            onSelect={() => {
+              if (layerActionsDisabled || !onBringForward) {
+                return;
+              }
+              onBringForward();
+            }}
+          >
+            <ArrowUp className="mr-2 h-4 w-4" />
+            Bring forward
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={layerActionsDisabled}
+            onSelect={() => {
+              if (layerActionsDisabled || !onSendBackward) {
+                return;
+              }
+              onSendBackward();
+            }}
+          >
+            <ArrowDown className="mr-2 h-4 w-4" />
+            Send backward
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={layerActionsDisabled}
+            onSelect={() => {
+              if (layerActionsDisabled || !onSendToBack) {
+                return;
+              }
+              onSendToBack();
+            }}
+          >
+            <ArrowDownToLine className="mr-2 h-4 w-4" />
+            Send to back
+          </ContextMenuItem>
         </ContextMenuSubContent>
       </ContextMenuSub>
 
