@@ -20,23 +20,40 @@ export const mergeHandler: AtomHandler = {
     
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
-    // 🔧 FIX: Show smart_response in handleSuccess for success cases
-    // handleFailure will handle failure cases
+    // 🚨 FORCED TEST MESSAGE - This MUST appear if handler is called
+    console.log('🚨🚨🚨 MERGE HANDLER CALLED - FORCING TEST MESSAGE');
+    const testMsg: Message = {
+      id: `test_${Date.now()}`,
+      content: '🚨 TEST: Merge handler was called! If you see this, the handler works.',
+      sender: 'ai',
+      timestamp: new Date(),
+    };
+    setMessages((prev: Message[]) => {
+      console.log('🚨 BEFORE adding test message:', prev.length);
+      const updated = [...prev, testMsg];
+      console.log('🚨 AFTER adding test message:', updated.length);
+      return updated;
+    });
+    console.log('🚨 Test message added to state');
+    
+    // 🔧 CRITICAL FIX: Show smart_response EXACTLY like DataFrame Operations (no isStreamMode check)
     const smartResponseText = processSmartResponse(data);
-    console.log('💬 Smart response text available:', smartResponseText ? 'Yes' : 'No');
+    console.log('💬 Smart response text:', smartResponseText);
+    console.log('💬 Smart response length:', smartResponseText?.length);
     console.log('🔍 Has merge_json:', !!data.merge_json);
     
-    // Show smart_response for success cases (when merge_json exists)
+    // Add AI smart response message (prioritize smart_response - SAME AS DATAFRAME OPERATIONS)
     if (smartResponseText) {
-      const smartMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: smartResponseText,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      console.log('📤 Sending smart response message to chat...');
-      setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user:', smartResponseText);
+      // Use the AI's smart response for a more conversational experience
+      const aiMessage = createMessage(smartResponseText);
+      setMessages(prev => [...prev, aiMessage]);
+      console.log('🤖 AI Smart Response displayed:', smartResponseText);
+    } else {
+      // 🔧 FALLBACK: If backend doesn't send smart_response, create a generic success message
+      console.warn('⚠️ No smart_response found in merge data - creating fallback message');
+      const fallbackMsg = createMessage('✅ I\'ve received your merge request and will process it now.');
+      setMessages(prev => [...prev, fallbackMsg]);
+      console.log('🤖 Fallback message displayed');
     }
     
     if (!data.merge_json) {
@@ -328,8 +345,7 @@ export const mergeHandler: AtomHandler = {
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { setMessages, atomId, updateAtomSettings } = context;
     
-    // 🔧 FIX: This function now handles BOTH success and failure cases
-    // Always show the smart_response message once, regardless of success/failure
+    // 🔧 FIX: EXACTLY like DataFrame Operations - no isStreamMode check
     let aiText = '';
     if (data.smart_response) {
       aiText = data.smart_response;
@@ -353,17 +369,15 @@ export const mergeHandler: AtomHandler = {
       aiText = data.smart_response || data.message || 'AI response received';
     }
     
-    // Only add the message if we have content
-    if (aiText) {
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: aiText,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, aiMsg]);
-      console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
-    }
+    // Create and add AI message (EXACTLY like DataFrame Operations - no conditional)
+    const aiMsg: Message = {
+      id: (Date.now() + 1).toString(),
+      content: aiText,
+      sender: 'ai',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, aiMsg]);
+    console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
     
     // 🔧 CRITICAL FIX: Load available files into atom settings for dropdown population
     // This ensures files appear in the merge interface even for failure cases

@@ -15,23 +15,25 @@ import {
 
 export const groupbyHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId, isStreamMode = false } = context;
     
     // 🔧 FIX: Show smart_response in handleSuccess for success cases
     // handleFailure will handle failure cases
+    // Only show messages in Individual AI mode (not in Stream AI mode)
     const smartResponseText = processSmartResponse(data);
     console.log('💬 Smart response text available:', smartResponseText ? 'Yes' : 'No');
     console.log('🔍 Has groupby_json:', !!data.groupby_json);
+    console.log('🔍 Is Stream Mode:', isStreamMode);
     
-    // Show smart_response for success cases (when groupby_json exists)
-    if (smartResponseText) {
+    // Show smart_response for success cases (when groupby_json exists) - only in Individual AI
+    if (smartResponseText && !isStreamMode) {
       const smartMsg: Message = {
         id: (Date.now() + 1).toString(),
         content: smartResponseText,
         sender: 'ai',
         timestamp: new Date(),
       };
-      console.log('📤 Sending smart response message to chat...');
+      console.log('📤 Sending smart response message to chat (Individual AI)...');
       setMessages(prev => [...prev, smartMsg]);
       console.log('✅ Displayed smart_response to user:', smartResponseText);
     }
@@ -88,13 +90,15 @@ export const groupbyHandler: AtomHandler = {
         console.log('✅ Using real file path from atom settings:', singleFileName);
       } else {
         // Still no real file path - show error and don't proceed
-        const errorMsg = createErrorMessage(
-          'GroupBy configuration',
-          `No valid file path found. AI provided: ${cfg.object_names || 'N/A'}, Atom settings: ${realDataSource || 'N/A'}`,
-          'File validation'
-        );
-        errorMsg.content += '\n\n💡 Please ensure you have selected a data file before using AI GroupBy.';
-        setMessages(prev => [...prev, errorMsg]);
+        if (!isStreamMode) {
+          const errorMsg = createErrorMessage(
+            'GroupBy configuration',
+            `No valid file path found. AI provided: ${cfg.object_names || 'N/A'}, Atom settings: ${realDataSource || 'N/A'}`,
+            'File validation'
+          );
+          errorMsg.content += '\n\n💡 Please ensure you have selected a data file before using AI GroupBy.';
+          setMessages(prev => [...prev, errorMsg]);
+        }
         
         updateAtomSettings(atomId, { 
           aiConfig: cfg,
@@ -168,13 +172,15 @@ export const groupbyHandler: AtomHandler = {
     
     // 🔧 CRITICAL FIX: Final validation - ensure we have a valid file path
     if (!singleFileName || singleFileName === 'your_file.csv' || singleFileName === 'N/A') {
-      const errorMsg = createErrorMessage(
-        'GroupBy configuration',
-        `Invalid file path: ${singleFileName}`,
-        'File validation'
-      );
-      errorMsg.content += '\n\n💡 Please ensure you have selected a valid data file before using AI GroupBy.';
-      setMessages(prev => [...prev, errorMsg]);
+      if (!isStreamMode) {
+        const errorMsg = createErrorMessage(
+          'GroupBy configuration',
+          `Invalid file path: ${singleFileName}`,
+          'File validation'
+        );
+        errorMsg.content += '\n\n💡 Please ensure you have selected a valid data file before using AI GroupBy.';
+        setMessages(prev => [...prev, errorMsg]);
+      }
       return { success: false, error: 'Invalid file path' };
     }
     
@@ -209,9 +215,11 @@ export const groupbyHandler: AtomHandler = {
       'Aggregations': aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', '),
       'Session': sessionId
     };
-    const successMsg = createSuccessMessage('AI groupby configuration completed', successDetails);
-    successMsg.content += '\n\n🔄 Now executing the groupby operation...';
-    setMessages(prev => [...prev, successMsg]);
+    if (!isStreamMode) {
+      const successMsg = createSuccessMessage('AI groupby configuration completed', successDetails);
+      successMsg.content += '\n\n🔄 Now executing the groupby operation...';
+      setMessages(prev => [...prev, successMsg]);
+    }
     
     // 🔧 CRITICAL FIX: Automatically call perform endpoint with AI configuration and validate real results
     try {
@@ -324,15 +332,17 @@ export const groupbyHandler: AtomHandler = {
                     lastUpdateTime: Date.now()
                   });
                   
-                  // ✅ SUCCESS MESSAGE WITH REAL DATA FROM SAVED FILE
-                  const completionDetails = {
-                    'Result File': result.data.result_file,
-                    'Rows': rows.length.toLocaleString(),
-                    'Columns': headers.length
-                  };
-                  const completionMsg = createSuccessMessage('GroupBy operation', completionDetails);
-                  completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
-                  setMessages(prev => [...prev, completionMsg]);
+                  // ✅ SUCCESS MESSAGE WITH REAL DATA FROM SAVED FILE (only in Individual AI mode)
+                  if (!isStreamMode) {
+                    const completionDetails = {
+                      'Result File': result.data.result_file,
+                      'Rows': rows.length.toLocaleString(),
+                      'Columns': headers.length
+                    };
+                    const completionMsg = createSuccessMessage('GroupBy operation', completionDetails);
+                    completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
+                    setMessages(prev => [...prev, completionMsg]);
+                  }
                 
               } else {
                 throw new Error('No data rows found in CSV');
@@ -359,18 +369,20 @@ export const groupbyHandler: AtomHandler = {
               operationCompleted: true
             });
             
-            const warningDetails = {
-              'Result File': result.data.result_file,
-              'Rows': result.data.row_count || 'Unknown',
-              'Columns': result.data.columns?.length || 'Unknown'
-            };
-            const warningMsg = createErrorMessage(
-              'GroupBy operation completed and file saved, but results display failed',
-              'Could not retrieve results for display',
-              Object.entries(warningDetails).map(([k,v]) => `${k}: ${v}`).join(', ')
-            );
-            warningMsg.content += '\n\n📁 File has been saved successfully. Please click the Perform button to view the results.';
-            setMessages(prev => [...prev, warningMsg]);
+            if (!isStreamMode) {
+              const warningDetails = {
+                'Result File': result.data.result_file,
+                'Rows': result.data.row_count || 'Unknown',
+                'Columns': result.data.columns?.length || 'Unknown'
+              };
+              const warningMsg = createErrorMessage(
+                'GroupBy operation completed and file saved, but results display failed',
+                'Could not retrieve results for display',
+                Object.entries(warningDetails).map(([k,v]) => `${k}: ${v}`).join(', ')
+              );
+              warningMsg.content += '\n\n📁 File has been saved successfully. Please click the Perform button to view the results.';
+              setMessages(prev => [...prev, warningMsg]);
+            }
           }
           
           } else {
@@ -387,24 +399,28 @@ export const groupbyHandler: AtomHandler = {
               operationCompleted: false
             });
             
+            if (!isStreamMode) {
+              const errorMsg = createErrorMessage(
+                'GroupBy operation',
+                result.data.error || 'Unknown error',
+                `File: ${singleFileName}, Identifiers: ${aiSelectedIdentifiers.join(', ')}, Measures: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}`
+              );
+              errorMsg.content += '\n\n💡 Please check your configuration and try clicking the Perform button manually.';
+              setMessages(prev => [...prev, errorMsg]);
+            }
+          }
+        } else {
+          console.error('❌ GroupBy operation failed:', result.error);
+          
+          if (!isStreamMode) {
             const errorMsg = createErrorMessage(
               'GroupBy operation',
-              result.data.error || 'Unknown error',
+              result.error || 'Unknown error',
               `File: ${singleFileName}, Identifiers: ${aiSelectedIdentifiers.join(', ')}, Measures: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}`
             );
             errorMsg.content += '\n\n💡 Please check your configuration and try clicking the Perform button manually.';
             setMessages(prev => [...prev, errorMsg]);
           }
-        } else {
-          console.error('❌ GroupBy operation failed:', result.error);
-          
-          const errorMsg = createErrorMessage(
-            'GroupBy operation',
-            result.error || 'Unknown error',
-            `File: ${singleFileName}, Identifiers: ${aiSelectedIdentifiers.join(', ')}, Measures: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}`
-          );
-          errorMsg.content += '\n\n💡 Please check your configuration and try clicking the Perform button manually.';
-          setMessages(prev => [...prev, errorMsg]);
           
           updateAtomSettings(atomId, {
             selectedIdentifiers: aiSelectedIdentifiers,
@@ -420,13 +436,15 @@ export const groupbyHandler: AtomHandler = {
     } catch (error) {
       console.error('❌ Error calling groupby perform endpoint:', error);
       
-      const errorMsg = createErrorMessage(
-        'GroupBy operation',
-        error,
-        `File: ${singleFileName}, Identifiers: ${aiSelectedIdentifiers.join(', ')}, Measures: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}`
-      );
-      errorMsg.content += '\n\n💡 Please try clicking the Perform button manually.';
-      setMessages(prev => [...prev, errorMsg]);
+      if (!isStreamMode) {
+        const errorMsg = createErrorMessage(
+          'GroupBy operation',
+          error,
+          `File: ${singleFileName}, Identifiers: ${aiSelectedIdentifiers.join(', ')}, Measures: ${aiSelectedMeasures.map(m => `${m.field} (${m.aggregator})`).join(', ')}`
+        );
+        errorMsg.content += '\n\n💡 Please try clicking the Perform button manually.';
+        setMessages(prev => [...prev, errorMsg]);
+      }
       
       updateAtomSettings(atomId, {
         selectedIdentifiers: aiSelectedIdentifiers,
@@ -444,7 +462,7 @@ export const groupbyHandler: AtomHandler = {
   },
 
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { setMessages, atomId, updateAtomSettings } = context;
+    const { setMessages, atomId, updateAtomSettings, isStreamMode = false } = context;
     
     // 🔧 FIX: This function now handles BOTH success and failure cases
     // Always show the smart_response message once, regardless of success/failure
@@ -471,8 +489,8 @@ export const groupbyHandler: AtomHandler = {
       aiText = data.smart_response || data.message || 'AI response received';
     }
     
-    // Only add the message if we have content
-    if (aiText) {
+    // Only add the message if we have content (and not in Stream mode)
+    if (aiText && !isStreamMode) {
       const aiMsg: Message = {
         id: (Date.now() + 1).toString(),
         content: aiText,
@@ -480,7 +498,7 @@ export const groupbyHandler: AtomHandler = {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, aiMsg]);
-      console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
+      console.log('📤 Added AI message to chat (Individual AI):', aiText.substring(0, 100) + '...');
     }
     
     // 🔧 CRITICAL FIX: Load available files into atom settings for dropdown population

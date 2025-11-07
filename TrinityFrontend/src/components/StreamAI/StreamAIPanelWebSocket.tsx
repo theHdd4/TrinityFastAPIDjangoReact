@@ -1408,7 +1408,7 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                           <button
                             key={index}
                             onClick={() => {
-                              setInputValue(prev => prev + (prev ? ' ' : '') + displayName);
+                              setInputValue(prev => prev ? `${prev} @${displayName}` : `@${displayName}`);
                               setShowFilePicker(false);
                             }}
                             className="w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors duration-150 group border border-transparent hover:border-[#41C185]/20 min-w-max"

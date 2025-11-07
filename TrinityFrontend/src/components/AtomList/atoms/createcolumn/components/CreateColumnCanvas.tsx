@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { constructFullPath } from '@/components/TrinityAI/handlers/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,9 +68,38 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings = atom?.settings || {};
+  const envContext = settings?.envContext;
+
+  const resolveObjectName = React.useCallback(
+    (objectName: string): string => {
+      if (!objectName) return '';
+
+      if (envContext && envContext.client_name && envContext.app_name && envContext.project_name) {
+        const prefix = `${envContext.client_name}/${envContext.app_name}/${envContext.project_name}/`;
+        if (objectName.startsWith(prefix)) {
+          return objectName;
+        }
+
+        const tail = objectName.includes('/') ? objectName.split('/').pop() || objectName : objectName;
+        return `${prefix}${tail}`;
+      }
+
+      if (!objectName.includes('/')) {
+        return constructFullPath(objectName, envContext);
+      }
+
+      return objectName;
+    },
+    [envContext]
+  );
+
+  const resolvedDataSource = React.useMemo(
+    () => resolveObjectName((settings.file_key as string) || (settings.dataSource as string) || ''),
+    [resolveObjectName, settings.file_key, settings.dataSource]
+  );
   
   // Get input file name for clickable subtitle
-  const inputFileName = settings.dataSource || '';
+  const inputFileName = resolvedDataSource;
 
   // Handle opening the input file in a new tab
   const handleViewDataClick = () => {
@@ -239,7 +269,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       setShowCatSelector(false);
       setCatColumns([]);
       setSelectedIdentifiers([]);
-      const dataSource = atom?.settings?.dataSource;
+      const dataSource = resolveObjectName((atom?.settings?.file_key as string) || (atom?.settings?.dataSource as string) || '');
       if (!dataSource) return;
       
       // Extract client/app/project from file path like scope_selector does
@@ -351,7 +381,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       if (!operations.length) throw new Error('No operations selected.');
       // Prepare form data
       const formData = new FormData();
-      formData.append('object_names', atom.settings.dataSource);
+      formData.append('object_names', resolvedDataSource);
       formData.append('bucket_name', 'trinity'); // TODO: use actual bucket if needed
       // Add each operation as a key with columns as value
       // Operations are processed sequentially - each operation can use columns created by previous operations
@@ -696,7 +726,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     try {
       const csv_data = previewToCSV(preview);
       // Use the full original path to overwrite at the original location
-      let filename = atom.settings.dataSource;
+      let filename = resolvedDataSource;
       // Remove .arrow extension if present (backend will add it back)
       if (filename.endsWith('.arrow')) {
         filename = filename.replace('.arrow', '');
@@ -710,7 +740,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       
       // Prepare operation details for MongoDB
       const operation_details = {
-        input_file: atom.settings.dataSource,
+        input_file: resolvedDataSource,
         operations: operations.map(op => {
           // Get the actual column name created (either rename or default)
           let created_column_name = '';
@@ -808,13 +838,14 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
 
   // Fetch cardinality data
   const fetchCardinalityData = async () => {
-    if (!atom?.settings?.dataSource) return;
+    const resolvedObjectName = resolveObjectName((atom?.settings?.file_key as string) || (atom?.settings?.dataSource as string) || '');
+    if (!resolvedObjectName) return;
     
     setCardinalityLoading(true);
     setCardinalityError(null);
     
     try {
-      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(atom.settings.dataSource || '')}`;
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(resolvedObjectName)}`;
       const res = await fetch(url);
       const data = await res.json();
       

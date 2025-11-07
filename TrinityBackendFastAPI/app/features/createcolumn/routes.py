@@ -130,6 +130,9 @@ async def perform_create(
     object_names: str = Form(...),
     bucket_name: str = Form(...),
     identifiers: str = Form(None),
+    client_name: str = Form(""),
+    app_name: str = Form(""),
+    project_name: str = Form(""),
 ):
     try:
         import logging
@@ -137,9 +140,14 @@ async def perform_create(
         
         logger.info(f"🔵 [CREATE-PERFORM] Starting perform operation")
         logger.info(f"📂 [CREATE-PERFORM] Input file: {object_names}")
+        logger.info(f"🔧 [CREATE-PERFORM] Context: client={client_name}, app={app_name}, project={project_name}")
         
-        # 🔧 CRITICAL FIX: Resolve the full MinIO object path
-        prefix = await get_object_prefix()
+        # 🔧 CRITICAL FIX: Resolve the full MinIO object path with correct client/app/project context
+        prefix = await get_object_prefix(
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name
+        )
         full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
         
         logger.info(f"🔧 [CREATE-PERFORM] File path resolution: original={object_names}, prefix={prefix}, full_path={full_object_path}")
@@ -614,10 +622,11 @@ async def perform_create(
             logger.warning(f"   Final date columns: {final_date_columns}")
             logger.warning(f"   LOST: {set(date_columns) - set(final_date_columns)}")
 
-        # Save result file using object_names only
-        create_key = f"{object_names}_create.csv"
+        # 🔧 CRITICAL FIX: Save result file using full_object_path (not just filename)
+        create_key = f"{full_object_path}_create.csv"
         
         logger.info(f"💾 [CREATE-PERFORM] Saving results to MinIO: {create_key}")
+        logger.info(f"🔧 [CREATE-PERFORM] Full path used for save: {create_key}")
         
         # Clean DataFrame before saving to CSV to handle NaN, infinity values
         clean_df_for_csv = df.replace({np.nan: None, np.inf: None, -np.inf: None})

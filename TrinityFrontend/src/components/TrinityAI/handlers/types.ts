@@ -12,6 +12,7 @@ export interface AtomHandlerContext {
   sessionId: string;
   updateAtomSettings: (atomId: string, settings: any) => void;
   setMessages: (updater: (prev: Message[]) => Message[]) => void;
+  isStreamMode?: boolean; // true = SuperagentAI (don't show messages), false = Individual AI (show messages)
 }
 
 export interface AtomHandlerResponse {

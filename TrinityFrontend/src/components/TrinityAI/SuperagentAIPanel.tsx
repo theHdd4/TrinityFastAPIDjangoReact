@@ -1002,7 +1002,8 @@ const SuperagentAIPanel: React.FC<SuperagentAIPanelProps> = ({
                                   console.log('Handler generated messages:', newMsgs);
                                 }
                               },
-                              sessionId: `session_${Date.now()}`
+                              sessionId: `session_${Date.now()}`,
+                              isStreamMode: true // Stream AI - don't show messages in chat
                             };
                             
                             // 🔧 FIX: Call appropriate handler method based on success status
