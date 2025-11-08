@@ -14,7 +14,9 @@ import {
   DEFAULT_CROP_INSETS,
   ImageCropInsets,
   ImageCropOverlay,
+  cropLog,
   hasCrop as hasActiveCrop,
+  resolveCropRenderMetrics,
   useImageCropInteraction,
 } from './toolbar/Crop';
 
@@ -345,14 +347,16 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
 
   const handleCropChange = useCallback(
     (next: ImageCropInsets) => {
+      cropLog('Request crop change', { id, next });
       onCropChange?.(id, next);
     },
     [id, onCropChange],
   );
 
   const handleCropCommit = useCallback(() => {
+    cropLog('Commit crop request', { id, crop: normalizedCrop });
     onCropCommit?.(id);
-  }, [id, onCropCommit]);
+  }, [id, normalizedCrop, onCropCommit]);
 
   const { beginCropDrag, isDragging: isCropDragging, normalizedCrop } = useImageCropInteraction({
     isCropping,
@@ -367,6 +371,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       return;
     }
     onInteract();
+    cropLog('Toggle crop request', { id });
     onToggleCrop(id);
   }, [id, onInteract, onToggleCrop]);
 
@@ -499,30 +504,49 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   const resolvedName = name && name.trim().length > 0 ? name : 'Slide image';
   const hasCrop = hasActiveCrop(normalizedCrop);
 
+  const cropRenderMetrics = useMemo(() => resolveCropRenderMetrics(normalizedCrop), [normalizedCrop]);
+
+  const cropWrapperTransform = useMemo(() => {
+    if (!hasCrop && !isCropping) {
+      return 'translate3d(0, 0, 0) scale(1, 1)';
+    }
+
+    const { translateXPercent, translateYPercent, scaleX, scaleY } = cropRenderMetrics;
+    return `translate3d(-${translateXPercent}%, -${translateYPercent}%, 0) scale(${scaleX}, ${scaleY})`;
+  }, [cropRenderMetrics, hasCrop, isCropping]);
+
+  const cropWrapperStyle = useMemo<React.CSSProperties>(
+    () => ({
+      transform: cropWrapperTransform,
+      transformOrigin: 'top left',
+      willChange: 'transform',
+    }),
+    [cropWrapperTransform],
+  );
+
+  useEffect(() => {
+    if (!hasCrop && !isCropping) {
+      return;
+    }
+
+    cropLog('Render crop transform', {
+      id,
+      crop: normalizedCrop,
+      metrics: cropRenderMetrics,
+      transform: cropWrapperTransform,
+      hasCrop,
+      isCropping,
+    });
+  }, [cropRenderMetrics, cropWrapperTransform, hasCrop, id, isCropping, normalizedCrop]);
+
   const handleResetCrop = useCallback(() => {
     if (!onResetCrop) {
       return;
     }
     onInteract();
+    cropLog('Reset crop request', { id });
     onResetCrop(id);
   }, [id, onInteract, onResetCrop]);
-
-  const clipPathValue = useMemo(() => {
-    if (!hasCrop) {
-      return undefined;
-    }
-
-    const insetValues = [
-      normalizedCrop.top,
-      normalizedCrop.right,
-      normalizedCrop.bottom,
-      normalizedCrop.left,
-    ]
-      .map(value => `${value}%`)
-      .join(' ');
-
-    return `inset(${insetValues})`;
-  }, [hasCrop, normalizedCrop.bottom, normalizedCrop.left, normalizedCrop.right, normalizedCrop.top]);
 
   const imageStyle = useMemo<React.CSSProperties>(
     () => {
@@ -535,10 +559,9 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
         transform: `scaleX(${scaleX}) scaleY(${scaleY})`,
         transformOrigin: 'center center',
         opacity: clampOpacity(localOpacity),
-        clipPath: clipPathValue,
       } as React.CSSProperties;
     },
-    [clipPathValue, localFlipHorizontal, localFlipVertical, localOpacity],
+    [localFlipHorizontal, localFlipVertical, localOpacity],
   );
 
   return (
@@ -552,16 +575,21 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     >
       {src ? (
         <>
-          <img
-            src={src}
-            alt={resolvedName}
-            className={cn(
-              'slide-image-visual h-full w-full object-cover',
-              localFitMode === 'contain' ? 'object-contain' : 'object-cover',
-              localAnimated && 'animate-slide-image',
-            )}
-            style={imageStyle}
-          />
+          <div className="h-full w-full" data-crop-stage>
+            <div className="h-full w-full" style={cropWrapperStyle} data-crop-transform>
+              <img
+                src={src}
+                alt={resolvedName}
+                className={cn(
+                  'slide-image-visual h-full w-full object-cover',
+                  localFitMode === 'contain' ? 'object-contain' : 'object-cover',
+                  localAnimated && 'animate-slide-image',
+                )}
+                style={imageStyle}
+                data-crop-image
+              />
+            </div>
+          </div>
           {isCropping && (
             <ImageCropOverlay
               cropInsets={normalizedCrop}
