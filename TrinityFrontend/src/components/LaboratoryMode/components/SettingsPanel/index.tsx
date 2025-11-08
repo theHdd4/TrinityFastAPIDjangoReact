@@ -43,6 +43,7 @@ import { ScenarioPlannerProperties } from '@/components/AtomList/atoms/scenario-
 import ExploreProperties from '@/components/AtomList/atoms/explore/components/properties/ExploreProperties';
 import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
 import EvaluateModelsFeatureProperties from '@/components/AtomList/atoms/evaluate-models-feature/components/properties/EvaluateModelsFeatureProperties';
+import PivotTableProperties from '@/components/AtomList/atoms/pivot-table/components/PivotTableProperties';
 import AtomSettingsTabs from './AtomSettingsTabs';
 
 interface SettingsPanelProps {
@@ -143,6 +144,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ExploreProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
             <ChartMakerProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'pivot-table' ? (
+            <PivotTableProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
             <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'select-models-feature' ? (
