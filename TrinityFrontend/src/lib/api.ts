@@ -179,6 +179,10 @@ export const CHART_MAKER_API =
   normalizeUrl(import.meta.env.VITE_CHART_MAKER_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/chart-maker`;
 
+export const PIVOT_API =
+  normalizeUrl(import.meta.env.VITE_PIVOT_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/pivot`;
+
 export const BUILD_MODEL_API =
   normalizeUrl(import.meta.env.VITE_BUILD_MODEL_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`;

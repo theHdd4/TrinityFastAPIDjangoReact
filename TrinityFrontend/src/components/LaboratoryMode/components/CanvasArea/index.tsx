@@ -44,6 +44,7 @@ import SelectModelsAutoRegressiveAtom from '@/components/AtomList/atoms/select-m
 import EvaluateModelsAutoRegressiveAtom from '@/components/AtomList/atoms/evaluate-models-auto-regressive/EvaluateModelsAutoRegressiveAtom';
 import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
 import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
+import PivotTableAtom from '@/components/AtomList/atoms/pivot-table/PivotTableAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -67,6 +68,7 @@ import {
   ColumnClassifierColumn,
   DEFAULT_EXPLORE_SETTINGS,
   DEFAULT_EXPLORE_DATA,
+  DEFAULT_PIVOT_TABLE_SETTINGS,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, UnifiedRenderItem } from './helpers';
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
@@ -97,6 +99,7 @@ const LLM_MAP: Record<string, string> = {
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
   'dataframe-operations': 'Agent DataFrame Operations',
+  'pivot-table': 'Agent Pivot Table',
 };
 
 const hydrateDroppedAtom = (atom: any): DroppedAtom => {
@@ -1844,6 +1847,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             ? { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } }
             : atom.id === 'chart-maker'
             ? { ...DEFAULT_CHART_MAKER_SETTINGS }
+            : atom.id === 'pivot-table'
+            ? { ...DEFAULT_PIVOT_TABLE_SETTINGS }
             : atom.id === 'dataframe-operations'
             ? { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS }
             : atom.id === 'select-models-feature'
@@ -2488,6 +2493,8 @@ const getDefaultSettingsForAtom = (atomId: string) => {
       return { data: { ...DEFAULT_EXPLORE_DATA }, settings: { ...DEFAULT_EXPLORE_SETTINGS } };
     case 'chart-maker':
       return { ...DEFAULT_CHART_MAKER_SETTINGS };
+    case 'pivot-table':
+      return { ...DEFAULT_PIVOT_TABLE_SETTINGS };
     case 'dataframe-operations':
       return { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS };
     case 'select-models-feature':
@@ -4037,6 +4044,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                       <ExploreAtom atomId={atom.id} />
                                     ) : atom.atomId === 'chart-maker' ? (
                                       <ChartMakerAtom atomId={atom.id} />
+                              ) : atom.atomId === 'pivot-table' ? (
+                                <PivotTableAtom atomId={atom.id} />
                                     ) : atom.atomId === 'concat' ? (
                                       <ConcatAtom atomId={atom.id} />
                                     ) : atom.atomId === 'merge' ? (
@@ -4313,6 +4322,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   <ExploreAtom atomId={atom.id} />
                                 ) : atom.atomId === 'chart-maker' ? (
                                   <ChartMakerAtom atomId={atom.id} />
+              ) : atom.atomId === 'pivot-table' ? (
+                <PivotTableAtom atomId={atom.id} />
                                 ) : atom.atomId === 'concat' ? (
                                   <ConcatAtom atomId={atom.id} />
                                 ) : atom.atomId === 'merge' ? (
@@ -4508,6 +4519,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               <ExploreAtom atomId={atom.id} />
                             ) : atom.atomId === 'chart-maker' ? (
                               <ChartMakerAtom atomId={atom.id} />
+              ) : atom.atomId === 'pivot-table' ? (
+                <PivotTableAtom atomId={atom.id} />
                             ) : atom.atomId === 'concat' ? (
                               <ConcatAtom atomId={atom.id} />
                             ) : atom.atomId === 'merge' ? (
@@ -4747,6 +4760,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <ExploreAtom atomId={atom.id} />
                       ) : atom.atomId === 'chart-maker' ? (
                         <ChartMakerAtom atomId={atom.id} />
+            ) : atom.atomId === 'pivot-table' ? (
+              <PivotTableAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (
                         <ConcatAtom atomId={atom.id} />
                       ) : atom.atomId === 'merge' ? (
@@ -4932,6 +4947,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             <ExploreAtom atomId={atom.id} />
                           ) : atom.atomId === 'chart-maker' ? (
                             <ChartMakerAtom atomId={atom.id} />
+              ) : atom.atomId === 'pivot-table' ? (
+                <PivotTableAtom atomId={atom.id} />
                           ) : atom.atomId === 'concat' ? (
                             <ConcatAtom atomId={atom.id} />
                           ) : atom.atomId === 'merge' ? (

@@ -1697,6 +1697,66 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   }
 };
 
+export interface PivotTableSettings {
+  dataSource?: string;
+  dataSourceColumns?: string[];
+  fields: string[];
+  selectedFields: string[];
+  rowFields: string[];
+  columnFields: string[];
+  valueFields: { field: string; aggregation: string }[];
+  filterFields: string[];
+  pivotResults: any[];
+  pivotStatus?: 'idle' | 'pending' | 'success' | 'failed';
+  pivotError?: string | null;
+  pivotUpdatedAt?: string;
+  pivotRowCount?: number;
+  pivotLastSavedPath?: string | null;
+  pivotLastSavedAt?: string | null;
+  pivotFilterOptions?: Record<string, string[]>;
+  pivotFilterSelections?: Record<string, string[]>;
+  grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
+  pivotStyleId?: string;
+  pivotStyleOptions?: {
+    rowHeaders: boolean;
+    columnHeaders: boolean;
+    bandedRows: boolean;
+  };
+  pivotHierarchy?: any[];
+  reportLayout?: 'compact' | 'outline' | 'tabular';
+  collapsedKeys?: string[];
+}
+
+export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
+  dataSource: '',
+  dataSourceColumns: [],
+  fields: [],
+  selectedFields: [],
+  rowFields: [],
+  columnFields: [],
+  valueFields: [],
+  filterFields: [],
+  pivotResults: [],
+  pivotStatus: 'idle',
+  pivotError: null,
+  pivotUpdatedAt: undefined,
+  pivotRowCount: 0,
+  pivotLastSavedPath: null,
+  pivotLastSavedAt: null,
+  pivotFilterOptions: {},
+  pivotFilterSelections: {},
+  grandTotalsMode: 'both',
+  pivotStyleId: 'light-slate',
+  pivotStyleOptions: {
+    rowHeaders: true,
+    columnHeaders: true,
+    bandedRows: false,
+  },
+  pivotHierarchy: [],
+  reportLayout: 'compact',
+  collapsedKeys: [],
+};
+
 interface LaboratoryStore {
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;
