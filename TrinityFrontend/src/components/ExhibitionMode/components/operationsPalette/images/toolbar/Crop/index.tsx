@@ -1,6 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
+const isDevEnvironment = process.env.NODE_ENV === 'development';
+const cropLog = (...args: unknown[]) => {
+  if (!isDevEnvironment) {
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.debug('[ImageCrop]', ...args);
+};
+
 export type CropHandle = 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
 
 export interface ImageCropInsets {
@@ -130,12 +139,14 @@ export const useImageCropInteraction = ({
   const [previewCrop, setPreviewCrop] = useState<ImageCropInsets>(normalizedCropFromProps);
 
   useEffect(() => {
+    cropLog('Crop mode state changed', { isCropping });
     if (!isCropping) {
       setPreviewCrop(normalizedCropFromProps);
     }
   }, [isCropping, normalizedCropFromProps]);
 
   useEffect(() => {
+    cropLog('Received crop props update', normalizedCropFromProps);
     setPreviewCrop(normalizedCropFromProps);
   }, [normalizedCropFromProps]);
 
@@ -143,11 +154,18 @@ export const useImageCropInteraction = ({
     (event: PointerEvent) => {
       const state = dragStateRef.current;
       if (!state || !onCropChange) {
+        if (!state) {
+          cropLog('Pointer move ignored – no drag state');
+        }
+        if (!onCropChange) {
+          cropLog('Pointer move ignored – missing onCropChange handler');
+        }
         return;
       }
 
       const { handle, startX, startY, containerRect, initialCrop } = state;
       if (containerRect.width <= 0 || containerRect.height <= 0) {
+        cropLog('Pointer move ignored – invalid container rect', containerRect);
         return;
       }
 
@@ -155,6 +173,13 @@ export const useImageCropInteraction = ({
       const deltaYPercent = ((event.clientY - startY) / containerRect.height) * 100;
       const next = computeNextCrop(handle, deltaXPercent, deltaYPercent, initialCrop);
       setPreviewCrop(next);
+      cropLog('Pointer move', {
+        handle,
+        deltaXPercent,
+        deltaYPercent,
+        initialCrop,
+        next,
+      });
       onCropChange(next);
     },
     [onCropChange],
@@ -162,12 +187,14 @@ export const useImageCropInteraction = ({
 
   const handleCropPointerUp = useCallback(() => {
     if (!dragStateRef.current) {
+      cropLog('Pointer up ignored – no drag state');
       return;
     }
     window.removeEventListener('pointermove', handleCropPointerMove);
     window.removeEventListener('pointerup', handleCropPointerUp);
     dragStateRef.current = null;
     setIsDragging(false);
+    cropLog('Pointer up – committing crop');
     onCropCommit?.();
   }, [handleCropPointerMove, onCropCommit]);
 
@@ -190,16 +217,22 @@ export const useImageCropInteraction = ({
   const beginCropDrag = useCallback(
     (handle: CropHandle, event: React.PointerEvent<HTMLElement>) => {
       if (!isCropping || !onCropChange) {
+        cropLog('Begin drag ignored – crop disabled or missing handler', {
+          isCropping,
+          hasOnCropChange: Boolean(onCropChange),
+        });
         return false;
       }
 
       const container = containerRef.current;
       if (!container) {
+        cropLog('Begin drag ignored – missing container ref');
         return false;
       }
 
       const rect = container.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) {
+        cropLog('Begin drag ignored – invalid container rect', rect);
         return false;
       }
 
@@ -214,6 +247,11 @@ export const useImageCropInteraction = ({
         initialCrop: normalizedCropFromProps,
       };
       setIsDragging(true);
+      cropLog('Begin drag', {
+        handle,
+        containerRect: rect,
+        initialCrop: normalizedCropFromProps,
+      });
       window.addEventListener('pointermove', handleCropPointerMove);
       window.addEventListener('pointerup', handleCropPointerUp);
       return true;
