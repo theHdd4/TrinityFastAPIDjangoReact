@@ -539,8 +539,22 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       });
 
       normalizedValueColumns.forEach(({ name, canonical }) => {
-        if (record[name] === undefined && sourceValues.has(canonical)) {
-          record[name] = sourceValues.get(canonical);
+        if (!sourceValues.has(canonical)) {
+          return;
+        }
+
+        const value = sourceValues.get(canonical);
+
+        if (record[name] === undefined || record[name] === null) {
+          record[name] = value;
+        }
+
+        if (
+          canonical &&
+          canonical !== name &&
+          (record[canonical] === undefined || record[canonical] === null)
+        ) {
+          record[canonical] = value;
         }
       });
 
@@ -548,8 +562,25 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         const match = findMatchingPivotRow(node.labels ?? []);
         if (match) {
           valueColumns.forEach((column) => {
+            const canonicalColumn = canonicalizeKey(column);
+            const matchValue =
+              match[column] ??
+              (canonicalColumn && canonicalColumn !== column ? match[canonicalColumn] : undefined);
+
+            if (matchValue === undefined || matchValue === null) {
+              return;
+            }
+
             if (record[column] === undefined || record[column] === null) {
-              record[column] = match[column];
+              record[column] = matchValue;
+            }
+
+            if (
+              canonicalColumn &&
+              canonicalColumn !== column &&
+              (record[canonicalColumn] === undefined || record[canonicalColumn] === null)
+            ) {
+              record[canonicalColumn] = matchValue;
             }
           });
         }
@@ -745,20 +776,29 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       </TableCell>
                     );
                   })}
-                  {valueColumns.map((column) => (
-                    <TableCell
-                      key={`${rowIndex}-${column}`}
-                      className="text-right tabular-nums font-medium"
-                      style={getDataCellStyle({
-                        row: row.record,
-                        column,
-                        rowIndex,
-                        isRowHeader: false,
-                      })}
-                    >
-                      {formatValue(row.record[column])}
-                    </TableCell>
-                  ))}
+                  {valueColumns.map((column) => {
+                    const canonicalColumn = canonicalizeKey(column);
+                    const rawValue =
+                      row.record[column] ??
+                      (canonicalColumn && canonicalColumn !== column
+                        ? row.record[canonicalColumn]
+                        : undefined);
+
+                    return (
+                      <TableCell
+                        key={`${rowIndex}-${column}`}
+                        className="text-right tabular-nums font-medium"
+                        style={getDataCellStyle({
+                          row: row.record,
+                          column,
+                          rowIndex,
+                          isRowHeader: false,
+                        })}
+                      >
+                        {formatValue(rawValue)}
+                      </TableCell>
+                    );
+                  })}
                 </TableRow>
               ))}
         </TableBody>
@@ -1145,14 +1185,34 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     if (!rowFields.length || hierarchyTree.roots.length === 0) {
       return pivotRows.map((row) => {
         const record: Record<string, any> = { ...row };
+
+        valueColumns.forEach((column) => {
+          const canonicalColumn = canonicalizeKey(column);
+          const columnValue = row[column];
+          if (
+            canonicalColumn &&
+            canonicalColumn !== column &&
+            columnValue !== undefined &&
+            columnValue !== null &&
+            record[canonicalColumn] === undefined
+          ) {
+            record[canonicalColumn] = columnValue;
+          }
+        });
+
         rowFields.forEach((field) => {
           const canonicalField = canonicalizeKey(field);
           const value = row[field];
           record[field] = value;
-          if (canonicalField && canonicalField !== field) {
+          if (
+            canonicalField &&
+            canonicalField !== field &&
+            record[canonicalField] === undefined
+          ) {
             record[canonicalField] = value;
           }
         });
+
         return { record };
       });
     }
@@ -1183,7 +1243,11 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
             : trimmed;
         }
         record[field] = displayValue;
-        if (canonicalField && canonicalField !== field) {
+        if (
+          canonicalField &&
+          canonicalField !== field &&
+          (record[canonicalField] === undefined || record[canonicalField] === null)
+        ) {
           record[canonicalField] = displayValue;
         }
       });
@@ -1199,7 +1263,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
     hierarchyTree.roots.forEach((root) => traverse(root, {}));
     return rows;
-  }, [buildRecordForNode, canonicalizeKey, hierarchyTree, pivotRows, rowFields]);
+  }, [buildRecordForNode, canonicalizeKey, hierarchyTree, pivotRows, rowFields, valueColumns]);
 
   const layoutOptions = useMemo(
     () => [
