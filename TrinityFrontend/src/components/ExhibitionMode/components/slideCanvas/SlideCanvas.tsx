@@ -4562,10 +4562,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onOpacityChange={value => handleSetImageOpacity(object.id, value)}
                       onCropChange={next => handleSetImageCrop(object.id, next)}
                       onResetCrop={() => handleResetImageCrop(object.id)}
-                      onBringForward={() => handleLayerAction('forward', [object.id])}
-                      onSendBackward={() => handleLayerAction('backward', [object.id])}
-                      onBringToFront={() => handleLayerAction('front', [object.id])}
-                      onSendToBack={() => handleLayerAction('back', [object.id])}
                       onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
                     />
                   ) : isChartObject && chartProps ? (
