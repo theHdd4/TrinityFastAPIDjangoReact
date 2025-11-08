@@ -9,6 +9,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import {
+  CropHandle,
+  DEFAULT_CROP_INSETS,
+  ImageCropInsets,
+  ImageCropOverlay,
+  hasCrop as hasActiveCrop,
+  useImageCropInteraction,
+} from './toolbar/Crop';
 
 interface ImageToolbarProps {
   name?: string | null;
@@ -32,47 +40,6 @@ interface ImageToolbarProps {
 const Separator = () => <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />;
 
 const clampOpacity = (value: number) => Math.min(Math.max(value, 0), 1);
-
-interface ImageCropInsets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
-const DEFAULT_CROP_INSETS: ImageCropInsets = { top: 0, right: 0, bottom: 0, left: 0 };
-
-const clampCropValue = (value: number) => Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 95);
-const roundCropValue = (value: number) => Math.round(value * 100) / 100;
-const MIN_VISIBLE_PERCENT = 5;
-
-const normalizeCropInsets = (value: unknown): ImageCropInsets => {
-  if (!value || typeof value !== 'object') {
-    return DEFAULT_CROP_INSETS;
-  }
-
-  const candidate = value as Partial<ImageCropInsets>;
-  const top = clampCropValue(candidate.top ?? 0);
-  const right = clampCropValue(candidate.right ?? 0);
-  const bottom = clampCropValue(candidate.bottom ?? 0);
-  const left = clampCropValue(candidate.left ?? 0);
-
-  const maxTop = Math.max(0, 100 - MIN_VISIBLE_PERCENT - bottom);
-  const resolvedTop = Math.min(top, maxTop);
-  const maxBottom = Math.max(0, 100 - MIN_VISIBLE_PERCENT - resolvedTop);
-  const resolvedBottom = Math.min(bottom, maxBottom);
-  const maxLeft = Math.max(0, 100 - MIN_VISIBLE_PERCENT - right);
-  const resolvedLeft = Math.min(left, maxLeft);
-  const maxRight = Math.max(0, 100 - MIN_VISIBLE_PERCENT - resolvedLeft);
-  const resolvedRight = Math.min(right, maxRight);
-
-  return {
-    top: roundCropValue(resolvedTop),
-    right: roundCropValue(resolvedRight),
-    bottom: roundCropValue(resolvedBottom),
-    left: roundCropValue(resolvedLeft),
-  } satisfies ImageCropInsets;
-};
 
 const ImageToolbar: React.FC<ImageToolbarProps> = ({
   name,
@@ -340,15 +307,6 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   onDelete,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const cropDragStateRef = useRef<{
-    handle: 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
-    startX: number;
-    startY: number;
-    containerRect: DOMRect;
-    initialCrop: ImageCropInsets;
-  } | null>(null);
-  const [isCropDragging, setIsCropDragging] = useState(false);
-  const normalizedCrop = useMemo(() => normalizeCropInsets(cropInsets), [cropInsets]);
   const [localFitMode, setLocalFitMode] = useState<'cover' | 'contain'>(fitMode);
   const [localFlipHorizontal, setLocalFlipHorizontal] = useState<boolean>(flipHorizontal);
   const [localFlipVertical, setLocalFlipVertical] = useState<boolean>(flipVertical);
@@ -384,6 +342,14 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     onInteract();
     onToggleFit();
   }, [localFitMode, onInteract, onToggleFit]);
+
+  const { beginCropDrag, isDragging: isCropDragging, normalizedCrop } = useImageCropInteraction({
+    isCropping,
+    cropInsets,
+    containerRef,
+    onCropChange,
+    onCropCommit,
+  });
 
   const handleToggleCrop = useCallback(() => {
     if (!onToggleCrop) {
@@ -441,124 +407,14 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     onRequestPositionPanel();
   }, [onInteract, onRequestPositionPanel]);
 
-  const computeNextCrop = useCallback(
-    (
-      handle: 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se',
-      deltaXPercent: number,
-      deltaYPercent: number,
-      initial: ImageCropInsets,
-    ): ImageCropInsets => {
-      const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-      let nextTop = initial.top;
-      let nextRight = initial.right;
-      let nextBottom = initial.bottom;
-      let nextLeft = initial.left;
-
-      if (handle === 'move') {
-        const width = 100 - initial.left - initial.right;
-        const height = 100 - initial.top - initial.bottom;
-        const maxLeft = Math.max(0, 100 - width);
-        const maxTop = Math.max(0, 100 - height);
-        const proposedLeft = clamp(initial.left + deltaXPercent, 0, maxLeft);
-        const proposedTop = clamp(initial.top + deltaYPercent, 0, maxTop);
-        nextLeft = proposedLeft;
-        nextTop = proposedTop;
-        nextRight = 100 - width - proposedLeft;
-        nextBottom = 100 - height - proposedTop;
-        return normalizeCropInsets({ top: nextTop, right: nextRight, bottom: nextBottom, left: nextLeft });
-      }
-
-      if (handle.includes('n')) {
-        const maxTop = 100 - MIN_VISIBLE_PERCENT - initial.bottom;
-        nextTop = clamp(initial.top + deltaYPercent, 0, maxTop);
-      }
-      if (handle.includes('s')) {
-        const maxBottom = 100 - MIN_VISIBLE_PERCENT - nextTop;
-        nextBottom = clamp(initial.bottom - deltaYPercent, 0, maxBottom);
-      }
-      if (handle.includes('w')) {
-        const maxLeft = 100 - MIN_VISIBLE_PERCENT - initial.right;
-        nextLeft = clamp(initial.left + deltaXPercent, 0, maxLeft);
-      }
-      if (handle.includes('e')) {
-        const maxRight = 100 - MIN_VISIBLE_PERCENT - nextLeft;
-        nextRight = clamp(initial.right - deltaXPercent, 0, maxRight);
-      }
-
-      return normalizeCropInsets({ top: nextTop, right: nextRight, bottom: nextBottom, left: nextLeft });
-    },
-    [],
-  );
-
-  const handleCropPointerMove = useCallback(
-    (event: PointerEvent) => {
-      const state = cropDragStateRef.current;
-      if (!state || !onCropChange) {
-        return;
-      }
-
-      const { handle, startX, startY, containerRect, initialCrop } = state;
-      if (containerRect.width <= 0 || containerRect.height <= 0) {
-        return;
-      }
-
-      const deltaXPercent = ((event.clientX - startX) / containerRect.width) * 100;
-      const deltaYPercent = ((event.clientY - startY) / containerRect.height) * 100;
-      const next = computeNextCrop(handle, deltaXPercent, deltaYPercent, initialCrop);
-      onCropChange(next);
-    },
-    [computeNextCrop, onCropChange],
-  );
-
-  const handleCropPointerUp = useCallback(
-    () => {
-      if (!cropDragStateRef.current) {
-        return;
-      }
-      window.removeEventListener('pointermove', handleCropPointerMove);
-      window.removeEventListener('pointerup', handleCropPointerUp);
-      cropDragStateRef.current = null;
-      setIsCropDragging(false);
-      onCropCommit?.();
-    },
-    [handleCropPointerMove, onCropCommit],
-  );
-
   const handleCropPointerDown = useCallback(
-    (
-      handle: 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se',
-      event: React.PointerEvent<HTMLDivElement>,
-    ) => {
-      if (!isCropping || !onCropChange) {
-        return;
+    (handle: CropHandle, event: React.PointerEvent<HTMLElement>) => {
+      const started = beginCropDrag(handle, event);
+      if (started) {
+        onInteract();
       }
-
-      const container = containerRef.current;
-      if (!container) {
-        return;
-      }
-
-      const rect = container.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      onInteract();
-
-      cropDragStateRef.current = {
-        handle,
-        startX: event.clientX,
-        startY: event.clientY,
-        containerRect: rect,
-        initialCrop: normalizedCrop,
-      };
-      setIsCropDragging(true);
-      window.addEventListener('pointermove', handleCropPointerMove);
-      window.addEventListener('pointerup', handleCropPointerUp);
     },
-    [handleCropPointerMove, handleCropPointerUp, isCropping, normalizedCrop, onCropChange, onInteract],
+    [beginCropDrag, onInteract],
   );
 
   const toolbar = useMemo(() => {
@@ -628,26 +484,16 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     };
   }, [canEdit, id, isSelected, onToolbarStateChange, toolbar]);
 
-  useEffect(() => {
-    if (!isCropping) {
-      window.removeEventListener('pointermove', handleCropPointerMove);
-      window.removeEventListener('pointerup', handleCropPointerUp);
-      cropDragStateRef.current = null;
-      setIsCropDragging(false);
-    }
-
-    return () => {
-      window.removeEventListener('pointermove', handleCropPointerMove);
-      window.removeEventListener('pointerup', handleCropPointerUp);
-    };
-  }, [handleCropPointerMove, handleCropPointerUp, isCropping]);
-
   const resolvedName = name && name.trim().length > 0 ? name : 'Slide image';
-  const hasCrop =
-    normalizedCrop.top > 0 ||
-    normalizedCrop.right > 0 ||
-    normalizedCrop.bottom > 0 ||
-    normalizedCrop.left > 0;
+  const hasCrop = hasActiveCrop(normalizedCrop);
+
+  const handleResetCrop = useCallback(() => {
+    if (!onResetCrop) {
+      return;
+    }
+    onInteract();
+    onResetCrop();
+  }, [onInteract, onResetCrop]);
 
   const clipPathValue = useMemo(() => {
     if (!hasCrop) {
@@ -673,26 +519,6 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     [clipPathValue, localFlipHorizontal, localFlipVertical, localOpacity],
   );
 
-  const cropCornerHandles = useMemo(
-    () => [
-      { handle: 'nw' as const, className: 'top-0 left-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize' },
-      { handle: 'ne' as const, className: 'top-0 right-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize' },
-      { handle: 'sw' as const, className: 'bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize' },
-      { handle: 'se' as const, className: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize' },
-    ],
-    [],
-  );
-
-  const cropEdgeHandles = useMemo(
-    () => [
-      { handle: 'n' as const, className: 'top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 cursor-n-resize' },
-      { handle: 's' as const, className: 'bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 cursor-s-resize' },
-      { handle: 'e' as const, className: 'top-1/2 right-0 translate-x-1/2 -translate-y-1/2 cursor-e-resize' },
-      { handle: 'w' as const, className: 'top-1/2 left-0 -translate-x-1/2 -translate-y-1/2 cursor-w-resize' },
-    ],
-    [],
-  );
-
   return (
     <div
       className={cn(
@@ -715,82 +541,12 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
             style={imageStyle}
           />
           {isCropping && (
-            <>
-              <div className="pointer-events-none absolute inset-0 z-30">
-                <div className="absolute left-0 right-0 top-0 bg-black/40" style={{ height: `${normalizedCrop.top}%` }} />
-                <div
-                  className="absolute left-0 right-0 bg-black/40"
-                  style={{
-                    top: `${100 - normalizedCrop.bottom}%`,
-                    height: `${normalizedCrop.bottom}%`,
-                  }}
-                />
-                <div
-                  className="absolute left-0 bg-black/40"
-                  style={{
-                    top: `${normalizedCrop.top}%`,
-                    bottom: `${normalizedCrop.bottom}%`,
-                    width: `${normalizedCrop.left}%`,
-                  }}
-                />
-                <div
-                  className="absolute right-0 bg-black/40"
-                  style={{
-                    top: `${normalizedCrop.top}%`,
-                    bottom: `${normalizedCrop.bottom}%`,
-                    width: `${normalizedCrop.right}%`,
-                  }}
-                />
-              </div>
-              <div
-                className={cn(
-                  'absolute z-40 border-2 border-primary/80 bg-transparent',
-                  isCropDragging ? 'shadow-[0_0_0_999px_rgba(59,130,246,0.12)]' : 'shadow-[0_0_0_999px_rgba(15,23,42,0.25)]',
-                )}
-                style={{
-                  top: `${normalizedCrop.top}%`,
-                  right: `${normalizedCrop.right}%`,
-                  bottom: `${normalizedCrop.bottom}%`,
-                  left: `${normalizedCrop.left}%`,
-                  cursor: isCropDragging ? 'grabbing' : 'grab',
-                }}
-                onPointerDown={event => handleCropPointerDown('move', event)}
-              >
-                <div className="pointer-events-none absolute inset-0 border border-white/40" />
-                <div className="absolute left-2 top-2 flex items-center gap-2 rounded-full bg-primary/90 px-3 py-1 text-xs font-medium text-white shadow">
-                  Crop mode
-                  {onResetCrop && hasCrop && (
-                    <button
-                      type="button"
-                      className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white/80 hover:bg-white/20"
-                      onPointerDown={event => event.stopPropagation()}
-                      onClick={event => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onInteract();
-                        onResetCrop();
-                      }}
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-                {cropCornerHandles.map(def => (
-                  <span
-                    key={def.handle}
-                    className={cn('absolute z-50 h-3 w-3 rounded-full border border-background bg-white', def.className)}
-                    onPointerDown={event => handleCropPointerDown(def.handle, event)}
-                  />
-                ))}
-                {cropEdgeHandles.map(def => (
-                  <span
-                    key={def.handle}
-                    className={cn('absolute z-50 h-3 w-3 rounded-full border border-background bg-white', def.className)}
-                    onPointerDown={event => handleCropPointerDown(def.handle, event)}
-                  />
-                ))}
-              </div>
-            </>
+            <ImageCropOverlay
+              cropInsets={normalizedCrop}
+              isDragging={isCropDragging}
+              onBeginDrag={handleCropPointerDown}
+              onResetCrop={onResetCrop && hasCrop ? handleResetCrop : undefined}
+            />
           )}
         </>
       ) : (

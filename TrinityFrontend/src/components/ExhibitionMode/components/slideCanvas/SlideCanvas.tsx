@@ -108,45 +108,7 @@ import {
 } from './utils';
 import { resolveFeatureOverviewTransparency, resolveSlideBackground } from './background';
 import { formattingShallowEqual, readTableState, tableStatesEqual, type TableState } from './table';
-
-interface ImageCropInsets {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
-const clampCropPercent = (value: number) => Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 95);
-
-const sanitizeImageCrop = (value: unknown): ImageCropInsets => {
-  if (!value || typeof value !== 'object') {
-    return { top: 0, right: 0, bottom: 0, left: 0 };
-  }
-
-  const candidate = value as Partial<ImageCropInsets>;
-  const top = clampCropPercent(candidate.top ?? 0);
-  const right = clampCropPercent(candidate.right ?? 0);
-  const bottom = clampCropPercent(candidate.bottom ?? 0);
-  const left = clampCropPercent(candidate.left ?? 0);
-
-  const minVisible = 5;
-  const maxTop = Math.max(0, 100 - minVisible - bottom);
-  const resolvedTop = Math.min(top, maxTop);
-  const maxBottom = Math.max(0, 100 - minVisible - resolvedTop);
-  const resolvedBottom = Math.min(bottom, maxBottom);
-  const maxLeft = Math.max(0, 100 - minVisible - right);
-  const resolvedLeft = Math.min(left, maxLeft);
-  const maxRight = Math.max(0, 100 - minVisible - resolvedLeft);
-  const resolvedRight = Math.min(right, maxRight);
-
-  const round = (input: number) => Math.round(input * 100) / 100;
-  return {
-    top: round(resolvedTop),
-    right: round(resolvedRight),
-    bottom: round(resolvedBottom),
-    left: round(resolvedLeft),
-  };
-};
+import { ImageCropInsets, sanitizeImageCrop } from '../operationsPalette/images/toolbar/Crop';
 
 
 
