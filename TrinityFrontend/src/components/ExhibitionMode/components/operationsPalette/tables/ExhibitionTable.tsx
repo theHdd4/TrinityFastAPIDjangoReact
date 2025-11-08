@@ -339,6 +339,7 @@ interface ContentEditableCellProps {
   value: string;
   formatting: TableCellFormatting;
   editable: boolean;
+  isEditing: boolean;
   onFocus: () => void;
   onChange: (value: string) => void;
   onCommit: (value: string) => void;
@@ -350,6 +351,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
   value,
   formatting,
   editable,
+  isEditing,
   onFocus,
   onChange,
   onCommit,
@@ -358,6 +360,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
 }) => {
   const elementRef = useRef<HTMLDivElement | null>(null);
   const lastValueRef = useRef<string>('');
+  const wasEditingRef = useRef<boolean>(false);
 
   const setDomValue = useCallback((nextValue: string) => {
     const node = elementRef.current;
@@ -404,24 +407,24 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
   }, [onCommit, readDomValue]);
 
   const handleInput = useCallback(() => {
-    if (!editable) {
+    if (!editable || !isEditing) {
       return;
     }
     onInteract?.();
     emitChange();
-  }, [editable, emitChange, onInteract]);
+  }, [editable, emitChange, isEditing, onInteract]);
 
   const handleBlur = useCallback(() => {
-    if (!editable) {
+    if (!editable || !isEditing) {
       return;
     }
     emitCommit();
     onBlur?.();
-  }, [editable, emitCommit, onBlur]);
+  }, [editable, emitCommit, isEditing, onBlur]);
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLDivElement>) => {
-      if (!editable) {
+      if (!editable || !isEditing) {
         return;
       }
 
@@ -432,8 +435,65 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
         ownerDocument.execCommand('insertText', false, plainText);
       }
     },
-    [editable],
+    [editable, isEditing],
   );
+
+  useEffect(() => {
+    const node = elementRef.current;
+    if (!node) {
+      wasEditingRef.current = isEditing;
+      return;
+    }
+
+    if (!editable || !isEditing) {
+      wasEditingRef.current = isEditing;
+      return;
+    }
+
+    if (wasEditingRef.current) {
+      wasEditingRef.current = isEditing;
+      return;
+    }
+
+    wasEditingRef.current = isEditing;
+
+    const ownerDocument = node.ownerDocument;
+    if (!ownerDocument) {
+      return;
+    }
+
+    const focusNode = () => {
+      try {
+        node.focus({ preventScroll: true });
+      } catch {
+        node.focus();
+      }
+
+      const selection = ownerDocument.getSelection();
+      const selectionInside = Boolean(
+        selection?.rangeCount &&
+        selection?.anchorNode &&
+        node.contains(selection.anchorNode),
+      );
+
+      if (!selectionInside && ownerDocument.createRange) {
+        try {
+          const range = ownerDocument.createRange();
+          range.selectNodeContents(node);
+          selection?.removeAllRanges();
+          selection?.addRange(range);
+        } catch {
+          // Ignore selection errors
+        }
+      }
+    };
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(focusNode);
+    } else {
+      focusNode();
+    }
+  }, [editable, isEditing]);
 
   return (
     <div
@@ -454,7 +514,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
         textDecoration: buildTextDecoration(formatting),
         whiteSpace: 'pre-wrap',
       }}
-      contentEditable={editable}
+      contentEditable={editable && isEditing}
       suppressContentEditableWarning
       onFocus={onFocus}
       onInput={handleInput}
@@ -527,13 +587,19 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
 
       const targetElement = event.target as HTMLElement | null;
       const isDoubleClick = event.detail > 1;
-      if (!event.shiftKey && !isDoubleClick && targetElement?.dataset.exhibitionTableCellContent !== 'true') {
+      const isContentTarget = targetElement?.dataset.exhibitionTableCellContent === 'true';
+
+      if (isEditing && isContentTarget) {
+        return;
+      }
+
+      if (!event.shiftKey && !isDoubleClick && !isContentTarget) {
         event.preventDefault();
       }
 
       onSelectionStart(selectionTarget, { extend: event.shiftKey });
     },
-    [onSelectionStart, selectionTarget],
+    [isEditing, onSelectionStart, selectionTarget],
   );
 
   const handlePointerEnter = useCallback(
@@ -542,17 +608,23 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
         return;
       }
 
+      if (isEditing) {
+        return;
+      }
+
       onSelectionExtend(selectionTarget);
     },
-    [onSelectionExtend, selectionTarget],
+    [isEditing, onSelectionExtend, selectionTarget],
   );
 
   const handleFocus = useCallback(() => {
-    onSelectionStart(selectionTarget);
+    if (!isEditing) {
+      onSelectionStart(selectionTarget);
+    }
     if (editable) {
       onInteract?.();
     }
-  }, [editable, onInteract, onSelectionStart, selectionTarget]);
+  }, [editable, isEditing, onInteract, onSelectionStart, selectionTarget]);
 
   const handleDoubleClick = useCallback(
     (event: React.MouseEvent<HTMLTableCellElement>) => {
@@ -561,34 +633,13 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
       }
 
       event.stopPropagation();
-      onSelectionStart(selectionTarget);
-      onEnterEditMode?.(selectionTarget);
-      onInteract?.();
-
-      const content = event.currentTarget.querySelector<HTMLElement>(
-        '[data-exhibition-table-cell-content="true"]',
-      );
-      if (content && typeof content.focus === 'function') {
-        content.focus({ preventScroll: true });
-        const ownerDocument = content.ownerDocument;
-        if (
-          ownerDocument &&
-          typeof ownerDocument.createRange === 'function' &&
-          typeof ownerDocument.getSelection === 'function'
-        ) {
-          try {
-            const range = ownerDocument.createRange();
-            range.selectNodeContents(content);
-            const selection = ownerDocument.getSelection();
-            selection?.removeAllRanges();
-            selection?.addRange(range);
-          } catch {
-            // Ignore selection errors
-          }
-        }
+      if (!isEditing) {
+        onSelectionStart(selectionTarget);
+        onEnterEditMode?.(selectionTarget);
       }
+      onInteract?.();
     },
-    [editable, onEnterEditMode, onInteract, onSelectionStart, selectionTarget],
+    [editable, isEditing, onEnterEditMode, onInteract, onSelectionStart, selectionTarget],
   );
 
   return (
@@ -623,6 +674,7 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
         value={cell?.content ?? ''}
         formatting={formatting}
         editable={editable}
+        isEditing={Boolean(isEditing)}
         onFocus={handleFocus}
         onChange={onChange}
         onCommit={onCommit}
@@ -702,13 +754,19 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
 
       const targetElement = event.target as HTMLElement | null;
       const isDoubleClick = event.detail > 1;
-      if (!event.shiftKey && !isDoubleClick && targetElement?.dataset.exhibitionTableCellContent !== 'true') {
+      const isContentTarget = targetElement?.dataset.exhibitionTableCellContent === 'true';
+
+      if (isEditing && isContentTarget) {
+        return;
+      }
+
+      if (!event.shiftKey && !isDoubleClick && !isContentTarget) {
         event.preventDefault();
       }
 
       onSelectionStart(selectionTarget, { extend: event.shiftKey });
     },
-    [onSelectionStart, selectionTarget],
+    [isEditing, onSelectionStart, selectionTarget],
   );
 
   const handlePointerEnter = useCallback(
@@ -717,17 +775,23 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
         return;
       }
 
+      if (isEditing) {
+        return;
+      }
+
       onSelectionExtend(selectionTarget);
     },
-    [onSelectionExtend, selectionTarget],
+    [isEditing, onSelectionExtend, selectionTarget],
   );
 
   const handleFocus = useCallback(() => {
-    onSelectionStart(selectionTarget);
+    if (!isEditing) {
+      onSelectionStart(selectionTarget);
+    }
     if (editable) {
       onInteract?.();
     }
-  }, [editable, onInteract, onSelectionStart, selectionTarget]);
+  }, [editable, isEditing, onInteract, onSelectionStart, selectionTarget]);
 
   const handleDoubleClick = useCallback(
     (event: React.MouseEvent<HTMLTableCellElement>) => {
@@ -736,34 +800,13 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
       }
 
       event.stopPropagation();
-      onSelectionStart(selectionTarget);
-      onEnterEditMode?.(selectionTarget);
-      onInteract?.();
-
-      const content = event.currentTarget.querySelector<HTMLElement>(
-        '[data-exhibition-table-cell-content="true"]',
-      );
-      if (content && typeof content.focus === 'function') {
-        content.focus({ preventScroll: true });
-        const ownerDocument = content.ownerDocument;
-        if (
-          ownerDocument &&
-          typeof ownerDocument.createRange === 'function' &&
-          typeof ownerDocument.getSelection === 'function'
-        ) {
-          try {
-            const range = ownerDocument.createRange();
-            range.selectNodeContents(content);
-            const selection = ownerDocument.getSelection();
-            selection?.removeAllRanges();
-            selection?.addRange(range);
-          } catch {
-            // Ignore selection errors
-          }
-        }
+      if (!isEditing) {
+        onSelectionStart(selectionTarget);
+        onEnterEditMode?.(selectionTarget);
       }
+      onInteract?.();
     },
-    [editable, onEnterEditMode, onInteract, onSelectionStart, selectionTarget],
+    [editable, isEditing, onEnterEditMode, onInteract, onSelectionStart, selectionTarget],
   );
 
   return (
@@ -807,6 +850,7 @@ const EditableHeaderCell: React.FC<EditableHeaderCellProps> = ({
         value={cell?.content ?? ''}
         formatting={formatting}
         editable={editable}
+        isEditing={Boolean(isEditing)}
         onFocus={handleFocus}
         onChange={onChange}
         onCommit={onCommit}
