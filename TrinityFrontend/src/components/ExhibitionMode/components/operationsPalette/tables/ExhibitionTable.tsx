@@ -50,10 +50,10 @@ export interface ExhibitionTableProps {
   onDelete2Columns?: (startIndex: number, count: number) => void;
   onDeleteRow?: (startIndex: number, count: number) => void;
   onDelete2Rows?: (startIndex: number, count: number) => void;
-  onAddColumn?: () => void;
-  onAdd2Columns?: () => void;
-  onAddRow?: () => void;
-  onAdd2Rows?: () => void;
+  onAddColumn?: (startIndex: number, count: number) => void;
+  onAdd2Columns?: (startIndex: number, count: number) => void;
+  onAddRow?: (startIndex: number, count: number) => void;
+  onAdd2Rows?: (startIndex: number, count: number) => void;
   onToolbarStateChange?: (toolbar: React.ReactNode | null) => void;
   onInteract?: () => void;
   onStyleChange?: (styleId: string) => void;
