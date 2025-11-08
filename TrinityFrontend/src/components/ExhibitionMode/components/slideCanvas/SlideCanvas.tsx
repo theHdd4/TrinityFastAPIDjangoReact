@@ -112,7 +112,7 @@ import {
 } from './utils';
 import { resolveFeatureOverviewTransparency, resolveSlideBackground } from './background';
 import { formattingShallowEqual, readTableState, tableStatesEqual, type TableState } from './table';
-import { ImageCropInsets, sanitizeImageCrop } from '../operationsPalette/images/toolbar/Crop';
+import { ImageCropInsets, cropLog, sanitizeImageCrop } from '../operationsPalette/images/toolbar/Crop';
 
 
 
@@ -2307,9 +2307,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
     const handleSetImageCrop = useCallback(
       (objectId: string, nextCrop: ImageCropInsets) => {
+        const sanitized = sanitizeImageCrop(nextCrop);
+        cropLog('Persist crop update request', { id: objectId, crop: sanitized });
         updateImageProps(objectId, props => ({
           ...props,
-          crop: sanitizeImageCrop(nextCrop),
+          crop: sanitized,
         }));
       },
       [updateImageProps],
