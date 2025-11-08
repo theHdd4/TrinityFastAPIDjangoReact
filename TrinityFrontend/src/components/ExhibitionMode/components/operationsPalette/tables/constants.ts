@@ -8,6 +8,9 @@ export const DEFAULT_TABLE_HEIGHT = 260;
 export const DEFAULT_TABLE_COLUMN_WIDTH = 150;
 export const MIN_TABLE_COLUMN_WIDTH = 72;
 export const MAX_TABLE_COLUMN_WIDTH = 640;
+export const DEFAULT_TABLE_ROW_HEIGHT = 64;
+export const MIN_TABLE_ROW_HEIGHT = 32;
+export const MAX_TABLE_ROW_HEIGHT = 320;
 
 export type TableTextAlign = 'left' | 'center' | 'right';
 
@@ -100,6 +103,41 @@ export const createDefaultHeaderCell = (index: number): TableCellData => ({
   formatting: createCellFormatting({ bold: true }),
 });
 
+const COLUMN_HEADER_PATTERN = /^Column\s+(\d+)$/i;
+
+export const renumberDefaultTableHeaders = (headers: TableCellData[]): TableCellData[] => {
+  return headers.map((header, index) => {
+    const content = header?.content ?? '';
+    const trimmed = content.trim();
+
+    if (!trimmed) {
+      return header;
+    }
+
+    const match = COLUMN_HEADER_PATTERN.exec(trimmed);
+    if (!match) {
+      return header;
+    }
+
+    const numeric = Number(match[1]);
+    if (!Number.isFinite(numeric)) {
+      return header;
+    }
+
+    if (numeric === index + 1) {
+      return header;
+    }
+
+    if (numeric < 1 || numeric > headers.length + 5) {
+      return header;
+    }
+
+    const cloned = cloneCell(header);
+    cloned.content = `Column ${index + 1}`;
+    return cloned;
+  });
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
@@ -132,6 +170,31 @@ export const normaliseTableColumnWidths = (value: unknown, count: number): numbe
 
   const source = Array.isArray(value) ? value : [];
   return Array.from({ length: count }, (_, index) => clampColumnWidth(source[index]));
+};
+
+const clampRowHeight = (value: unknown): number => {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) {
+    return DEFAULT_TABLE_ROW_HEIGHT;
+  }
+
+  const rounded = Math.round(numeric);
+  if (rounded < MIN_TABLE_ROW_HEIGHT) {
+    return MIN_TABLE_ROW_HEIGHT;
+  }
+  if (rounded > MAX_TABLE_ROW_HEIGHT) {
+    return MAX_TABLE_ROW_HEIGHT;
+  }
+  return rounded;
+};
+
+export const normaliseTableRowHeights = (value: unknown, count: number): number[] => {
+  if (count <= 0) {
+    return [];
+  }
+
+  const source = Array.isArray(value) ? value : [];
+  return Array.from({ length: count }, (_, index) => clampRowHeight(source[index]));
 };
 
 const normaliseAlign = (value: unknown): TableTextAlign => {
@@ -582,10 +645,12 @@ export const normaliseTableHeaders = (
   const source = Array.isArray(value) ? value : [];
   const count = Math.max(fallbackCount, source.length, 1);
 
-  return Array.from({ length: count }, (_, index) => {
+  const headers = Array.from({ length: count }, (_, index) => {
     const header = index < source.length ? ensureHeaderCell(source[index], index) : createDefaultHeaderCell(index);
     return header;
   });
+
+  return renumberDefaultTableHeaders(headers);
 };
 
 export const normaliseTableData = (
@@ -621,6 +686,7 @@ export interface TableObjectProps {
   cols: number;
   locked?: boolean;
   showOutline?: boolean;
+  rowHeights?: number[];
 }
 
 const resolveNextZIndex = (objects: SlideObject[] | undefined): number => {
@@ -672,10 +738,12 @@ export const createTableSlideObject = (
     locked: Boolean(tableOptions.locked),
     showOutline: tableOptions.showOutline !== false,
     columnWidths: normaliseTableColumnWidths(tableOptions.columnWidths, cols),
+    rowHeights: normaliseTableRowHeights(tableOptions.rowHeights, rows),
     ...(overrideProps ?? {}),
   };
 
   props.columnWidths = normaliseTableColumnWidths(props.columnWidths, cols);
+  props.rowHeights = normaliseTableRowHeights(props.rowHeights, rows);
 
   return {
     id,
