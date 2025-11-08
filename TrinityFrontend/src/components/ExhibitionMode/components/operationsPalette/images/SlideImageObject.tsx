@@ -14,8 +14,10 @@ import {
   DEFAULT_CROP_INSETS,
   ImageCropInsets,
   ImageCropOverlay,
+  areCropInsetsEqual,
   cropLog,
   hasCrop as hasActiveCrop,
+  normalizeCropInsets,
   resolveCropRenderMetrics,
   useImageCropInteraction,
 } from './toolbar/Crop';
@@ -309,11 +311,17 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   onDelete,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const normalizedCropFromProps = useMemo(() => normalizeCropInsets(cropInsets), [cropInsets]);
+  const [liveCrop, setLiveCrop] = useState<ImageCropInsets>(normalizedCropFromProps);
   const [localFitMode, setLocalFitMode] = useState<'cover' | 'contain'>(fitMode);
   const [localFlipHorizontal, setLocalFlipHorizontal] = useState<boolean>(flipHorizontal);
   const [localFlipVertical, setLocalFlipVertical] = useState<boolean>(flipVertical);
   const [localAnimated, setLocalAnimated] = useState<boolean>(isAnimated);
   const [localOpacity, setLocalOpacity] = useState<number>(clampOpacity(opacity));
+
+  useEffect(() => {
+    setLiveCrop(previous => (areCropInsetsEqual(previous, normalizedCropFromProps) ? previous : normalizedCropFromProps));
+  }, [normalizedCropFromProps]);
 
   useEffect(() => {
     setLocalFitMode(fitMode);
@@ -353,15 +361,19 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     [id, onCropChange],
   );
 
-  const handleCropCommit = useCallback(() => {
-    cropLog('Commit crop request', { id, crop: normalizedCrop });
-    onCropCommit?.(id);
-  }, [id, normalizedCrop, onCropCommit]);
+  const handleCropCommit = useCallback(
+    (finalCrop: ImageCropInsets) => {
+      cropLog('Commit crop request', { id, crop: finalCrop });
+      onCropCommit?.(id);
+    },
+    [id, onCropCommit],
+  );
 
-  const { beginCropDrag, isDragging: isCropDragging, normalizedCrop } = useImageCropInteraction({
+  const { beginCropDrag, isDragging: isCropDragging } = useImageCropInteraction({
     isCropping,
     cropInsets,
     containerRef,
+    onPreviewChange: setLiveCrop,
     onCropChange: handleCropChange,
     onCropCommit: handleCropCommit,
   });
@@ -502,9 +514,13 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   }, [canEdit, id, isSelected, onToolbarStateChange, toolbar]);
 
   const resolvedName = name && name.trim().length > 0 ? name : 'Slide image';
-  const hasCrop = hasActiveCrop(normalizedCrop);
+  const hasCrop = hasActiveCrop(liveCrop);
 
-  const cropRenderMetrics = useMemo(() => resolveCropRenderMetrics(normalizedCrop), [normalizedCrop]);
+  const cropRenderMetrics = useMemo(() => resolveCropRenderMetrics(liveCrop), [liveCrop]);
+
+  useEffect(() => {
+    cropLog('Live crop state updated', { id, crop: liveCrop });
+  }, [id, liveCrop]);
 
   const cropWrapperTransform = useMemo(() => {
     if (!hasCrop && !isCropping) {
@@ -531,13 +547,13 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
 
     cropLog('Render crop transform', {
       id,
-      crop: normalizedCrop,
+      crop: liveCrop,
       metrics: cropRenderMetrics,
       transform: cropWrapperTransform,
       hasCrop,
       isCropping,
     });
-  }, [cropRenderMetrics, cropWrapperTransform, hasCrop, id, isCropping, normalizedCrop]);
+  }, [cropRenderMetrics, cropWrapperTransform, hasCrop, id, isCropping, liveCrop]);
 
   const handleResetCrop = useCallback(() => {
     if (!onResetCrop) {
@@ -545,6 +561,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     }
     onInteract();
     cropLog('Reset crop request', { id });
+    setLiveCrop(DEFAULT_CROP_INSETS);
     onResetCrop(id);
   }, [id, onInteract, onResetCrop]);
 
@@ -592,7 +609,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
           </div>
           {isCropping && (
             <ImageCropOverlay
-              cropInsets={normalizedCrop}
+              cropInsets={liveCrop}
               isDragging={isCropDragging}
               onBeginDrag={handleCropPointerDown}
               onResetCrop={onResetCrop && hasCrop ? handleResetCrop : undefined}

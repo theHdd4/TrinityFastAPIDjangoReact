@@ -25,7 +25,7 @@ const MIN_VISIBLE_PERCENT = 5;
 
 export const DEFAULT_CROP_INSETS: ImageCropInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
-const areCropInsetsEqual = (a: ImageCropInsets, b: ImageCropInsets): boolean =>
+export const areCropInsetsEqual = (a: ImageCropInsets, b: ImageCropInsets): boolean =>
   a.top === b.top && a.right === b.right && a.bottom === b.bottom && a.left === b.left;
 
 export const normalizeCropInsets = (value: unknown): ImageCropInsets => {
@@ -149,8 +149,9 @@ export interface UseImageCropInteractionOptions {
   isCropping: boolean;
   cropInsets?: ImageCropInsets | null;
   containerRef: React.RefObject<HTMLElement | null>;
+  onPreviewChange?: (next: ImageCropInsets) => void;
   onCropChange?: (next: ImageCropInsets) => void;
-  onCropCommit?: () => void;
+  onCropCommit?: (final: ImageCropInsets) => void;
 }
 
 export interface UseImageCropInteractionResult {
@@ -163,6 +164,7 @@ export const useImageCropInteraction = ({
   isCropping,
   cropInsets,
   containerRef,
+  onPreviewChange,
   onCropChange,
   onCropCommit,
 }: UseImageCropInteractionOptions): UseImageCropInteractionResult => {
@@ -176,10 +178,14 @@ export const useImageCropInteraction = ({
     previewCropRef.current = previewCrop;
   }, [previewCrop]);
 
-  const commitPreviewCrop = useCallback((next: ImageCropInsets) => {
-    previewCropRef.current = next;
-    setPreviewCrop(next);
-  }, []);
+  const commitPreviewCrop = useCallback(
+    (next: ImageCropInsets) => {
+      previewCropRef.current = next;
+      setPreviewCrop(next);
+      onPreviewChange?.(next);
+    },
+    [onPreviewChange],
+  );
 
   const syncPreviewCrop = useCallback(
     (next: ImageCropInsets) => {
@@ -248,7 +254,7 @@ export const useImageCropInteraction = ({
     dragStateRef.current = null;
     setIsDragging(false);
     cropLog('Pointer up – committing crop');
-    onCropCommit?.();
+    onCropCommit?.(previewCropRef.current);
   }, [handleCropPointerMove, onCropCommit]);
 
   useEffect(() => {
@@ -297,7 +303,7 @@ export const useImageCropInteraction = ({
         startX: event.clientX,
         startY: event.clientY,
         containerRect: rect,
-        initialCrop: normalizedCropFromProps,
+        initialCrop: previewCropRef.current,
       };
       setIsDragging(true);
       cropLog('Begin drag', {
