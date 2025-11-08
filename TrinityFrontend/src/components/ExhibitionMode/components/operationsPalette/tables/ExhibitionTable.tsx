@@ -438,6 +438,20 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
     [editable, isEditing],
   );
 
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!editable || !isEditing) {
+        return;
+      }
+
+      event.stopPropagation();
+      if (typeof event.nativeEvent.stopImmediatePropagation === 'function') {
+        event.nativeEvent.stopImmediatePropagation();
+      }
+    },
+    [editable, isEditing],
+  );
+
   useEffect(() => {
     const node = elementRef.current;
     if (!node) {
@@ -520,6 +534,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
       onInput={handleInput}
       onBlur={handleBlur}
       onPaste={handlePaste}
+      onKeyDown={handleKeyDown}
       spellCheck={false}
     />
   );
