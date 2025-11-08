@@ -194,6 +194,9 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
           pivotUpdatedAt: result?.updated_at,
           pivotRowCount: result?.rows,
           pivotHierarchy: Array.isArray(result?.hierarchy) ? result.hierarchy : [],
+          pivotColumnHierarchy: Array.isArray(result?.column_hierarchy)
+            ? result.column_hierarchy
+            : [],
           collapsedKeys: [],
         });
         setIsComputing(false);

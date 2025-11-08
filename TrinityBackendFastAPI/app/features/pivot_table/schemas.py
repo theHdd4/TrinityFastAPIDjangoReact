@@ -87,6 +87,10 @@ class PivotComputeResponse(BaseModel):
         default_factory=list,
         description="Hierarchical nodes describing row field structure for compact/outline layouts",
     )
+    column_hierarchy: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Hierarchical nodes describing column field structure for column headers",
+    )
 
 
 class PivotStatusResponse(BaseModel):

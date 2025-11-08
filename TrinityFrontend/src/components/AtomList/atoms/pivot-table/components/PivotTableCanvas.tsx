@@ -358,6 +358,44 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   const showColumnHeaders = styleOptions.columnHeaders;
   const grandTotalsMode = data.grandTotalsMode ?? 'both';
 
+  const getAggregationLabel = (aggregation?: string) => {
+    const normalized = (aggregation ?? 'sum').toLowerCase();
+    switch (normalized) {
+      case 'sum':
+        return 'Sum';
+      case 'avg':
+      case 'average':
+      case 'mean':
+        return 'Average';
+      case 'count':
+        return 'Count';
+      case 'min':
+        return 'Min';
+      case 'max':
+        return 'Max';
+      case 'median':
+        return 'Median';
+      default:
+        return normalized.length > 0
+          ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`
+          : 'Value';
+    }
+  };
+
+  const valueFieldLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    const valueConfigs = Array.isArray(data.valueFields) ? data.valueFields : [];
+    valueConfigs.forEach((item) => {
+      if (!item?.field) {
+        return;
+      }
+      const label = `${getAggregationLabel(item.aggregation)} of ${item.field}`;
+      map.set(item.field, label);
+      map.set(item.field.toLowerCase(), label);
+    });
+    return map;
+  }, [data.valueFields]);
+
   const getNormalizedKey = (field: string) => field.toLowerCase();
 
   const getFilterOptions = (field: string): string[] => {
@@ -478,10 +516,169 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
     return ordered;
   }, [data.rowFields, pivotRows, hasResults]);
+  type ColumnNode = {
+    key: string;
+    parentKey: string | null;
+    level: number;
+    order: number;
+    labels: Array<{ field: string; value: any }>;
+    column: string | null;
+    children: ColumnNode[];
+  };
 
-  const valueColumns = useMemo(
+  type ColumnHeaderCell = {
+    key: string;
+    label: string;
+    colSpan: number;
+    rowSpan: number;
+    level: number;
+    isValueField: boolean;
+  };
+
+  const columnHeaderInfo = useMemo(() => {
+    const rawNodes = Array.isArray(data.pivotColumnHierarchy)
+      ? data.pivotColumnHierarchy
+      : [];
+
+    const nodeMap = new Map<string, ColumnNode>();
+
+    rawNodes.forEach((raw: any) => {
+      const rawKey = raw?.key;
+      const key =
+        typeof rawKey === 'string' && rawKey.length > 0
+          ? rawKey
+          : String(rawKey ?? '');
+      if (!key) {
+        return;
+      }
+      const node: ColumnNode = {
+        key,
+        parentKey:
+          typeof raw?.parent_key === 'string' && raw.parent_key.length > 0
+            ? raw.parent_key
+            : null,
+        level: Number(raw?.level ?? 0),
+        order: Number(raw?.order ?? 0),
+        labels: Array.isArray(raw?.labels) ? raw.labels : [],
+        column:
+          typeof raw?.column === 'string' && raw.column.length > 0
+            ? raw.column
+            : null,
+        children: [],
+      };
+      nodeMap.set(key, node);
+    });
+
+    if (nodeMap.size === 0) {
+      return { rows: [] as ColumnHeaderCell[][], leafColumns: [] as string[] };
+    }
+
+    const roots: ColumnNode[] = [];
+    nodeMap.forEach((node) => {
+      const parentKey = node.parentKey;
+      if (parentKey && nodeMap.has(parentKey)) {
+        nodeMap.get(parentKey)!.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    });
+
+    const sortRecursive = (items: ColumnNode[]) => {
+      items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      items.forEach((child) => sortRecursive(child.children));
+    };
+    sortRecursive(roots);
+
+    let maxLevel = 0;
+    const determineDepth = (node: ColumnNode) => {
+      if (node.level > maxLevel) {
+        maxLevel = node.level;
+      }
+      node.children.forEach(determineDepth);
+    };
+    roots.forEach(determineDepth);
+    const depth = Math.max(maxLevel + 1, 1);
+
+    const leafCountMap = new Map<string, number>();
+    const leafColumns: string[] = [];
+
+    const computeLeafCounts = (node: ColumnNode): number => {
+      if (node.children.length === 0) {
+        leafCountMap.set(node.key, 1);
+        if (typeof node.column === 'string' && node.column.length > 0) {
+          leafColumns.push(node.column);
+        }
+        return 1;
+      }
+      let total = 0;
+      node.children.forEach((child) => {
+        total += computeLeafCounts(child);
+      });
+      leafCountMap.set(node.key, total);
+      return total;
+    };
+    roots.forEach(computeLeafCounts);
+
+    const rows: ColumnHeaderCell[][] = Array.from(
+      { length: depth },
+      () => [],
+    );
+
+    const pushNode = (node: ColumnNode) => {
+      const level = Math.max(0, node.level ?? 0);
+      const safeLevel = Math.min(level, rows.length - 1);
+      const leafCount = leafCountMap.get(node.key) ?? 1;
+      const hasChildren = node.children.length > 0;
+      const labelEntry = node.labels?.[node.labels.length - 1];
+      let labelValue = labelEntry?.value ?? '';
+      const fieldName = labelEntry?.field ?? '';
+      const isValueField = fieldName === '__value__';
+      if (isValueField) {
+        const normalizedLabel = String(labelValue ?? '').toLowerCase();
+        labelValue =
+          valueFieldLabelMap.get(normalizedLabel) ??
+          valueFieldLabelMap.get(String(labelValue ?? '')) ??
+          labelValue;
+      }
+      const displayLabel =
+        labelValue === null || labelValue === undefined || labelValue === ''
+          ? '\u00A0'
+          : String(labelValue);
+      const rowSpan = hasChildren ? 1 : Math.max(depth - level, 1);
+      rows[safeLevel].push({
+        key: node.key,
+        label: displayLabel,
+        colSpan: leafCount,
+        rowSpan,
+        level,
+        isValueField,
+      });
+      node.children.forEach(pushNode);
+    };
+    roots.forEach(pushNode);
+
+    return { rows, leafColumns };
+  }, [data.pivotColumnHierarchy, valueFieldLabelMap]);
+
+  const rawColumnHeaderRows = columnHeaderInfo.rows;
+  const columnLeafColumns = columnHeaderInfo.leafColumns;
+  const columnHeaderRows = showColumnHeaders ? rawColumnHeaderRows : [];
+
+  const getHeaderCellClass = (cell: ColumnHeaderCell) =>
+    cn(
+      'text-[12px] uppercase tracking-wide font-semibold',
+      cell.isValueField ? 'text-right' : 'text-left',
+    );
+
+  const baseValueColumns = useMemo(
     () => columns.filter((column) => !rowFieldSet.has(column.toLowerCase())),
     [columns, rowFieldSet],
+  );
+
+  const valueColumns = useMemo(
+    () =>
+      columnLeafColumns.length > 0 ? columnLeafColumns : baseValueColumns,
+    [columnLeafColumns, baseValueColumns],
   );
 
   const canonicalizeKey = useCallback((key: unknown) => {
@@ -747,33 +944,52 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
   const renderTabularTable = () => {
     const colSpan = Math.max(rowFields.length + valueColumns.length, 1);
+    const headerRowCount = columnHeaderRows.length > 0 ? columnHeaderRows.length : 1;
 
     return (
       <Table style={tableStyle}>
         <TableHeader>
-          <TableRow style={{ borderColor }}>
-            {rowFields.map((field, index) => (
-              <TableHead
-                key={field}
-                className="text-left text-[12px] uppercase tracking-wide font-semibold"
-                style={{
-                  ...headerStyle,
-                  textAlign: index === 0 ? 'left' : 'left',
-                }}
-              >
-                {field}
-              </TableHead>
-            ))}
-            {valueColumns.map((column) => (
-              <TableHead
-                key={column}
-                className="text-right text-[12px] uppercase tracking-wide font-semibold"
-                style={headerStyle}
-              >
-                {column}
-              </TableHead>
-            ))}
-          </TableRow>
+          {Array.from({ length: headerRowCount }).map((_, headerIndex) => (
+            <TableRow key={`tabular-header-${headerIndex}`} style={{ borderColor }}>
+              {headerIndex === 0 &&
+                rowFields.map((field) => (
+                  <TableHead
+                    key={field}
+                    rowSpan={headerRowCount}
+                    className="text-left text-[12px] uppercase tracking-wide font-semibold"
+                    style={{ ...headerStyle, textAlign: 'left' }}
+                  >
+                    {field}
+                  </TableHead>
+                ))}
+              {columnHeaderRows.length > 0
+                ? (columnHeaderRows[headerIndex] ?? []).map((cell) => (
+                    <TableHead
+                      key={`${cell.key}-${headerIndex}`}
+                      colSpan={cell.colSpan}
+                      rowSpan={cell.rowSpan}
+                      className={getHeaderCellClass(cell)}
+                      style={{
+                        ...headerStyle,
+                        textAlign: cell.isValueField ? 'right' : 'left',
+                      }}
+                    >
+                      {cell.label}
+                    </TableHead>
+                  ))
+                : headerIndex === 0
+                ? valueColumns.map((column) => (
+                    <TableHead
+                      key={column}
+                      className="text-right text-[12px] uppercase tracking-wide font-semibold"
+                      style={headerStyle}
+                    >
+                      {column}
+                    </TableHead>
+                  ))
+                : null}
+            </TableRow>
+          ))}
         </TableHeader>
         <TableBody>
           {isLoading
@@ -847,28 +1063,55 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       return renderTabularTable();
     }
 
-  return (
+    const headerRowCount = columnHeaderRows.length > 0 ? columnHeaderRows.length : 1;
+
+    return (
       <Table style={tableStyle}>
         <TableHeader>
-          <TableRow style={{ borderColor }}>
-            <TableHead
-              className="text-left text-[12px] uppercase tracking-wide font-semibold"
-              style={headerStyle}
-            >
-              <div className="flex items-center justify-between" style={{ color: headerStyle.color as string }}>
-                Row Labels
-              </div>
-            </TableHead>
-            {valueColumns.map((column) => (
-              <TableHead
-                key={column}
-                className="text-right text-[12px] uppercase tracking-wide font-semibold"
-                style={headerStyle}
-              >
-                {column}
-              </TableHead>
-            ))}
-          </TableRow>
+          {Array.from({ length: headerRowCount }).map((_, headerIndex) => (
+            <TableRow key={`compact-header-${headerIndex}`} style={{ borderColor }}>
+              {headerIndex === 0 && (
+                <TableHead
+                  rowSpan={headerRowCount}
+                  className="text-left text-[12px] uppercase tracking-wide font-semibold"
+                  style={headerStyle}
+                >
+                  <div
+                    className="flex items-center justify-between"
+                    style={{ color: headerStyle.color as string }}
+                  >
+                    Row Labels
+                  </div>
+                </TableHead>
+              )}
+              {columnHeaderRows.length > 0
+                ? (columnHeaderRows[headerIndex] ?? []).map((cell) => (
+                    <TableHead
+                      key={`${cell.key}-${headerIndex}`}
+                      colSpan={cell.colSpan}
+                      rowSpan={cell.rowSpan}
+                      className={getHeaderCellClass(cell)}
+                      style={{
+                        ...headerStyle,
+                        textAlign: cell.isValueField ? 'right' : 'left',
+                      }}
+                    >
+                      {cell.label}
+                    </TableHead>
+                  ))
+                : headerIndex === 0
+                ? valueColumns.map((column) => (
+                    <TableHead
+                      key={column}
+                      className="text-right text-[12px] uppercase tracking-wide font-semibold"
+                      style={headerStyle}
+                    >
+                      {column}
+                    </TableHead>
+                  ))
+                : null}
+            </TableRow>
+          ))}
         </TableHeader>
         <TableBody>
           {isLoading
@@ -937,33 +1180,52 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     }
 
     const colSpan = Math.max(rowFields.length + valueColumns.length, 1);
+    const headerRowCount = columnHeaderRows.length > 0 ? columnHeaderRows.length : 1;
 
     return (
       <Table style={tableStyle}>
         <TableHeader>
-          <TableRow style={{ borderColor }}>
-            {rowFields.map((field, index) => (
-              <TableHead
-                key={field}
-                className="text-left text-[12px] uppercase tracking-wide font-semibold"
-                style={{
-                  ...headerStyle,
-                  textAlign: 'left',
-                }}
-              >
-                {field}
-              </TableHead>
-            ))}
-            {valueColumns.map((column) => (
-              <TableHead
-                key={column}
-                className="text-right text-[12px] uppercase tracking-wide font-semibold"
-                style={headerStyle}
-              >
-                {column}
-              </TableHead>
-            ))}
-          </TableRow>
+          {Array.from({ length: headerRowCount }).map((_, headerIndex) => (
+            <TableRow key={`outline-header-${headerIndex}`} style={{ borderColor }}>
+              {headerIndex === 0 &&
+                rowFields.map((field) => (
+                  <TableHead
+                    key={field}
+                    rowSpan={headerRowCount}
+                    className="text-left text-[12px] uppercase tracking-wide font-semibold"
+                    style={{ ...headerStyle, textAlign: 'left' }}
+                  >
+                    {field}
+                  </TableHead>
+                ))}
+              {columnHeaderRows.length > 0
+                ? (columnHeaderRows[headerIndex] ?? []).map((cell) => (
+                    <TableHead
+                      key={`${cell.key}-${headerIndex}`}
+                      colSpan={cell.colSpan}
+                      rowSpan={cell.rowSpan}
+                      className={getHeaderCellClass(cell)}
+                      style={{
+                        ...headerStyle,
+                        textAlign: cell.isValueField ? 'right' : 'left',
+                      }}
+                    >
+                      {cell.label}
+                    </TableHead>
+                  ))
+                : headerIndex === 0
+                ? valueColumns.map((column) => (
+                    <TableHead
+                      key={column}
+                      className="text-right text-[12px] uppercase tracking-wide font-semibold"
+                      style={headerStyle}
+                    >
+                      {column}
+                    </TableHead>
+                  ))
+                : null}
+            </TableRow>
+          ))}
         </TableHeader>
         <TableBody>
           {isLoading

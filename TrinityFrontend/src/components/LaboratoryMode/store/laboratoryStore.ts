@@ -1723,6 +1723,7 @@ export interface PivotTableSettings {
     bandedRows: boolean;
   };
   pivotHierarchy?: any[];
+  pivotColumnHierarchy?: any[];
   reportLayout?: 'compact' | 'outline' | 'tabular';
   collapsedKeys?: string[];
 }
@@ -1753,6 +1754,7 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
     bandedRows: false,
   },
   pivotHierarchy: [],
+  pivotColumnHierarchy: [],
   reportLayout: 'compact',
   collapsedKeys: [],
 };

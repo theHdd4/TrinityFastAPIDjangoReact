@@ -55,6 +55,8 @@ async def get_pivot_data_endpoint(config_id: str) -> PivotComputeResponse:
         updated_at=updated_at,
         rows=rows,
         data=cached.get("data", []),
+        hierarchy=cached.get("hierarchy", []),
+        column_hierarchy=cached.get("column_hierarchy", []),
     )
 
 

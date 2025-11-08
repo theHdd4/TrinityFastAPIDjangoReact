@@ -152,12 +152,13 @@ def _apply_filters(df: pd.DataFrame, filters: List[Dict[str, Any]]) -> pd.DataFr
     return result
 
 
+def _format_column_label(parts: Iterable[Any]) -> str:
+    return " | ".join([str(part) for part in parts if str(part) != ""])
+
+
 def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [
-            " | ".join([str(part) for part in col if str(part) != ""])
-            for col in df.columns
-        ]
+        df.columns = [_format_column_label(col) for col in df.columns]
     else:
         df.columns = [str(col) for col in df.columns]
     return df
@@ -226,6 +227,83 @@ def _build_hierarchy_nodes(
             )
 
     return nodes
+
+
+def _build_column_hierarchy_nodes(
+    df: pd.DataFrame,
+    column_fields: List[str],
+    value_columns: List[str],
+) -> List[Dict[str, Any]]:
+    include_value_level = bool(column_fields) or len(value_columns) > 1
+    total_levels = len(column_fields) + (1 if include_value_level else 0)
+    if total_levels == 0:
+        return []
+
+    if isinstance(df.columns, pd.MultiIndex):
+        column_iterable = [tuple(col) for col in df.columns.tolist()]
+    else:
+        column_iterable = [(col,) for col in df.columns.tolist()]
+
+    nodes: Dict[str, Dict[str, Any]] = {}
+
+    for order, col_tuple in enumerate(column_iterable):
+        parts = list(col_tuple)
+        if include_value_level and not parts:
+            parts = [""]
+
+        path_entries: List[tuple[str, Any]] = []
+        remaining = parts
+
+        if include_value_level:
+            value_part = remaining[0] if remaining else ""
+            path_entries.append(("__value__", value_part))
+            remaining = remaining[1:]
+
+        for index, field in enumerate(column_fields):
+            value = remaining[index] if index < len(remaining) else ""
+            path_entries.append((field, value))
+
+        if not path_entries:
+            continue
+
+        column_name = _format_column_label(col_tuple)
+
+        for depth in range(1, len(path_entries) + 1):
+            prefix = path_entries[:depth]
+            key = "|".join(
+                f"{field}:{_value_to_key(value)}" for field, value in prefix
+            )
+            parent_key = (
+                "|".join(
+                    f"{field}:{_value_to_key(value)}" for field, value in prefix[:-1]
+                )
+                if depth > 1
+                else None
+            )
+
+            node = nodes.get(key)
+            if not node:
+                node = {
+                    "key": key,
+                    "parent_key": parent_key,
+                    "level": depth - 1,
+                    "order": order,
+                    "labels": [
+                        {"field": field, "value": _convert_numpy(value)}
+                        for field, value in prefix
+                    ],
+                }
+                nodes[key] = node
+            else:
+                node["order"] = min(node["order"], order)
+
+            if depth == len(path_entries):
+                node["column"] = column_name
+
+    ordered_nodes = sorted(
+        nodes.values(), key=lambda item: (item["level"], item["order"])
+    )
+    return ordered_nodes
 
 
 def _drop_margin_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -382,13 +460,22 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         if payload.grand_totals in ("rows", "off"):
             pivot_df = _drop_margin_columns(pivot_df)
 
+    series_converted = False
     if isinstance(pivot_df, pd.Series):
         pivot_df = pivot_df.to_frame(name=list(agg_map.keys())[0])
+        series_converted = True
+
+    column_hierarchy_nodes = _build_column_hierarchy_nodes(
+        pivot_df, column_fields, list(agg_map.keys())
+    )
 
     if row_fields:
         pivot_df = pivot_df.reset_index()
     else:
-        pivot_df = pivot_df.to_frame().T.reset_index(drop=True)
+        if series_converted:
+            pivot_df = pivot_df.T.reset_index(drop=True)
+        else:
+            pivot_df = pivot_df.reset_index(drop=True)
 
     pivot_df = _flatten_columns(pivot_df)
 
@@ -425,6 +512,7 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
             "rows": len(records),
             "data": records,
             "hierarchy": hierarchy_nodes,
+            "column_hierarchy": column_hierarchy_nodes,
         },
     )
 
@@ -447,6 +535,7 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         rows=len(records),
         data=records,
         hierarchy=hierarchy_nodes,
+        column_hierarchy=column_hierarchy_nodes,
     )
 
 
