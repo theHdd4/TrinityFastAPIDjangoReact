@@ -1457,22 +1457,23 @@ const ExhibitionMode = () => {
 
       const slideObjects = slideObjectsByCardId[targetCard.id] ?? [];
       const nextZIndex = slideObjects.reduce((max, object) => {
-        const value = typeof object.zIndex === 'number' ? object.zIndex : 1;
+        const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
         return value > max ? value : max;
-      }, 1);
+      }, 0);
 
-      const baseZIndex = nextZIndex + 1;
+      const baseZIndex = Math.round(nextZIndex) + 1;
 
       selections.forEach((selection, index) => {
         const imageObject = createImageSlideObject(
           generateImageObjectId(),
           selection.imageUrl,
           {
+            existingObjects: slideObjects,
             name: selection.metadata.title ?? null,
             source: selection.metadata.source,
-          },
-          {
-            zIndex: baseZIndex + index,
+            overrides: {
+              zIndex: baseZIndex + index,
+            },
           },
         );
 
@@ -1651,8 +1652,11 @@ const ExhibitionMode = () => {
     addSlideObject(
       targetCard.id,
       createTextBoxSlideObject(generateTextBoxId(), {
-        x: 120 + offset,
-        y: 120 + offset,
+        existingObjects,
+        overrides: {
+          x: 120 + offset,
+          y: 120 + offset,
+        },
       }),
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTextBoxId, slideObjectsByCardId]);
@@ -1670,8 +1674,11 @@ const ExhibitionMode = () => {
     addSlideObject(
       targetCard.id,
       createTableSlideObject(generateTableId(), {
-        x: 144 + offset,
-        y: 144 + offset,
+        existingObjects,
+        overrides: {
+          x: 144 + offset,
+          y: 144 + offset,
+        },
       }),
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
@@ -1690,15 +1697,12 @@ const ExhibitionMode = () => {
       const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
       const existingCharts = existingObjects.filter(object => object.type === 'chart').length;
       const offset = existingCharts * 32;
-      const nextZIndex = existingObjects.reduce((max, object) => {
-        const value = typeof object.zIndex === 'number' ? object.zIndex : 1;
-        return value > max ? value : max;
-      }, 1) + 1;
-
       const chartObject = createChartSlideObject(generateChartId(), data, chartConfig, {
-        x: 184 + offset,
-        y: 184 + offset,
-        zIndex: nextZIndex,
+        existingObjects,
+        overrides: {
+          x: 184 + offset,
+          y: 184 + offset,
+        },
       });
 
       addSlideObject(targetCard.id, chartObject);
@@ -1733,8 +1737,11 @@ const ExhibitionMode = () => {
       addSlideObject(
         targetCard.id,
         createShapeSlideObject(generateShapeId(), shape, {
-          x: 160 + offset,
-          y: 160 + offset,
+          existingObjects,
+          overrides: {
+            x: 160 + offset,
+            y: 160 + offset,
+          },
         }),
       );
     },
@@ -1828,6 +1835,12 @@ const ExhibitionMode = () => {
             ? textBoxes.filter(textBox => textBox !== titleTextBox)
             : textBoxes;
 
+        const templateBaseObjects = slideObjectsByCardId[newCard.id] ?? [];
+        let templateLayerCursor = templateBaseObjects.reduce((max, object) => {
+          const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+          return value > max ? value : max;
+        }, 0);
+
         supportingTextBoxes
           .filter(textBox => textBox.text.trim().length > 0)
           .forEach(textBox => {
@@ -1857,18 +1870,21 @@ const ExhibitionMode = () => {
               formatting.underline = textBox.underline;
             }
 
+            templateLayerCursor += 1;
+
             addSlideObject(
               newCard.id,
-              createTextBoxSlideObject(
-                generateTextBoxId(),
-                {
+              createTextBoxSlideObject(generateTextBoxId(), {
+                existingObjects: templateBaseObjects,
+                overrides: {
                   x: textBox.position.x,
                   y: textBox.position.y,
                   width: textBox.size.width,
                   height: textBox.size.height,
+                  zIndex: templateLayerCursor,
                 },
-                formatting,
-              ),
+                formattingOverrides: formatting,
+              }),
             );
           });
 
@@ -1892,54 +1908,57 @@ const ExhibitionMode = () => {
             shapeProps.opacity = Math.max(0, Math.min(1, shape.opacity));
           }
 
+          templateLayerCursor += 1;
+
           addSlideObject(
             newCard.id,
-            createShapeSlideObject(
-              generateShapeId(),
-              definition,
-              {
+            createShapeSlideObject(generateShapeId(), definition, {
+              existingObjects: templateBaseObjects,
+              overrides: {
                 x: shape.position.x,
                 y: shape.position.y,
                 width: shape.size.width,
                 height: shape.size.height,
                 rotation: typeof shape.rotation === 'number' ? shape.rotation : 0,
+                zIndex: templateLayerCursor,
               },
-              shapeProps,
-            ),
+              propsOverrides: shapeProps,
+            }),
           );
         });
 
         slide.content?.charts?.forEach(chart => {
-          const chartObject = createChartSlideObject(
-            generateChartId(),
-            chart.data,
-            chart.config,
-            {
+          templateLayerCursor += 1;
+
+          const chartObject = createChartSlideObject(generateChartId(), chart.data, chart.config, {
+            existingObjects: templateBaseObjects,
+            overrides: {
               x: chart.position.x,
               y: chart.position.y,
               width: chart.size.width,
               height: chart.size.height,
+              zIndex: templateLayerCursor,
             },
-          );
+          });
 
           addSlideObject(newCard.id, chartObject);
         });
 
         slide.content?.images?.forEach(image => {
-          const imageObject = createImageSlideObject(
-            generateImageObjectId(),
-            image.src,
-            {
-              name: image.name ?? image.description ?? null,
-              source: image.source ?? 'Template placeholder image',
-            },
-            {
+          templateLayerCursor += 1;
+
+          const imageObject = createImageSlideObject(generateImageObjectId(), image.src, {
+            existingObjects: templateBaseObjects,
+            name: image.name ?? image.description ?? null,
+            source: image.source ?? 'Template placeholder image',
+            overrides: {
               x: image.position.x,
               y: image.position.y,
               width: image.size.width,
               height: image.size.height,
+              zIndex: templateLayerCursor,
             },
-          );
+          });
 
           addSlideObject(newCard.id, imageObject);
         });
@@ -1969,8 +1988,10 @@ const ExhibitionMode = () => {
       bulkUpdateSlideObjects,
       canEdit,
       exhibitedCards.length,
+      generateChartId,
       generateShapeId,
       generateTextBoxId,
+      slideObjectsByCardId,
       setCurrentSlide,
       setOperationsPanelState,
       toast,

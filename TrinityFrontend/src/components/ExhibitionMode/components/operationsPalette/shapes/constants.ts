@@ -403,18 +403,44 @@ export const findShapeDefinition = (shapeId: string | undefined | null): ShapeDe
   return SHAPE_DEFINITIONS.find(shape => shape.id === shapeId) ?? null;
 };
 
+const resolveNextZIndex = (objects: SlideObject[] | undefined): number => {
+  if (!Array.isArray(objects) || objects.length === 0) {
+    return 1;
+  }
+
+  const max = objects.reduce((acc, object) => {
+    const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+    return value > acc ? value : acc;
+  }, 0);
+
+  return Math.round(max) + 1;
+};
+
+export interface CreateShapeSlideObjectOptions {
+  existingObjects?: SlideObject[];
+  overrides?: Partial<SlideObject>;
+  propsOverrides?: Partial<ShapeObjectProps>;
+}
+
 export const createShapeSlideObject = (
   id: string,
   shape: ShapeDefinition,
-  overrides: Partial<SlideObject> = {},
-  propsOverrides: Partial<ShapeObjectProps> = {},
+  options: CreateShapeSlideObjectOptions = {},
 ): SlideObject => {
+  const { existingObjects = [], overrides = {}, propsOverrides = {} } = options;
+  const { props: overrideProps = {}, zIndex: overrideZIndex, ...restOverrides } = overrides;
   const defaults = getDefaultShapeProps(shape);
   const props: ShapeObjectProps = {
     ...defaults,
     ...propsOverrides,
+    ...(overrideProps as Partial<ShapeObjectProps>),
     shapeId: shape.id,
   };
+
+  const zIndex =
+    typeof overrideZIndex === 'number' && Number.isFinite(overrideZIndex)
+      ? Math.round(overrideZIndex)
+      : resolveNextZIndex(existingObjects);
 
   return {
     id,
@@ -423,11 +449,11 @@ export const createShapeSlideObject = (
     y: 160,
     width: DEFAULT_SHAPE_WIDTH,
     height: DEFAULT_SHAPE_HEIGHT,
-    zIndex: 1,
+    zIndex,
     rotation: 0,
     groupId: null,
     props,
-    ...overrides,
+    ...restOverrides,
   };
 };
 

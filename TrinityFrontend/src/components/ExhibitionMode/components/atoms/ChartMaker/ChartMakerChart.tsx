@@ -176,6 +176,7 @@ const ChartMakerChart: React.FC<ChartMakerComponentProps> = ({ metadata, variant
     enableScroll: chartConfig?.enableScroll,
     chartsPerRow: chartConfig?.chartsPerRow,
     forceSingleAxis: shouldForceSingleAxis,
+    seriesSettings: chartConfig?.seriesSettings,
   };
   
   // Debug: Log renderer props

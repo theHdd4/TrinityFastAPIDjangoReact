@@ -26,12 +26,20 @@ export type ActiveInteraction =
       initial: { x: number; y: number; width: number; height: number };
     };
 
-export interface EditingTextState {
-  id: string;
-  type: 'text-box';
-  value: string;
-  original: string;
-}
+export type EditingTextState =
+  | {
+      id: string;
+      type: 'text-box';
+      value: string;
+      original: string;
+    }
+  | {
+      id: string;
+      type: 'table-cell';
+      region: 'header' | 'body';
+      row: number;
+      col: number;
+    };
 
 export const isAtomObject = (
   object: SlideObject,
