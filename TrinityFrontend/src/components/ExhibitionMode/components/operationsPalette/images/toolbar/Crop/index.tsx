@@ -25,6 +25,9 @@ const MIN_VISIBLE_PERCENT = 5;
 
 export const DEFAULT_CROP_INSETS: ImageCropInsets = { top: 0, right: 0, bottom: 0, left: 0 };
 
+const areCropInsetsEqual = (a: ImageCropInsets, b: ImageCropInsets): boolean =>
+  a.top === b.top && a.right === b.right && a.bottom === b.bottom && a.left === b.left;
+
 export const normalizeCropInsets = (value: unknown): ImageCropInsets => {
   if (!value || typeof value !== 'object') {
     return DEFAULT_CROP_INSETS;
@@ -137,18 +140,38 @@ export const useImageCropInteraction = ({
   const [isDragging, setIsDragging] = useState(false);
   const normalizedCropFromProps = useMemo(() => normalizeCropInsets(cropInsets), [cropInsets]);
   const [previewCrop, setPreviewCrop] = useState<ImageCropInsets>(normalizedCropFromProps);
+  const previewCropRef = useRef<ImageCropInsets>(normalizedCropFromProps);
+
+  useEffect(() => {
+    previewCropRef.current = previewCrop;
+  }, [previewCrop]);
+
+  const commitPreviewCrop = useCallback((next: ImageCropInsets) => {
+    previewCropRef.current = next;
+    setPreviewCrop(next);
+  }, []);
+
+  const syncPreviewCrop = useCallback(
+    (next: ImageCropInsets) => {
+      if (areCropInsetsEqual(previewCropRef.current, next)) {
+        return;
+      }
+      commitPreviewCrop(next);
+    },
+    [commitPreviewCrop],
+  );
 
   useEffect(() => {
     cropLog('Crop mode state changed', { isCropping });
     if (!isCropping) {
-      setPreviewCrop(normalizedCropFromProps);
+      syncPreviewCrop(normalizedCropFromProps);
     }
-  }, [isCropping, normalizedCropFromProps]);
+  }, [isCropping, normalizedCropFromProps, syncPreviewCrop]);
 
   useEffect(() => {
     cropLog('Received crop props update', normalizedCropFromProps);
-    setPreviewCrop(normalizedCropFromProps);
-  }, [normalizedCropFromProps]);
+    syncPreviewCrop(normalizedCropFromProps);
+  }, [normalizedCropFromProps, syncPreviewCrop]);
 
   const handleCropPointerMove = useCallback(
     (event: PointerEvent) => {
@@ -172,7 +195,7 @@ export const useImageCropInteraction = ({
       const deltaXPercent = ((event.clientX - startX) / containerRect.width) * 100;
       const deltaYPercent = ((event.clientY - startY) / containerRect.height) * 100;
       const next = computeNextCrop(handle, deltaXPercent, deltaYPercent, initialCrop);
-      setPreviewCrop(next);
+      commitPreviewCrop(next);
       cropLog('Pointer move', {
         handle,
         deltaXPercent,
@@ -182,7 +205,7 @@ export const useImageCropInteraction = ({
       });
       onCropChange(next);
     },
-    [onCropChange],
+    [commitPreviewCrop, onCropChange],
   );
 
   const handleCropPointerUp = useCallback(() => {
