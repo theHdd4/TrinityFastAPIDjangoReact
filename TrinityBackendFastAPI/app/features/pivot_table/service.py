@@ -175,52 +175,114 @@ def _value_to_key(value: Any) -> str:
 def _build_hierarchy_nodes(
     df: pd.DataFrame,
     row_fields: List[str],
+    column_fields: List[str],
     agg_map: Dict[str, str],
     order_lookup: Dict[str, int],
+    leaf_columns: List[str],
+    column_meta: Dict[str, Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     if not row_fields:
         return []
 
     nodes: List[Dict[str, Any]] = []
 
+    has_column_fields = (
+        len(column_fields) > 0 and len(leaf_columns) > 0 and len(column_meta) > 0
+    )
+
+    columns_by_key: Dict[tuple, List[str]] = {}
+    column_value_field_lookup: Dict[str, Optional[str]] = {}
+    if has_column_fields:
+        for column_name in leaf_columns:
+            meta = column_meta.get(column_name, {})
+            value_field = meta.get("value_field")
+            if not value_field and len(agg_map) == 1:
+                value_field = next(iter(agg_map.keys()))
+            column_value_field_lookup[column_name] = value_field
+
+            key_tuple = meta.get("column_key")
+            if key_tuple is None:
+                key_tuple = tuple("" for _ in column_fields)
+            columns_by_key.setdefault(key_tuple, []).append(column_name)
+
     for depth in range(len(row_fields)):
         group_fields = row_fields[: depth + 1]
+        aggregate_fields = (
+            group_fields + column_fields if has_column_fields else group_fields
+        )
+
         try:
             grouped = (
-                df.groupby(group_fields, dropna=False)
+                df.groupby(aggregate_fields, dropna=False)
                 .agg(agg_map)
                 .reset_index()
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception(
-                "Failed to build hierarchy for fields %s: %s", group_fields, exc
+                "Failed to build hierarchy for fields %s: %s", aggregate_fields, exc
             )
             continue
 
         grouped = _flatten_columns(grouped)
-        value_columns = [col for col in grouped.columns if col not in group_fields]
 
-        for _, row in grouped.iterrows():
+        if has_column_fields:
+            if group_fields:
+                grouped_iter = grouped.groupby(group_fields, dropna=False)
+            else:
+                grouped_iter = [(tuple(), grouped)]
+        else:
+            grouped_iter = [
+                (
+                    tuple(row[field] for field in group_fields),
+                    pd.DataFrame([row]),
+                )
+                for _, row in grouped.iterrows()
+            ]
+
+        for group_key, subset in grouped_iter:
+            if not isinstance(group_key, tuple):
+                group_key = (group_key,)
+
             labels: List[Dict[str, Any]] = []
             key_parts: List[str] = []
 
-            for field in group_fields:
-                raw_value = row[field]
-                labels.append(
-                    {"field": field, "value": _convert_numpy(raw_value)}
-                )
-                key_parts.append(f"{field}:{_value_to_key(raw_value)}")
+            for field, value in zip(group_fields, group_key):
+                labels.append({"field": field, "value": _convert_numpy(value)})
+                key_parts.append(f"{field}:{_value_to_key(value)}")
 
             key = "|".join(key_parts)
             parent_key = "|".join(key_parts[:-1]) if len(key_parts) > 1 else None
-            values = _convert_numpy({col: row[col] for col in value_columns})
+
+            values: Dict[str, Any] = {}
+
+            if has_column_fields:
+                for _, row in subset.iterrows():
+                    column_key = tuple(
+                        _value_to_key(row.get(field)) for field in column_fields
+                    )
+                    matched_columns = columns_by_key.get(column_key, [])
+                    for column_name in matched_columns:
+                        value_field = column_value_field_lookup.get(column_name)
+                        if not value_field:
+                            continue
+                        raw_value = row.get(value_field)
+                        values[column_name] = _convert_numpy(raw_value)
+            else:
+                row = subset.iloc[0]
+                for col in grouped.columns:
+                    if col in group_fields:
+                        continue
+                    if col in agg_map:
+                        values[col] = _convert_numpy(row[col])
+
+            order = order_lookup.get(key, len(order_lookup) + len(nodes))
 
             nodes.append(
                 {
                     "key": key,
                     "parent_key": parent_key,
                     "level": depth,
-                    "order": order_lookup.get(key, len(order_lookup) + len(nodes)),
+                    "order": order,
                     "labels": labels,
                     "values": values,
                 }
@@ -233,11 +295,11 @@ def _build_column_hierarchy_nodes(
     df: pd.DataFrame,
     column_fields: List[str],
     value_columns: List[str],
-) -> List[Dict[str, Any]]:
-    include_value_level = bool(column_fields) or len(value_columns) > 1
+) -> tuple[List[Dict[str, Any]], List[str], Dict[str, Dict[str, Any]]]:
+    include_value_level = len(value_columns) > 1 or not column_fields
     total_levels = len(column_fields) + (1 if include_value_level else 0)
     if total_levels == 0:
-        return []
+        return [], [], {}
 
     if isinstance(df.columns, pd.MultiIndex):
         column_iterable = [tuple(col) for col in df.columns.tolist()]
@@ -245,28 +307,54 @@ def _build_column_hierarchy_nodes(
         column_iterable = [(col,) for col in df.columns.tolist()]
 
     nodes: Dict[str, Dict[str, Any]] = {}
+    leaf_columns: List[str] = []
+    column_meta: Dict[str, Dict[str, Any]] = {}
+
+    normalized_fields = [field or "" for field in column_fields]
+    field_count = len(normalized_fields)
 
     for order, col_tuple in enumerate(column_iterable):
-        parts = list(col_tuple)
-        if include_value_level and not parts:
-            parts = [""]
-
-        path_entries: List[tuple[str, Any]] = []
-        remaining = parts
-
-        if include_value_level:
-            value_part = remaining[0] if remaining else ""
-            path_entries.append(("__value__", value_part))
-            remaining = remaining[1:]
-
-        for index, field in enumerate(column_fields):
-            value = remaining[index] if index < len(remaining) else ""
-            path_entries.append((field, value))
-
-        if not path_entries:
+        tuple_parts = list(col_tuple)
+        if not tuple_parts:
             continue
 
         column_name = _format_column_label(col_tuple)
+
+        # Pandas returns MultiIndex columns with value fields leading, followed by
+        # the configured column field hierarchy. Extract the value portion and the
+        # column field values so we can build a tree that mirrors the desired
+        # header layout (column fields first, value fields last).
+        column_values: List[Any] = []
+        value_label: Any = None
+
+        if field_count:
+            column_values = tuple_parts[-field_count:]
+            remaining = tuple_parts[: len(tuple_parts) - field_count]
+        else:
+            column_values = []
+            remaining = tuple_parts
+
+        if include_value_level:
+            if remaining:
+                value_label = remaining[-1]
+            else:
+                # When pandas flattens the columns into a single level (e.g. only
+                # one value field with no column fields), reuse the column name so
+                # the frontend can still render a value header.
+                value_label = tuple_parts[-1] if tuple_parts else ""
+
+        path_entries: List[tuple[str, Any]] = []
+
+        for index, field in enumerate(normalized_fields):
+            value = column_values[index] if index < len(column_values) else ""
+            path_entries.append((field, value))
+
+        if include_value_level:
+            fallback_value = value_columns[0] if value_columns else ""
+            path_entries.append(("__value__", value_label if value_label is not None else fallback_value))
+
+        if not path_entries:
+            continue
 
         for depth in range(1, len(path_entries) + 1):
             prefix = path_entries[:depth]
@@ -299,11 +387,38 @@ def _build_column_hierarchy_nodes(
 
             if depth == len(path_entries):
                 node["column"] = column_name
+                if column_name not in leaf_columns:
+                    leaf_columns.append(column_name)
+
+                labels = node.get("labels", [])
+                value_field: Optional[str] = None
+                for label in labels:
+                    if label.get("field") == "__value__":
+                        raw_value = label.get("value")
+                        value_field = str(raw_value) if raw_value is not None else None
+
+                if not value_field and len(value_columns) == 1:
+                    value_field = value_columns[0]
+
+                column_values_map: Dict[str, Any] = {}
+                for idx, field in enumerate(normalized_fields):
+                    column_values_map[field] = _convert_numpy(
+                        column_values[idx] if idx < len(column_values) else ""
+                    )
+
+                column_meta[column_name] = {
+                    "value_field": value_field,
+                    "column_fields": column_values_map,
+                    "column_key": tuple(
+                        _value_to_key(column_values[idx] if idx < len(column_values) else "")
+                        for idx in range(field_count)
+                    ),
+                }
 
     ordered_nodes = sorted(
         nodes.values(), key=lambda item: (item["level"], item["order"])
     )
-    return ordered_nodes
+    return ordered_nodes, leaf_columns, column_meta
 
 
 def _drop_margin_rows(df: pd.DataFrame) -> pd.DataFrame:
@@ -465,7 +580,11 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         pivot_df = pivot_df.to_frame(name=list(agg_map.keys())[0])
         series_converted = True
 
-    column_hierarchy_nodes = _build_column_hierarchy_nodes(
+    (
+        column_hierarchy_nodes,
+        column_leaf_columns,
+        column_leaf_meta,
+    ) = _build_column_hierarchy_nodes(
         pivot_df, column_fields, list(agg_map.keys())
     )
 
@@ -497,8 +616,18 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
                     order_lookup[key] = order_counter
                     order_counter += 1
 
+    effective_leaf_columns = (
+        column_leaf_columns if column_leaf_columns else list(agg_map.keys())
+    )
+
     hierarchy_nodes = _build_hierarchy_nodes(
-        filtered_df, row_fields, agg_map, order_lookup
+        filtered_df,
+        row_fields,
+        column_fields,
+        agg_map,
+        order_lookup,
+        effective_leaf_columns,
+        column_leaf_meta,
     )
 
     updated_at = datetime.now(timezone.utc)
