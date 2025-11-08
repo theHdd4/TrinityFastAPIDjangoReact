@@ -1148,11 +1148,18 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       const nextPath = { ...path };
       node.labels?.forEach(({ field, value }) => {
         nextPath[field] = value;
+        nextPath[canonicalizeKey(field)] = value;
       });
 
       const record = buildRecordForNode(node);
       rowFields.forEach((field, index) => {
-        let displayValue = nextPath[field] ?? '';
+        let displayValue = nextPath[field];
+        if (displayValue === undefined) {
+          displayValue = nextPath[canonicalizeKey(field)];
+        }
+        if (displayValue === undefined) {
+          displayValue = '';
+        }
         if (node.children.length > 0 && index === node.level && typeof displayValue === 'string') {
           const trimmed = displayValue.trim();
           displayValue = trimmed.length > 0 && !trimmed.toLowerCase().endsWith('total')
@@ -1173,7 +1180,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
     hierarchyTree.roots.forEach((root) => traverse(root, {}));
     return rows;
-  }, [buildRecordForNode, hierarchyTree, pivotRows, rowFields]);
+  }, [buildRecordForNode, canonicalizeKey, hierarchyTree, pivotRows, rowFields]);
 
   const layoutOptions = useMemo(
     () => [
