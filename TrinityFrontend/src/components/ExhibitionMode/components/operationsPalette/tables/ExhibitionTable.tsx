@@ -1945,7 +1945,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                   rowHeight={resolvedRowHeight}
                   minRowHeight={MIN_TABLE_ROW_HEIGHT}
                   maxRowHeight={MAX_TABLE_ROW_HEIGHT}
-                  showRowResizeHandle={allowRowResize && colIndex === rowData.length - 1}
+                  showRowResizeHandle={allowRowResize}
                   onResizeRowStart={
                     allowRowResize
                       ? event => handleRowResizeStart(rowIndex, event)
