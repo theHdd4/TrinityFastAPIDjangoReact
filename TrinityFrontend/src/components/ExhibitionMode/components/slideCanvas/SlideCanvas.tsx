@@ -3043,15 +3043,22 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     );
 
     const addRowsToTable = useCallback(
-      (objectId: string, count: number) => {
+      (objectId: string, startIndex: number, count: number) => {
         if (count <= 0) {
           return;
         }
 
         mutateTableState(objectId, state => {
           const columnCount = Math.max(state.cols, 1);
+          const safeStart = Number.isFinite(startIndex)
+            ? Math.min(Math.max(Math.floor(startIndex), 0), state.rows)
+            : state.rows;
           const additions = Array.from({ length: count }, () => createEmptyTableRow(columnCount));
-          const nextData = [...state.data, ...additions];
+          const nextData = [
+            ...state.data.slice(0, safeStart),
+            ...additions,
+            ...state.data.slice(safeStart),
+          ];
 
           return {
             ...state,
@@ -3064,24 +3071,105 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     );
 
     const addColumnsToTable = useCallback(
-      (objectId: string, count: number) => {
+      (objectId: string, startIndex: number, count: number) => {
         if (count <= 0) {
           return;
         }
 
+        const object = objectsMap.get(objectId);
+        const targetWidth =
+          typeof object?.width === 'number' && Number.isFinite(object.width) && object.width > 0
+            ? Math.round(object.width)
+            : null;
+
         mutateTableState(objectId, state => {
-          const nextData = state.data.map(row => [
-            ...row,
-            ...Array.from({ length: count }, () => createEmptyCell()),
-          ]);
+          const safeStart = Number.isFinite(startIndex)
+            ? Math.min(Math.max(Math.floor(startIndex), 0), state.cols)
+            : state.cols;
+          const nextData = state.data.map(row => {
+            const before = row.slice(0, safeStart);
+            const after = row.slice(safeStart);
+            const additions = Array.from({ length: count }, () => createEmptyCell());
+            return [...before, ...additions, ...after];
+          });
           const existingHeaders = cloneTableHeaders(state.headers);
+          const headerInsertion = Math.min(Math.max(safeStart, 0), existingHeaders.length);
           const headerAdditions = Array.from({ length: count }, (_, additionIndex) =>
-            createDefaultHeaderCell(existingHeaders.length + additionIndex),
+            createDefaultHeaderCell(headerInsertion + additionIndex),
           );
-          const nextHeaders = [...existingHeaders, ...headerAdditions];
+          const nextHeaders = [
+            ...existingHeaders.slice(0, headerInsertion),
+            ...headerAdditions,
+            ...existingHeaders.slice(headerInsertion),
+          ];
           const nextCols = nextHeaders.length;
+          const widthInsertion = Math.min(Math.max(safeStart, 0), state.columnWidths.length);
           const widthAdditions = Array.from({ length: count }, () => DEFAULT_TABLE_COLUMN_WIDTH);
-          const nextColumnWidths = [...state.columnWidths, ...widthAdditions];
+          let nextColumnWidths = [
+            ...state.columnWidths.slice(0, widthInsertion),
+            ...widthAdditions,
+            ...state.columnWidths.slice(widthInsertion),
+          ];
+
+          const clampWidth = (value: number) => {
+            if (!Number.isFinite(value)) {
+              return DEFAULT_TABLE_COLUMN_WIDTH;
+            }
+            if (value < MIN_TABLE_COLUMN_WIDTH) {
+              return MIN_TABLE_COLUMN_WIDTH;
+            }
+            if (value > MAX_TABLE_COLUMN_WIDTH) {
+              return MAX_TABLE_COLUMN_WIDTH;
+            }
+            return Math.round(value);
+          };
+
+          const desiredTotalWidth = (() => {
+            if (targetWidth && targetWidth > 0) {
+              return targetWidth;
+            }
+            const existingTotal = state.columnWidths.reduce((sum, width) => sum + width, 0);
+            return existingTotal > 0 ? existingTotal : null;
+          })();
+
+          if (desiredTotalWidth && nextColumnWidths.length > 0) {
+            const currentTotal = nextColumnWidths.reduce((sum, width) => sum + width, 0);
+
+            if (currentTotal > 0) {
+              const scale = desiredTotalWidth / currentTotal;
+              nextColumnWidths = nextColumnWidths.map(width => clampWidth(Math.round(width * scale)));
+
+              let adjustedTotal = nextColumnWidths.reduce((sum, width) => sum + width, 0);
+              const desiredTotal = Math.round(desiredTotalWidth);
+
+              if (adjustedTotal !== desiredTotal && nextColumnWidths.length > 0) {
+                let difference = desiredTotal - adjustedTotal;
+                const step = difference > 0 ? 1 : -1;
+                let index = 0;
+                const maxIterations = nextColumnWidths.length * Math.abs(difference);
+                let iterations = 0;
+
+                while (difference !== 0 && iterations < maxIterations) {
+                  const candidate = nextColumnWidths[index] + step;
+                  if (candidate >= MIN_TABLE_COLUMN_WIDTH && candidate <= MAX_TABLE_COLUMN_WIDTH) {
+                    nextColumnWidths[index] = candidate;
+                    difference -= step;
+                    adjustedTotal += step;
+                  }
+                  index = (index + 1) % nextColumnWidths.length;
+                  iterations += 1;
+                  if (index === 0) {
+                    const canAdjust = nextColumnWidths.some(width => {
+                      return step > 0 ? width < MAX_TABLE_COLUMN_WIDTH : width > MIN_TABLE_COLUMN_WIDTH;
+                    });
+                    if (!canAdjust) {
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
 
           return {
             ...state,
@@ -3092,7 +3180,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           };
         });
       },
-      [mutateTableState],
+      [mutateTableState, objectsMap],
     );
 
     const removeRowsFromTable = useCallback(
@@ -4499,10 +4587,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onDelete2Columns={(startIndex, count) => removeColumnsFromTable(object.id, startIndex, count)}
                       onDeleteRow={(startIndex, count) => removeRowsFromTable(object.id, startIndex, count)}
                       onDelete2Rows={(startIndex, count) => removeRowsFromTable(object.id, startIndex, count)}
-                      onAddColumn={() => addColumnsToTable(object.id, 1)}
-                      onAdd2Columns={() => addColumnsToTable(object.id, 2)}
-                      onAddRow={() => addRowsToTable(object.id, 1)}
-                      onAdd2Rows={() => addRowsToTable(object.id, 2)}
+                      onAddColumn={(startIndex, count) => addColumnsToTable(object.id, startIndex, count)}
+                      onAdd2Columns={(startIndex, count) => addColumnsToTable(object.id, startIndex, count)}
+                      onAddRow={(startIndex, count) => addRowsToTable(object.id, startIndex, count)}
+                      onAdd2Rows={(startIndex, count) => addRowsToTable(object.id, startIndex, count)}
                       onToolbarStateChange={node => handleTextToolbarStateChange(object.id, node)}
                       onInteract={onInteract}
                       onBringToFront={() => handleLayerAction('front', [object.id])}
