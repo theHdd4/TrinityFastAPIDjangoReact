@@ -124,6 +124,13 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   const [open, setOpen] = useState(false);
   const closeMenu = useCallback(() => setOpen(false), []);
 
+  const handleTriggerContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      onContextMenu?.(event);
+    },
+    [onContextMenu],
+  );
+
   const handleAlign = useCallback(
     (action: AlignAction) => () => {
       closeMenu();
@@ -139,7 +146,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   return (
     <ContextMenu open={open} onOpenChange={setOpen}>
       <ContextMenuTrigger asChild>
-        <div onContextMenu={onContextMenu}>{children}</div>
+        <div onContextMenu={handleTriggerContextMenu}>{children}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-64" style={{ zIndex: 9999 }}>
         <ContextMenuItem disabled={!canEdit || disableCopy} onSelect={event => {
