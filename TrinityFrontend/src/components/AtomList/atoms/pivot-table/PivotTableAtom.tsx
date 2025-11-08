@@ -15,8 +15,10 @@ interface PivotTableAtomProps {
 const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: PivotTableSettings =
-    (atom?.settings as PivotTableSettings) || { ...DEFAULT_PIVOT_TABLE_SETTINGS };
+  const settings: PivotTableSettings = {
+    ...DEFAULT_PIVOT_TABLE_SETTINGS,
+    ...(atom?.settings as PivotTableSettings),
+  };
 
   const [isComputing, setIsComputing] = React.useState(false);
   const [computeError, setComputeError] = React.useState<string | null>(null);
@@ -68,8 +70,10 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
   const handleDataChange = React.useCallback(
     (newData: Partial<PivotTableSettings>) => {
       const latestAtom = useLaboratoryStore.getState().getAtom(atomId);
-      const latestSettings: PivotTableSettings =
-        (latestAtom?.settings as PivotTableSettings) || { ...DEFAULT_PIVOT_TABLE_SETTINGS };
+      const latestSettings: PivotTableSettings = {
+        ...DEFAULT_PIVOT_TABLE_SETTINGS,
+        ...(latestAtom?.settings as PivotTableSettings),
+      };
 
       updateSettings(atomId, {
         ...latestSettings,
@@ -189,6 +193,8 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
           pivotError: null,
           pivotUpdatedAt: result?.updated_at,
           pivotRowCount: result?.rows,
+          pivotHierarchy: Array.isArray(result?.hierarchy) ? result.hierarchy : [],
+          collapsedKeys: [],
         });
         setIsComputing(false);
         setComputeError(null);
@@ -266,6 +272,26 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     return null;
   }, [settings.dataSource, settings.valueFields]);
 
+  const handleReportLayoutChange = React.useCallback(
+    (layout: 'compact' | 'outline' | 'tabular') => {
+      handleDataChange({ reportLayout: layout });
+    },
+    [handleDataChange],
+  );
+
+  const handleToggleCollapse = React.useCallback(
+    (key: string) => {
+      const current = new Set(settings.collapsedKeys ?? []);
+      if (current.has(key)) {
+        current.delete(key);
+      } else {
+        current.add(key);
+      }
+      handleDataChange({ collapsedKeys: Array.from(current) });
+    },
+    [handleDataChange, settings.collapsedKeys],
+  );
+
   return (
     <div className="w-full h-full">
       <PivotTableCanvas
@@ -289,6 +315,16 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
         onGrandTotalsChange={(mode) =>
           handleDataChange({ grandTotalsMode: mode })
         }
+        onStyleChange={(styleId) =>
+          handleDataChange({ pivotStyleId: styleId })
+        }
+        onStyleOptionsChange={(options) =>
+          handleDataChange({ pivotStyleOptions: options })
+        }
+        reportLayout={settings.reportLayout ?? 'compact'}
+        onReportLayoutChange={handleReportLayoutChange}
+        collapsedKeys={settings.collapsedKeys ?? []}
+        onToggleCollapse={handleToggleCollapse}
       />
     </div>
   );

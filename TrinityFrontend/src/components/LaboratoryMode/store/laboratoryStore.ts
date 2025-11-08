@@ -1714,6 +1714,15 @@ export interface PivotTableSettings {
   pivotFilterOptions?: Record<string, string[]>;
   pivotFilterSelections?: Record<string, string[]>;
   grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
+  pivotStyleId?: string;
+  pivotStyleOptions?: {
+    rowHeaders: boolean;
+    columnHeaders: boolean;
+    bandedRows: boolean;
+  };
+  pivotHierarchy?: any[];
+  reportLayout?: 'compact' | 'outline' | 'tabular';
+  collapsedKeys?: string[];
 }
 
 export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
@@ -1735,6 +1744,15 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   pivotFilterOptions: {},
   pivotFilterSelections: {},
   grandTotalsMode: 'both',
+  pivotStyleId: 'light-slate',
+  pivotStyleOptions: {
+    rowHeaders: true,
+    columnHeaders: true,
+    bandedRows: false,
+  },
+  pivotHierarchy: [],
+  reportLayout: 'compact',
+  collapsedKeys: [],
 };
 
 interface LaboratoryStore {

@@ -20,11 +20,251 @@ import {
   Layout,
   Loader2,
   Palette,
+  PlusSquare,
+  MinusSquare,
   Save,
   RefreshCcw,
 } from 'lucide-react';
 import { PivotTableSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { SCOPE_SELECTOR_API } from '@/lib/api';
+
+type PivotStyleOptions = {
+  rowHeaders: boolean;
+  columnHeaders: boolean;
+  bandedRows: boolean;
+};
+
+type PivotTheme = {
+  id: string;
+  name: string;
+  category: 'light' | 'dark';
+  colors: {
+    headerBg: string;
+    headerText: string;
+    rowBg: string;
+    rowText: string;
+    rowAltBg: string;
+    rowAltText: string;
+    rowHeaderBg: string;
+    rowHeaderText: string;
+    border: string;
+    totalRowBg: string;
+    totalRowText: string;
+    totalColumnBg: string;
+    totalColumnText: string;
+  };
+};
+
+const DEFAULT_STYLE_OPTIONS: PivotStyleOptions = {
+    rowHeaders: true,
+    columnHeaders: true,
+    bandedRows: false,
+};
+
+const DEFAULT_THEME_ID = 'light-slate';
+
+const LIGHT_THEMES: PivotTheme[] = [
+  {
+    id: 'light-slate',
+    name: 'Light Slate',
+    category: 'light',
+    colors: {
+      headerBg: '#E6EBF5',
+      headerText: '#1F2937',
+      rowBg: '#FFFFFF',
+      rowText: '#1F2937',
+      rowAltBg: '#F5F7FB',
+      rowAltText: '#1F2937',
+      rowHeaderBg: '#DCE4F2',
+      rowHeaderText: '#1D2738',
+      border: '#D2D9E6',
+      totalRowBg: '#C7D8F7',
+      totalRowText: '#102A56',
+      totalColumnBg: '#D0DCF9',
+      totalColumnText: '#102A56',
+    },
+  },
+  {
+    id: 'light-azure',
+    name: 'Light Azure',
+    category: 'light',
+    colors: {
+      headerBg: '#DBEAFE',
+      headerText: '#1E3A8A',
+      rowBg: '#FFFFFF',
+      rowText: '#1F2937',
+      rowAltBg: '#EFF6FF',
+      rowAltText: '#1E3A8A',
+      rowHeaderBg: '#C7D2FE',
+      rowHeaderText: '#1E3A8A',
+      border: '#CBD5F5',
+      totalRowBg: '#BCD4FF',
+      totalRowText: '#1E3A8A',
+      totalColumnBg: '#C7DCFF',
+      totalColumnText: '#1E3A8A',
+    },
+  },
+  {
+    id: 'light-sunset',
+    name: 'Light Sunset',
+    category: 'light',
+    colors: {
+      headerBg: '#FFE4D6',
+      headerText: '#7C2D12',
+      rowBg: '#FFFFFF',
+      rowText: '#3F2A1C',
+      rowAltBg: '#FFF4EC',
+      rowAltText: '#7C2D12',
+      rowHeaderBg: '#FFD5C2',
+      rowHeaderText: '#7C2D12',
+      border: '#FBC9B3',
+      totalRowBg: '#FFC4A8',
+      totalRowText: '#7C2D12',
+      totalColumnBg: '#FFD1B9',
+      totalColumnText: '#7C2D12',
+    },
+  },
+  {
+    id: 'light-emerald',
+    name: 'Light Emerald',
+    category: 'light',
+    colors: {
+      headerBg: '#D4F5E8',
+      headerText: '#065F46',
+      rowBg: '#FFFFFF',
+      rowText: '#064E3B',
+      rowAltBg: '#ECFDF5',
+      rowAltText: '#065F46',
+      rowHeaderBg: '#C1F0DC',
+      rowHeaderText: '#065F46',
+      border: '#B4E4CF',
+      totalRowBg: '#A8EDD0',
+      totalRowText: '#064E3B',
+      totalColumnBg: '#B7F0D8',
+      totalColumnText: '#064E3B',
+    },
+  },
+  {
+    id: 'light-olive',
+    name: 'Light Olive',
+    category: 'light',
+    colors: {
+      headerBg: '#F2F5DC',
+      headerText: '#4B5320',
+      rowBg: '#FFFFFF',
+      rowText: '#3A3E19',
+      rowAltBg: '#F9FBEF',
+      rowAltText: '#4B5320',
+      rowHeaderBg: '#E5EDC7',
+      rowHeaderText: '#4B5320',
+      border: '#D7E1B5',
+      totalRowBg: '#D7E9A9',
+      totalRowText: '#3A4116',
+      totalColumnBg: '#E1F0BA',
+      totalColumnText: '#3A4116',
+    },
+  },
+];
+
+const DARK_THEMES: PivotTheme[] = [
+  {
+    id: 'dark-slate',
+    name: 'Dark Slate',
+    category: 'dark',
+    colors: {
+      headerBg: '#1F2937',
+      headerText: '#F8FAFC',
+      rowBg: '#111827',
+      rowText: '#E5E7EB',
+      rowAltBg: '#1A2333',
+      rowAltText: '#E5E7EB',
+      rowHeaderBg: '#273347',
+      rowHeaderText: '#F8FAFC',
+      border: '#334155',
+      totalRowBg: '#2B3A55',
+      totalRowText: '#F8FAFC',
+      totalColumnBg: '#314263',
+      totalColumnText: '#F8FAFC',
+    },
+  },
+  {
+    id: 'dark-emerald',
+    name: 'Dark Emerald',
+    category: 'dark',
+    colors: {
+      headerBg: '#064E3B',
+      headerText: '#D1FAE5',
+      rowBg: '#052C23',
+      rowText: '#CCFBF1',
+      rowAltBg: '#094235',
+      rowAltText: '#D1FAE5',
+      rowHeaderBg: '#0B5F46',
+      rowHeaderText: '#ECFDF5',
+      border: '#0F766E',
+      totalRowBg: '#0F6652',
+      totalRowText: '#ECFDF5',
+      totalColumnBg: '#117063',
+      totalColumnText: '#ECFDF5',
+    },
+  },
+  {
+    id: 'dark-indigo',
+    name: 'Dark Indigo',
+    category: 'dark',
+    colors: {
+      headerBg: '#312E81',
+      headerText: '#E0E7FF',
+      rowBg: '#1F1B4F',
+      rowText: '#E0E7FF',
+      rowAltBg: '#27206A',
+      rowAltText: '#E0E7FF',
+      rowHeaderBg: '#3A358F',
+      rowHeaderText: '#E0E7FF',
+      border: '#4338CA',
+      totalRowBg: '#4338CA',
+      totalRowText: '#F5F3FF',
+      totalColumnBg: '#4C46D2',
+      totalColumnText: '#F5F3FF',
+    },
+  },
+  {
+    id: 'dark-ember',
+    name: 'Dark Ember',
+    category: 'dark',
+    colors: {
+      headerBg: '#3B2314',
+      headerText: '#FDEDD4',
+      rowBg: '#22140A',
+      rowText: '#FCE7C1',
+      rowAltBg: '#2C1A0E',
+      rowAltText: '#FCE7C1',
+      rowHeaderBg: '#4A2D17',
+      rowHeaderText: '#FDEDD4',
+      border: '#5B3A1F',
+      totalRowBg: '#6B3F1A',
+      totalRowText: '#FFF5E0',
+      totalColumnBg: '#7A4820',
+      totalColumnText: '#FFF5E0',
+    },
+  },
+];
+
+const PIVOT_THEME_GROUPS: Array<{
+  id: 'light' | 'dark';
+  label: string;
+  themes: PivotTheme[];
+}> = [
+  { id: 'light', label: 'Light', themes: LIGHT_THEMES },
+  { id: 'dark', label: 'Dark', themes: DARK_THEMES },
+];
+
+const PIVOT_THEME_MAP: Record<string, PivotTheme> = [
+  ...LIGHT_THEMES,
+  ...DARK_THEMES,
+].reduce<Record<string, PivotTheme>>((acc, theme) => {
+  acc[theme.id] = theme;
+  return acc;
+}, {});
 
 interface PivotTableCanvasProps {
   data: PivotTableSettings;
@@ -40,6 +280,12 @@ interface PivotTableCanvasProps {
   filterOptions: Record<string, string[]>;
   filterSelections: Record<string, string[]>;
   onGrandTotalsChange: (mode: 'off' | 'rows' | 'columns' | 'both') => void;
+  onStyleChange: (styleId: string) => void;
+  onStyleOptionsChange: (options: PivotStyleOptions) => void;
+  reportLayout: 'compact' | 'outline' | 'tabular';
+  onReportLayoutChange: (layout: 'compact' | 'outline' | 'tabular') => void;
+  collapsedKeys: string[];
+  onToggleCollapse: (key: string) => void;
 }
 
 const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
@@ -56,48 +302,54 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   filterOptions,
   filterSelections,
   onGrandTotalsChange,
+  onStyleChange,
+  onStyleOptionsChange,
+  reportLayout,
+  onReportLayoutChange,
+  collapsedKeys,
+  onToggleCollapse,
 }) => {
-  const [styleOptions, setStyleOptions] = useState({
-    rowHeaders: true,
-    columnHeaders: true,
-    bandedRows: false,
-    bandedColumns: false,
-  });
-
-  const [selectedStyle, setSelectedStyle] = useState('default');
   const [filterSearch, setFilterSearch] = useState<Record<string, string>>({});
   const [loadingFilter, setLoadingFilter] = useState<string | null>(null);
   const [filterErrors, setFilterErrors] = useState<Record<string, string | null>>({});
 
-  const pivotStyles = {
-    light: [
-      { id: 'light-1', name: 'Light Style 1', headerBg: 'bg-green-100', rowBg: 'bg-green-50', border: 'border-green-200' },
-      { id: 'light-2', name: 'Light Style 2', headerBg: 'bg-gray-100', rowBg: 'bg-gray-50', border: 'border-gray-200' },
-      { id: 'light-3', name: 'Light Style 3', headerBg: 'bg-blue-100', rowBg: 'bg-blue-50', border: 'border-blue-200' },
-      { id: 'light-4', name: 'Light Style 4', headerBg: 'bg-orange-100', rowBg: 'bg-orange-50', border: 'border-orange-200' },
-      { id: 'light-5', name: 'Light Style 5', headerBg: 'bg-teal-100', rowBg: 'bg-teal-50', border: 'border-teal-200' },
-      { id: 'light-6', name: 'Light Style 6', headerBg: 'bg-cyan-100', rowBg: 'bg-cyan-50', border: 'border-cyan-200' },
-      { id: 'light-7', name: 'Light Style 7', headerBg: 'bg-purple-100', rowBg: 'bg-purple-50', border: 'border-purple-200' },
-    ],
-    medium: [
-      { id: 'medium-1', name: 'Medium Style 1', headerBg: 'bg-gray-600 text-white', rowBg: 'bg-gray-100', border: 'border-gray-300' },
-      { id: 'medium-2', name: 'Medium Style 2', headerBg: 'bg-blue-600 text-white', rowBg: 'bg-blue-50', border: 'border-blue-300' },
-      { id: 'medium-3', name: 'Medium Style 3', headerBg: 'bg-orange-600 text-white', rowBg: 'bg-orange-50', border: 'border-orange-300' },
-      { id: 'medium-4', name: 'Medium Style 4', headerBg: 'bg-green-600 text-white', rowBg: 'bg-green-50', border: 'border-green-300' },
-      { id: 'medium-5', name: 'Medium Style 5', headerBg: 'bg-cyan-600 text-white', rowBg: 'bg-cyan-50', border: 'border-cyan-300' },
-      { id: 'medium-6', name: 'Medium Style 6', headerBg: 'bg-purple-600 text-white', rowBg: 'bg-purple-50', border: 'border-purple-300' },
-      { id: 'medium-7', name: 'Medium Style 7', headerBg: 'bg-lime-600 text-white', rowBg: 'bg-lime-50', border: 'border-lime-300' },
-    ],
-    dark: [
-      { id: 'dark-1', name: 'Dark Style 1', headerBg: 'bg-gray-800 text-white', rowBg: 'bg-gray-700 text-white', border: 'border-gray-600' },
-      { id: 'dark-2', name: 'Dark Style 2', headerBg: 'bg-blue-800 text-white', rowBg: 'bg-blue-700 text-white', border: 'border-blue-600' },
-      { id: 'dark-3', name: 'Dark Style 3', headerBg: 'bg-orange-800 text-white', rowBg: 'bg-orange-700 text-white', border: 'border-orange-600' },
-      { id: 'dark-4', name: 'Dark Style 4', headerBg: 'bg-green-800 text-white', rowBg: 'bg-green-700 text-white', border: 'border-green-600' },
-      { id: 'dark-5', name: 'Dark Style 5', headerBg: 'bg-cyan-800 text-white', rowBg: 'bg-cyan-700 text-white', border: 'border-cyan-600' },
-      { id: 'dark-6', name: 'Dark Style 6', headerBg: 'bg-purple-800 text-white', rowBg: 'bg-purple-700 text-white', border: 'border-purple-600' },
-      { id: 'dark-7', name: 'Dark Style 7', headerBg: 'bg-lime-800 text-white', rowBg: 'bg-lime-700 text-white', border: 'border-lime-600' },
-    ],
-  };
+  const styleOptions = useMemo<PivotStyleOptions>(() => {
+    return {
+      ...DEFAULT_STYLE_OPTIONS,
+      ...(data.pivotStyleOptions ?? {}),
+    };
+  }, [data.pivotStyleOptions]);
+
+  const selectedStyleId = data.pivotStyleId ?? DEFAULT_THEME_ID;
+  const selectedTheme =
+    PIVOT_THEME_MAP[selectedStyleId] ?? PIVOT_THEME_MAP[DEFAULT_THEME_ID];
+  const themeColors = selectedTheme.colors;
+  const borderColor = themeColors.border;
+  const headerStyle = useMemo(
+    () =>
+      styleOptions.columnHeaders
+        ? {
+            backgroundColor: themeColors.headerBg,
+            color: themeColors.headerText,
+            borderColor,
+          }
+        : {
+            backgroundColor: '#F6F6F6',
+            color: '#3F3F3F',
+            borderColor,
+          },
+    [styleOptions.columnHeaders, themeColors, borderColor]
+  );
+  const headerIconColor = styleOptions.columnHeaders
+    ? themeColors.headerText
+    : '#3F3F3F';
+  const rowFields = data.rowFields ?? [];
+  const rowFieldSet = useMemo(
+    () => new Set(rowFields.map(field => field.toLowerCase())),
+    [rowFields]
+  );
+  const tableStyle = useMemo(() => ({ borderColor }), [borderColor]);
+  const collapsedSet = useMemo(() => new Set(collapsedKeys ?? []), [collapsedKeys]);
 
   const filters = data.filterFields ?? [];
   const pivotRows = data.pivotResults ?? [];
@@ -227,6 +479,172 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     return ordered;
   }, [data.rowFields, pivotRows, hasResults]);
 
+  const valueColumns = useMemo(
+    () => columns.filter((column) => !rowFieldSet.has(column.toLowerCase())),
+    [columns, rowFieldSet],
+  );
+
+  const canonicalizeKey = useCallback((key: unknown) => {
+    if (key === null || key === undefined) return '';
+    return String(key).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }, []);
+
+  const normalizedValueColumns = useMemo(
+    () =>
+      valueColumns.map((column) => ({
+        name: column,
+        canonical: canonicalizeKey(column),
+      })),
+    [canonicalizeKey, valueColumns],
+  );
+
+  const findMatchingPivotRow = useCallback(
+    (labels: Array<{ field: string; value: any }>) =>
+      pivotRows.find((row) =>
+        rowFields.every((field, index) => {
+          const label = labels?.[index];
+          const rowValKey = canonicalizeKey(row?.[field]);
+          if (label && label.field === field) {
+            const labelKey = canonicalizeKey(label.value);
+            return rowValKey === labelKey;
+          }
+          return rowValKey === '' || rowValKey.endsWith('total');
+        }),
+      ),
+    [canonicalizeKey, pivotRows, rowFields],
+  );
+
+  const buildRecordForNode = useCallback(
+    (node: HierNode) => {
+      const record: Record<string, any> = {};
+      const labelMap = new Map<string, any>();
+
+      node.labels?.forEach(({ field, value }) => {
+        record[field] = value;
+        labelMap.set(canonicalizeKey(field), value);
+      });
+
+      rowFields.forEach((field) => {
+        if (record[field] === undefined) {
+          const mapped = labelMap.get(canonicalizeKey(field));
+          if (mapped !== undefined) {
+            record[field] = mapped;
+          }
+        }
+      });
+
+      const sourceValues = new Map<string, any>();
+      Object.entries(node.values ?? {}).forEach(([key, value]) => {
+        sourceValues.set(canonicalizeKey(key), value);
+      });
+
+      normalizedValueColumns.forEach(({ name, canonical }) => {
+        if (record[name] === undefined && sourceValues.has(canonical)) {
+          record[name] = sourceValues.get(canonical);
+        }
+      });
+
+      if (valueColumns.some((column) => record[column] === undefined || record[column] === null)) {
+        const match = findMatchingPivotRow(node.labels ?? []);
+        if (match) {
+          valueColumns.forEach((column) => {
+            if (record[column] === undefined || record[column] === null) {
+              record[column] = match[column];
+            }
+          });
+        }
+      }
+
+      return record;
+    },
+    [canonicalizeKey, findMatchingPivotRow, normalizedValueColumns, rowFields, valueColumns],
+  );
+
+  const isRowGrandTotal = useCallback(
+    (row: Record<string, any>) => {
+      const isTotalString = (value: unknown) =>
+        typeof value === 'string' && value.trim().toLowerCase().endsWith('total');
+      if (rowFields.length > 0) {
+        return rowFields.some((field) => isTotalString(row[field]));
+      }
+      const firstColumn = columns[0];
+      if (!firstColumn) {
+        return false;
+      }
+      return isTotalString(row[firstColumn]);
+    },
+    [columns, rowFields]
+  );
+
+  const isColumnGrandTotal = useCallback(
+    (column: string) => column?.toLowerCase().includes('grand total'),
+    []
+  );
+
+  const getDataCellStyle = useCallback(
+    (params: {
+      row: Record<string, any>;
+      column: string;
+      rowIndex: number;
+      isRowHeader: boolean;
+    }): React.CSSProperties => {
+      const { row, column, rowIndex, isRowHeader } = params;
+      const columnIsTotal = isColumnGrandTotal(column);
+      const rowIsTotal = isRowGrandTotal(row);
+
+      let backgroundColor = themeColors.rowBg;
+      let color = themeColors.rowText;
+      let fontWeight: number | undefined;
+
+      if (styleOptions.bandedRows && rowIndex % 2 === 1 && !rowIsTotal) {
+        backgroundColor = themeColors.rowAltBg;
+        color = themeColors.rowAltText;
+      }
+
+      if (styleOptions.rowHeaders && isRowHeader && !rowIsTotal) {
+        backgroundColor = themeColors.rowHeaderBg;
+        color = themeColors.rowHeaderText;
+        fontWeight = 600;
+      }
+
+      if (columnIsTotal) {
+        backgroundColor = themeColors.totalColumnBg;
+        color = themeColors.totalColumnText;
+        fontWeight = 700;
+      }
+
+      if (rowIsTotal) {
+        backgroundColor = themeColors.totalRowBg;
+        color = themeColors.totalRowText;
+        fontWeight = 700;
+      }
+
+      return {
+        backgroundColor,
+        color,
+        borderColor,
+        fontWeight,
+      };
+    },
+    [
+      borderColor,
+      isColumnGrandTotal,
+      isRowGrandTotal,
+      styleOptions.bandedRows,
+      styleOptions.rowHeaders,
+      themeColors.rowAltBg,
+      themeColors.rowAltText,
+      themeColors.rowBg,
+      themeColors.rowHeaderBg,
+      themeColors.rowHeaderText,
+      themeColors.rowText,
+      themeColors.totalColumnBg,
+      themeColors.totalColumnText,
+      themeColors.totalRowBg,
+      themeColors.totalRowText,
+    ]
+  );
+
   const formatValue = (value: unknown) => {
     if (value === null || value === undefined) {
       return '-';
@@ -240,9 +658,539 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     return String(value);
   };
 
+  const renderLoadingRow = (colSpan: number) => (
+    <TableRow style={{ borderColor }}>
+      <TableCell colSpan={colSpan} className="text-center py-8" style={{ borderColor }}>
+        <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
+      </TableCell>
+    </TableRow>
+  );
+
+  const renderEmptyRow = (colSpan: number, message: string) => (
+    <TableRow style={{ borderColor }}>
+      <TableCell
+        colSpan={colSpan}
+        className="text-center py-8 text-sm text-muted-foreground"
+        style={{ borderColor }}
+      >
+        {message}
+      </TableCell>
+    </TableRow>
+  );
+
+  const renderTabularTable = () => {
+    const colSpan = Math.max(rowFields.length + valueColumns.length, 1);
+
+    return (
+      <Table style={tableStyle}>
+        <TableHeader>
+          <TableRow style={{ borderColor }}>
+            {rowFields.map((field, index) => (
+              <TableHead
+                key={field}
+                className="text-left text-[12px] uppercase tracking-wide font-semibold"
+                style={{
+                  ...headerStyle,
+                  textAlign: index === 0 ? 'left' : 'left',
+                }}
+              >
+                {field}
+              </TableHead>
+            ))}
+            {valueColumns.map((column) => (
+              <TableHead
+                key={column}
+                className="text-right text-[12px] uppercase tracking-wide font-semibold"
+                style={headerStyle}
+              >
+                {column}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading
+            ? renderLoadingRow(colSpan)
+            : tabularRows.length === 0
+            ? renderEmptyRow(
+                colSpan,
+                'No pivot results yet. Configure the layout and refresh to generate the table.'
+              )
+            : tabularRows.map((row, rowIndex) => (
+                <TableRow key={`tabular-${rowIndex}`} style={{ borderColor }}>
+                  {rowFields.map((field, fieldIndex) => (
+                    <TableCell
+                      key={`${rowIndex}-${field}`}
+                      className={cn(
+                        'text-left',
+                        fieldIndex === 0 ? 'font-semibold' : 'font-medium'
+                      )}
+                      style={getDataCellStyle({
+                        row: row.record,
+                        column: field,
+                        rowIndex,
+                        isRowHeader: fieldIndex === 0,
+                      })}
+                    >
+                      {row.record[field] ?? ''}
+                    </TableCell>
+                  ))}
+                  {valueColumns.map((column) => (
+                    <TableCell
+                      key={`${rowIndex}-${column}`}
+                      className="text-right tabular-nums font-medium"
+                      style={getDataCellStyle({
+                        row: row.record,
+                        column,
+                        rowIndex,
+                        isRowHeader: false,
+                      })}
+                    >
+                      {formatValue(row.record[column])}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+        </TableBody>
+      </Table>
+    );
+  };
+
+  const renderCompactTable = () => {
+    if (!rowFields.length || compactRows.length === 0) {
+      return renderTabularTable();
+    }
+
+  return (
+      <Table style={tableStyle}>
+        <TableHeader>
+          <TableRow style={{ borderColor }}>
+            <TableHead
+              className="text-left text-[12px] uppercase tracking-wide font-semibold"
+              style={headerStyle}
+            >
+              <div className="flex items-center justify-between" style={{ color: headerStyle.color as string }}>
+                Row Labels
+              </div>
+            </TableHead>
+            {valueColumns.map((column) => (
+              <TableHead
+                key={column}
+                className="text-right text-[12px] uppercase tracking-wide font-semibold"
+                style={headerStyle}
+              >
+                {column}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading
+            ? renderLoadingRow(Math.max(1 + valueColumns.length, 1))
+            : compactRows.map((row, rowIndex) => {
+                const cellStyle = getDataCellStyle({
+                  row: row.record,
+                  column: 'Row Labels',
+                  rowIndex,
+                  isRowHeader: true,
+                });
+                return (
+                  <TableRow key={row.node.key} style={{ borderColor }}>
+                    <TableCell
+                      className="text-left font-semibold"
+                      style={{ ...cellStyle, borderColor }}
+                    >
+                      <div
+                        className="flex items-center gap-2"
+                        style={{ paddingLeft: `${Math.max(row.depth, 0) * 16}px` }}
+                      >
+                        {row.hasChildren ? (
+                          <button
+                            type="button"
+                            className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted"
+                            onClick={() => onToggleCollapse(row.node.key)}
+                            aria-label={collapsedSet.has(row.node.key) ? 'Expand group' : 'Collapse group'}
+                          >
+                            {collapsedSet.has(row.node.key) ? (
+                              <PlusSquare className="h-3.5 w-3.5" />
+                            ) : (
+                              <MinusSquare className="h-3.5 w-3.5" />
+                            )}
+                          </button>
+                        ) : (
+                          <span className="w-3.5" />
+                        )}
+                        <span>{row.label}</span>
+                      </div>
+                    </TableCell>
+                    {valueColumns.map((column) => (
+                      <TableCell
+                        key={`${row.node.key}-${column}`}
+                        className="text-right tabular-nums"
+                        style={getDataCellStyle({
+                          row: row.record,
+                          column,
+                          rowIndex,
+                          isRowHeader: false,
+                        })}
+                      >
+                        {formatValue(row.record[column])}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })}
+        </TableBody>
+      </Table>
+    );
+  };
+
+  const renderOutlineTable = () => {
+    if (!rowFields.length || outlineRows.length === 0) {
+      return renderTabularTable();
+    }
+
+    const colSpan = Math.max(rowFields.length + valueColumns.length, 1);
+
+    return (
+      <Table style={tableStyle}>
+        <TableHeader>
+          <TableRow style={{ borderColor }}>
+            {rowFields.map((field, index) => (
+              <TableHead
+                key={field}
+                className="text-left text-[12px] uppercase tracking-wide font-semibold"
+                style={{
+                  ...headerStyle,
+                  textAlign: 'left',
+                }}
+              >
+                {field}
+              </TableHead>
+            ))}
+            {valueColumns.map((column) => (
+              <TableHead
+                key={column}
+                className="text-right text-[12px] uppercase tracking-wide font-semibold"
+                style={headerStyle}
+              >
+                {column}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {isLoading
+            ? renderLoadingRow(colSpan)
+            : outlineRows.map((row, rowIndex) => (
+                <TableRow key={`${row.node.key}-outline${row.isTotal ? '-total' : ''}`} style={{ borderColor }}>
+                  {rowFields.map((field, fieldIndex) => {
+                    const isLevelCell = fieldIndex === row.level;
+                    const cellStyle = getDataCellStyle({
+                      row: row.record,
+                      column: field,
+                      rowIndex,
+                      isRowHeader: fieldIndex === 0,
+                    });
+                    const cellValue = row.display[field] ?? '';
+                    const showToggle = isLevelCell && row.hasChildren && !row.isTotal;
+                    const isCollapsed = collapsedSet.has(row.node.key);
+
+                    return (
+                      <TableCell
+                        key={`${row.node.key}-${field}-${row.isTotal ? 'total' : 'value'}`}
+                        className={cn(
+                          'text-left',
+                          fieldIndex === 0 ? 'font-semibold' : 'font-medium'
+                        )}
+                        style={cellStyle}
+                      >
+                        {isLevelCell ? (
+                          <div className="flex items-center gap-2">
+                            {showToggle ? (
+                              <button
+                                type="button"
+                                className="flex h-5 w-5 items-center justify-center rounded hover:bg-muted"
+                                onClick={() => onToggleCollapse(row.node.key)}
+                                aria-label={isCollapsed ? 'Expand group' : 'Collapse group'}
+                              >
+                                {isCollapsed ? (
+                                  <PlusSquare className="h-3.5 w-3.5" />
+                                ) : (
+                                  <MinusSquare className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            ) : row.hasChildren && !row.isTotal ? (
+                              <span className="w-3.5" />
+                            ) : null}
+                            <span>{cellValue}</span>
+                          </div>
+                        ) : (
+                          cellValue
+                        )}
+                      </TableCell>
+                    );
+                  })}
+                  {valueColumns.map((column) => (
+                    <TableCell
+                      key={`${row.node.key}-${column}-${row.isTotal ? 'total' : 'value'}`}
+                      className="text-right tabular-nums font-medium"
+                      style={getDataCellStyle({
+                        row: row.record,
+                        column,
+                        rowIndex,
+                        isRowHeader: false,
+                      })}
+                    >
+                      {formatValue(row.record[column])}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+        </TableBody>
+      </Table>
+    );
+  };
+
+  const renderCurrentLayout = () => {
+    if (!canUseHierarchicalLayouts) {
+      return renderTabularTable();
+    }
+    switch (reportLayout) {
+      case 'compact':
+        return renderCompactTable();
+      case 'outline':
+        return renderOutlineTable();
+      case 'tabular':
+      default:
+        return renderTabularTable();
+    }
+  };
+
   const datasetLabel = data.dataSource
     ? data.dataSource.split('/').filter(Boolean).slice(-1)[0]
     : 'Not selected';
+
+  type HierNode = {
+    key: string;
+    parentKey: string | null;
+    level: number;
+    order: number;
+    labels: Array<{ field: string; value: any }>;
+    values: Record<string, any>;
+    children: HierNode[];
+  };
+
+  const hierarchyTree = useMemo(() => {
+    const rawNodes = Array.isArray(data.pivotHierarchy) ? data.pivotHierarchy : [];
+    const nodeMap = new Map<string, HierNode>();
+
+    rawNodes.forEach((raw: any) => {
+      const key = typeof raw?.key === 'string' && raw.key.length > 0 ? raw.key : String(raw?.key ?? '');
+      if (!key) {
+        return;
+      }
+      const node: HierNode = {
+        key,
+        parentKey: raw?.parent_key ?? null,
+        level: Number(raw?.level ?? 0),
+        order: Number(raw?.order ?? 0),
+        labels: Array.isArray(raw?.labels) ? raw.labels : [],
+        values: raw?.values ?? {},
+        children: [],
+      };
+      nodeMap.set(key, node);
+    });
+
+    const roots: HierNode[] = [];
+    nodeMap.forEach((node) => {
+      const parentKey = node.parentKey;
+      if (parentKey && nodeMap.has(parentKey)) {
+        nodeMap.get(parentKey)!.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    });
+
+    const sortRecursive = (items: HierNode[]) => {
+      items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      items.forEach((child) => sortRecursive(child.children));
+    };
+    sortRecursive(roots);
+
+    return { roots, nodeMap };
+  }, [data.pivotHierarchy]);
+
+  type CompactRow = {
+    node: HierNode;
+    depth: number;
+    label: string;
+    record: Record<string, any>;
+    hasChildren: boolean;
+  };
+
+  const compactRows = useMemo<CompactRow[]>(() => {
+    if (!rowFields.length || hierarchyTree.roots.length === 0) {
+      return [];
+    }
+
+    const rows: CompactRow[] = [];
+
+    const pushNode = (node: HierNode, ancestorCollapsed: boolean) => {
+      const record = buildRecordForNode(node);
+      const labelEntry = node.labels?.[node.labels.length - 1];
+      const labelValue = labelEntry?.value ?? '';
+      const nodeHasChildren = node.children.length > 0;
+      const isCollapsed = collapsedSet.has(node.key) && nodeHasChildren;
+
+      if (!ancestorCollapsed) {
+        rows.push({
+          node,
+          depth: node.level,
+          label: String(labelValue ?? ''),
+          record,
+          hasChildren: nodeHasChildren,
+        });
+      }
+
+      const nextAncestorCollapsed = ancestorCollapsed || isCollapsed;
+      node.children.forEach((child) => pushNode(child, nextAncestorCollapsed));
+    };
+
+    hierarchyTree.roots.forEach((root) => pushNode(root, false));
+
+    return rows;
+  }, [buildRecordForNode, collapsedSet, hierarchyTree, rowFields.length]);
+
+  type OutlineRow = {
+    node: HierNode;
+    record: Record<string, any>;
+    display: Record<string, any>;
+    level: number;
+    hasChildren: boolean;
+    isTotal: boolean;
+  };
+
+  const outlineRows = useMemo<OutlineRow[]>(() => {
+    if (!rowFields.length || hierarchyTree.roots.length === 0) {
+      return [];
+    }
+    const rows: OutlineRow[] = [];
+
+    const visit = (node: HierNode, ancestorCollapsed: boolean) => {
+      const nodeHasChildren = node.children.length > 0;
+      const isCollapsed = collapsedSet.has(node.key) && nodeHasChildren;
+      const record = buildRecordForNode(node);
+      const display: Record<string, any> = {};
+      rowFields.forEach((field, index) => {
+        display[field] = index === node.level ? record[field] : '';
+      });
+
+      if (!ancestorCollapsed) {
+        rows.push({
+          node,
+          record,
+          display,
+          level: node.level,
+          hasChildren: nodeHasChildren,
+          isTotal: false,
+        });
+      }
+
+      const nextAncestorCollapsed = ancestorCollapsed || isCollapsed;
+      node.children.forEach((child) => visit(child, nextAncestorCollapsed));
+
+      if (!ancestorCollapsed && nodeHasChildren && !isCollapsed) {
+        const fieldName = rowFields[node.level] ?? rowFields[0];
+        const totalRecord = { ...record };
+        const totalDisplay = { ...display };
+        if (fieldName) {
+          const base = String(totalRecord[fieldName] ?? '').trim();
+          const totalLabel = base.length > 0 && !base.toLowerCase().endsWith('total')
+            ? `${base} Total`
+            : base;
+          totalRecord[fieldName] = totalLabel;
+          totalDisplay[fieldName] = totalLabel;
+        }
+        rows.push({
+          node,
+          record: totalRecord,
+          display: totalDisplay,
+          level: node.level,
+          hasChildren: false,
+          isTotal: true,
+        });
+      }
+    };
+
+    hierarchyTree.roots.forEach((root) => visit(root, false));
+    return rows;
+  }, [buildRecordForNode, collapsedSet, hierarchyTree, rowFields]);
+
+  type TabularRow = {
+    record: Record<string, any>;
+  };
+
+  const tabularRows = useMemo<TabularRow[]>(() => {
+    if (!rowFields.length || hierarchyTree.roots.length === 0) {
+      return pivotRows.map((row) => {
+        const record: Record<string, any> = { ...row };
+        rowFields.forEach((field) => {
+          record[field] = row[field];
+        });
+        return { record };
+      });
+    }
+
+    const rows: TabularRow[] = [];
+
+    const traverse = (node: HierNode, path: Record<string, any>) => {
+      const nextPath = { ...path };
+      node.labels?.forEach(({ field, value }) => {
+        nextPath[field] = value;
+      });
+
+      const record = buildRecordForNode(node);
+      rowFields.forEach((field, index) => {
+        let displayValue = nextPath[field] ?? '';
+        if (node.children.length > 0 && index === node.level && typeof displayValue === 'string') {
+          const trimmed = displayValue.trim();
+          displayValue = trimmed.length > 0 && !trimmed.toLowerCase().endsWith('total')
+            ? `${trimmed} Total`
+            : trimmed;
+        }
+        record[field] = displayValue;
+      });
+
+      if (node.children.length === 0) {
+        rows.push({ record });
+        return;
+      }
+
+      node.children.forEach((child) => traverse(child, nextPath));
+      rows.push({ record });
+    };
+
+    hierarchyTree.roots.forEach((root) => traverse(root, {}));
+    return rows;
+  }, [buildRecordForNode, hierarchyTree, pivotRows, rowFields]);
+
+  const layoutOptions = useMemo(
+    () => [
+      { id: 'compact' as const, label: 'Show in Compact Form' },
+      { id: 'outline' as const, label: 'Show in Outline Form' },
+      { id: 'tabular' as const, label: 'Show in Tabular Form' },
+    ],
+    [],
+  );
+
+  const canUseHierarchicalLayouts = rowFields.length > 0 && hierarchyTree.roots.length > 0;
+
+  React.useEffect(() => {
+    if (!canUseHierarchicalLayouts && (reportLayout === 'compact' || reportLayout === 'outline')) {
+      onReportLayoutChange('tabular');
+    }
+  }, [canUseHierarchicalLayouts, onReportLayoutChange, reportLayout]);
 
   return (
     <div className="w-full h-full bg-[#F3F3F3] overflow-auto">
@@ -316,11 +1264,39 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                         <ChevronDown className="w-3 h-3 ml-1" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-56">
-                      <DropdownMenuItem>Show in Compact Form</DropdownMenuItem>
-                      <DropdownMenuItem>Show in Outline Form</DropdownMenuItem>
-                      <DropdownMenuItem>Show in Tabular Form</DropdownMenuItem>
-                      <DropdownMenuItem className="border-t">Repeat All Item Labels</DropdownMenuItem>
+                    <DropdownMenuContent align="start" className="w-56 py-1">
+                      {layoutOptions.map((option) => {
+                        const isActive = reportLayout === option.id;
+                        const disabled = option.id !== 'tabular' && !canUseHierarchicalLayouts;
+                        return (
+                          <DropdownMenuItem
+                            key={option.id}
+                            disabled={disabled}
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              if (!disabled) {
+                                onReportLayoutChange(option.id);
+                              }
+                            }}
+                            className={cn(
+                              'text-xs py-2 flex items-center justify-between',
+                              isActive ? 'font-semibold text-[#1A73E8]' : ''
+                            )}
+                          >
+                            {option.label}
+                            {disabled ? (
+                              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                                Unavailable
+                              </span>
+                            ) : isActive ? (
+                              <span className="text-[10px] uppercase tracking-wide">Active</span>
+                            ) : null}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                      <DropdownMenuItem className="border-t text-xs text-muted-foreground" disabled>
+                        Repeat All Item Labels
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -333,7 +1309,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     <Checkbox
                       checked={styleOptions.rowHeaders}
                       onCheckedChange={(checked) =>
-                        setStyleOptions((prev) => ({ ...prev, rowHeaders: checked as boolean }))
+                        onStyleOptionsChange({
+                          ...styleOptions,
+                          rowHeaders: Boolean(checked),
+                        })
                       }
                       className="h-3.5 w-3.5"
                     />
@@ -343,7 +1322,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     <Checkbox
                       checked={styleOptions.columnHeaders}
                       onCheckedChange={(checked) =>
-                        setStyleOptions((prev) => ({ ...prev, columnHeaders: checked as boolean }))
+                        onStyleOptionsChange({
+                          ...styleOptions,
+                          columnHeaders: Boolean(checked),
+                        })
                       }
                       className="h-3.5 w-3.5"
                     />
@@ -353,7 +1335,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     <Checkbox
                       checked={styleOptions.bandedRows}
                       onCheckedChange={(checked) =>
-                        setStyleOptions((prev) => ({ ...prev, bandedRows: checked as boolean }))
+                        onStyleOptionsChange({
+                          ...styleOptions,
+                          bandedRows: Boolean(checked),
+                        })
                       }
                       className="h-3.5 w-3.5"
                     />
@@ -366,51 +1351,72 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase">Style</span>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" className="h-7 px-3 text-[11px] font-medium text-[#3F3F3F] gap-1 hover:bg-[#EBEBEB]">
+                    <Button variant="ghost" size="sm" className="h-7 px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]">
                       <Palette className="w-3.5 h-3.5" />
                       PivotTable Styles
                       <ChevronDown className="w-3 h-3" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-[500px] p-4 max-h-[600px] overflow-y-auto">
-                    {(['light', 'medium', 'dark'] as const).map((group) => (
-                      <div key={group} className="mb-6 last:mb-0">
-                        <h4 className="text-sm font-semibold mb-3 text-foreground capitalize">{group}</h4>
+                    {PIVOT_THEME_GROUPS.map((group) => (
+                      <div key={group.id} className="mb-6 last:mb-0">
+                        <h4 className="text-sm font-semibold mb-3 text-foreground capitalize">
+                          {group.label}
+                        </h4>
                       <div className="grid grid-cols-4 gap-3">
-                          {pivotStyles[group].map((style) => (
+                          {group.themes.map((theme) => {
+                            const isActive = selectedStyleId === theme.id;
+                            return (
                           <button
-                            key={style.id}
-                            onClick={() => setSelectedStyle(style.id)}
-                              className={cn(
-                                'relative group rounded-lg border-2 transition-all overflow-hidden',
-                                selectedStyle === style.id
+                                key={theme.id}
+                                type="button"
+                                onClick={() => onStyleChange(theme.id)}
+                                className={cn(
+                                  'relative group rounded-lg border-2 transition-all overflow-hidden text-left',
+                                  isActive
                                 ? 'border-primary ring-2 ring-primary/20 shadow-lg'
                                 : 'border-border hover:border-primary/50 hover:shadow-md'
-                              )}
+                                )}
                           >
                             <div className="p-2">
                               <div className="space-y-0.5">
-                                  <div className={cn('h-3 rounded-t border', style.headerBg, style.border)} />
-                                  <div className={cn('h-2 border-x border-b', style.rowBg, style.border)} />
-                                  <div className={cn('h-2 border-x border-b', style.rowBg, style.border)} />
-                                  <div className={cn('h-2 border-x border-b', style.rowBg, style.border)} />
+                                    <div
+                                      className="h-3 rounded-t border border-black/5"
+                                      style={{ backgroundColor: theme.colors.headerBg }}
+                                    />
+                                    <div
+                                      className="h-2 border-x border-black/5"
+                                      style={{ backgroundColor: theme.colors.rowBg }}
+                                    />
+                                    <div
+                                      className="h-2 border-x border-black/5"
+                                      style={{ backgroundColor: theme.colors.rowAltBg }}
+                                    />
+                                    <div
+                                      className="h-2 rounded-b border-x border-b border-black/5"
+                                      style={{ backgroundColor: theme.colors.totalRowBg }}
+                                    />
                               </div>
+                                  <span className="mt-2 block text-xs font-medium text-foreground truncate">
+                                    {theme.name}
+                                  </span>
                             </div>
-                            {selectedStyle === style.id && (
+                                {isActive && (
                               <div className="absolute top-1 right-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center">
                                 <div className="w-2 h-2 bg-white rounded-full" />
                               </div>
                             )}
                           </button>
-                        ))}
+                            );
+                          })}
                       </div>
                     </div>
-                    ))}
+                        ))}
                   </DropdownMenuContent>
                 </DropdownMenu>
-              </div>
-            </div>
-          </div>
+                              </div>
+                            </div>
+                              </div>
 
           <div className="flex flex-col gap-2 border-t border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1 text-[11px] text-[#595959]">
@@ -423,7 +1429,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
               {typeof data.pivotRowCount === 'number' && data.pivotRowCount > 0 && (
                 <p>Rows returned: <span className="font-medium text-[#262626]">{data.pivotRowCount.toLocaleString()}</span></p>
               )}
-            </div>
+                      </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="default"
@@ -445,8 +1451,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
                 Refresh
               </Button>
-          </div>
-        </div>
+                              </div>
+                            </div>
 
           {(error || infoMessage || saveError || saveMessage) && (
             <div className="border-t border-border/60">
@@ -454,26 +1460,26 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 <div className="flex items-start gap-2 bg-destructive/10 px-4 py-3 text-destructive">
                   <AlertTriangle className="h-4 w-4 mt-0.5" />
                   <p className="text-sm">{error}</p>
-                </div>
-              )}
+                              </div>
+                            )}
               {!error && infoMessage && (
                 <div className="flex items-start gap-2 bg-muted/30 px-4 py-3 text-muted-foreground">
                   <Info className="h-4 w-4 mt-0.5" />
                   <p className="text-sm">{infoMessage}</p>
-                </div>
+                      </div>
               )}
               {saveError && (
                 <div className="flex items-start gap-2 bg-destructive/10 px-4 py-3 text-destructive">
                   <AlertTriangle className="h-4 w-4 mt-0.5" />
                   <p className="text-sm">{saveError}</p>
-                </div>
+                    </div>
               )}
               {!saveError && saveMessage && (
                 <div className="flex items-start gap-2 bg-emerald-50 px-4 py-3 text-emerald-700">
                   <Info className="h-4 w-4 mt-0.5" />
                   <p className="text-sm">{saveMessage}</p>
-                </div>
-              )}
+              </div>
+                            )}
             </div>
           )}
         </Card>
@@ -569,8 +1575,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                               disabled={loadingFilter === field}
                             />
                             <span>Select Multiple Items</span>
-                          </div>
-                        </div>
+              </div>
+            </div>
                         <div className="border-t border-[#E6E6E6]" />
                         <div className="py-1">
                           {loadingFilter === field ? (
@@ -612,7 +1618,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                               No matches
                             </DropdownMenuItem>
                           )}
-                </div>
+                  </div>
                         <div className="border-t border-[#E6E6E6]" />
                         <div className="flex items-center justify-between px-3 py-2">
                           <Button
@@ -633,93 +1639,18 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                           >
                             Clear
                           </Button>
-                        </div>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    </div>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                   );
                 })}
-              </div>
+            </div>
               </div>
             </div>
           )}
 
         <div className="bg-white border border-[#D9D9D9] rounded-md overflow-hidden shadow-sm">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-[#F6F6F6] border-b border-[#E0E0E0]">
-                {columns.map((column, index) => {
-                  const isRowHeader =
-                    (showRowHeaders && data.rowFields.some(
-                      (row) => row.toLowerCase() === column.toLowerCase()
-                    )) || index === 0;
-                  return (
-                    <TableHead
-                      key={column}
-                      className={cn(
-                        'font-semibold text-[#3F3F3F] border-[#E0E0E0] text-[12px] uppercase tracking-wide',
-                        !showColumnHeaders && 'text-[#BFBFBF]',
-                        isRowHeader ? 'text-left border-r' : 'text-right border-r last:border-r-0'
-                      )}
-                    >
-                      <div className={cn('flex items-center gap-1', isRowHeader ? 'justify-start' : 'justify-end')}>
-                        {column}
-                        {isRowHeader && <ChevronDown className="w-3 h-3" />}
-                  </div>
-                </TableHead>
-                  );
-                })}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={columns.length} className="text-center py-8">
-                    <Loader2 className="mx-auto h-5 w-5 animate-spin text-primary" />
-                  </TableCell>
-                </TableRow>
-              ) : hasResults ? (
-                pivotRows.map((row, rowIndex) => (
-                  <TableRow
-                    key={rowIndex}
-                    className={cn(
-                      'transition-colors text-[13px]',
-                      styleOptions.bandedRows && rowIndex % 2 === 1
-                        ? 'bg-[#FDF8F2]'
-                        : 'bg-white hover:bg-[#F5F5F5]'
-                    )}
-                  >
-                    {columns.map((column, index) => {
-                      const value = row[column];
-                      const isRowHeader =
-                        (showRowHeaders && data.rowFields.some(
-                          (field) => field.toLowerCase() === column.toLowerCase()
-                        )) || index === 0;
-                      return (
-                        <TableCell
-                          key={`${rowIndex}-${column}`}
-                          className={cn(
-                            'border-[#E0E0E0] text-[#262626] align-middle',
-                            isRowHeader
-                              ? 'text-left border-r font-semibold'
-                              : 'text-right border-r tabular-nums font-medium text-[#1F3B57]',
-                            styleOptions.bandedColumns && index % 2 === 1 && 'bg-[#FDF1E8]'
-                          )}
-                        >
-                          {formatValue(value)}
-                </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={columns.length} className="text-center py-8 text-sm text-muted-foreground">
-                    No pivot results yet. Configure the layout and refresh to generate the table.
-                </TableCell>
-              </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          {renderCurrentLayout()}
         </div>
       </div>
     </div>

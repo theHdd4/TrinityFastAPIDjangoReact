@@ -83,6 +83,10 @@ class PivotComputeResponse(BaseModel):
     updated_at: datetime
     rows: int
     data: List[Dict[str, Any]]
+    hierarchy: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Hierarchical nodes describing row field structure for compact/outline layouts",
+    )
 
 
 class PivotStatusResponse(BaseModel):

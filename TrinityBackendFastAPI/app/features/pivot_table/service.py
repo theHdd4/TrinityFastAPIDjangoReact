@@ -163,6 +163,71 @@ def _flatten_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _value_to_key(value: Any) -> str:
+    if value is None:
+        return "__NA__"
+    if isinstance(value, (float, np.floating)) and pd.isna(value):
+        return "__NA__"
+    return str(value)
+
+
+def _build_hierarchy_nodes(
+    df: pd.DataFrame,
+    row_fields: List[str],
+    agg_map: Dict[str, str],
+    order_lookup: Dict[str, int],
+) -> List[Dict[str, Any]]:
+    if not row_fields:
+        return []
+
+    nodes: List[Dict[str, Any]] = []
+
+    for depth in range(len(row_fields)):
+        group_fields = row_fields[: depth + 1]
+        try:
+            grouped = (
+                df.groupby(group_fields, dropna=False)
+                .agg(agg_map)
+                .reset_index()
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception(
+                "Failed to build hierarchy for fields %s: %s", group_fields, exc
+            )
+            continue
+
+        grouped = _flatten_columns(grouped)
+        value_columns = [col for col in grouped.columns if col not in group_fields]
+
+        for _, row in grouped.iterrows():
+            labels: List[Dict[str, Any]] = []
+            key_parts: List[str] = []
+
+            for field in group_fields:
+                raw_value = row[field]
+                labels.append(
+                    {"field": field, "value": _convert_numpy(raw_value)}
+                )
+                key_parts.append(f"{field}:{_value_to_key(raw_value)}")
+
+            key = "|".join(key_parts)
+            parent_key = "|".join(key_parts[:-1]) if len(key_parts) > 1 else None
+            values = _convert_numpy({col: row[col] for col in value_columns})
+
+            nodes.append(
+                {
+                    "key": key,
+                    "parent_key": parent_key,
+                    "level": depth,
+                    "order": order_lookup.get(key, len(order_lookup) + len(nodes)),
+                    "labels": labels,
+                    "values": values,
+                }
+            )
+
+    return nodes
+
+
 def _drop_margin_rows(df: pd.DataFrame) -> pd.DataFrame:
     if isinstance(df.index, pd.MultiIndex):
         mask = df.index.map(
@@ -332,6 +397,23 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
     if payload.limit and len(records) > payload.limit:
         records = records[: payload.limit]
 
+    order_lookup: Dict[str, int] = {}
+    if row_fields:
+        order_counter = 0
+        for record in records:
+            key_parts: List[str] = []
+            for field in row_fields:
+                raw_value = record.get(field)
+                key_parts.append(f"{field}:{_value_to_key(raw_value)}")
+                key = "|".join(key_parts)
+                if key not in order_lookup:
+                    order_lookup[key] = order_counter
+                    order_counter += 1
+
+    hierarchy_nodes = _build_hierarchy_nodes(
+        filtered_df, row_fields, agg_map, order_lookup
+    )
+
     updated_at = datetime.now(timezone.utc)
 
     _store_data(
@@ -342,6 +424,7 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
             "updated_at": updated_at.isoformat(),
             "rows": len(records),
             "data": records,
+            "hierarchy": hierarchy_nodes,
         },
     )
 
@@ -363,6 +446,7 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         updated_at=updated_at,
         rows=len(records),
         data=records,
+        hierarchy=hierarchy_nodes,
     )
 
 
