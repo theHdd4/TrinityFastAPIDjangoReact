@@ -1,18 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ArrowDown,
-  ArrowUp,
-  ChevronsDown,
-  ChevronsUp,
-  Crop,
-  FlipHorizontal,
-  FlipVertical,
-  CircleDashed,
-  Maximize2,
-  Move,
-  Sparkles,
-  Trash2,
-} from 'lucide-react';
+import { Crop, FlipHorizontal, FlipVertical, CircleDashed, Maximize2, Move, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -39,10 +26,6 @@ interface ImageToolbarProps {
   onToggleAnimate?: () => void;
   onRequestPosition?: () => void;
   onOpacityChange?: (opacity: number) => void;
-  onBringForward: () => void;
-  onSendBackward: () => void;
-  onBringToFront: () => void;
-  onSendToBack: () => void;
   onDelete?: () => void;
 }
 
@@ -107,10 +90,6 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
   onToggleAnimate,
   onRequestPosition,
   onOpacityChange,
-  onBringForward,
-  onSendBackward,
-  onBringToFront,
-  onSendToBack,
   onDelete,
 }) => {
   const handleToolbarMouseDown = (event: React.MouseEvent) => {
@@ -125,17 +104,6 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
         ? 'bg-foreground text-background shadow-sm'
         : 'bg-transparent hover:bg-muted/40 hover:text-foreground',
     );
-
-  const layerButtons = useMemo(
-    () =>
-      [
-        { id: 'forward', icon: ArrowUp, handler: onBringForward },
-        { id: 'backward', icon: ArrowDown, handler: onSendBackward },
-        { id: 'front', icon: ChevronsUp, handler: onBringToFront },
-        { id: 'back', icon: ChevronsDown, handler: onSendToBack },
-      ].filter(entry => typeof entry.handler === 'function'),
-    [onBringForward, onBringToFront, onSendBackward, onSendToBack],
-  );
 
   return (
     <div
@@ -251,33 +219,7 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
           <Move className="h-4 w-4" />
           Position
         </Button>
-      </div>
-      {layerButtons.length > 0 && (
-        <>
-          <Separator />
-          <div className="flex items-center gap-1">
-            {layerButtons.map(entry => {
-              const Icon = entry.icon;
-              return (
-                <Button
-                  key={entry.id}
-                  variant="ghost"
-                  size="icon"
-                  type="button"
-                  className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
-                  onClick={entry.handler as () => void}
-                  onMouseDown={handleToolbarMouseDown}
-                >
-                  <Icon className="h-4 w-4" />
-                </Button>
-              );
-            })}
-          </div>
-        </>
-      )}
-      {onOpacityChange && (
-        <>
-          <Separator />
+        {onOpacityChange && (
           <Popover>
             <PopoverTrigger asChild>
               <Button
@@ -319,8 +261,8 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
               </label>
             </PopoverContent>
           </Popover>
-        </>
-      )}
+        )}
+      </div>
       {onDelete && (
         <>
           <Separator />
@@ -366,10 +308,6 @@ interface SlideImageObjectProps {
   onCropChange?: (next: ImageCropInsets) => void;
   onCropCommit?: () => void;
   onResetCrop?: () => void;
-  onBringForward: () => void;
-  onSendBackward: () => void;
-  onBringToFront: () => void;
-  onSendToBack: () => void;
   onDelete?: () => void;
 }
 
@@ -399,10 +337,6 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   onCropChange,
   onCropCommit,
   onResetCrop,
-  onBringForward,
-  onSendBackward,
-  onBringToFront,
-  onSendToBack,
   onDelete,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -440,26 +374,6 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   useEffect(() => {
     setLocalOpacity(clampOpacity(opacity));
   }, [opacity]);
-
-  const handleBringForward = useCallback(() => {
-    onInteract();
-    onBringForward();
-  }, [onBringForward, onInteract]);
-
-  const handleSendBackward = useCallback(() => {
-    onInteract();
-    onSendBackward();
-  }, [onInteract, onSendBackward]);
-
-  const handleBringToFront = useCallback(() => {
-    onInteract();
-    onBringToFront();
-  }, [onBringToFront, onInteract]);
-
-  const handleSendToBack = useCallback(() => {
-    onInteract();
-    onSendToBack();
-  }, [onInteract, onSendToBack]);
 
   const handleToggleFit = useCallback(() => {
     if (!onToggleFit) {
@@ -669,19 +583,11 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
         onToggleAnimate={onToggleAnimate ? handleToggleAnimate : undefined}
         onRequestPosition={onRequestPositionPanel ? handleRequestPosition : undefined}
         onOpacityChange={onOpacityChange ? handleOpacityChange : undefined}
-        onBringForward={handleBringForward}
-        onSendBackward={handleSendBackward}
-        onBringToFront={handleBringToFront}
-        onSendToBack={handleSendToBack}
         onDelete={onDelete}
       />
     );
   }, [
     canEdit,
-    handleBringForward,
-    handleSendBackward,
-    handleBringToFront,
-    handleSendToBack,
     handleToggleAnimate,
     handleToggleFit,
     handleToggleCrop,
