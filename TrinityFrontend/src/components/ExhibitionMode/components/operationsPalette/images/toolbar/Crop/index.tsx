@@ -126,7 +126,18 @@ export const useImageCropInteraction = ({
 }: UseImageCropInteractionOptions): UseImageCropInteractionResult => {
   const dragStateRef = useRef<DragState | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const normalizedCrop = useMemo(() => normalizeCropInsets(cropInsets), [cropInsets]);
+  const normalizedCropFromProps = useMemo(() => normalizeCropInsets(cropInsets), [cropInsets]);
+  const [previewCrop, setPreviewCrop] = useState<ImageCropInsets>(normalizedCropFromProps);
+
+  useEffect(() => {
+    if (!isCropping) {
+      setPreviewCrop(normalizedCropFromProps);
+    }
+  }, [isCropping, normalizedCropFromProps]);
+
+  useEffect(() => {
+    setPreviewCrop(normalizedCropFromProps);
+  }, [normalizedCropFromProps]);
 
   const handleCropPointerMove = useCallback(
     (event: PointerEvent) => {
@@ -143,6 +154,7 @@ export const useImageCropInteraction = ({
       const deltaXPercent = ((event.clientX - startX) / containerRect.width) * 100;
       const deltaYPercent = ((event.clientY - startY) / containerRect.height) * 100;
       const next = computeNextCrop(handle, deltaXPercent, deltaYPercent, initialCrop);
+      setPreviewCrop(next);
       onCropChange(next);
     },
     [onCropChange],
@@ -199,23 +211,30 @@ export const useImageCropInteraction = ({
         startX: event.clientX,
         startY: event.clientY,
         containerRect: rect,
-        initialCrop: normalizedCrop,
+        initialCrop: normalizedCropFromProps,
       };
       setIsDragging(true);
       window.addEventListener('pointermove', handleCropPointerMove);
       window.addEventListener('pointerup', handleCropPointerUp);
       return true;
     },
-    [containerRef, handleCropPointerMove, handleCropPointerUp, isCropping, normalizedCrop, onCropChange],
+    [
+      containerRef,
+      handleCropPointerMove,
+      handleCropPointerUp,
+      isCropping,
+      normalizedCropFromProps,
+      onCropChange,
+    ],
   );
 
   return useMemo(
     () => ({
       isDragging,
-      normalizedCrop,
+      normalizedCrop: previewCrop,
       beginCropDrag,
     }),
-    [beginCropDrag, isDragging, normalizedCrop],
+    [beginCropDrag, isDragging, previewCrop],
   );
 };
 
