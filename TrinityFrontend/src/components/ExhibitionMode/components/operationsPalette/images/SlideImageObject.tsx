@@ -511,7 +511,17 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     if (!hasCrop) {
       return undefined;
     }
-    return `inset(${normalizedCrop.top}% ${normalizedCrop.right}% ${normalizedCrop.bottom}% ${normalizedCrop.left}%)`;
+
+    const insetValues = [
+      normalizedCrop.top,
+      normalizedCrop.right,
+      normalizedCrop.bottom,
+      normalizedCrop.left,
+    ]
+      .map(value => `${value}%`)
+      .join(' ');
+
+    return `inset(${insetValues})`;
   }, [hasCrop, normalizedCrop.bottom, normalizedCrop.left, normalizedCrop.right, normalizedCrop.top]);
 
   const imageStyle = useMemo<React.CSSProperties>(
