@@ -21,6 +21,9 @@ import {
   DEFAULT_TABLE_COLUMN_WIDTH,
   MIN_TABLE_COLUMN_WIDTH,
   MAX_TABLE_COLUMN_WIDTH,
+  DEFAULT_TABLE_ROW_HEIGHT,
+  MIN_TABLE_ROW_HEIGHT,
+  MAX_TABLE_ROW_HEIGHT,
 } from './constants';
 import { ExhibitionTableTray } from './ExhibitionTableTray';
 
@@ -33,6 +36,7 @@ export interface ExhibitionTableProps {
   rows?: number;
   cols?: number;
   columnWidths?: number[];
+  rowHeights?: number[];
   selectedCell?: TableSelection | null;
   onCellSelect?: (selection: TableSelection | null) => void;
   onUpdateCell?: (row: number, col: number, value: string) => void;
@@ -58,6 +62,7 @@ export interface ExhibitionTableProps {
   onInteract?: () => void;
   onStyleChange?: (styleId: string) => void;
   onUpdateColumnWidth?: (colIndex: number, width: number) => void;
+  onUpdateRowHeight?: (rowIndex: number, height: number) => void;
   onBringToFront?: () => void;
   onBringForward?: () => void;
   onSendBackward?: () => void;
@@ -153,6 +158,42 @@ const buildColumnWidthsForCount = (count: number, source?: number[]): number[] =
 };
 
 const columnWidthArraysEqual = (a: number[], b: number[]): boolean => {
+  if (a === b) {
+    return true;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
+};
+
+const clampRowHeightValue = (value: number | undefined): number => {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_TABLE_ROW_HEIGHT;
+  }
+
+  const rounded = Math.round(value!);
+  if (!Number.isFinite(rounded)) {
+    return DEFAULT_TABLE_ROW_HEIGHT;
+  }
+  if (rounded < MIN_TABLE_ROW_HEIGHT) {
+    return MIN_TABLE_ROW_HEIGHT;
+  }
+  if (rounded > MAX_TABLE_ROW_HEIGHT) {
+    return MAX_TABLE_ROW_HEIGHT;
+  }
+  return rounded;
+};
+
+const buildRowHeightsForCount = (count: number, source?: number[]): number[] => {
+  if (count <= 0) {
+    return [];
+  }
+
+  return Array.from({ length: count }, (_, index) => clampRowHeightValue(source?.[index]));
+};
+
+const rowHeightArraysEqual = (a: number[], b: number[]): boolean => {
   if (a === b) {
     return true;
   }
@@ -345,6 +386,7 @@ interface ContentEditableCellProps {
   onCommit: (value: string) => void;
   onInteract?: () => void;
   onBlur?: () => void;
+  minHeight?: number;
 }
 
 const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
@@ -357,6 +399,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
   onCommit,
   onInteract,
   onBlur,
+  minHeight,
 }) => {
   const elementRef = useRef<HTMLDivElement | null>(null);
   const lastValueRef = useRef<string>('');
@@ -517,7 +560,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
           setDomValue(value ?? '');
         }
       }}
-      className="min-h-[40px] w-full px-3 py-2 text-sm focus:outline-none"
+      className="min-h-[32px] w-full px-3 py-2 text-sm focus:outline-none"
       data-exhibition-table-cell-content={editable ? 'true' : 'false'}
       style={{
         fontFamily: formatting.fontFamily,
@@ -527,6 +570,7 @@ const ContentEditableCell: React.FC<ContentEditableCellProps> = ({
         fontStyle: formatting.italic ? 'italic' : 'normal',
         textDecoration: buildTextDecoration(formatting),
         whiteSpace: 'pre-wrap',
+        minHeight: minHeight ? `${minHeight}px` : undefined,
       }}
       contentEditable={editable && isEditing}
       suppressContentEditableWarning
@@ -559,6 +603,11 @@ interface EditableTableCellProps {
   columnWidth?: number;
   minColumnWidth?: number;
   maxColumnWidth?: number;
+  rowHeight?: number;
+  minRowHeight?: number;
+  maxRowHeight?: number;
+  showRowResizeHandle?: boolean;
+  onResizeRowStart?: (event: React.PointerEvent<HTMLDivElement>) => void;
   onEnterEditMode?: (target: SelectionTarget) => void;
   onExitEditMode?: (target: SelectionTarget) => void;
   isEditing?: boolean;
@@ -583,6 +632,11 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   columnWidth,
   minColumnWidth,
   maxColumnWidth,
+  rowHeight,
+  minRowHeight,
+  maxRowHeight,
+  showRowResizeHandle,
+  onResizeRowStart,
   onEnterEditMode,
   onExitEditMode,
   isEditing,
@@ -660,7 +714,7 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
   return (
     <td
       className={cn(
-        'align-top transition-colors border',
+        'group relative align-top transition-colors border',
         editable ? 'cursor-text' : 'cursor-default',
         isActive && 'outline outline-2 outline-primary/60',
       )}
@@ -675,6 +729,9 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
         width: columnWidth,
         minWidth: minColumnWidth,
         maxWidth: maxColumnWidth,
+        height: rowHeight,
+        minHeight: minRowHeight,
+        maxHeight: maxRowHeight,
       }}
       onPointerDown={handlePointerDown}
       onPointerEnter={handlePointerEnter}
@@ -699,7 +756,25 @@ const EditableTableCell: React.FC<EditableTableCellProps> = ({
             onExitEditMode?.(selectionTarget);
           }
         }}
+        minHeight={rowHeight}
       />
+      {showRowResizeHandle && (
+        <div
+          role="presentation"
+          className="absolute bottom-0 left-0 right-0 z-20 h-3 cursor-row-resize touch-none"
+          data-exhibition-table-row-resizer="true"
+          onPointerDown={event => {
+            if (!onResizeRowStart) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            onResizeRowStart(event);
+          }}
+        >
+          <span className="pointer-events-none absolute left-1/2 top-1/2 hidden h-px w-6 -translate-x-1/2 -translate-y-1/2 bg-border group-hover:block" />
+        </div>
+      )}
     </td>
   );
 };
@@ -890,6 +965,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   rows,
   cols,
   columnWidths: columnWidthsProp,
+  rowHeights: rowHeightsProp,
   selectedCell,
   onCellSelect = noop,
   onUpdateCell,
@@ -914,6 +990,7 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   onInteract = noop,
   onStyleChange = noop,
   onUpdateColumnWidth,
+  onUpdateRowHeight,
   onBringToFront,
   onBringForward,
   onSendBackward,
@@ -1061,9 +1138,23 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   const pendingColumnWidthRef = useRef<{ index: number; width: number } | null>(null);
   const activeResizeHandlersRef = useRef<{ move: (event: PointerEvent) => void; up: () => void } | null>(null);
 
+  const [rowHeightState, setRowHeightState] = useState<number[]>(() =>
+    buildRowHeightsForCount(rowCount, rowHeightsProp),
+  );
+  const rowHeightsRef = useRef<number[]>(rowHeightState);
+  const resizingRowRef = useRef<
+    { index: number; startY: number; startHeight: number; pointerId: number; target: Element | null } | null
+  >(null);
+  const pendingRowHeightRef = useRef<{ index: number; height: number } | null>(null);
+  const activeRowResizeHandlersRef = useRef<{ move: (event: PointerEvent) => void; up: () => void } | null>(null);
+
   useEffect(() => {
     columnWidthsRef.current = columnWidthState;
   }, [columnWidthState]);
+
+  useEffect(() => {
+    rowHeightsRef.current = rowHeightState;
+  }, [rowHeightState]);
 
   useEffect(() => {
     if (resizingColumnRef.current) {
@@ -1076,6 +1167,18 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
       setColumnWidthState(nextWidths);
     }
   }, [colCount, columnWidthsProp]);
+
+  useEffect(() => {
+    if (resizingRowRef.current) {
+      return;
+    }
+
+    const nextHeights = buildRowHeightsForCount(rowCount, rowHeightsProp);
+    if (!rowHeightArraysEqual(rowHeightsRef.current, nextHeights)) {
+      rowHeightsRef.current = nextHeights;
+      setRowHeightState(nextHeights);
+    }
+  }, [rowCount, rowHeightsProp]);
 
   useEffect(() => {
     return () => {
@@ -1101,6 +1204,33 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
       activeResizeHandlersRef.current = null;
       resizingColumnRef.current = null;
       pendingColumnWidthRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      const handlers = activeRowResizeHandlersRef.current;
+      if (handlers && typeof window !== 'undefined') {
+        window.removeEventListener('pointermove', handlers.move);
+        window.removeEventListener('pointerup', handlers.up);
+      }
+
+      if (typeof document !== 'undefined') {
+        document.body.style.cursor = '';
+      }
+
+      const resizeState = resizingRowRef.current;
+      if (resizeState?.target && typeof resizeState.target.releasePointerCapture === 'function') {
+        try {
+          resizeState.target.releasePointerCapture(resizeState.pointerId);
+        } catch {
+          // Ignore release errors
+        }
+      }
+
+      activeRowResizeHandlersRef.current = null;
+      resizingRowRef.current = null;
+      pendingRowHeightRef.current = null;
     };
   }, []);
 
@@ -1205,6 +1335,112 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
   );
 
   const allowColumnResize = canEdit && !locked;
+
+  const handleRowResizeStart = useCallback(
+    (rowIndex: number, pointerEvent: React.PointerEvent<HTMLDivElement>) => {
+      if (!canEdit || locked) {
+        return;
+      }
+
+      if (pointerEvent.pointerType === 'mouse' && pointerEvent.button !== 0) {
+        return;
+      }
+
+      pointerEvent.preventDefault();
+      pointerEvent.stopPropagation();
+
+      const startHeight = clampRowHeightValue(rowHeightsRef.current[rowIndex]);
+      const startY = pointerEvent.clientY;
+      const targetElement = pointerEvent.currentTarget instanceof Element ? pointerEvent.currentTarget : null;
+
+      resizingRowRef.current = {
+        index: rowIndex,
+        startY,
+        startHeight,
+        pointerId: pointerEvent.pointerId,
+        target: targetElement,
+      };
+      pendingRowHeightRef.current = { index: rowIndex, height: startHeight };
+
+      onInteract();
+
+      const moveListener = (event: PointerEvent) => {
+        const resizeState = resizingRowRef.current;
+        if (!resizeState) {
+          return;
+        }
+
+        const delta = event.clientY - resizeState.startY;
+        const nextHeight = clampRowHeightValue(resizeState.startHeight + delta);
+        pendingRowHeightRef.current = { index: resizeState.index, height: nextHeight };
+
+        setRowHeightState(prev => {
+          if (prev[resizeState.index] === nextHeight) {
+            return prev;
+          }
+          const next = [...prev];
+          next[resizeState.index] = nextHeight;
+          rowHeightsRef.current = next;
+          return next;
+        });
+      };
+
+      const stopResizing = () => {
+        if (typeof document !== 'undefined') {
+          document.body.style.cursor = '';
+        }
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('pointermove', moveListener);
+          window.removeEventListener('pointerup', stopResizing);
+        }
+        activeRowResizeHandlersRef.current = null;
+
+        const resizeState = resizingRowRef.current;
+        if (resizeState?.target && typeof resizeState.target.releasePointerCapture === 'function') {
+          try {
+            resizeState.target.releasePointerCapture(resizeState.pointerId);
+          } catch {
+            // Ignore release errors
+          }
+        }
+
+        const pendingHeight = pendingRowHeightRef.current;
+        if (pendingHeight && pendingHeight.index === rowIndex) {
+          onUpdateRowHeight?.(pendingHeight.index, pendingHeight.height);
+        }
+
+        pendingRowHeightRef.current = null;
+        resizingRowRef.current = null;
+      };
+
+      if (typeof document !== 'undefined') {
+        document.body.style.cursor = 'row-resize';
+      }
+
+      if (typeof window !== 'undefined') {
+        const handlers = activeRowResizeHandlersRef.current;
+        if (handlers) {
+          window.removeEventListener('pointermove', handlers.move);
+          window.removeEventListener('pointerup', handlers.up);
+        }
+
+        window.addEventListener('pointermove', moveListener);
+        window.addEventListener('pointerup', stopResizing);
+        activeRowResizeHandlersRef.current = { move: moveListener, up: stopResizing };
+      }
+
+      if (targetElement && typeof targetElement.setPointerCapture === 'function') {
+        try {
+          targetElement.setPointerCapture(pointerEvent.pointerId);
+        } catch {
+          // Ignore capture errors
+        }
+      }
+    },
+    [canEdit, locked, onInteract, onUpdateRowHeight],
+  );
+
+  const allowRowResize = canEdit && !locked;
 
   const tableData = useMemo(() => {
     return Array.from({ length: rowCount }, (_, rowIndex) => {
@@ -1671,23 +1907,24 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
               {tableData.map((rowData, rowIndex) => {
                 const rowBackgroundColor = rowIndex % 2 === 0 ? bodyOddBackground : bodyEvenBackground;
 
-                return (
-                  <tr key={`${id}-row-${rowIndex}`}>
-                    {rowData.map((cell, colIndex) => {
-                      const isActive =
-                        selectionRegion === 'body' &&
-                        bodySelectionBounds != null &&
-                        rowIndex >= bodySelectionBounds.startRow &&
-                        rowIndex <= bodySelectionBounds.endRow &&
-                        colIndex >= bodySelectionBounds.startCol &&
-                        colIndex <= bodySelectionBounds.endCol;
-                      const cellFormatting = cell?.formatting ?? createCellFormatting();
-                      const styledCellFormatting = applyStyleTextColor(cellFormatting, bodyTextColor);
+        return (
+          <tr key={`${id}-row-${rowIndex}`}>
+            {rowData.map((cell, colIndex) => {
+              const isActive =
+                selectionRegion === 'body' &&
+                bodySelectionBounds != null &&
+                rowIndex >= bodySelectionBounds.startRow &&
+                rowIndex <= bodySelectionBounds.endRow &&
+                colIndex >= bodySelectionBounds.startCol &&
+                colIndex <= bodySelectionBounds.endCol;
+              const cellFormatting = cell?.formatting ?? createCellFormatting();
+              const styledCellFormatting = applyStyleTextColor(cellFormatting, bodyTextColor);
+              const resolvedRowHeight = clampRowHeightValue(rowHeightState[rowIndex]);
 
-                      return (
-                        <EditableTableCell
-                          key={`${id}-cell-${rowIndex}-${colIndex}`}
-                          rowIndex={rowIndex}
+              return (
+                <EditableTableCell
+                  key={`${id}-cell-${rowIndex}-${colIndex}`}
+                  rowIndex={rowIndex}
                           colIndex={colIndex}
                           cell={cell}
                           formatting={styledCellFormatting}
@@ -1700,16 +1937,25 @@ export const ExhibitionTable: React.FC<ExhibitionTableProps> = ({
                           onSelectionStart={handleSelectionStart}
                           onSelectionExtend={handleSelectionExtend}
                           onChange={value => handleBodyCellInput(rowIndex, colIndex, value)}
-                          onCommit={value => handleBodyCellCommit(rowIndex, colIndex, value)}
-                          onInteract={onInteract}
-                          columnWidth={columnWidthState[colIndex]}
-                          minColumnWidth={MIN_TABLE_COLUMN_WIDTH}
-                          maxColumnWidth={MAX_TABLE_COLUMN_WIDTH}
-                          onEnterEditMode={onBeginCellTextEdit}
-                          onExitEditMode={onEndCellTextEdit}
-                          isEditing={
-                            Boolean(
-                              editingCell &&
+                  onCommit={value => handleBodyCellCommit(rowIndex, colIndex, value)}
+                  onInteract={onInteract}
+                  columnWidth={columnWidthState[colIndex]}
+                  minColumnWidth={MIN_TABLE_COLUMN_WIDTH}
+                  maxColumnWidth={MAX_TABLE_COLUMN_WIDTH}
+                  rowHeight={resolvedRowHeight}
+                  minRowHeight={MIN_TABLE_ROW_HEIGHT}
+                  maxRowHeight={MAX_TABLE_ROW_HEIGHT}
+                  showRowResizeHandle={allowRowResize}
+                  onResizeRowStart={
+                    allowRowResize
+                      ? event => handleRowResizeStart(rowIndex, event)
+                      : undefined
+                  }
+                  onEnterEditMode={onBeginCellTextEdit}
+                  onExitEditMode={onEndCellTextEdit}
+                  isEditing={
+                    Boolean(
+                      editingCell &&
                                 editingCell.region === 'body' &&
                                 editingCell.row === rowIndex &&
                                 editingCell.col === colIndex,

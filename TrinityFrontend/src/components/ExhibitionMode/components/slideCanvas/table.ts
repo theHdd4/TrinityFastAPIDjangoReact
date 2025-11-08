@@ -4,6 +4,7 @@ import {
   normaliseTableData,
   normaliseTableHeaders,
   normaliseTableColumnWidths,
+  normaliseTableRowHeights,
   ensureTableStyleId,
   type TableCellData,
   type TableCellFormatting,
@@ -19,6 +20,7 @@ export type TableState = {
   headers: TableCellData[];
   styleId: string;
   columnWidths: number[];
+  rowHeights: number[];
 };
 
 const coercePositiveInteger = (value: unknown, fallback: number): number => {
@@ -44,6 +46,7 @@ export const readTableState = (object: SlideObject): TableState => {
   const headers = extractTableHeaders(props?.headers, colCount);
   const styleId = ensureTableStyleId(props?.styleId);
   const columnWidths = normaliseTableColumnWidths(props?.columnWidths, colCount);
+  const rowHeights = normaliseTableRowHeights(props?.rowHeights, data.length);
 
   return {
     data,
@@ -54,6 +57,7 @@ export const readTableState = (object: SlideObject): TableState => {
     headers,
     styleId,
     columnWidths,
+    rowHeights,
   };
 };
 
@@ -76,7 +80,8 @@ export const tableStatesEqual = (a: TableState, b: TableState) => {
     a.showOutline === b.showOutline &&
     a.headers === b.headers &&
     a.styleId === b.styleId &&
-    numericArraysEqual(a.columnWidths, b.columnWidths)
+    numericArraysEqual(a.columnWidths, b.columnWidths) &&
+    numericArraysEqual(a.rowHeights, b.rowHeights)
   );
 };
 

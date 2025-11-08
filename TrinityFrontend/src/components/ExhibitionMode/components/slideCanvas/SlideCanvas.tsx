@@ -77,6 +77,10 @@ import {
   DEFAULT_TABLE_COLUMN_WIDTH,
   MIN_TABLE_COLUMN_WIDTH,
   MAX_TABLE_COLUMN_WIDTH,
+  DEFAULT_TABLE_ROW_HEIGHT,
+  MIN_TABLE_ROW_HEIGHT,
+  MAX_TABLE_ROW_HEIGHT,
+  renumberDefaultTableHeaders,
   type TableCellFormatting,
 } from '../operationsPalette/tables/constants';
 import {
@@ -2813,6 +2817,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               headers: nextState.headers,
               styleId: nextState.styleId,
               columnWidths: nextState.columnWidths,
+              rowHeights: nextState.rowHeights,
             },
           },
         });
@@ -2985,6 +2990,49 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [mutateTableState],
     );
 
+    const updateTableRowHeight = useCallback(
+      (objectId: string, rowIndex: number, height: number) => {
+        mutateTableState(objectId, state => {
+          if (rowIndex < 0 || rowIndex >= state.rows) {
+            return state;
+          }
+
+          const numericHeight = Number(height);
+          const roundedHeight = Number.isFinite(numericHeight)
+            ? Math.round(numericHeight)
+            : DEFAULT_TABLE_ROW_HEIGHT;
+          const clampedHeight = Math.min(
+            Math.max(roundedHeight, MIN_TABLE_ROW_HEIGHT),
+            MAX_TABLE_ROW_HEIGHT,
+          );
+
+          const nextRowHeights = Array.from({ length: state.rows }, (_, index) => {
+            const existing = state.rowHeights[index];
+            if (!Number.isFinite(existing)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            const rounded = Math.round(existing);
+            if (!Number.isFinite(rounded)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            return Math.min(Math.max(rounded, MIN_TABLE_ROW_HEIGHT), MAX_TABLE_ROW_HEIGHT);
+          });
+
+          if (nextRowHeights[rowIndex] === clampedHeight) {
+            return state;
+          }
+
+          nextRowHeights[rowIndex] = clampedHeight;
+
+          return {
+            ...state,
+            rowHeights: nextRowHeights,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
     const toggleTableLock = useCallback(
       (objectId: string) => {
         mutateTableState(objectId, state => ({
@@ -3040,11 +3088,33 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             ...additions,
             ...state.data.slice(safeStart),
           ];
+          const normalisedRowHeights = Array.from({ length: state.rows }, (_, index) => {
+            const existing = state.rowHeights[index];
+            if (!Number.isFinite(existing)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            const rounded = Math.round(existing);
+            if (!Number.isFinite(rounded)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            return Math.min(Math.max(rounded, MIN_TABLE_ROW_HEIGHT), MAX_TABLE_ROW_HEIGHT);
+          });
+          const heightInsertion = Math.min(
+            Math.max(safeStart, 0),
+            normalisedRowHeights.length,
+          );
+          const heightAdditions = Array.from({ length: count }, () => DEFAULT_TABLE_ROW_HEIGHT);
+          const nextRowHeights = [
+            ...normalisedRowHeights.slice(0, heightInsertion),
+            ...heightAdditions,
+            ...normalisedRowHeights.slice(heightInsertion),
+          ];
 
           return {
             ...state,
             data: nextData,
             rows: nextData.length,
+            rowHeights: nextRowHeights,
           };
         });
       },
@@ -3083,7 +3153,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             ...headerAdditions,
             ...existingHeaders.slice(headerInsertion),
           ];
-          const nextCols = nextHeaders.length;
+          const renumberedHeaders = renumberDefaultTableHeaders(nextHeaders);
+          const nextCols = renumberedHeaders.length;
           const widthInsertion = Math.min(Math.max(safeStart, 0), state.columnWidths.length);
           const widthAdditions = Array.from({ length: count }, () => DEFAULT_TABLE_COLUMN_WIDTH);
           let nextColumnWidths = [
@@ -3156,7 +3227,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             ...state,
             data: nextData,
             cols: nextCols,
-            headers: nextHeaders,
+            headers: renumberedHeaders,
             columnWidths: nextColumnWidths,
           };
         });
@@ -3184,11 +3255,26 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           const nextData = state.data.filter((_, index) => index < safeStart || index >= safeStart + actualCount);
+          const normalisedRowHeights = Array.from({ length: state.rows }, (_, index) => {
+            const existing = state.rowHeights[index];
+            if (!Number.isFinite(existing)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            const rounded = Math.round(existing);
+            if (!Number.isFinite(rounded)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            return Math.min(Math.max(rounded, MIN_TABLE_ROW_HEIGHT), MAX_TABLE_ROW_HEIGHT);
+          });
+          const nextRowHeights = normalisedRowHeights.filter(
+            (_, index) => index < safeStart || index >= safeStart + actualCount,
+          );
 
           return {
             ...state,
             data: nextData,
             rows: nextData.length,
+            rowHeights: nextRowHeights,
           };
         });
       },
@@ -3225,13 +3311,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           const nextColumnWidths = state.columnWidths.filter(
             (_, index) => index < safeStart || index >= safeStart + actualCount,
           );
-          const nextCols = nextHeaders.length;
+          const renumberedHeaders = renumberDefaultTableHeaders(nextHeaders);
+          const nextCols = renumberedHeaders.length;
 
           return {
             ...state,
             data: nextData,
             cols: nextCols,
-            headers: nextHeaders,
+            headers: renumberedHeaders,
             columnWidths: nextColumnWidths,
           };
         });
@@ -4543,6 +4630,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       rows={tableState.rows}
                       cols={tableState.cols}
                       columnWidths={tableState.columnWidths}
+                      rowHeights={tableState.rowHeights}
                       locked={tableState.locked}
                       showOutline={tableState.showOutline}
                       styleId={tableState.styleId}
@@ -4559,6 +4647,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       }
                       onUpdateColumnWidth={(col, width) =>
                         updateTableColumnWidth(object.id, col, width)
+                      }
+                      onUpdateRowHeight={(row, height) =>
+                        updateTableRowHeight(object.id, row, height)
                       }
                       onToggleLock={() => toggleTableLock(object.id)}
                       onToggleOutline={() => toggleTableOutline(object.id)}
