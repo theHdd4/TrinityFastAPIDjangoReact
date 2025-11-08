@@ -2748,11 +2748,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       (objectId: string, node: ReactNode | null) => {
         setActiveTextToolbar(prev => {
           if (node) {
+            if (prev?.id === objectId && prev.node === node) {
+              return prev;
+            }
             return { id: objectId, node };
           }
+
           if (prev?.id === objectId) {
             return null;
           }
+
           return prev;
         });
       },
@@ -4622,7 +4627,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onFlipHorizontal={handleFlipImageHorizontal}
                       onFlipVertical={handleFlipImageVertical}
                       onToggleAnimate={handleToggleImageAnimation}
-                      onRequestPositionPanel={handleRequestPositionPanel}
+                      onRequestPositionPanel={onRequestPositionPanel}
                       onOpacityChange={handleSetImageOpacity}
                       onCropChange={handleSetImageCrop}
                       onResetCrop={handleResetImageCrop}
