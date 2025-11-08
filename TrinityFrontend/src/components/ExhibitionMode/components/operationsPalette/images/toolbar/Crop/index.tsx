@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils';
 
 const isDevEnvironment = process.env.NODE_ENV === 'development';
-const cropLog = (...args: unknown[]) => {
+export const cropLog = (...args: unknown[]) => {
   if (!isDevEnvironment) {
     return;
   }
@@ -60,6 +60,36 @@ export const sanitizeImageCrop = (value: unknown): ImageCropInsets => normalizeC
 
 export const hasCrop = (insets: ImageCropInsets): boolean =>
   insets.top > 0 || insets.right > 0 || insets.bottom > 0 || insets.left > 0;
+
+export interface CropRenderMetrics {
+  widthPercent: number;
+  heightPercent: number;
+  translateXPercent: number;
+  translateYPercent: number;
+  scaleX: number;
+  scaleY: number;
+}
+
+export const resolveCropRenderMetrics = (insets: ImageCropInsets): CropRenderMetrics => {
+  const normalized = normalizeCropInsets(insets);
+  const widthPercent = Math.max(MIN_VISIBLE_PERCENT, 100 - normalized.left - normalized.right);
+  const heightPercent = Math.max(MIN_VISIBLE_PERCENT, 100 - normalized.top - normalized.bottom);
+
+  const translateXPercent = (normalized.left / widthPercent) * 100;
+  const translateYPercent = (normalized.top / heightPercent) * 100;
+
+  const scaleX = 100 / widthPercent;
+  const scaleY = 100 / heightPercent;
+
+  return {
+    widthPercent,
+    heightPercent,
+    translateXPercent,
+    translateYPercent,
+    scaleX,
+    scaleY,
+  } satisfies CropRenderMetrics;
+};
 
 interface DragState {
   handle: CropHandle;
