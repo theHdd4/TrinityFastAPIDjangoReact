@@ -498,9 +498,44 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     [canonicalizeKey, valueColumns],
   );
 
+  const pivotRowLookup = useMemo(() => {
+    if (!rowFields.length || pivotRows.length === 0) {
+      return new Map<string, Record<string, any>>();
+    }
+
+    const map = new Map<string, Record<string, any>>();
+
+    pivotRows.forEach((row) => {
+      const key = rowFields
+        .map((field) => canonicalizeKey(row?.[field]))
+        .join('|');
+      if (!map.has(key)) {
+        map.set(key, row);
+      }
+    });
+
+    return map;
+  }, [canonicalizeKey, pivotRows, rowFields]);
+
   const findMatchingPivotRow = useCallback(
-    (labels: Array<{ field: string; value: any }>) =>
-      pivotRows.find((row) =>
+    (labels: Array<{ field: string; value: any }>) => {
+      if (!rowFields.length) {
+        return pivotRows[0];
+      }
+
+      const key = rowFields
+        .map((field) => {
+          const label = labels.find((item) => item.field === field);
+          return canonicalizeKey(label?.value);
+        })
+        .join('|');
+
+      const directMatch = pivotRowLookup.get(key);
+      if (directMatch) {
+        return directMatch;
+      }
+
+      return pivotRows.find((row) =>
         rowFields.every((field, index) => {
           const label = labels?.[index];
           const rowValKey = canonicalizeKey(row?.[field]);
@@ -510,8 +545,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           }
           return rowValKey === '' || rowValKey.endsWith('total');
         }),
-      ),
-    [canonicalizeKey, pivotRows, rowFields],
+      );
+    },
+    [canonicalizeKey, pivotRowLookup, pivotRows, rowFields],
   );
 
   const buildRecordForNode = useCallback(
