@@ -718,23 +718,33 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
               )
             : tabularRows.map((row, rowIndex) => (
                 <TableRow key={`tabular-${rowIndex}`} style={{ borderColor }}>
-                  {rowFields.map((field, fieldIndex) => (
-                    <TableCell
-                      key={`${rowIndex}-${field}`}
-                      className={cn(
-                        'text-left',
-                        fieldIndex === 0 ? 'font-semibold' : 'font-medium'
-                      )}
-                      style={getDataCellStyle({
-                        row: row.record,
-                        column: field,
-                        rowIndex,
-                        isRowHeader: fieldIndex === 0,
-                      })}
-                    >
-                      {row.record[field] ?? ''}
-                    </TableCell>
-                  ))}
+                  {rowFields.map((field, fieldIndex) => {
+                    const canonicalField = canonicalizeKey(field);
+                    const cellValue =
+                      row.record[field] ??
+                      (canonicalField && canonicalField !== field
+                        ? row.record[canonicalField]
+                        : undefined) ??
+                      '';
+
+                    return (
+                      <TableCell
+                        key={`${rowIndex}-${field}`}
+                        className={cn(
+                          'text-left',
+                          fieldIndex === 0 ? 'font-semibold' : 'font-medium'
+                        )}
+                        style={getDataCellStyle({
+                          row: row.record,
+                          column: field,
+                          rowIndex,
+                          isRowHeader: fieldIndex === 0,
+                        })}
+                      >
+                        {cellValue}
+                      </TableCell>
+                    );
+                  })}
                   {valueColumns.map((column) => (
                     <TableCell
                       key={`${rowIndex}-${column}`}
@@ -1136,7 +1146,12 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       return pivotRows.map((row) => {
         const record: Record<string, any> = { ...row };
         rowFields.forEach((field) => {
-          record[field] = row[field];
+          const canonicalField = canonicalizeKey(field);
+          const value = row[field];
+          record[field] = value;
+          if (canonicalField && canonicalField !== field) {
+            record[canonicalField] = value;
+          }
         });
         return { record };
       });
@@ -1153,9 +1168,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
       const record = buildRecordForNode(node);
       rowFields.forEach((field, index) => {
+        const canonicalField = canonicalizeKey(field);
         let displayValue = nextPath[field];
         if (displayValue === undefined) {
-          displayValue = nextPath[canonicalizeKey(field)];
+          displayValue = nextPath[canonicalField];
         }
         if (displayValue === undefined) {
           displayValue = '';
@@ -1167,6 +1183,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
             : trimmed;
         }
         record[field] = displayValue;
+        if (canonicalField && canonicalField !== field) {
+          record[canonicalField] = displayValue;
+        }
       });
 
       if (node.children.length === 0) {
