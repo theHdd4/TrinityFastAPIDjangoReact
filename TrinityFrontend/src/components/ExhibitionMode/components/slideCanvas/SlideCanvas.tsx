@@ -2276,6 +2276,20 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [updateImageProps],
     );
 
+    const handleFlipImageHorizontal = useCallback(
+      (objectId: string) => {
+        handleFlipImage(objectId, 'horizontal');
+      },
+      [handleFlipImage],
+    );
+
+    const handleFlipImageVertical = useCallback(
+      (objectId: string) => {
+        handleFlipImage(objectId, 'vertical');
+      },
+      [handleFlipImage],
+    );
+
     const handleSetImageOpacity = useCallback(
       (objectId: string, value: number) => {
         const clamped = Math.min(Math.max(Number.isFinite(value) ? value : 1, 0), 1);
@@ -4603,16 +4617,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       cropInsets={imageCropInsets}
                       onInteract={onInteract}
                       onToolbarStateChange={handleTextToolbarStateChange}
-                      onToggleFit={() => handleToggleImageFit(object.id)}
-                      onToggleCrop={() => handleToggleImageCrop(object.id)}
-                      onFlipHorizontal={() => handleFlipImage(object.id, 'horizontal')}
-                      onFlipVertical={() => handleFlipImage(object.id, 'vertical')}
-                      onToggleAnimate={() => handleToggleImageAnimation(object.id)}
-                      onRequestPositionPanel={() => handleRequestPositionPanel(object.id)}
-                      onOpacityChange={value => handleSetImageOpacity(object.id, value)}
-                      onCropChange={next => handleSetImageCrop(object.id, next)}
-                      onResetCrop={() => handleResetImageCrop(object.id)}
-                      onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
+                      onToggleFit={handleToggleImageFit}
+                      onToggleCrop={handleToggleImageCrop}
+                      onFlipHorizontal={handleFlipImageHorizontal}
+                      onFlipVertical={handleFlipImageVertical}
+                      onToggleAnimate={handleToggleImageAnimation}
+                      onRequestPositionPanel={handleRequestPositionPanel}
+                      onOpacityChange={handleSetImageOpacity}
+                      onCropChange={handleSetImageCrop}
+                      onResetCrop={handleResetImageCrop}
+                      onDelete={onRemoveObject}
                     />
                   ) : isChartObject && chartProps ? (
                     <SlideChartObject

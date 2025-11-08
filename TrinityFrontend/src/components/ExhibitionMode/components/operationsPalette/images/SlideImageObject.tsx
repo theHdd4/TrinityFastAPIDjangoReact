@@ -265,17 +265,17 @@ interface SlideImageObjectProps {
   cropInsets?: ImageCropInsets | null;
   onInteract: () => void;
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
-  onToggleFit?: () => void;
-  onToggleCrop?: () => void;
-  onFlipHorizontal?: () => void;
-  onFlipVertical?: () => void;
-  onToggleAnimate?: () => void;
-  onRequestPositionPanel?: () => void;
-  onOpacityChange?: (opacity: number) => void;
-  onCropChange?: (next: ImageCropInsets) => void;
-  onCropCommit?: () => void;
-  onResetCrop?: () => void;
-  onDelete?: () => void;
+  onToggleFit?: (objectId: string) => void;
+  onToggleCrop?: (objectId: string) => void;
+  onFlipHorizontal?: (objectId: string) => void;
+  onFlipVertical?: (objectId: string) => void;
+  onToggleAnimate?: (objectId: string) => void;
+  onRequestPositionPanel?: (objectId: string) => void;
+  onOpacityChange?: (objectId: string, opacity: number) => void;
+  onCropChange?: (objectId: string, next: ImageCropInsets) => void;
+  onCropCommit?: (objectId: string) => void;
+  onResetCrop?: (objectId: string) => void;
+  onDelete?: (objectId: string) => void;
 }
 
 export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
@@ -340,15 +340,26 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     const nextFit = localFitMode === 'contain' ? 'cover' : 'contain';
     setLocalFitMode(nextFit);
     onInteract();
-    onToggleFit();
-  }, [localFitMode, onInteract, onToggleFit]);
+    onToggleFit(id);
+  }, [id, localFitMode, onInteract, onToggleFit]);
+
+  const handleCropChange = useCallback(
+    (next: ImageCropInsets) => {
+      onCropChange?.(id, next);
+    },
+    [id, onCropChange],
+  );
+
+  const handleCropCommit = useCallback(() => {
+    onCropCommit?.(id);
+  }, [id, onCropCommit]);
 
   const { beginCropDrag, isDragging: isCropDragging, normalizedCrop } = useImageCropInteraction({
     isCropping,
     cropInsets,
     containerRef,
-    onCropChange,
-    onCropCommit,
+    onCropChange: handleCropChange,
+    onCropCommit: handleCropCommit,
   });
 
   const handleToggleCrop = useCallback(() => {
@@ -356,8 +367,8 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       return;
     }
     onInteract();
-    onToggleCrop();
-  }, [onInteract, onToggleCrop]);
+    onToggleCrop(id);
+  }, [id, onInteract, onToggleCrop]);
 
   const handleFlipHorizontal = useCallback(() => {
     if (!onFlipHorizontal) {
@@ -365,8 +376,8 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     }
     setLocalFlipHorizontal(previous => !previous);
     onInteract();
-    onFlipHorizontal();
-  }, [onFlipHorizontal, onInteract]);
+    onFlipHorizontal(id);
+  }, [id, onFlipHorizontal, onInteract]);
 
   const handleFlipVertical = useCallback(() => {
     if (!onFlipVertical) {
@@ -374,8 +385,8 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     }
     setLocalFlipVertical(previous => !previous);
     onInteract();
-    onFlipVertical();
-  }, [onFlipVertical, onInteract]);
+    onFlipVertical(id);
+  }, [id, onFlipVertical, onInteract]);
 
   const handleOpacityChange = useCallback(
     (value: number) => {
@@ -385,9 +396,9 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       const clamped = clampOpacity(value);
       setLocalOpacity(clamped);
       onInteract();
-      onOpacityChange(clamped);
+      onOpacityChange(id, clamped);
     },
-    [onInteract, onOpacityChange],
+    [id, onInteract, onOpacityChange],
   );
 
   const handleToggleAnimate = useCallback(() => {
@@ -396,16 +407,16 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     }
     setLocalAnimated(previous => !previous);
     onInteract();
-    onToggleAnimate();
-  }, [onInteract, onToggleAnimate]);
+    onToggleAnimate(id);
+  }, [id, onInteract, onToggleAnimate]);
 
   const handleRequestPosition = useCallback(() => {
     if (!onRequestPositionPanel) {
       return;
     }
     onInteract();
-    onRequestPositionPanel();
-  }, [onInteract, onRequestPositionPanel]);
+    onRequestPositionPanel(id);
+  }, [id, onInteract, onRequestPositionPanel]);
 
   const handleCropPointerDown = useCallback(
     (handle: CropHandle, event: React.PointerEvent<HTMLElement>) => {
@@ -439,7 +450,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
         onToggleAnimate={onToggleAnimate ? handleToggleAnimate : undefined}
         onRequestPosition={onRequestPositionPanel ? handleRequestPosition : undefined}
         onOpacityChange={onOpacityChange ? handleOpacityChange : undefined}
-        onDelete={onDelete}
+        onDelete={onDelete ? () => onDelete(id) : undefined}
       />
     );
   }, [
@@ -466,6 +477,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     onFlipVertical,
     onOpacityChange,
     onDelete,
+    id,
     src,
   ]);
 
@@ -492,8 +504,8 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       return;
     }
     onInteract();
-    onResetCrop();
-  }, [onInteract, onResetCrop]);
+    onResetCrop(id);
+  }, [id, onInteract, onResetCrop]);
 
   const clipPathValue = useMemo(() => {
     if (!hasCrop) {
@@ -562,7 +574,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
           className="absolute top-3 right-3 h-9 w-9 rounded-full text-muted-foreground hover:text-destructive"
           onClick={() => {
             onInteract();
-            onDelete();
+            onDelete(id);
           }}
         >
           <Trash2 className="h-4 w-4" />
