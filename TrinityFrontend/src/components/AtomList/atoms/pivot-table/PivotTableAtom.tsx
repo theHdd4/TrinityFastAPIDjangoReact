@@ -168,7 +168,7 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
               ? { field, include: includeValues }
               : { field };
           }),
-          grand_totals: settings.grandTotalsMode || 'both',
+          grand_totals: settings.grandTotalsMode || 'off',
         };
 
         const response = await fetch(

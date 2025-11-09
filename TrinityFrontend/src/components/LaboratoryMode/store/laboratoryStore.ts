@@ -1747,8 +1747,8 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   pivotLastSavedAt: null,
   pivotFilterOptions: {},
   pivotFilterSelections: {},
-  grandTotalsMode: 'both',
-  subtotalsMode: 'bottom',
+  grandTotalsMode: 'off',
+  subtotalsMode: 'off',
   pivotStyleId: 'light-slate',
   pivotStyleOptions: {
     rowHeaders: true,

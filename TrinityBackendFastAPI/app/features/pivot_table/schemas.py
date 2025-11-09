@@ -68,7 +68,7 @@ class PivotComputeRequest(BaseModel):
         "columns",
         "both",
     ] = Field(
-        default="both",
+        default="off",
         description=(
             "Control visibility of grand totals. "
             "'off' hides all. 'rows' adds a footer row. "

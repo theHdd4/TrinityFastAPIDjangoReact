@@ -361,8 +361,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   const hasResults = pivotRows.length > 0;
   const showRowHeaders = styleOptions.rowHeaders;
   const showColumnHeaders = styleOptions.columnHeaders;
-  const grandTotalsMode = data.grandTotalsMode ?? 'both';
-  const subtotalsMode = data.subtotalsMode ?? 'bottom';
+  const grandTotalsMode = data.grandTotalsMode ?? 'off';
+  const subtotalsMode = data.subtotalsMode ?? 'off';
 
   const getAggregationLabel = (aggregation?: string) => {
     const normalized = (aggregation ?? 'sum').toLowerCase();
