@@ -180,6 +180,7 @@ def _build_hierarchy_nodes(
     order_lookup: Dict[str, int],
     leaf_columns: List[str],
     column_meta: Dict[str, Dict[str, Any]],
+    include_grand_total: bool = False,
 ) -> List[Dict[str, Any]]:
     if not row_fields:
         return []
@@ -341,6 +342,22 @@ def _build_hierarchy_nodes(
                     "values": values,
                 }
             )
+
+    if include_grand_total and row_fields:
+        existing_orders = [node.get("order", 0) for node in nodes]
+        next_order = (max(existing_orders) + 1) if existing_orders else 0
+        labels: List[Dict[str, Any]] = [
+            {"field": row_fields[0], "value": "Grand Total"}
+        ]
+        grand_total_node = {
+            "key": "__grand_total__",
+            "parent_key": None,
+            "level": 0,
+            "order": next_order,
+            "labels": labels,
+            "values": {},
+        }
+        nodes.append(grand_total_node)
 
     return nodes
 
@@ -674,6 +691,8 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         column_leaf_columns if column_leaf_columns else list(agg_map.keys())
     )
 
+    include_grand_total_row = include_margins and payload.grand_totals in ("rows", "both")
+
     hierarchy_nodes = _build_hierarchy_nodes(
         filtered_df,
         row_fields,
@@ -682,6 +701,7 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         order_lookup,
         effective_leaf_columns,
         column_leaf_meta,
+        include_grand_total=include_grand_total_row,
     )
 
     updated_at = datetime.now(timezone.utc)
