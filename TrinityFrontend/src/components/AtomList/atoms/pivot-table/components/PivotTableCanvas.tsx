@@ -1754,16 +1754,15 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
+                      className="h-7 px-2.5 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] whitespace-nowrap"
                     >
-                      <Info className="w-3.5 h-3.5 mr-1.5" />
-                      PivotTable Options
+                      Pivot Options
                       <ChevronDown className="w-3 h-3 ml-1" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-56 py-1">
                     <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                      PivotTable Options
+                      Pivot Options
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuCheckboxItem
