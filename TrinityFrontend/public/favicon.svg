@@ -1,18 +1,28 @@
-<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">Trinity favicon</title>
+  <desc id="desc">Stylised Trinity monogram with orbital data accents</desc>
   <defs>
-    <linearGradient id="matrixGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#10B981" stop-opacity="1"/>
-      <stop offset="50%" stop-color="#059669" stop-opacity="0.8"/>
-      <stop offset="100%" stop-color="#047857" stop-opacity="0.6"/>
+    <linearGradient id="trinityGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
     </linearGradient>
+    <radialGradient id="pulse" cx="50%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.9" />
+      <stop offset="80%" stop-color="#0ea5e9" stop-opacity="0.1" />
+      <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0" />
+    </radialGradient>
   </defs>
-  <g fill="url(#matrixGradient)" stroke="currentColor">
-    <polygon points="12,3 15,8 9,8" fill="none" stroke-width="1.5" opacity="0.9"/>
-    <polygon points="7,12 10,17 4,17" fill="none" stroke-width="1.5" opacity="0.9"/>
-    <polygon points="17,12 20,17 14,17" fill="none" stroke-width="1.5" opacity="0.9"/>
-    <circle cx="12" cy="12" r="2" opacity="1"/>
-    <line x1="12" y1="8" x2="12" y2="10" stroke-width="1" opacity="0.7"/>
-    <line x1="9" y1="12" x2="10" y2="12" stroke-width="1" opacity="0.7"/>
-    <line x1="14" y1="12" x2="15" y2="12" stroke-width="1" opacity="0.7"/>
-  </g>
+  <rect width="64" height="64" rx="16" fill="url(#trinityGradient)" />
+  <circle cx="36" cy="22" r="14" fill="url(#pulse)" />
+  <path
+    d="M16 18h32a4 4 0 0 0 0-8H16a4 4 0 0 0 0 8zm12 34V28h8v24c0 2.2 1.8 4 4 4s4-1.8 4-4V24c0-2.2-1.8-4-4-4H24c-2.2 0-4 1.8-4 4v28c0 2.2 1.8 4 4 4s4-1.8 4-4z"
+    fill="#38bdf8"
+  />
+  <path
+    d="M20 44c-1.7 0-3.4.4-5 1.1a2 2 0 1 0 1.6 3.7c2.2-1 4.6-1.4 7-1.1 2.4.3 4.6 1.2 6.5 2.6a2 2 0 1 0 2.4-3.1C29.6 44.7 24.9 44 20 44zm21-10c1.4 1.9 3.5 3.1 5.8 3.3 2.3.2 4.6-.6 6.2-2.2a2 2 0 1 0-2.8-2.8c-.6.6-1.5.9-2.3.8-.8-.1-1.5-.5-2-.9a2 2 0 1 0-4.8-2.1c-.5 1.2-.2 2.6.7 3.9z"
+    fill="#f59e0b"
+    opacity="0.85"
+  />
+  <circle cx="44" cy="26" r="3" fill="#a855f7" opacity="0.85" />
+  <circle cx="22" cy="48" r="2.5" fill="#22d3ee" opacity="0.9" />
 </svg>
