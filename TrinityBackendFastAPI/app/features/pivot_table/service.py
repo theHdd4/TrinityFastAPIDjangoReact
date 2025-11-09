@@ -225,11 +225,48 @@ def _build_hierarchy_nodes(
 
         grouped = _flatten_columns(grouped)
 
+        totals_lookup: Dict[tuple, pd.Series] = {}
+        grand_total_columns: List[str] = []
+
         if has_column_fields:
             if group_fields:
                 grouped_iter = grouped.groupby(group_fields, dropna=False)
             else:
                 grouped_iter = [(tuple(), grouped)]
+
+            try:
+                totals_grouped = (
+                    df.groupby(group_fields, dropna=False).agg(agg_map).reset_index()
+                )
+            except Exception:  # pragma: no cover - defensive
+                totals_grouped = pd.DataFrame()
+
+            if not totals_grouped.empty:
+                totals_grouped = _flatten_columns(totals_grouped)
+                for _, total_row in totals_grouped.iterrows():
+                    key_tuple = tuple(
+                        _value_to_key(total_row.get(field)) for field in group_fields
+                    )
+                    totals_lookup[key_tuple] = total_row
+
+            def _is_grand_total_column(column_name: str) -> bool:
+                meta = column_meta.get(column_name, {})
+                key_tuple = meta.get("column_key")
+                if not key_tuple:
+                    return False
+                seen_total = False
+                for part in key_tuple:
+                    normalized = str(part).strip().lower()
+                    if normalized == "grand total":
+                        seen_total = True
+                        continue
+                    if normalized not in {"", "__na__"}:
+                        return False
+                return seen_total
+
+            grand_total_columns = [
+                name for name in leaf_columns if _is_grand_total_column(name)
+            ]
         else:
             grouped_iter = [
                 (
@@ -253,6 +290,8 @@ def _build_hierarchy_nodes(
             key = "|".join(key_parts)
             parent_key = "|".join(key_parts[:-1]) if len(key_parts) > 1 else None
 
+            normalized_group_key = tuple(_value_to_key(value) for value in group_key)
+
             values: Dict[str, Any] = {}
 
             if has_column_fields:
@@ -265,8 +304,23 @@ def _build_hierarchy_nodes(
                         value_field = column_value_field_lookup.get(column_name)
                         if not value_field:
                             continue
-                        raw_value = row.get(value_field)
+                        raw_value = row.get(column_name)
+                        if raw_value is None:
+                            raw_value = row.get(value_field)
                         values[column_name] = _convert_numpy(raw_value)
+
+                if grand_total_columns and normalized_group_key in totals_lookup:
+                    totals_row = totals_lookup[normalized_group_key]
+                    for column_name in grand_total_columns:
+                        if column_name in values:
+                            continue
+                        value_field = column_value_field_lookup.get(column_name)
+                        if not value_field:
+                            continue
+                        raw_total = totals_row.get(value_field)
+                        if raw_total is None:
+                            raw_total = totals_row.get(column_name)
+                        values[column_name] = _convert_numpy(raw_total)
             else:
                 row = subset.iloc[0]
                 for col in grouped.columns:

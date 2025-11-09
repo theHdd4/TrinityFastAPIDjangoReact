@@ -280,6 +280,7 @@ interface PivotTableCanvasProps {
   filterOptions: Record<string, string[]>;
   filterSelections: Record<string, string[]>;
   onGrandTotalsChange: (mode: 'off' | 'rows' | 'columns' | 'both') => void;
+  onSubtotalsChange: (mode: 'off' | 'top' | 'bottom') => void;
   onStyleChange: (styleId: string) => void;
   onStyleOptionsChange: (options: PivotStyleOptions) => void;
   reportLayout: 'compact' | 'outline' | 'tabular';
@@ -302,6 +303,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   filterOptions,
   filterSelections,
   onGrandTotalsChange,
+  onSubtotalsChange,
   onStyleChange,
   onStyleOptionsChange,
   reportLayout,
@@ -357,6 +359,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   const showRowHeaders = styleOptions.rowHeaders;
   const showColumnHeaders = styleOptions.columnHeaders;
   const grandTotalsMode = data.grandTotalsMode ?? 'both';
+  const subtotalsMode = data.subtotalsMode ?? 'bottom';
 
   const getAggregationLabel = (aggregation?: string) => {
     const normalized = (aggregation ?? 'sum').toLowerCase();
@@ -1424,6 +1427,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       return [];
     }
     const rows: OutlineRow[] = [];
+    const showSubtotals = subtotalsMode !== 'off';
 
     const visit = (node: HierNode, ancestorCollapsed: boolean) => {
       const nodeHasChildren = node.children.length > 0;
@@ -1434,21 +1438,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         display[field] = index === node.level ? record[field] : '';
       });
 
-      if (!ancestorCollapsed) {
-        rows.push({
-          node,
-          record,
-          display,
-          level: node.level,
-          hasChildren: nodeHasChildren,
-          isTotal: false,
-        });
-      }
+      const shouldShowSubtotals = showSubtotals && nodeHasChildren;
 
-      const nextAncestorCollapsed = ancestorCollapsed || isCollapsed;
-      node.children.forEach((child) => visit(child, nextAncestorCollapsed));
-
-      if (!ancestorCollapsed && nodeHasChildren && !isCollapsed) {
+      const createTotalRow = () => {
         const fieldName = rowFields[node.level] ?? rowFields[0];
         const totalRecord = { ...record };
         const totalDisplay = { ...display };
@@ -1468,12 +1460,45 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           hasChildren: false,
           isTotal: true,
         });
+      };
+
+      if (!ancestorCollapsed) {
+        rows.push({
+          node,
+          record,
+          display,
+          level: node.level,
+          hasChildren: nodeHasChildren,
+          isTotal: false,
+        });
+
+        if (shouldShowSubtotals && subtotalsMode === 'top' && !isCollapsed) {
+          createTotalRow();
+        }
+      }
+
+      const nextAncestorCollapsed = ancestorCollapsed || isCollapsed;
+      node.children.forEach((child) => visit(child, nextAncestorCollapsed));
+
+      if (
+        !ancestorCollapsed &&
+        shouldShowSubtotals &&
+        subtotalsMode === 'bottom' &&
+        !isCollapsed
+      ) {
+        createTotalRow();
       }
     };
 
     hierarchyTree.roots.forEach((root) => visit(root, false));
     return rows;
-  }, [buildRecordForNode, collapsedSet, hierarchyTree, rowFields]);
+  }, [
+    buildRecordForNode,
+    collapsedSet,
+    hierarchyTree,
+    rowFields,
+    subtotalsMode,
+  ]);
 
   type TabularRow = {
     record: Record<string, any>;
@@ -1597,10 +1622,40 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                         <ChevronDown className="w-3 h-3 ml-1" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-56">
-                      <DropdownMenuItem>Do Not Show Subtotals</DropdownMenuItem>
-                      <DropdownMenuItem>Show All Subtotals at Bottom of Group</DropdownMenuItem>
-                      <DropdownMenuItem>Show All Subtotals at Top of Group</DropdownMenuItem>
+                    <DropdownMenuContent align="start" className="w-64 py-1">
+                      {[
+                        { id: 'off', label: 'Do Not Show Subtotals' },
+                        {
+                          id: 'bottom',
+                          label: 'Show All Subtotals at Bottom of Group',
+                        },
+                        {
+                          id: 'top',
+                          label: 'Show All Subtotals at Top of Group',
+                        },
+                      ].map((option) => {
+                        const isActive = subtotalsMode === option.id;
+                        return (
+                          <DropdownMenuItem
+                            key={option.id}
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              onSubtotalsChange(option.id as 'off' | 'top' | 'bottom');
+                            }}
+                            className={cn(
+                              'text-xs py-2 flex items-center justify-between',
+                              isActive ? 'font-semibold text-[#1A73E8]' : ''
+                            )}
+                          >
+                            {option.label}
+                            {isActive && (
+                              <span className="text-[10px] uppercase tracking-wide">
+                                Selected
+                              </span>
+                            )}
+                          </DropdownMenuItem>
+                        );
+                      })}
                     </DropdownMenuContent>
                   </DropdownMenu>
 

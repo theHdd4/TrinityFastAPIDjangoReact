@@ -318,6 +318,9 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
         onGrandTotalsChange={(mode) =>
           handleDataChange({ grandTotalsMode: mode })
         }
+        onSubtotalsChange={(mode) =>
+          handleDataChange({ subtotalsMode: mode })
+        }
         onStyleChange={(styleId) =>
           handleDataChange({ pivotStyleId: styleId })
         }

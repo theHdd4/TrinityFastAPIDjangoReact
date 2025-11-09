@@ -1716,6 +1716,7 @@ export interface PivotTableSettings {
   pivotFilterOptions?: Record<string, string[]>;
   pivotFilterSelections?: Record<string, string[]>;
   grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
+  subtotalsMode?: 'off' | 'top' | 'bottom';
   pivotStyleId?: string;
   pivotStyleOptions?: {
     rowHeaders: boolean;
@@ -1747,6 +1748,7 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   pivotFilterOptions: {},
   pivotFilterSelections: {},
   grandTotalsMode: 'both',
+  subtotalsMode: 'bottom',
   pivotStyleId: 'light-slate',
   pivotStyleOptions: {
     rowHeaders: true,
