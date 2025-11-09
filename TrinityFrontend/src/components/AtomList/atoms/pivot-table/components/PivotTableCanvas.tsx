@@ -1621,11 +1621,11 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] whitespace-nowrap"
+                        className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
                       >
-                        <Grid3x3 className="w-3.5 h-3.5 mr-1.5" />
-                        Subtotals
-                        <ChevronDown className="w-3 h-3 ml-1" />
+                        <Grid3x3 className="w-3.5 h-3.5" />
+                        <span className="whitespace-normal leading-tight text-left">Subtotals</span>
+                        <ChevronDown className="w-3 h-3" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-64 py-1">
@@ -1670,11 +1670,14 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] whitespace-nowrap"
+                        className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
                       >
-                        <Grid3x3 className="w-3.5 h-3.5 mr-1.5" />
-                        Grand Totals
-                        <ChevronDown className="w-3 h-3 ml-1" />
+                        <Grid3x3 className="w-3.5 h-3.5" />
+                        <span className="flex flex-col leading-tight text-left whitespace-normal">
+                          <span>Grand</span>
+                          <span>Totals</span>
+                        </span>
+                        <ChevronDown className="w-3 h-3" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-56 py-1">
@@ -1714,11 +1717,14 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-7 px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] whitespace-nowrap"
+                        className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
                       >
-                        <Layout className="w-3.5 h-3.5 mr-1.5" />
-                        Report Layout
-                        <ChevronDown className="w-3 h-3 ml-1" />
+                        <Layout className="w-3.5 h-3.5" />
+                        <span className="flex flex-col leading-tight text-left whitespace-normal">
+                          <span>Report</span>
+                          <span>Layout</span>
+                        </span>
+                        <ChevronDown className="w-3 h-3" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-56 py-1">
@@ -1765,10 +1771,13 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2.5 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] whitespace-nowrap"
+                      className="px-2.5 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
                     >
-                      Pivot Options
-                      <ChevronDown className="w-3 h-3 ml-1" />
+                      <span className="flex flex-col leading-tight text-left whitespace-normal">
+                        <span>Pivot</span>
+                        <span>Options</span>
+                      </span>
+                      <ChevronDown className="w-3 h-3" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-56 py-1">
@@ -1822,10 +1831,13 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] whitespace-nowrap"
+                      className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
                     >
-                      PivotTable Styles
-                      <ChevronDown className="w-3 h-3 ml-1" />
+                      <span className="flex flex-col leading-tight text-left whitespace-normal">
+                        <span>PivotTable</span>
+                        <span>Styles</span>
+                      </span>
+                      <ChevronDown className="w-3 h-3" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-[500px] p-4 max-h-[600px] overflow-y-auto">
