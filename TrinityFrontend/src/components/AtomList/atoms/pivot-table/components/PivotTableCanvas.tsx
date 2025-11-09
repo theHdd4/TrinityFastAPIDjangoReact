@@ -1613,8 +1613,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       <div className="p-3 space-y-3">
         <Card className="bg-white border border-[#D9D9D9] rounded-md shadow-sm">
           <div className="px-4 py-3">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
+            <div className="flex w-full flex-wrap items-center gap-3 sm:gap-4 lg:justify-between">
+              <div className="flex flex-wrap items-center gap-3">
                 <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase">Layout</span>
                 <div className="flex gap-1">
                   <DropdownMenu>
@@ -1748,8 +1748,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase">Options</span>
+              <div className="flex flex-wrap items-center gap-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -1807,8 +1806,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 </DropdownMenu>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase">Style</span>
+              <div className="flex flex-wrap items-center gap-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="ghost" size="sm" className="h-7 px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]">
