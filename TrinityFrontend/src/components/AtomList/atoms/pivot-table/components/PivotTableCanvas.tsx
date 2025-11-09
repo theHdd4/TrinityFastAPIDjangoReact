@@ -1129,9 +1129,15 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                   isRowHeader: true,
                 });
                 return (
-                  <TableRow key={row.node.key} style={{ borderColor }}>
+                  <TableRow
+                    key={`${row.node.key}-${row.isTotal ? 'total' : 'value'}`}
+                    style={{ borderColor }}
+                  >
                     <TableCell
-                      className="text-left font-semibold"
+                      className={cn(
+                        'text-left font-semibold',
+                        row.isTotal ? 'italic' : undefined,
+                      )}
                       style={{ ...cellStyle, borderColor }}
                     >
                       <div
@@ -1380,6 +1386,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     label: string;
     record: Record<string, any>;
     hasChildren: boolean;
+    isTotal: boolean;
   };
 
   const compactRows = useMemo<CompactRow[]>(() => {
@@ -1388,6 +1395,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     }
 
     const rows: CompactRow[] = [];
+    const showSubtotals = subtotalsMode !== 'off';
 
     const pushNode = (node: HierNode, ancestorCollapsed: boolean) => {
       const record = buildRecordForNode(node);
@@ -1395,6 +1403,46 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       const labelValue = labelEntry?.value ?? '';
       const nodeHasChildren = node.children.length > 0;
       const isCollapsed = collapsedSet.has(node.key) && nodeHasChildren;
+      const shouldShowSubtotals = showSubtotals && nodeHasChildren;
+
+      const createTotalRow = () => {
+        const fieldName = rowFields[node.level] ?? rowFields[0];
+        const totalRecord = { ...record };
+        let totalLabel = String(labelValue ?? '').trim();
+
+        if (!totalLabel && fieldName) {
+          const baseValue = String(totalRecord[fieldName] ?? '').trim();
+          totalLabel = baseValue;
+        }
+
+        if (totalLabel.length > 0 && !totalLabel.toLowerCase().endsWith('total')) {
+          totalLabel = `${totalLabel} Total`;
+        }
+
+        if (!totalLabel) {
+          totalLabel = 'Total';
+        }
+
+        if (fieldName) {
+          const base = String(totalRecord[fieldName] ?? '').trim();
+          const totalFieldLabel =
+            base.length > 0 && !base.toLowerCase().endsWith('total')
+              ? `${base} Total`
+              : base || totalLabel;
+          totalRecord[fieldName] = totalFieldLabel;
+        }
+
+        const totalRow: CompactRow = {
+          node,
+          depth: node.level,
+          label: totalLabel,
+          record: totalRecord,
+          hasChildren: false,
+          isTotal: true,
+        };
+
+        return totalRow;
+      };
 
       if (!ancestorCollapsed) {
         rows.push({
@@ -1403,17 +1451,37 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           label: String(labelValue ?? ''),
           record,
           hasChildren: nodeHasChildren,
+          isTotal: false,
         });
+
+        if (shouldShowSubtotals && subtotalsMode === 'top' && !isCollapsed) {
+          rows.push(createTotalRow());
+        }
       }
 
       const nextAncestorCollapsed = ancestorCollapsed || isCollapsed;
       node.children.forEach((child) => pushNode(child, nextAncestorCollapsed));
+
+      if (
+        !ancestorCollapsed &&
+        shouldShowSubtotals &&
+        subtotalsMode === 'bottom' &&
+        !isCollapsed
+      ) {
+        rows.push(createTotalRow());
+      }
     };
 
     hierarchyTree.roots.forEach((root) => pushNode(root, false));
 
     return rows;
-  }, [buildRecordForNode, collapsedSet, hierarchyTree, rowFields.length]);
+  }, [
+    buildRecordForNode,
+    collapsedSet,
+    hierarchyTree,
+    rowFields,
+    subtotalsMode,
+  ]);
 
   type OutlineRow = {
     node: HierNode;
@@ -1590,11 +1658,13 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     return rows;
   }, [buildRecordForNode, canonicalizeKey, hierarchyTree, pivotRows, rowFields, valueColumns]);
 
-  const layoutOptions = useMemo(
+  type LayoutOption = { id: 'compact' | 'outline' | 'tabular'; label: string };
+
+  const layoutOptions: LayoutOption[] = useMemo(
     () => [
-      { id: 'compact' as const, label: 'Show in Compact Form' },
-      { id: 'outline' as const, label: 'Show in Outline Form' },
-      { id: 'tabular' as const, label: 'Show in Tabular Form' },
+      { id: 'compact', label: 'Show in Compact Form' },
+      { id: 'outline', label: 'Show in Outline Form' },
+      { id: 'tabular', label: 'Show in Tabular Form' },
     ],
     [],
   );
