@@ -131,7 +131,7 @@ const computeNextCrop = (
   }
   if (handle.includes('s')) {
     const maxBottom = 100 - MIN_VISIBLE_PERCENT - nextTop;
-    nextBottom = clamp(initial.bottom - deltaYPercent, 0, maxBottom);
+    nextBottom = clamp(initial.bottom + deltaYPercent, 0, maxBottom);
   }
   if (handle.includes('w')) {
     const maxLeft = 100 - MIN_VISIBLE_PERCENT - initial.right;
@@ -139,7 +139,7 @@ const computeNextCrop = (
   }
   if (handle.includes('e')) {
     const maxRight = 100 - MIN_VISIBLE_PERCENT - nextLeft;
-    nextRight = clamp(initial.right - deltaXPercent, 0, maxRight);
+    nextRight = clamp(initial.right + deltaXPercent, 0, maxRight);
   }
 
   return normalizeCropInsets({ top: nextTop, right: nextRight, bottom: nextBottom, left: nextLeft });
@@ -366,7 +366,7 @@ export const ImageCropOverlay: React.FC<ImageCropOverlayProps> = ({
 }) => {
   return (
     <>
-      <div className="pointer-events-none absolute inset-0 z-30">
+      <div className="pointer-events-none absolute inset-0 z-40">
         <div className="absolute left-0 right-0 top-0 bg-black/40" style={{ height: `${cropInsets.top}%` }} />
         <div
           className="absolute left-0 right-0 bg-black/40"
@@ -394,7 +394,7 @@ export const ImageCropOverlay: React.FC<ImageCropOverlayProps> = ({
       </div>
       <div
         className={cn(
-          'absolute z-40 border-2 border-primary/80 bg-transparent',
+          'absolute z-50 border-2 border-primary/80 bg-transparent pointer-events-auto touch-none',
           isDragging ? 'shadow-[0_0_0_999px_rgba(59,130,246,0.12)]' : 'shadow-[0_0_0_999px_rgba(15,23,42,0.25)]',
         )}
         style={{
@@ -427,14 +427,14 @@ export const ImageCropOverlay: React.FC<ImageCropOverlayProps> = ({
         {cornerHandles.map(def => (
           <span
             key={def.handle}
-            className={cn('absolute z-50 h-3 w-3 rounded-full border border-background bg-white', def.className)}
+            className={cn('absolute z-[60] h-3 w-3 rounded-full border border-background bg-white', def.className)}
             onPointerDown={event => onBeginDrag(def.handle, event)}
           />
         ))}
         {edgeHandles.map(def => (
           <span
             key={def.handle}
-            className={cn('absolute z-50 h-3 w-3 rounded-full border border-background bg-white', def.className)}
+            className={cn('absolute z-[60] h-3 w-3 rounded-full border border-background bg-white', def.className)}
             onPointerDown={event => onBeginDrag(def.handle, event)}
           />
         ))}
