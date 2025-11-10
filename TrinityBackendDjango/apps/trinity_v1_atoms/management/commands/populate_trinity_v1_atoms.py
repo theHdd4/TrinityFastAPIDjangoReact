@@ -61,7 +61,8 @@ class Command(BaseCommand):
             
             # Business Intelligence
             {'atom_id': 'base-price-estimator', 'name': 'Base Price Estimator', 'description': 'Estimate base prices for products', 'category': 'Business Intelligence'},
-            {'atom_id': 'promo-estimator', 'name': 'Promo Estimator', 'description': 'Estimate promotional effects', 'category': 'Business Intelligence'}
+            {'atom_id': 'promo-estimator', 'name': 'Promo Estimator', 'description': 'Estimate promotional effects', 'category': 'Business Intelligence'},
+            {'atom_id': 'pivot-table', 'name': 'Pivot Table', 'description': 'Create interactive pivot table summaries', 'category': 'Business Intelligence'}
         ]
 
         created_count = 0
