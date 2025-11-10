@@ -2,7 +2,7 @@
 Stream RAG Engine
 =================
 
-Enhanced RAG engine specifically for Stream AI sequential atom execution.
+Enhanced RAG engine specifically for Trinity AI sequential atom execution.
 Extends the workflow RAG engine with atom sequencing capabilities.
 """
 
@@ -12,7 +12,7 @@ import sys
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 
-logger = logging.getLogger("trinity.streamai.rag")
+logger = logging.getLogger("trinity.trinityai.rag")
 
 # Add workflow_mode to path for importing WorkflowRAGEngine
 WORKFLOW_MODE_PATH = Path(__file__).resolve().parent.parent / "workflow_mode"
@@ -30,7 +30,7 @@ except ImportError as e:
 
 class StreamRAGEngine:
     """
-    Enhanced RAG engine for Stream AI with atom sequencing capabilities.
+    Enhanced RAG engine for Trinity AI with atom sequencing capabilities.
     Extends WorkflowRAGEngine with dependency resolution and sequence generation.
     """
     

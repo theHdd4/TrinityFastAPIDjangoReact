@@ -1,5 +1,5 @@
 """
-Result Storage for Stream AI
+Result Storage for Trinity AI
 =============================
 
 Session-based storage for intermediate results between atom executions.
@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 import threading
 import json
 
-logger = logging.getLogger("trinity.streamai.storage")
+logger = logging.getLogger("trinity.trinityai.storage")
 
 
 class ResultStorage:

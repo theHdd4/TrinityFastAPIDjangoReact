@@ -333,7 +333,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         // Use modular handlers for BOTH UI updates AND message display
         // 🔧 CRITICAL FIX: If hasSpecificHandler is true (concat_json, merge_json, etc. exists),
         // treat it as a success case regardless of data.success flag
-        // This matches SuperagentAIPanel behavior and fixes individual AI agents
+        // This matches the TrinityAIPanel behavior and fixes individual AI agents
         const shouldCallHandleSuccess = handler && (hasSpecificHandler || data.success);
         
         console.log('🔍 ===== HANDLER DECISION =====');

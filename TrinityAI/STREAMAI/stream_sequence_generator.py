@@ -15,7 +15,7 @@ import aiohttp  # Changed from requests to aiohttp for async
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
-logger = logging.getLogger("trinity.streamai.generator")
+logger = logging.getLogger("trinity.trinityai.generator")
 
 # Add parent directory to path for imports
 PARENT_DIR = Path(__file__).resolve().parent.parent
@@ -40,19 +40,13 @@ except ImportError as e:
 
 # Import atom mapping for endpoint resolution
 try:
-    from SUPERAGENT.atom_mapping import ATOM_MAPPING
+    from STREAMAI.atom_mapping import ATOM_MAPPING
     ATOM_MAPPING_AVAILABLE = True
     logger.info("✅ ATOM_MAPPING imported successfully")
 except ImportError as e:
-    try:
-        sys.path.append(str(PARENT_DIR / "SUPERAGENT"))
-        from atom_mapping import ATOM_MAPPING
-        ATOM_MAPPING_AVAILABLE = True
-        logger.info("✅ ATOM_MAPPING imported successfully (direct)")
-    except ImportError as e2:
-        ATOM_MAPPING_AVAILABLE = False
-        logger.warning(f"⚠️ ATOM_MAPPING not available: {e} | {e2}")
-        ATOM_MAPPING = {}
+    ATOM_MAPPING_AVAILABLE = False
+    ATOM_MAPPING = {}
+    logger.warning(f"⚠️ ATOM_MAPPING not available: {e}")
 
 
 class StreamSequenceGenerator:
@@ -192,7 +186,7 @@ class StreamSequenceGenerator:
             file_context_section += "If the user mentions any of these files, **DO NOT** include `data-upload-validate` in the sequence. "
             file_context_section += "Instead, start directly with the operation atoms (merge, concat, groupby, etc.) that use these existing files.\n"
         
-        prompt = f"""You are Stream AI, an intelligent atom sequencing system for data analysis.
+        prompt = f"""You are Trinity AI, an intelligent atom sequencing system for data analysis.
 
 **USER QUERY**: "{user_query}"
 

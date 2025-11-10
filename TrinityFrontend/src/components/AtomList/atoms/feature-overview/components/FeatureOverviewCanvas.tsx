@@ -1246,6 +1246,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 xAxisLabel: chartState.xAxisLabel,
                 yAxisLabel: chartState.yAxisLabel,
                 sortOrder: chartState.sortOrder ?? null,
+                seriesSettings: chartState.seriesSettings,
               }
             : undefined;
 
@@ -1328,6 +1329,7 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
                 yAxisLabel: resolvedYAxisLabel,
                 sortOrder: chartSortOrder ?? null,
                 colorPalette: resolvePalette(chartTheme),
+                seriesSettings: settings.chartSeriesSettings ? cloneDeep(settings.chartSeriesSettings) : {},
               }
             : undefined;
 

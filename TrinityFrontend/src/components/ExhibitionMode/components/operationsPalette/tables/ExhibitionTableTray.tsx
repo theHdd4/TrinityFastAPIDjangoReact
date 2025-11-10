@@ -144,10 +144,10 @@ export interface ExhibitionTableTrayProps {
   onDelete2Columns: () => void;
   onDeleteRow: () => void;
   onDelete2Rows: () => void;
-  onAddColumn: () => void;
-  onAdd2Columns: () => void;
-  onAddRow: () => void;
-  onAdd2Rows: () => void;
+  onAddColumn: (startIndex: number, count: number) => void;
+  onAdd2Columns: (startIndex: number, count: number) => void;
+  onAddRow: (startIndex: number, count: number) => void;
+  onAdd2Rows: (startIndex: number, count: number) => void;
   onSelectStyle?: (styleId: string) => void;
   onBringToFront?: () => void;
   onBringForward?: () => void;
@@ -480,19 +480,43 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem onClick={onAddColumn} disabled={locked || !canEdit}>
+      <ContextMenuItem
+        onClick={() => {
+          const insertionIndex = columnSelection ? columnSelection.start : cols;
+          onAddColumn(insertionIndex, 1);
+        }}
+        disabled={locked || !canEdit}
+      >
         <Plus className="mr-2 h-4 w-4" />
         Add column
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAdd2Columns} disabled={locked || !canEdit}>
+      <ContextMenuItem
+        onClick={() => {
+          const insertionIndex = columnSelection ? columnSelection.start : cols;
+          onAdd2Columns(insertionIndex, 2);
+        }}
+        disabled={locked || !canEdit}
+      >
         <Plus className="mr-2 h-4 w-4" />
         Add 2 columns
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAddRow} disabled={locked || !canEdit}>
+      <ContextMenuItem
+        onClick={() => {
+          const insertionIndex = rowSelection ? rowSelection.start : rows;
+          onAddRow(insertionIndex, 1);
+        }}
+        disabled={locked || !canEdit}
+      >
         <Plus className="mr-2 h-4 w-4" />
         Add row
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAdd2Rows} disabled={locked || !canEdit}>
+      <ContextMenuItem
+        onClick={() => {
+          const insertionIndex = rowSelection ? rowSelection.start : rows;
+          onAdd2Rows(insertionIndex, 2);
+        }}
+        disabled={locked || !canEdit}
+      >
         <Plus className="mr-2 h-4 w-4" />
         Add 2 rows
       </ContextMenuItem>

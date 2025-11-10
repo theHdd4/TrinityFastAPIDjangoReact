@@ -1,8 +1,8 @@
 """
-Stream Orchestrator
-===================
+Trinity AI Orchestrator
+=======================
 
-Orchestrates the execution of atom sequences with the 3-step pattern for each atom:
+Orchestrates the execution of atom sequences with the Trinity AI 3-step pattern for each atom:
 1. Add Card - Create laboratory card
 2. Fetch Atom - Load atom into laboratory
 3. Execute Atom - Run atom with prompt and previous results
@@ -18,7 +18,7 @@ from typing import Dict, Any, List, Optional, Callable
 from pathlib import Path
 from datetime import datetime
 
-logger = logging.getLogger("trinity.streamai.orchestrator")
+logger = logging.getLogger("trinity.trinityai.orchestrator")
 
 # Add parent directory to path
 PARENT_DIR = Path(__file__).resolve().parent.parent

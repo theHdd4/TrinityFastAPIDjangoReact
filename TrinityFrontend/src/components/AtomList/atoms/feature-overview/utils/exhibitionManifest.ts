@@ -32,6 +32,7 @@ export type ManifestChartRendererProps = {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 };
 
 const normaliseManifestChartType = (
@@ -99,6 +100,7 @@ export const buildChartRendererPropsFromManifest = (
         : sortOrder === null
         ? null
         : undefined,
+    seriesSettings: manifest.chart.seriesSettings,
   };
 };
 

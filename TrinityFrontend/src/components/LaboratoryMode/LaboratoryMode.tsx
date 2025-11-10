@@ -10,13 +10,13 @@ import {
   saveCurrentProject,
   persistLaboratoryConfig,
 } from '@/utils/projectStorage';
-import CanvasArea from './components/CanvasArea';
+import CanvasArea, { CanvasAreaRef } from './components/CanvasArea';
 import AuxiliaryMenu from './components/AuxiliaryMenu';
 import AuxiliaryMenuLeft from './components/AuxiliaryMenuLeft';
 import FloatingNavigationList from './components/FloatingNavigationList';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
 import { REGISTRY_API, LAB_ACTIONS_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
-import { useLaboratoryStore } from './store/laboratoryStore';
+import { useLaboratoryStore, LayoutCard } from './store/laboratoryStore';
 import { useAuth } from '@/contexts/AuthContext';
 import { addNavigationItem, logSessionState } from '@/lib/session';
 import { ShareDialog } from './components/ShareDialog';
@@ -42,7 +42,7 @@ const LaboratoryMode = () => {
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
-  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | null>(null);
+  const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
   const { toast } = useToast();
@@ -53,6 +53,8 @@ const LaboratoryMode = () => {
   const skipInitialLabCleanupRef = useRef(true);
   const reduceMotionRef = useRef(initialReduceMotion);
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
+  // Ref for CanvasArea to access sync function
+  const canvasAreaRef = useRef<CanvasAreaRef>(null);
 
   useIsomorphicInsertionEffect(() => {
     const reduceMotion = prefersReducedMotion();
@@ -243,6 +245,78 @@ const LaboratoryMode = () => {
     setIsShareOpen(true);
   };
 
+  // Function to sort cards in workflow order using order field (grid approach)
+  // Uses the same logic as buildUnifiedRenderArray to ensure consistency
+  // order = (moleculeIndex * 1000) + subOrder
+  const sortCardsInWorkflowOrder = (cardsToSort: LayoutCard[], workflowMolecules: any[]): LayoutCard[] => {
+    if (!workflowMolecules || workflowMolecules.length === 0) {
+      // No workflow molecules - sort by order field if available
+      return [...cardsToSort].sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : Infinity;
+        const orderB = typeof b.order === 'number' ? b.order : Infinity;
+        return orderA - orderB;
+      });
+    }
+
+    const sortedCards: LayoutCard[] = [];
+    
+    // Separate cards into workflow and standalone
+    const workflowCards = cardsToSort.filter(card => card.moleculeId);
+    const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
+    
+    // Create a map of moleculeId to moleculeIndex for quick lookup
+    const moleculeIndexMap = new Map<string, number>();
+    workflowMolecules.forEach((molecule, index) => {
+      moleculeIndexMap.set(molecule.moleculeId, index);
+    });
+    
+         // Process each molecule and its associated cards
+     workflowMolecules.forEach((molecule, moleculeIndex) => {
+       // Add all workflow cards for this molecule first (maintain their relative order)
+       const moleculeCards = workflowCards
+         .filter(card => card.moleculeId === molecule.moleculeId)
+         .sort((a, b) => {
+           // Maintain original order within molecule
+           const indexA = cardsToSort.findIndex(c => c.id === a.id);
+           const indexB = cardsToSort.findIndex(c => c.id === b.id);
+           return indexA - indexB;
+         });
+       sortedCards.push(...moleculeCards);
+       
+       // Find standalone cards that should appear after this molecule
+       // Based on order field: order = (moleculeIndex * 1000) + subOrder
+       const cardsAfterThisMolecule = standaloneCards.filter(card => {
+         if (card.order !== undefined && typeof card.order === 'number') {
+           const cardMoleculeIndex = Math.floor(card.order / 1000);
+           return cardMoleculeIndex === moleculeIndex;
+         }
+         return false;
+       });
+       
+       // Sort standalone cards by subOrder
+       cardsAfterThisMolecule.sort((a, b) => {
+         const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
+         const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
+         return subOrderA - subOrderB;
+       });
+       
+       // Add standalone cards that appear after this molecule (between molecules)
+       sortedCards.push(...cardsAfterThisMolecule);
+     });
+    
+    // Add standalone cards that should appear after the last molecule (orphans)
+    const placedStandaloneIds = new Set(sortedCards.map(c => c.id));
+    const orphanCards = standaloneCards.filter(card => !placedStandaloneIds.has(card.id));
+    sortedCards.push(...orphanCards);
+    
+    // Add any remaining workflow cards that weren't in any molecule (shouldn't happen, but safety check)
+    const allProcessedIds = new Set(sortedCards.map(c => c.id));
+    const remaining = cardsToSort.filter(c => !allProcessedIds.has(c.id));
+    sortedCards.push(...remaining);
+    
+    return sortedCards;
+  };
+
   const handleSave = async () => {
     if (!canEdit) return;
     try {
@@ -250,9 +324,71 @@ const LaboratoryMode = () => {
 
       setExhibitionCards(cards);
 
-      // Save the current laboratory configuration
+      // Get workflow molecules to sort cards correctly
+      const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+      let workflowMolecules: any[] = [];
+      if (storedWorkflowMolecules) {
+        try {
+          workflowMolecules = JSON.parse(storedWorkflowMolecules);
+        } catch (e) {
+          console.warn('Failed to parse workflow molecules for sorting', e);
+        }
+      }
+
+      // Sort cards in workflow order before saving (ensures order field reflects actual workflow position)
+      const sortedCards = workflowMolecules.length > 0 
+        ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
+        : cards || [];
+
+      console.info('[Laboratory API] Sorting cards in workflow order before save:', {
+        originalCount: cards?.length || 0,
+        sortedCount: sortedCards.length,
+        workflowMoleculesCount: workflowMolecules.length,
+        sortedCards: sortedCards.map((c, i) => ({
+          index: i,
+          id: c.id,
+          atomId: c.atoms[0]?.atomId,
+          moleculeId: c.moleculeId,
+          order: c.order
+        }))
+      });
+
+      // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
+      // moleculeIndex preserves the original order/position in the array
+      // FIX: If there are no cards, clear workflow molecules to return to regular laboratory mode
+      const workflowMoleculesForSave = (sortedCards.length === 0) 
+        ? [] // Clear workflow molecules when no cards remain
+        : workflowMolecules.map((molecule, index) => ({
+            moleculeId: molecule.moleculeId,
+            moleculeTitle: molecule.moleculeTitle,
+            atoms: molecule.atoms || [],
+            isActive: molecule.isActive !== false, // Default to true if not specified
+            moleculeIndex: index // Preserve the original index/position
+          }));
+
+      // FIX: Clear workflow-related localStorage items when no cards remain
+      if (sortedCards.length === 0) {
+        localStorage.removeItem('workflow-molecules');
+        localStorage.removeItem('workflow-selected-atoms');
+        localStorage.removeItem('workflow-data');
+        console.info('[Laboratory API] Cleared workflow data from localStorage (no cards remaining)');
+      }
+
+      console.info('[Laboratory API] Saving workflow molecules with isActive and moleculeIndex:', {
+        workflowMoleculesCount: workflowMoleculesForSave.length,
+        cardsCount: sortedCards.length,
+        willClearWorkflow: sortedCards.length === 0,
+        molecules: workflowMoleculesForSave.map(m => ({
+          moleculeId: m.moleculeId,
+          moleculeTitle: m.moleculeTitle,
+          isActive: m.isActive,
+          moleculeIndex: m.moleculeIndex
+        }))
+      });
+
+      // Save the current laboratory configuration with sorted cards
       const labConfig = {
-        cards,
+        cards: sortedCards,
         exhibitedCards,
         timestamp: new Date().toISOString(),
       };
@@ -266,6 +402,7 @@ const LaboratoryMode = () => {
           app_name: projectContext.app_name,
           project_name: projectContext.project_name,
           cards: sanitized.cards || [],
+          workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
           mode: 'laboratory',
         };
 
@@ -319,6 +456,18 @@ const LaboratoryMode = () => {
       }
 
       const storageSuccess = persistLaboratoryConfig(sanitized);
+      
+      // Sync changes to Workflow collection
+      if (canvasAreaRef.current) {
+        try {
+          await canvasAreaRef.current.syncWorkflowCollection();
+          console.log('✅ Laboratory changes synced to Workflow collection');
+        } catch (syncError) {
+          console.error('❌ Failed to sync Laboratory changes to Workflow collection:', syncError);
+          // Don't show error to user, just log it
+        }
+      }
+      
       if (storageSuccess) {
         toast({
           title: 'Configuration Saved',
@@ -443,14 +592,15 @@ const LaboratoryMode = () => {
                 : undefined
             }
           >
-            <CanvasArea
-              onAtomSelect={handleAtomSelect}
-              onCardSelect={handleCardSelect}
-              selectedCardId={selectedCardId}
-              onToggleSettingsPanel={toggleSettingsPanel}
-              onToggleHelpPanel={toggleHelpPanel}
-              canEdit={canEdit}
-            />
+              <CanvasArea
+                ref={canvasAreaRef}
+                onAtomSelect={handleAtomSelect}
+                onCardSelect={handleCardSelect}
+                selectedCardId={selectedCardId}
+                onToggleSettingsPanel={toggleSettingsPanel}
+                onToggleHelpPanel={toggleHelpPanel}
+                canEdit={canEdit}
+              />
           </div>
 
           {/* Auxiliary menu */}

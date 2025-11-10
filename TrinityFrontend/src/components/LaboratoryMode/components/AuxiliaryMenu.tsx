@@ -3,17 +3,16 @@ import SettingsPanel from './SettingsPanel/';
 import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
 import ExhibitionPanel from './ExhibitionPanel';
-import { SuperagentAIPanel, TrinityAIIcon } from '@/components/TrinityAI';
-import { StreamAIPanelWebSocket as StreamAIPanel } from '@/components/StreamAI/StreamAIPanelWebSocket';
-import { Settings, Database, HelpCircle, GalleryHorizontal, Zap } from 'lucide-react';
+import { TrinityAIIcon, TrinityAIPanel } from '@/components/TrinityAI';
+import { Settings, Database, HelpCircle, GalleryHorizontal } from 'lucide-react';
 
 interface Props {
   selectedAtomId?: string;
   selectedCardId?: string;
   cardExhibited?: boolean;
-  active?: 'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | 'exhibition' | null;
+  active?: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null;
   onActiveChange?: (
-    active: 'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | 'exhibition' | null,
+    active: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null,
   ) => void;
 }
 
@@ -25,13 +24,13 @@ const AuxiliaryMenu: React.FC<Props> = ({
   onActiveChange
 }) => {
   const [internalActive, setInternalActive] = useState<
-    'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | 'exhibition' | null
+    'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null
   >(null);
   const controlled = activeProp !== undefined;
   const active = controlled ? activeProp : internalActive;
 
   const setActive = (
-    value: 'settings' | 'frames' | 'help' | 'superagent' | 'streamai' | 'exhibition' | null,
+    value: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null,
   ) => {
     if (controlled) {
       onActiveChange?.(value);
@@ -44,8 +43,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openFrames = () => setActive(active === 'frames' ? null : 'frames');
   const openHelp = () => setActive(active === 'help' ? null : 'help');
   const openExhibition = () => setActive(active === 'exhibition' ? null : 'exhibition');
-  const openSuperagent = () => setActive(active === 'superagent' ? null : 'superagent');
-  const openStreamAI = () => setActive(active === 'streamai' ? null : 'streamai');
+  const openTrinityAI = () => setActive(active === 'trinity' ? null : 'trinity');
 
   return (
     <div className="relative z-30 flex h-full">
@@ -74,18 +72,11 @@ const AuxiliaryMenu: React.FC<Props> = ({
         />
       )}
 
-      {/* SuperAgent Panel - Always mounted to preserve state */}
-      <div className={active === 'superagent' ? '' : 'hidden'}>
-        <SuperagentAIPanel
-          isCollapsed={active !== 'superagent'}
-          onToggle={() => setActive(active === 'superagent' ? null : 'superagent')}
-        />
-      </div>
-
-      {/* Stream AI Panel */}
-      {active === 'streamai' && (
-        <StreamAIPanel
-          onClose={() => setActive(null)}
+      {/* Trinity AI Panel */}
+      {active === 'trinity' && (
+        <TrinityAIPanel
+          isCollapsed={false}
+          onToggle={() => setActive(null)}
         />
       )}
 
@@ -95,33 +86,17 @@ const AuxiliaryMenu: React.FC<Props> = ({
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
           <button
-            onClick={openSuperagent}
+            onClick={openTrinityAI}
             className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'superagent' ? 'bg-muted text-foreground' : ''
+              active === 'trinity' ? 'bg-muted text-foreground' : ''
             }`}
             title="Trinity AI"
-            data-superagent-ai="true"
+            data-trinity-ai="true"
             type="button"
           >
             <TrinityAIIcon className="text-purple-500" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Trinity AI
-            </span>
-          </button>
-        </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button
-            onClick={openStreamAI}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'streamai' ? 'bg-muted text-foreground' : ''
-            }`}
-            title="Stream AI"
-            data-streamai="true"
-            type="button"
-          >
-            <Zap className="w-4 h-4 text-green-500" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Stream AI
             </span>
           </button>
         </div>

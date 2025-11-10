@@ -187,6 +187,7 @@ export interface FeatureOverviewVisualizationManifestChart {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewVisualizationManifestTable {
@@ -233,6 +234,7 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewExhibitionSelectionContext {
@@ -1613,6 +1615,12 @@ export interface LayoutCard {
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
+  order?: number; // For positioning standalone cards between molecules
+  afterMoleculeId?: string; // Reference to molecule this card is positioned after
+  beforeMoleculeId?: string; // Reference to molecule this card is positioned before
+  betweenMolecules?: [string, string]; // [moleculeId1, moleculeId2] - card is between these two molecules
+  afterLastMolecule?: boolean; // true if card is after the last molecule (converted to betweenMolecules when new molecule added)
+  beforeFirstMolecule?: boolean; // true if card is before the first molecule
 }
 
 // GroupBy Atom Settings
@@ -1689,6 +1697,70 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   }
 };
 
+export interface PivotTableSettings {
+  dataSource?: string;
+  dataSourceColumns?: string[];
+  fields: string[];
+  selectedFields: string[];
+  rowFields: string[];
+  columnFields: string[];
+  valueFields: { field: string; aggregation: string }[];
+  filterFields: string[];
+  pivotResults: any[];
+  pivotStatus?: 'idle' | 'pending' | 'success' | 'failed';
+  pivotError?: string | null;
+  pivotUpdatedAt?: string;
+  pivotRowCount?: number;
+  pivotLastSavedPath?: string | null;
+  pivotLastSavedAt?: string | null;
+  pivotFilterOptions?: Record<string, string[]>;
+  pivotFilterSelections?: Record<string, string[]>;
+  grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
+  subtotalsMode?: 'off' | 'top' | 'bottom';
+  pivotStyleId?: string;
+  pivotStyleOptions?: {
+    rowHeaders: boolean;
+    columnHeaders: boolean;
+    bandedRows: boolean;
+  };
+  pivotHierarchy?: any[];
+  pivotColumnHierarchy?: any[];
+  reportLayout?: 'compact' | 'outline' | 'tabular';
+  collapsedKeys?: string[];
+}
+
+export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
+  dataSource: '',
+  dataSourceColumns: [],
+  fields: [],
+  selectedFields: [],
+  rowFields: [],
+  columnFields: [],
+  valueFields: [],
+  filterFields: [],
+  pivotResults: [],
+  pivotStatus: 'idle',
+  pivotError: null,
+  pivotUpdatedAt: undefined,
+  pivotRowCount: 0,
+  pivotLastSavedPath: null,
+  pivotLastSavedAt: null,
+  pivotFilterOptions: {},
+  pivotFilterSelections: {},
+  grandTotalsMode: 'off',
+  subtotalsMode: 'off',
+  pivotStyleId: 'light-slate',
+  pivotStyleOptions: {
+    rowHeaders: true,
+    columnHeaders: true,
+    bandedRows: false,
+  },
+  pivotHierarchy: [],
+  pivotColumnHierarchy: [],
+  reportLayout: 'compact',
+  collapsedKeys: [],
+};
+
 interface LaboratoryStore {
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;
@@ -1704,6 +1776,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
   auxPanelActive: null,
   setCards: (cards: LayoutCard[]) => {
+    // FIX: Ensure cards is always an array
+    if (!Array.isArray(cards)) {
+      console.error('[Laboratory Store] setCards called with non-array:', cards);
+      set({ cards: [] });
+      return;
+    }
     set({ cards });
   },
   
@@ -1725,9 +1803,15 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     // console.log('Store: settings to update:', settings);
     
     set((state) => {
+      // FIX: Ensure cards is always an array
+      if (!Array.isArray(state.cards)) {
+        console.error('[Laboratory Store] state.cards is not an array in updateAtomSettings:', state.cards);
+        return { cards: [] };
+      }
+      
       const updatedCards = state.cards.map((card) => ({
         ...card,
-        atoms: card.atoms.map((atom) =>
+        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) =>
           atom.id === atomId
             ? { 
                 ...atom, 
@@ -1737,7 +1821,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
                 } 
               }
             : atom,
-        ),
+        ) : [],
       }));
       
       return { cards: updatedCards };
@@ -1746,7 +1830,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   getAtom: (atomId: string) => {
     const state = get();
-    return state.cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
+    // FIX: Ensure cards is always an array
+    if (!Array.isArray(state.cards)) {
+      console.error('[Laboratory Store] state.cards is not an array in getAtom:', state.cards);
+      return undefined;
+    }
+    return state.cards.flatMap(card => Array.isArray(card.atoms) ? card.atoms : []).find(atom => atom.id === atomId);
   },
 
   reset: () => {

@@ -61,6 +61,7 @@ import basePriceEstimator from '@/components/AtomList/atoms/base-price-estimator
 import promoEstimator from '@/components/AtomList/atoms/promo-estimator';
 import dataframeOperations from '@/components/AtomList/atoms/dataframe-operations';
 import clustering from '@/components/AtomList/atoms/clustering';
+import pivotTable from '@/components/AtomList/atoms/pivot-table';
 
 export interface Atom {
   id: string;
@@ -168,7 +169,8 @@ export const atomCategories: AtomCategory[] = [
     color: 'bg-emerald-500',
     atoms: [
       basePriceEstimator,
-      promoEstimator
+      promoEstimator,
+      pivotTable
     ]
   }
 ];

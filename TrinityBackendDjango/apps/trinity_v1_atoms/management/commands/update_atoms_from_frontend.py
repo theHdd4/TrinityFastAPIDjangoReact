@@ -187,6 +187,11 @@ class Command(BaseCommand):
                 'tags': ['promotion', 'pricing', 'marketing'],
                 'color': 'bg-teal-500'
             },
+            'pivot-table': {
+                'description': 'Create interactive pivot table summaries',
+                'tags': ['pivot', 'aggregation', 'business'],
+                'color': 'bg-teal-500'
+            },
             'dataframe-operations': {
                 'description': 'Perform operations on dataframes',
                 'tags': ['dataframe', 'operations', 'data'],

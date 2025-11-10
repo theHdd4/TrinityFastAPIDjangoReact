@@ -1,8 +1,8 @@
 """
-Stream AI Main Application
-===========================
+Trinity AI Streaming Application
+================================
 
-FastAPI router for Stream AI endpoints.
+FastAPI router for Trinity AI streaming endpoints.
 Provides chat interface, sequence generation, execution, and status monitoring.
 """
 
@@ -15,34 +15,34 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-logger = logging.getLogger("trinity.streamai")
+logger = logging.getLogger("trinity.trinityai")
 
 # Add parent directory to path
 PARENT_DIR = Path(__file__).resolve().parent.parent
 if str(PARENT_DIR) not in sys.path:
     sys.path.append(str(PARENT_DIR))
 
-# Import Stream AI components
+# Import Trinity AI components
 try:
     from STREAMAI.stream_sequence_generator import get_sequence_generator
     from STREAMAI.stream_orchestrator import get_orchestrator
     from STREAMAI.result_storage import get_result_storage
     STREAMAI_AVAILABLE = True
-    logger.info("✅ Stream AI components imported successfully")
+    logger.info("✅ Trinity AI components imported successfully")
 except ImportError as e:
     try:
         from stream_sequence_generator import get_sequence_generator
         from stream_orchestrator import get_orchestrator
         from result_storage import get_result_storage
         STREAMAI_AVAILABLE = True
-        logger.info("✅ Stream AI components imported successfully (direct)")
+        logger.info("✅ Trinity AI components imported successfully (direct)")
     except ImportError as e2:
         STREAMAI_AVAILABLE = False
-        logger.error(f"❌ Stream AI components not available: {e} | {e2}")
+        logger.error(f"❌ Trinity AI components not available: {e} | {e2}")
 
 
 # Create router
-router = APIRouter(prefix="/streamai", tags=["StreamAI"])
+router = APIRouter(prefix="/streamai", tags=["TrinityAI"])
 
 
 # Request/Response models
@@ -107,15 +107,15 @@ if STREAMAI_AVAILABLE:
         sequence_generator = get_sequence_generator()
         orchestrator = get_orchestrator()
         result_storage = get_result_storage()
-        logger.info("✅ Stream AI components initialized")
+        logger.info("✅ Trinity AI components initialized")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize Stream AI components: {e}")
+        logger.error(f"❌ Failed to initialize Trinity AI components: {e}")
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     """
-    Chat interface for Stream AI.
+    Chat interface for Trinity AI.
     Generates and optionally executes atom sequences.
     
     Args:
@@ -125,9 +125,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
         Chat response with sequence
     """
     if not STREAMAI_AVAILABLE or not sequence_generator:
-        raise HTTPException(status_code=503, detail="Stream AI not available")
+        raise HTTPException(status_code=503, detail="Trinity AI not available")
     
-    logger.info(f"💬 Stream AI chat request: {request.message[:100]}...")
+    logger.info(f"💬 Trinity AI chat request: {request.message[:100]}...")
     
     try:
         # Generate session ID if not provided
@@ -188,7 +188,9 @@ async def generate_sequence(request: GenerateSequenceRequest) -> SequenceRespons
         Sequence response
     """
     if not STREAMAI_AVAILABLE or not sequence_generator:
-        raise HTTPException(status_code=503, detail="Stream AI not available")
+        raise HTTPException(status_code=503, detail="Trinity AI not available")
+    if not STREAMAI_AVAILABLE or not sequence_generator:
+        raise HTTPException(status_code=503, detail="Trinity AI not available")
     
     logger.info(f"🔄 Generating sequence for: {request.query[:100]}...")
     
@@ -241,7 +243,7 @@ async def execute_sequence(request: ExecuteSequenceRequest) -> ExecutionResponse
         Execution response
     """
     if not STREAMAI_AVAILABLE or not orchestrator:
-        raise HTTPException(status_code=503, detail="Stream AI not available")
+        raise HTTPException(status_code=503, detail="Trinity AI not available")
     
     logger.info(f"🚀 Executing sequence for session {request.session_id}")
     
@@ -286,7 +288,7 @@ async def get_status(session_id: str) -> StatusResponse:
         Status response
     """
     if not STREAMAI_AVAILABLE or not orchestrator:
-        raise HTTPException(status_code=503, detail="Stream AI not available")
+        raise HTTPException(status_code=503, detail="Trinity AI not available")
     
     logger.info(f"📊 Getting status for session {session_id}")
     
@@ -322,7 +324,7 @@ async def get_results(session_id: str) -> ResultsResponse:
         Results response
     """
     if not STREAMAI_AVAILABLE or not orchestrator:
-        raise HTTPException(status_code=503, detail="Stream AI not available")
+        raise HTTPException(status_code=503, detail="Trinity AI not available")
     
     logger.info(f"📤 Getting results for session {session_id}")
     
@@ -356,7 +358,7 @@ async def health_check() -> Dict[str, Any]:
     """
     return {
         "status": "healthy" if STREAMAI_AVAILABLE else "unavailable",
-        "service": "Stream AI",
+        "service": "Trinity AI",
         "components": {
             "sequence_generator": sequence_generator is not None,
             "orchestrator": orchestrator is not None,
@@ -366,7 +368,7 @@ async def health_check() -> Dict[str, Any]:
 
 
 # Log router registration
-logger.info("✅ Stream AI router created with endpoints:")
+logger.info("✅ Trinity AI router created with endpoints:")
 logger.info("  POST /streamai/chat")
 logger.info("  POST /streamai/generate-sequence")
 logger.info("  POST /streamai/execute-sequence")

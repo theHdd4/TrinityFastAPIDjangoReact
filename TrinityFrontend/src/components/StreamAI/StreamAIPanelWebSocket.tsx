@@ -11,6 +11,9 @@ import StreamStepMonitor from './StreamStepMonitor';
 import StreamStepApproval from './StreamStepApproval';
 import { autoSaveStepResult } from '../TrinityAI/handlers/utils';
 
+const BRAND_GREEN = '#50C878';
+const BRAND_PURPLE = '#7C3AED';
+
 // FastAPI base URL
 const FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || 'http://localhost:8002';
 
@@ -43,9 +46,9 @@ const fadeInStyle = `
 `;
 
 // Inject the CSS if not already present
-if (typeof document !== 'undefined' && !document.querySelector('#stream-ai-animations')) {
+if (typeof document !== 'undefined' && !document.querySelector('#trinity-ai-animations')) {
   const style = document.createElement('style');
-  style.id = 'stream-ai-animations';
+  style.id = 'trinity-ai-animations';
   style.textContent = fadeInStyle;
   document.head.appendChild(style);
 }
@@ -80,12 +83,12 @@ interface Chat {
   sessionId?: string; // Backend session ID for this chat
 }
 
-interface StreamAIPanelProps {
+interface TrinityAIPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
 }
 
-export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollapsed, onToggle }) => {
+export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle }) => {
   // Chat management
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -126,11 +129,11 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
     
     const newChat: Chat = {
       id: newChatId,
-      title: 'New Stream AI Chat',
+      title: 'New Trinity AI Chat',
       messages: [
         {
           id: '1',
-          content: "Hello! I'm Stream AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+          content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
           sender: 'ai',
           timestamp: new Date()
         }
@@ -155,8 +158,8 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
   // Load chats from localStorage on mount
   useEffect(() => {
     const loadChats = () => {
-      const savedChats = localStorage.getItem('stream-ai-chats');
-      const savedCurrentChatId = localStorage.getItem('stream-ai-current-chat-id');
+    const savedChats = localStorage.getItem('trinity-ai-chats');
+    const savedCurrentChatId = localStorage.getItem('trinity-ai-current-chat-id');
       
       if (savedChats) {
         try {
@@ -201,14 +204,14 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
   // Save chats to localStorage
   useEffect(() => {
     if (chats.length > 0) {
-      localStorage.setItem('stream-ai-chats', JSON.stringify(chats));
+      localStorage.setItem('trinity-ai-chats', JSON.stringify(chats));
     }
   }, [chats]);
   
   // Save current chat ID
   useEffect(() => {
     if (currentChatId) {
-      localStorage.setItem('stream-ai-current-chat-id', currentChatId);
+      localStorage.setItem('trinity-ai-current-chat-id', currentChatId);
     }
   }, [currentChatId]);
   
@@ -292,7 +295,7 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
   useEffect(() => {
     return () => {
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        console.log('🧹 Stream AI unmounting, closing WebSocket');
+        console.log('🧹 Trinity AI unmounting, closing WebSocket');
         wsRef.current.close();
       }
     };
@@ -585,7 +588,7 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
       const wsPort = window.location.port ? `:${window.location.port}` : '';
       const wsUrl = `${wsProtocol}//${wsHost}${wsPort}/streamai/execute-ws`;
       
-      console.log('🔗 Connecting to Stream AI WebSocket:', wsUrl);
+      console.log('🔗 Connecting to Trinity AI WebSocket:', wsUrl);
       const ws = new WebSocket(wsUrl);
       
       setWsConnection(ws);
@@ -625,7 +628,7 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
         
         switch (data.type) {
           case 'connected':
-            console.log('✅ Stream AI connected');
+            console.log('✅ Trinity AI connected');
             break;
             
           case 'plan_generated':
@@ -974,8 +977,9 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                     <button
                       onClick={() => setIsPanelFrozen(!isPanelFrozen)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        isPanelFrozen ? 'bg-[#41C185]' : 'bg-gray-300'
+                        isPanelFrozen ? '' : 'bg-gray-300'
                       }`}
+                      style={isPanelFrozen ? { backgroundColor: BRAND_GREEN } : undefined}
                     >
                       <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                         isPanelFrozen ? 'translate-x-6' : 'translate-x-1'
@@ -988,7 +992,10 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
                   <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Connection Status</h5>
                   <div className="flex items-center gap-2">
-                    <div className={`w-3 h-3 rounded-full ${wsConnection ? 'bg-green-500 animate-pulse' : 'bg-gray-300'}`}></div>
+                    <div
+                      className={`w-3 h-3 rounded-full ${wsConnection ? 'animate-pulse' : ''}`}
+                      style={{ backgroundColor: wsConnection ? BRAND_GREEN : '#D1D5DB' }}
+                    ></div>
                     <span className="text-gray-600 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
                       {wsConnection ? 'Connected' : 'Disconnected'}
                     </span>
@@ -1019,8 +1026,8 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                   <Button
                     onClick={() => {
                       if (confirm('Are you sure you want to clear all chat history? This cannot be undone.')) {
-                        localStorage.removeItem('stream-ai-chats');
-                        localStorage.removeItem('stream-ai-current-chat-id');
+                        localStorage.removeItem('trinity-ai-chats');
+                        localStorage.removeItem('trinity-ai-current-chat-id');
                         createNewChat();
                         setShowSettings(false);
                       }
@@ -1057,8 +1064,10 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
           <div className="p-4 border-b border-gray-200">
             <Button
               onClick={createNewChat}
-              className="w-full bg-[#41C185] hover:bg-[#3AB077] text-white font-semibold font-inter rounded-xl shadow-md hover:shadow-lg transition-all duration-200"
-              style={{ fontSize: `${smallFontSize}px` }}
+              className="w-full text-white font-semibold font-inter rounded-xl shadow-md transition-all duration-200"
+              style={{ fontSize: `${smallFontSize}px`, backgroundColor: BRAND_GREEN }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#3AB077')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = BRAND_GREEN)}
             >
               <Plus className="w-4 h-4 mr-2" />
               New Chat
@@ -1079,9 +1088,17 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                     onClick={() => switchToChat(chat.id)}
                     className={`p-3 rounded-xl cursor-pointer transition-all duration-200 border-2 ${
                       chat.id === currentChatId
-                        ? 'bg-[#41C185]/10 border-[#41C185] shadow-md'
+                        ? 'shadow-md'
                         : 'bg-gray-50 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
                     }`}
+                    style={
+                      chat.id === currentChatId
+                        ? {
+                            backgroundColor: `${BRAND_GREEN}1A`,
+                            borderColor: BRAND_GREEN,
+                          }
+                        : undefined
+                    }
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
@@ -1093,7 +1110,10 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                         </p>
                       </div>
                       {chat.id === currentChatId && (
-                        <div className="w-2 h-2 bg-[#41C185] rounded-full flex-shrink-0 mt-1" />
+                        <div
+                          className="w-2 h-2 rounded-full flex-shrink-0 mt-1"
+                          style={{ backgroundColor: BRAND_GREEN }}
+                        />
                       )}
                     </div>
                   </div>
@@ -1116,37 +1136,46 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
       <div
         ref={resizeRef}
         onMouseDown={handleMouseDown}
-        className={`absolute left-0 top-0 w-1 h-full z-40 hover:bg-[#41C185] transition-colors cursor-col-resize ${
+        className={`absolute left-0 top-0 w-1 h-full z-40 transition-colors ${
           isPanelFrozen 
             ? 'cursor-not-allowed opacity-30' 
             : 'cursor-col-resize hover:w-2'
         }`}
         style={{ 
-          background: isResizing ? '#41C185' : 'transparent',
+          background: isResizing ? `${BRAND_PURPLE}40` : 'transparent',
           width: isResizing ? '4px' : '4px'
         }}
         title={isPanelFrozen ? "Panel is frozen (resize disabled)" : "Drag to resize panel"}
       />
       
       {/* Header */}
-      <div className={`flex items-center justify-between p-5 border-b-2 border-gray-200 cursor-grab active:cursor-grabbing bg-gradient-to-r from-gray-50 to-white backdrop-blur-sm relative overflow-hidden group ${showChatHistory || showSettings ? 'z-40' : 'z-10'}`}>
+      <div className={`flex items-center justify-between p-5 border-b-2 border-gray-200 cursor-grab active:cursor-grabbing bg-gradient-to-r from-[#F4E9FF] via-white to-white backdrop-blur-sm relative overflow-hidden group ${showChatHistory || showSettings ? 'z-40' : 'z-10'}`}>
         {/* Animated background effect */}
-        <div className="absolute inset-0 bg-gradient-to-r from-gray-50/0 via-gray-100/50 to-gray-50/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#F4E9FF]/0 via-[#F4E9FF]/60 to-[#F4E9FF]/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
         
         <div className="flex items-center space-x-4 relative z-10">
           <div className="relative">
             <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-lg shadow-gray-200/30 border-2 border-gray-200/20 transition-all duration-300 group-hover:scale-105 group-hover:shadow-xl group-hover:shadow-gray-200/40">
-              <Sparkles className="w-6 h-6 text-purple-500 animate-slow-pulse" />
+              <Sparkles className="w-6 h-6 animate-slow-pulse" style={{ color: BRAND_PURPLE }} />
             </div>
             {/* Online indicator */}
-            <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 bg-[#50C878] rounded-full border-2 border-white shadow-lg">
-              <div className="absolute inset-0 bg-[#50C878] rounded-full animate-ping opacity-75" />
+            <div
+              className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow-lg"
+              style={{ backgroundColor: BRAND_GREEN }}
+            >
+              <div
+                className="absolute inset-0 rounded-full animate-ping opacity-75"
+                style={{ backgroundColor: BRAND_GREEN }}
+              />
             </div>
           </div>
           <div>
-            <h3 className="font-bold text-gray-800 tracking-tight font-inter text-lg">Stream AI</h3>
+            <h3 className="font-bold text-gray-800 tracking-tight font-inter text-lg">Trinity AI</h3>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-[#50C878] rounded-full animate-pulse" />
+              <div
+                className="w-2 h-2 rounded-full animate-pulse"
+                style={{ backgroundColor: BRAND_GREEN }}
+              />
               <p className="text-gray-600 font-medium font-inter text-xs">Active • Ready to help</p>
             </div>
           </div>
@@ -1155,7 +1184,10 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
           <Button
             variant="ghost"
             size="sm"
-            className="h-9 w-9 p-0 hover:bg-purple-100 hover:text-purple-500 transition-all duration-200 rounded-xl"
+            className="h-9 w-9 p-0 transition-all duration-200 rounded-xl"
+            style={{ color: showChatHistory ? BRAND_GREEN : undefined }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
             onClick={() => setShowChatHistory(!showChatHistory)}
             title="Chat History"
           >
@@ -1173,7 +1205,9 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
           <Button
             variant="ghost"
             size="sm"
-            className="h-9 w-9 p-0 hover:bg-green-100 hover:text-green-500 transition-all duration-200 rounded-xl"
+            className="h-9 w-9 p-0 transition-all duration-200 rounded-xl"
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
             onClick={createNewChat}
             title="New Chat"
           >
@@ -1219,11 +1253,20 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
             >
               {/* Avatar - Hide for workflow components to save space */}
               {(!msg.type || msg.type === 'text') && (
-                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg transition-all duration-300 hover:scale-110 ${
-                  msg.sender === 'ai' 
-                    ? 'bg-[#50C878] border-2 border-[#50C878]/30 shadow-[#50C878]/20' 
-                    : 'bg-[#458EE2] border-2 border-[#458EE2]/30 shadow-[#458EE2]/20'
-                }`}>
+                <div
+                  className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg transition-all duration-300 hover:scale-110 border-2 ${
+                    msg.sender === 'ai' ? '' : 'bg-[#458EE2] border-[#458EE2]/30 shadow-[#458EE2]/20'
+                  }`}
+                  style={
+                    msg.sender === 'ai'
+                      ? {
+                          backgroundColor: BRAND_GREEN,
+                          borderColor: `${BRAND_GREEN}4D`,
+                          boxShadow: `0 10px 20px -10px ${BRAND_GREEN}66`,
+                        }
+                      : undefined
+                  }
+                >
                   {msg.sender === 'ai' ? (
                     <Bot className="w-5 h-5 text-white" />
                   ) : (
@@ -1242,11 +1285,22 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                 {/* Regular text message */}
                 {(!msg.type || msg.type === 'text') && (
                   <>
-                    <div className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
-                      msg.sender === 'ai'
-                        ? 'bg-[#50C878] text-white border-[#50C878]/30 rounded-tl-md backdrop-blur-sm'
-                        : 'bg-[#458EE2] text-white border-[#458EE2]/30 rounded-tr-md backdrop-blur-sm'
-                      }`}>
+                    <div
+                      className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
+                        msg.sender === 'ai'
+                          ? 'text-white rounded-tl-md backdrop-blur-sm'
+                          : 'bg-[#458EE2] text-white border-[#458EE2]/30 rounded-tr-md backdrop-blur-sm'
+                      }`}
+                      style={
+                        msg.sender === 'ai'
+                          ? {
+                              backgroundColor: BRAND_GREEN,
+                              borderColor: `${BRAND_GREEN}4D`,
+                              boxShadow: `0 15px 30px -12px ${BRAND_GREEN}66`,
+                            }
+                          : undefined
+                      }
+                    >
                         <div
                           className="leading-relaxed font-medium font-inter text-sm"
                           dangerouslySetInnerHTML={{
@@ -1363,10 +1417,24 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
           {/* Typing Indicator */}
           {isLoading && (
             <div className="flex items-start gap-3 animate-fade-in">
-              <div className="w-10 h-10 rounded-2xl bg-[#50C878] border-2 border-[#50C878]/30 flex items-center justify-center shadow-lg shadow-[#50C878]/20">
+              <div
+                className="w-10 h-10 rounded-2xl flex items-center justify-center shadow-lg border-2"
+                style={{
+                  backgroundColor: BRAND_GREEN,
+                  borderColor: `${BRAND_GREEN}4D`,
+                  boxShadow: `0 10px 25px -10px ${BRAND_GREEN}66`,
+                }}
+              >
                 <Bot className="w-5 h-5 text-white" />
               </div>
-              <div className="bg-[#50C878] text-white rounded-3xl rounded-tl-md px-5 py-3.5 shadow-lg border-2 border-[#50C878]/30 backdrop-blur-sm">
+              <div
+                className="text-white rounded-3xl rounded-tl-md px-5 py-3.5 shadow-lg border-2 backdrop-blur-sm"
+                style={{
+                  backgroundColor: BRAND_GREEN,
+                  borderColor: `${BRAND_GREEN}4D`,
+                  boxShadow: `0 15px 30px -12px ${BRAND_GREEN}66`,
+                }}
+              >
                 <div className="flex space-x-1.5">
                   <div className="w-2.5 h-2.5 bg-white/70 rounded-full animate-bounce shadow-sm" />
                   <div className="w-2.5 h-2.5 bg-white/70 rounded-full animate-bounce shadow-sm" style={{ animationDelay: '0.1s' }} />
@@ -1390,7 +1458,7 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
             onClick={() => {
               setMessages([{
                 id: '1',
-                content: "Hello! I'm Stream AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+                content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
                 sender: 'ai',
                 timestamp: new Date()
               }]);
@@ -1432,7 +1500,10 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                 <div className="overflow-auto max-h-80 p-2" style={{ overflowX: 'auto', overflowY: 'auto' }}>
                   {loadingFiles ? (
                     <div className="flex flex-col items-center justify-center py-8 text-gray-500">
-                      <div className="w-6 h-6 border-2 border-gray-300 border-t-[#41C185] rounded-full animate-spin mb-2" />
+                      <div
+                        className="w-6 h-6 border-2 border-gray-300 rounded-full animate-spin mb-2"
+                        style={{ borderTopColor: BRAND_GREEN }}
+                      />
                       <p className="text-xs">Loading files...</p>
                     </div>
                   ) : availableFiles.length === 0 ? (
@@ -1451,11 +1522,11 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                               setInputValue(prev => prev ? `${prev} @${displayName}` : `@${displayName}`);
                               setShowFilePicker(false);
                             }}
-                            className="w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors duration-150 group border border-transparent hover:border-[#41C185]/20 min-w-max"
+                            className="w-full text-left p-3 rounded-lg hover:bg-gray-50 transition-colors duration-150 group border border-transparent hover:border-[#50C878]/20 min-w-max"
                           >
                             <div className="flex items-center gap-2">
-                              <File className="w-4 h-4 text-[#41C185] flex-shrink-0" />
-                              <span className="text-sm font-medium text-gray-800 font-inter group-hover:text-[#41C185] whitespace-nowrap">
+                              <File className="w-4 h-4 text-[#50C878] flex-shrink-0" />
+                              <span className="text-sm font-medium text-gray-800 font-inter group-hover:text-[#50C878] whitespace-nowrap">
                                 {displayName}
                               </span>
                             </div>
@@ -1499,7 +1570,7 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                 }
               }}
               placeholder="Type your message..."
-              className="min-h-[48px] max-h-[200px] bg-white backdrop-blur-sm border-2 border-gray-200 hover:border-gray-300 focus:border-[#41C185] focus-visible:ring-2 focus-visible:ring-[#41C185]/20 rounded-2xl px-4 py-3 font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter resize-none overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
+              className="min-h-[48px] max-h-[200px] bg-white backdrop-blur-sm border-2 border-gray-200 hover:border-gray-300 focus:border-[#50C878] focus-visible:ring-2 focus-visible:ring-[#50C878]/20 rounded-2xl px-4 py-3 font-medium transition-all duration-200 shadow-sm placeholder:text-gray-500/60 font-inter resize-none overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent hover:scrollbar-thumb-gray-400"
               style={{ 
                 fontSize: '14px',
                 scrollbarWidth: 'thin',
@@ -1543,5 +1614,5 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
   );
 };
 
-export default StreamAIPanelWebSocket;
+export default TrinityAIPanel;
 

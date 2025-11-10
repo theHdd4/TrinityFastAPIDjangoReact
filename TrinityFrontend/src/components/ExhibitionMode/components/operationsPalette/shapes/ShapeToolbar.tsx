@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronsDown, ChevronsUp, CircleDashed, Move, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, CircleDashed, Move, Sparkles, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
@@ -26,6 +26,8 @@ interface ShapeToolbarProps {
   onStrokeStyleChange: (style: ShapeStrokeStyle) => void;
   onOpacityChange: (opacity: number) => void;
   onBringToFront: () => void;
+  onBringForward: () => void;
+  onSendBackward: () => void;
   onSendToBack: () => void;
   onRequestAnimate?: () => void;
   onRequestPosition?: () => void;
@@ -123,6 +125,8 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
   onStrokeStyleChange,
   onOpacityChange,
   onBringToFront,
+  onBringForward,
+  onSendBackward,
   onSendToBack,
   onRequestAnimate,
   onRequestPosition,
@@ -483,6 +487,26 @@ const ShapeToolbar: React.FC<ShapeToolbarProps> = ({
       <Separator />
 
       <div className="flex shrink-0 items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          type="button"
+          className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          onClick={onBringForward}
+          onMouseDown={handleToolbarMouseDown}
+        >
+          <ArrowUp className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          type="button"
+          className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+          onClick={onSendBackward}
+          onMouseDown={handleToolbarMouseDown}
+        >
+          <ArrowDown className="h-4 w-4" />
+        </Button>
         <Button
           variant="ghost"
           size="icon"

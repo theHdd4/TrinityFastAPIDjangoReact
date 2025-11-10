@@ -21,8 +21,7 @@ class Command(BaseCommand):
                 'tag': 'Modeling',
                 'atoms': [
                     'auto-regressive-models',
-                    'build-model-feature-based',
-                    'regression-feature-based'
+                    'build-model-feature-based'
                 ]
             },
             {
@@ -47,7 +46,6 @@ class Command(BaseCommand):
                 'atoms': [
                     'correlation',
                     'explore',
-                    'descriptive-stats',
                     'chart-maker'
                 ]
             },
@@ -84,9 +82,7 @@ class Command(BaseCommand):
                 'tag': 'Analysis',
                 'atoms': [
                     'evaluate-models-feature',
-                    'evaluate-models-auto-regressive',
-                    'chart-maker',
-                    'descriptive-stats'
+                    'chart-maker'
                 ]
             },
             {
@@ -108,9 +104,7 @@ class Command(BaseCommand):
                 'tag': 'Reporting',
                 'atoms': [
                     'chart-maker',
-                    'text-box',
-                    'histogram',
-                    'scatter-plot'
+                    'text-box'
                 ]
             }
         ]

@@ -1,19 +1,19 @@
 """
-Stream AI API - WebSocket Endpoint
+Trinity AI API - WebSocket Endpoint
 ===================================
 
-Provides WebSocket endpoint for Stream AI sequential execution.
-Follows SuperAgent pattern for proper card and result handling.
+Provides WebSocket endpoint for Trinity AI sequential execution.
+Follows the Trinity AI streaming pattern for proper card and result handling.
 """
 
 import logging
 import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-logger = logging.getLogger("trinity.streamai.api")
+logger = logging.getLogger("trinity.trinityai.api")
 
 # Create router
-router = APIRouter(prefix="/streamai", tags=["StreamAI"])
+router = APIRouter(prefix="/streamai", tags=["TrinityAI"])
 
 # Initialize components (will be set by main_api.py)
 rag_engine = None
@@ -25,7 +25,7 @@ async def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "Stream AI WebSocket"
+        "service": "Trinity AI WebSocket"
     }
 
 
@@ -33,7 +33,7 @@ async def health_check():
 async def execute_workflow_websocket(websocket: WebSocket):
     """
     WebSocket endpoint for real-time workflow execution.
-    Follows SuperAgent pattern with events for card creation and result handling.
+    Implements the Trinity AI streaming pattern with events for card creation and result handling.
     
     Events sent to frontend:
     - connected: WebSocket ready

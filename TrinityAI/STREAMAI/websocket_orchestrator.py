@@ -1,19 +1,40 @@
 """
-WebSocket Orchestrator for Stream AI
+WebSocket Orchestrator for Trinity AI
 =====================================
 
 Handles real-time step-by-step workflow execution with WebSocket events.
-Follows the exact SuperAgent pattern for proper card and result handling.
+Implements the Trinity AI streaming pattern for card and result handling.
 """
 
 import asyncio
 import json
 import logging
+import os
+import re
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 import uuid
 
-logger = logging.getLogger("trinity.streamai.websocket")
+try:
+    from starlette.websockets import WebSocketDisconnect  # type: ignore
+except ImportError:  # pragma: no cover
+    class WebSocketDisconnect(Exception):  # type: ignore
+        """Fallback WebSocketDisconnect for environments without starlette."""
+
+        def __init__(self, code: int = 1000, reason: str = "") -> None:
+            self.code = code
+            self.reason = reason
+            super().__init__(code, reason)
+
+from .atom_mapping import ATOM_MAPPING
+
+try:
+    import aiohttp  # type: ignore
+except ImportError:  # pragma: no cover
+    aiohttp = None  # type: ignore
+
+logger = logging.getLogger("trinity.trinityai.websocket")
 
 
 @dataclass
@@ -81,9 +102,21 @@ class StreamWebSocketOrchestrator:
         self.parameter_generator = parameter_generator
         self.result_storage = result_storage
         self.rag_engine = rag_engine
-        
+
+        # In-memory caches for step execution data and outputs
+        self._step_execution_cache: Dict[str, Dict[int, Dict[str, Any]]] = {}
+        self._step_output_files: Dict[str, Dict[int, str]] = {}
+        self._sequence_available_files: Dict[str, List[str]] = {}
+
+        # Determine FastAPI base for downstream atom services (merge, concat, etc.)
+        self.fastapi_base_url = self._determine_fastapi_base_url()
+        self.merge_save_endpoint = f"{self.fastapi_base_url}/api/merge/save"
+        self.concat_save_endpoint = f"{self.fastapi_base_url}/api/concat/save"
+        self.merge_perform_endpoint = f"{self.fastapi_base_url}/api/merge/perform"
+        self.concat_perform_endpoint = f"{self.fastapi_base_url}/api/concat/perform"
+        logger.info(f"🔗 FastAPI base URL for auto-save: {self.fastapi_base_url}")
+
         # Get LLM config (same as merge/concat agents)
-        import os
         ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
         llm_port = os.getenv("OLLAMA_PORT", "11434")
         # Use OpenAI-compatible endpoint for workflow generation
@@ -101,10 +134,6 @@ class StreamWebSocketOrchestrator:
     def _load_atom_mapping(self):
         """Load atom mapping"""
         try:
-            import sys
-            from pathlib import Path
-            sys.path.insert(0, str(Path(__file__).parent.parent))
-            from SUPERAGENT.atom_mapping import ATOM_MAPPING
             self.atom_mapping = ATOM_MAPPING
             logger.info(f"✅ Loaded atom mapping for {len(ATOM_MAPPING)} atoms")
         except Exception as e:
@@ -435,7 +464,8 @@ WORKFLOW PLANNING RULES:
         Returns:
             Tuple of (workflow steps, files detected in user prompt, whether existing files matched)
         """
-        import aiohttp
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for LLM workflow generation but is not installed")
         
         # Extract files mentioned in prompt
         prompt_files = self._extract_file_names_from_prompt(user_prompt)
@@ -619,16 +649,21 @@ Respond ONLY with valid JSON array, no other text:
         - workflow_completed: All steps done
         - error: Error occurred
         """
+        sequence_id = frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
+        logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
+        available_files = list(available_files or [])
+        self._sequence_available_files[sequence_id] = available_files
+
         try:
-            # Use frontend session ID if provided, otherwise generate new one
-            sequence_id = frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
-            logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
-            
             # Send connected event
-            await websocket.send_text(WebSocketEvent(
-                "connected",
-                {"message": "Stream AI connected", "sequence_id": sequence_id}
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "connected",
+                    {"message": "Trinity AI connected", "sequence_id": sequence_id}
+                ),
+                "connected event"
+            )
             
             logger.info(f"🚀 Starting workflow for sequence: {sequence_id}")
             
@@ -660,14 +695,18 @@ Respond ONLY with valid JSON array, no other text:
                 logger.info(f"   Step {step.step_number}: {step.atom_id} - {step.description}")
             
             # Send plan_generated event
-            await websocket.send_text(WebSocketEvent(
-                "plan_generated",
-                {
-                    "plan": plan.to_dict(),
-                    "sequence_id": sequence_id,
-                    "total_steps": plan.total_steps
-                }
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "plan_generated",
+                    {
+                        "plan": plan.to_dict(),
+                        "sequence_id": sequence_id,
+                        "total_steps": plan.total_steps
+                    }
+                ),
+                "plan_generated event"
+            )
             
             logger.info(f"✅ Plan generated with {plan.total_steps} steps")
             
@@ -694,10 +733,14 @@ Respond ONLY with valid JSON array, no other text:
                     elif approval_msg.get('type') == 'reject_plan':
                         rejected = True
                         logger.info("❌ User rejected workflow - stopping")
-                        await websocket.send_text(WebSocketEvent(
-                            "workflow_rejected",
-                            {"message": "Workflow rejected by user", "sequence_id": sequence_id}
-                        ).to_json())
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "workflow_rejected",
+                                {"message": "Workflow rejected by user", "sequence_id": sequence_id}
+                            ),
+                            "workflow_rejected plan phase"
+                        )
                         return  # Exit without executing
                     elif approval_msg.get('type') == 'add_info':
                         # User added info before step 1 - regenerate entire workflow
@@ -725,17 +768,24 @@ Respond ONLY with valid JSON array, no other text:
                         )
                         
                         # Send updated plan
-                        await websocket.send_text(WebSocketEvent(
-                            "plan_generated",
-                            {
-                                "plan": plan.to_dict(),
-                                "sequence_id": sequence_id,
-                                "total_steps": plan.total_steps
-                            }
-                        ).to_json())
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "plan_generated",
+                                {
+                                    "plan": plan.to_dict(),
+                                    "sequence_id": sequence_id,
+                                    "total_steps": plan.total_steps
+                                }
+                            ),
+                            "plan_generated event (update)"
+                        )
                         
                         logger.info(f"✅ Regenerated workflow with {plan.total_steps} steps")
                         # Continue waiting for approval
+                except WebSocketDisconnect:
+                    logger.info("🔌 WebSocket disconnected while waiting for initial approval")
+                    return
                 except Exception as e:
                     logger.error(f"❌ Error waiting for approval: {e}")
                     break
@@ -748,13 +798,17 @@ Respond ONLY with valid JSON array, no other text:
             # ================================================================
             logger.info("🚀 PHASE 2: Starting step-by-step execution...")
             
-            await websocket.send_text(WebSocketEvent(
-                "workflow_started",
-                {
-                    "sequence_id": sequence_id,
-                    "total_steps": plan.total_steps
-                }
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "workflow_started",
+                    {
+                        "sequence_id": sequence_id,
+                        "total_steps": plan.total_steps
+                    }
+                ),
+                "workflow_started event"
+            )
             
             for idx, step in enumerate(plan.workflow_steps):
                 await self._execute_step_with_events(
@@ -788,18 +842,23 @@ Respond ONLY with valid JSON array, no other text:
                                         await self._auto_save_step(
                                             sequence_id=sequence_id,
                                             step_number=step.step_number,
-                                            workflow_step=step
+                                            workflow_step=step,
+                                            available_files=available_files
                                         )
                                     except Exception as save_error:
                                         logger.error(f"❌ Auto-save failed for step {step.step_number}: {save_error}")
-                                        await websocket.send_text(WebSocketEvent(
-                                            "error",
-                                            {
-                                                "sequence_id": sequence_id,
-                                                "error": str(save_error),
-                                                "message": f"Auto-save failed for step {step.step_number}: {save_error}"
-                                            }
-                                        ).to_json())
+                                        await self._send_event(
+                                            websocket,
+                                            WebSocketEvent(
+                                                "error",
+                                                {
+                                                    "sequence_id": sequence_id,
+                                                    "error": str(save_error),
+                                                    "message": f"Auto-save failed for step {step.step_number}: {save_error}"
+                                                }
+                                            ),
+                                            "auto-save error event"
+                                        )
                                         workflow_rejected = True
                                         break
 
@@ -811,10 +870,14 @@ Respond ONLY with valid JSON array, no other text:
                             elif approval_msg.get('type') == 'reject_workflow':
                                 workflow_rejected = True
                                 logger.info(f"❌ Workflow rejected at step {step.step_number}")
-                                await websocket.send_text(WebSocketEvent(
-                                    "workflow_rejected",
-                                    {"message": f"Workflow rejected by user at step {step.step_number}", "sequence_id": sequence_id}
-                                ).to_json())
+                                await self._send_event(
+                                    websocket,
+                                    WebSocketEvent(
+                                        "workflow_rejected",
+                                        {"message": f"Workflow rejected by user at step {step.step_number}", "sequence_id": sequence_id}
+                                    ),
+                                    "workflow_rejected step phase"
+                                )
                                 return
                             
                             elif approval_msg.get('type') == 'add_info':
@@ -853,20 +916,27 @@ Respond ONLY with valid JSON array, no other text:
                                     plan.total_steps = len(plan.workflow_steps)
                                     
                                     # Send updated plan
-                                    await websocket.send_text(WebSocketEvent(
-                                        "plan_updated",
-                                        {
-                                            "plan": plan.to_dict(),
-                                            "sequence_id": sequence_id,
-                                            "total_steps": plan.total_steps,
-                                            "updated_from_step": step.step_number + 1
-                                        }
-                                    ).to_json())
+                                    await self._send_event(
+                                        websocket,
+                                        WebSocketEvent(
+                                            "plan_updated",
+                                            {
+                                                "plan": plan.to_dict(),
+                                                "sequence_id": sequence_id,
+                                                "total_steps": plan.total_steps,
+                                                "updated_from_step": step.step_number + 1
+                                            }
+                                        ),
+                                        "plan_updated event"
+                                    )
                                     
                                     logger.info(f"✅ Updated workflow: {len(new_remaining_steps)} new steps from step {step.step_number + 1}")
                                     
                                     # Continue to next step (which is now updated)
                                     step_approved = True
+                        except WebSocketDisconnect:
+                            logger.info("🔌 WebSocket disconnected while waiting for step approval")
+                            return
                         except Exception as e:
                             logger.error(f"❌ Error waiting for step approval: {e}")
                             break
@@ -875,31 +945,46 @@ Respond ONLY with valid JSON array, no other text:
                         return
             
             # Send workflow completed
-            await websocket.send_text(WebSocketEvent(
-                "workflow_completed",
-                {
-                    "sequence_id": sequence_id,
-                    "total_steps": plan.total_steps,
-                    "message": "All steps completed successfully!"
-                }
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "workflow_completed",
+                    {
+                        "sequence_id": sequence_id,
+                        "total_steps": plan.total_steps,
+                        "message": "All steps completed successfully!"
+                    }
+                ),
+                "workflow_completed event"
+            )
             
             logger.info(f"✅ Workflow completed: {sequence_id}")
             
+        except WebSocketDisconnect:
+            logger.info(f"🔌 WebSocket disconnected during workflow {sequence_id}")
         except Exception as e:
             logger.error(f"❌ Workflow execution failed: {e}")
             import traceback
             traceback.print_exc()
             
             # Send error event
-            await websocket.send_text(WebSocketEvent(
-                "error",
-                {
-                    "sequence_id": sequence_id,
-                    "error": str(e),
-                    "message": f"Workflow failed: {str(e)}"
-                }
-            ).to_json())
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "error",
+                        {
+                            "sequence_id": sequence_id,
+                            "error": str(e),
+                            "message": f"Workflow failed: {str(e)}"
+                        }
+                    ),
+                    "workflow error event"
+                )
+            except WebSocketDisconnect:
+                logger.info("🔌 WebSocket disconnected before error event could be delivered")
+        finally:
+            self._cleanup_sequence_state(sequence_id)
     async def _execute_step_with_events(
         self,
         websocket,
@@ -930,16 +1015,20 @@ Respond ONLY with valid JSON array, no other text:
             # ================================================================
             logger.info(f"📍 Step {step_number}/{plan.total_steps}: {atom_id}")
             
-            await websocket.send_text(WebSocketEvent(
-                "step_started",
-                {
-                    "step": step_number,
-                    "total_steps": plan.total_steps,
-                    "atom_id": atom_id,
-                    "description": step.description,
-                    "sequence_id": sequence_id
-                }
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "step_started",
+                    {
+                        "step": step_number,
+                        "total_steps": plan.total_steps,
+                        "atom_id": atom_id,
+                        "description": step.description,
+                        "sequence_id": sequence_id
+                    }
+                ),
+                f"step_started event (step {step_number})"
+            )
             
             # ================================================================
             # PHASE A: GENERATE PARAMETERS (Simplified)
@@ -966,16 +1055,20 @@ Respond ONLY with valid JSON array, no other text:
             card_id = f"card-{uuid.uuid4().hex}"
             
             # EVENT 2: CARD_CREATED
-            await websocket.send_text(WebSocketEvent(
-                "card_created",
-                {
-                    "step": step_number,
-                    "card_id": card_id,
-                    "atom_id": atom_id,
-                    "sequence_id": sequence_id,
-                    "action": "CARD_CREATION"
-                }
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "card_created",
+                    {
+                        "step": step_number,
+                        "card_id": card_id,
+                        "atom_id": atom_id,
+                        "sequence_id": sequence_id,
+                        "action": "CARD_CREATION"
+                    }
+                ),
+                f"card_created event (step {step_number})"
+            )
             
             logger.info(f"✅ Card created: {card_id}")
             
@@ -991,53 +1084,465 @@ Respond ONLY with valid JSON array, no other text:
             )
             
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
+            self._record_step_execution_result(
+                sequence_id=sequence_id,
+                step_number=step_number,
+                atom_id=atom_id,
+                execution_result=execution_result
+            )
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
             # ================================================================
-            await websocket.send_text(WebSocketEvent(
-                "agent_executed",
-                {
-                    "step": step_number,
-                    "card_id": card_id,
-                    "atom_id": atom_id,
-                    "action": "AGENT_EXECUTION",
-                    "result": execution_result,  # merge_json, groupby_json, etc.
-                    "sequence_id": sequence_id,
-                    "output_alias": step.output_alias,
-                    "summary": f"Executed {atom_id}"
-                }
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "agent_executed",
+                    {
+                        "step": step_number,
+                        "card_id": card_id,
+                        "atom_id": atom_id,
+                        "action": "AGENT_EXECUTION",
+                        "result": execution_result,  # merge_json, groupby_json, etc.
+                        "sequence_id": sequence_id,
+                        "output_alias": step.output_alias,
+                        "summary": f"Executed {atom_id}"
+                    }
+                ),
+                f"agent_executed event (step {step_number})"
+            )
             
             # ================================================================
             # EVENT 4: STEP_COMPLETED
             # ================================================================
-            await websocket.send_text(WebSocketEvent(
-                "step_completed",
-                {
-                    "step": step_number,
-                    "total_steps": plan.total_steps,
-                    "atom_id": atom_id,
-                    "card_id": card_id,
-                    "summary": f"Step {step_number} completed",
-                    "sequence_id": sequence_id
-                }
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "step_completed",
+                    {
+                        "step": step_number,
+                        "total_steps": plan.total_steps,
+                        "atom_id": atom_id,
+                        "card_id": card_id,
+                        "summary": f"Step {step_number} completed",
+                        "sequence_id": sequence_id
+                    }
+                ),
+                f"step_completed event (step {step_number})"
+            )
             
             logger.info(f"✅ Step {step_number} completed")
             
+        except WebSocketDisconnect:
+            logger.info(f"🔌 WebSocket disconnected during step {step_number}")
+            raise
         except Exception as e:
             logger.error(f"❌ Step {step_number} failed: {e}")
             
-            await websocket.send_text(WebSocketEvent(
-                "step_failed",
-                {
-                    "step": step_number,
-                    "atom_id": atom_id,
-                    "error": str(e),
-                    "sequence_id": sequence_id
-                }
-            ).to_json())
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "step_failed",
+                    {
+                        "step": step_number,
+                        "atom_id": atom_id,
+                        "error": str(e),
+                        "sequence_id": sequence_id
+                    }
+                ),
+                f"step_failed event (step {step_number})"
+            )
     
+    async def _auto_save_step(
+        self,
+        sequence_id: str,
+        step_number: int,
+        workflow_step: WorkflowStepPlan,
+        available_files: List[str]
+    ) -> None:
+        """
+        Persist step output automatically before moving to the next step.
+        
+        Args:
+            sequence_id: Unique identifier for the workflow run
+            step_number: Step to auto-save
+            workflow_step: Step metadata (atom_id, output alias, etc.)
+            available_files: Mutable list of known files for this workflow (will be updated)
+        """
+        cache_for_sequence = self._step_execution_cache.get(sequence_id, {})
+        step_cache = cache_for_sequence.get(step_number)
+
+        if not step_cache:
+            raise ValueError(f"No execution result cached for step {step_number}")
+
+        atom_id = workflow_step.atom_id
+        execution_result = step_cache.get("execution_result") or {}
+
+        logger.info(f"💾 Auto-saving step {step_number} ({atom_id}) for sequence {sequence_id}")
+
+        saved_path: Optional[str] = None
+        auto_save_response: Optional[Dict[str, Any]] = None
+
+        if atom_id == "merge":
+            saved_path, auto_save_response = await self._auto_save_merge(
+                workflow_step=workflow_step,
+                execution_result=execution_result,
+                step_cache=step_cache
+            )
+        elif atom_id == "concat":
+            saved_path, auto_save_response = await self._auto_save_concat(
+                workflow_step=workflow_step,
+                execution_result=execution_result,
+                step_cache=step_cache
+            )
+        else:
+            logger.info(f"ℹ️ Auto-save skipped for atom '{atom_id}' (no auto-save logic implemented)")
+            return
+
+        if not saved_path:
+            raise ValueError(f"Auto-save did not return a saved file path for step {step_number}")
+
+        # Track saved output
+        self._step_output_files.setdefault(sequence_id, {})[step_number] = saved_path
+        step_cache["saved_path"] = saved_path
+        step_cache["auto_saved_at"] = datetime.utcnow().isoformat()
+        step_cache["auto_save_response"] = auto_save_response
+
+        # Update shared available file list for downstream steps
+        if saved_path not in available_files:
+            available_files.append(saved_path)
+
+        seq_files = self._sequence_available_files.get(sequence_id)
+        if seq_files is not None and saved_path not in seq_files:
+            seq_files.append(saved_path)
+
+        # Persist metadata in result storage for downstream consumers
+        if self.result_storage:
+            try:
+                self.result_storage.create_session(sequence_id)
+                result_name = workflow_step.output_alias or f"step_{step_number}_output"
+                metadata = {
+                    "step_number": step_number,
+                    "atom_id": atom_id,
+                    "auto_saved": True,
+                    "output_file": saved_path,
+                    "saved_at": step_cache["auto_saved_at"]
+                }
+                self.result_storage.store_result(
+                    sequence_id=sequence_id,
+                    result_name=result_name,
+                    result_data={
+                        "output_file": saved_path,
+                        "auto_save_response": auto_save_response
+                    },
+                    result_type="auto_saved_file",
+                    metadata=metadata
+                )
+            except Exception as storage_error:
+                logger.warning(f"⚠️ Failed to store auto-save metadata for step {step_number}: {storage_error}")
+
+        logger.info(f"✅ Auto-saved step {step_number} output to {saved_path}")
+
+    async def _auto_save_merge(
+        self,
+        workflow_step: WorkflowStepPlan,
+        execution_result: Dict[str, Any],
+        step_cache: Dict[str, Any]
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Auto-save helper for merge atom outputs."""
+        merge_cfg = execution_result.get("merge_json") or execution_result.get("merge_config") or {}
+        if not merge_cfg:
+            raise ValueError("Merge execution result did not include 'merge_json' for auto-save")
+
+        file1 = self._normalize_config_file_value(merge_cfg.get("file1"))
+        file2 = self._normalize_config_file_value(merge_cfg.get("file2"))
+        join_columns = merge_cfg.get("join_columns") or []
+        join_type = merge_cfg.get("join_type", "inner")
+        bucket_name = merge_cfg.get("bucket_name", "trinity")
+
+        if not file1 or not file2:
+            raise ValueError(f"Merge configuration missing file references: file1={file1}, file2={file2}")
+
+        if not isinstance(join_columns, list) or not join_columns:
+            raise ValueError(f"Merge configuration missing join columns: {join_columns}")
+
+        csv_data = execution_result.get("data") or execution_result.get("csv_data")
+        perform_response: Optional[Dict[str, Any]] = None
+
+        if not csv_data:
+            perform_response = await self._perform_merge_operation(
+                file1=file1,
+                file2=file2,
+                bucket_name=bucket_name,
+                join_columns=join_columns,
+                join_type=join_type
+            )
+            csv_data = perform_response.get("data") or perform_response.get("csv_data")
+
+        if not csv_data:
+            raise ValueError("Merge auto-save could not obtain CSV data from perform endpoint")
+
+        filename = self._build_auto_save_filename(workflow_step, default_prefix="merge")
+        payload = {
+            "csv_data": csv_data,
+            "filename": filename
+        }
+
+        response = await self._post_json(self.merge_save_endpoint, payload)
+        saved_path = (
+            response.get("result_file")
+            or response.get("object_name")
+            or response.get("path")
+            or response.get("filename")
+            or filename
+        )
+
+        if perform_response:
+            step_cache["perform_response"] = perform_response
+
+        return saved_path, response
+
+    async def _perform_merge_operation(
+        self,
+        file1: str,
+        file2: str,
+        bucket_name: str,
+        join_columns: List[str],
+        join_type: str
+    ) -> Dict[str, Any]:
+        """Invoke merge perform endpoint to get merged CSV."""
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for merge perform calls but is not installed")
+
+        form = aiohttp.FormData()
+        form.add_field("file1", self._extract_filename(file1))
+        form.add_field("file2", self._extract_filename(file2))
+        form.add_field("bucket_name", bucket_name)
+        form.add_field("join_columns", json.dumps(join_columns))
+        form.add_field("join_type", join_type)
+
+        logger.info(
+            f"🧪 Calling merge perform endpoint {self.merge_perform_endpoint} with "
+            f"file1={file1}, file2={file2}, join_columns={join_columns}, join_type={join_type}"
+        )
+
+        return await self._post_form(self.merge_perform_endpoint, form)
+
+    async def _perform_concat_operation(
+        self,
+        file1: str,
+        file2: str,
+        concat_direction: str
+    ) -> Dict[str, Any]:
+        """Invoke concat perform endpoint to get concatenated CSV."""
+        payload = {
+            "file1": self._extract_filename(file1),
+            "file2": self._extract_filename(file2),
+            "concat_direction": concat_direction or "vertical"
+        }
+
+        logger.info(
+            f"🧪 Calling concat perform endpoint {self.concat_perform_endpoint} "
+            f"with payload {payload}"
+        )
+
+        return await self._post_json(self.concat_perform_endpoint, payload)
+
+    async def _auto_save_concat(
+        self,
+        workflow_step: WorkflowStepPlan,
+        execution_result: Dict[str, Any],
+        step_cache: Dict[str, Any]
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Auto-save helper for concat atom outputs."""
+        concat_cfg = execution_result.get("concat_json") or execution_result.get("concat_config") or {}
+        if not concat_cfg:
+            raise ValueError("Concat execution result did not include 'concat_json' for auto-save")
+
+        file1 = self._normalize_config_file_value(concat_cfg.get("file1"))
+        file2 = self._normalize_config_file_value(concat_cfg.get("file2"))
+        direction = concat_cfg.get("concat_direction", "vertical")
+
+        if not file1 or not file2:
+            raise ValueError(f"Concat configuration missing file references: file1={file1}, file2={file2}")
+
+        csv_data = execution_result.get("data") or execution_result.get("csv_data")
+        perform_response: Optional[Dict[str, Any]] = None
+
+        if not csv_data:
+            perform_response = await self._perform_concat_operation(
+                file1=file1,
+                file2=file2,
+                concat_direction=direction
+            )
+            csv_data = perform_response.get("data") or perform_response.get("csv_data")
+
+        if not csv_data:
+            raise ValueError("Concat auto-save could not obtain CSV data from perform endpoint")
+
+        filename = self._build_auto_save_filename(workflow_step, default_prefix="concat")
+        payload = {
+            "csv_data": csv_data,
+            "filename": filename
+        }
+
+        response = await self._post_json(self.concat_save_endpoint, payload)
+        saved_path = (
+            response.get("result_file")
+            or response.get("object_name")
+            or response.get("path")
+            or response.get("filename")
+            or filename
+        )
+
+        if perform_response:
+            step_cache["perform_response"] = perform_response
+
+        return saved_path, response
+
+    async def _post_json(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Send POST request and return JSON payload."""
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for auto-save HTTP calls but is not installed")
+
+        logger.info(f"🌐 POST {url} payload keys: {list(payload.keys())}")
+        timeout = aiohttp.ClientTimeout(total=180)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as response:
+                text_body = await response.text()
+                if response.status >= 400:
+                    raise RuntimeError(f"{url} returned {response.status}: {text_body}")
+
+                if not text_body:
+                    return {}
+
+                try:
+                    return json.loads(text_body)
+                except json.JSONDecodeError:
+                    logger.warning(f"⚠️ Non-JSON response from {url}: {text_body[:200]}")
+                    return {}
+
+    async def _post_form(self, url: str, form: "aiohttp.FormData") -> Dict[str, Any]:
+        """Send POST request with form data and return JSON payload."""
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for auto-save HTTP calls but is not installed")
+
+        logger.info(f"🌐 POST (form) {url}")
+        timeout = aiohttp.ClientTimeout(total=180)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, data=form) as response:
+                text_body = await response.text()
+                if response.status >= 400:
+                    raise RuntimeError(f"{url} returned {response.status}: {text_body}")
+
+                if not text_body:
+                    return {}
+
+                try:
+                    return json.loads(text_body)
+                except json.JSONDecodeError:
+                    logger.warning(f"⚠️ Non-JSON response from {url}: {text_body[:200]}")
+                    return {}
+
+    def _normalize_config_file_value(self, value: Any) -> str:
+        """Normalize file value from config to a usable string."""
+        if isinstance(value, list):
+            value = value[0] if value else ""
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def _extract_filename(self, value: str) -> str:
+        """Extract filename component from possible path."""
+        if not value:
+            return value
+        if "/" in value:
+            value = value.split("/")[-1]
+        if "\\" in value:
+            value = value.split("\\")[-1]
+        return value
+
+    def _build_auto_save_filename(
+        self,
+        workflow_step: WorkflowStepPlan,
+        default_prefix: str
+    ) -> str:
+        """Construct deterministic filename for auto-saved outputs."""
+        base = workflow_step.output_alias or f"{default_prefix}_step_{workflow_step.step_number}"
+        sanitized = self._sanitize_filename(base)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"{sanitized}_{timestamp}"
+        if not filename.endswith(".arrow"):
+            filename += ".arrow"
+        return filename
+
+    def _sanitize_filename(self, value: str) -> str:
+        """Sanitize filename to include only safe characters."""
+        if not value:
+            return "stream_step"
+        sanitized = re.sub(r'[^A-Za-z0-9_\-]+', "_", value).strip("_")
+        return sanitized or "stream_step"
+
+    def _record_step_execution_result(
+        self,
+        sequence_id: str,
+        step_number: int,
+        atom_id: str,
+        execution_result: Dict[str, Any]
+    ) -> None:
+        """Cache step execution results for later auto-save and lineage tracking."""
+        cache = self._step_execution_cache.setdefault(sequence_id, {})
+        cache[step_number] = {
+            "atom_id": atom_id,
+            "execution_result": execution_result,
+            "recorded_at": datetime.utcnow().isoformat()
+        }
+
+    async def _send_event(
+        self,
+        websocket,
+        event: WebSocketEvent,
+        context: str
+    ) -> None:
+        """Safely send WebSocket event, converting close errors to disconnects."""
+        try:
+            await websocket.send_text(event.to_json())
+        except WebSocketDisconnect:
+            logger.info(f"🔌 WebSocket disconnected during {context}")
+            raise
+        except RuntimeError as runtime_error:
+            message = str(runtime_error)
+            if 'Cannot call "send" once a close message has been sent' in message:
+                logger.info(f"🔌 WebSocket already closed while sending {context}")
+                raise WebSocketDisconnect(code=1006)
+            raise
+
+    def _cleanup_sequence_state(self, sequence_id: str) -> None:
+        """Remove cached data for a sequence after completion."""
+        self._step_execution_cache.pop(sequence_id, None)
+        self._step_output_files.pop(sequence_id, None)
+        self._sequence_available_files.pop(sequence_id, None)
+
+    def _determine_fastapi_base_url(self) -> str:
+        """Resolve FastAPI base URL for downstream atom services."""
+        base_url = os.getenv("FASTAPI_BASE_URL")
+        if base_url:
+            return base_url.rstrip("/")
+
+        host = os.getenv("FASTAPI_HOST") or os.getenv("HOST_IP")
+        port = os.getenv("FASTAPI_PORT")
+
+        if host and port:
+            return f"http://{host}:{port}".rstrip("/")
+
+        # Heuristic defaults
+        default_host = host or "localhost"
+        # If running inside docker compose, fastapi service usually on 8001
+        default_port = "8001" if os.getenv("RUNNING_IN_DOCKER") else "8002"
+
+        return f"http://{default_host}:{port or default_port}".rstrip("/")
+
     async def _generate_simple_parameters(
         self,
         atom_id: str,
@@ -1060,7 +1565,8 @@ Respond ONLY with valid JSON array, no other text:
         session_id: str
     ) -> Dict[str, Any]:
         """Execute atom endpoint"""
-        import aiohttp
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for atom execution but is not installed")
         
         atom_info = self.atom_mapping.get(atom_id, {})
         endpoint = atom_info.get("endpoint", f"/trinityai/{atom_id}")
