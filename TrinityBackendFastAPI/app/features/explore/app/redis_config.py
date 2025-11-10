@@ -9,7 +9,8 @@ from typing import Optional
 
 from redis.exceptions import RedisError
 
-from app.core.redis import get_redis_settings, get_sync_redis
+from app.core.redis import get_redis_settings
+from app.features.cache_utils import get_feature_cache
 
 _settings = get_redis_settings()
 
@@ -28,7 +29,7 @@ def _display_endpoint() -> str:
 def get_redis_client():
     """Return the shared Redis client, ensuring the connection is healthy."""
     try:
-        client = get_sync_redis()
+        client = get_feature_cache()
         client.ping()
         return client
     except RedisError as exc:

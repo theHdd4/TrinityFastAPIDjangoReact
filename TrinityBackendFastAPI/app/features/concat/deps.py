@@ -8,7 +8,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.DataStorageRetrieval.arrow_client import download_dataframe
 from app.DataStorageRetrieval.db import fetch_client_app_project
-from app.core.redis import get_redis_settings, get_sync_redis
+from app.core.redis import get_redis_settings
+from app.features.cache_utils import get_feature_cache
 
 # MinIO config
 # Default to the development MinIO service if not explicitly configured
@@ -25,7 +26,7 @@ APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
 _redis_settings = get_redis_settings()
-redis_client = get_sync_redis()
+redis_client = get_feature_cache()
 
 if os.getenv("ENVIRONMENT", "production").lower() == "development":
     print(

@@ -8,7 +8,8 @@ from minio import Minio
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.core.mongo import build_host_mongo_uri
-from app.core.redis import get_redis_settings, get_sync_redis
+from app.core.redis import get_redis_settings
+from app.features.cache_utils import get_feature_cache
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +44,7 @@ PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 # Redis config
 _redis_settings = get_redis_settings()
 try:
-    redis_client = get_sync_redis()
+    redis_client = get_feature_cache()
     redis_client.ping()
     logger.info(
         "✅ Connected to Redis at %s:%s (DB: %s)",

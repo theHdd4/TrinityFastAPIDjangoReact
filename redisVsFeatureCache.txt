@@ -1,0 +1,66 @@
+Redis client vs. FeatureCacheClient
+===================================
+
+Overview
+--------
+The FastAPI feature stack already centralizes cache semantics inside
+`app/features/cache_utils.py`. That wrapper normalizes keys, applies the
+namespace TTLs from the cache taxonomy, stamps version hashes, and emits
+`cache:invalidate` events that downstream workers rely on. Directly invoking
+`app/core/redis.get_sync_redis` returns the raw Redis client with none of those
+policies layered on top. Choosing between the two affects correctness,
+operability, and developer ergonomics.
+
+Raw Redis client
+----------------
+**Pros**
+* Maximum flexibility: callers can opt into custom key formats, expirations, and
+  commands without wrapper constraints.
+* Slightly lower overhead for hot paths that only require simple `GET`/`SET`
+  calls and do not need namespace bookkeeping.
+* Familiar API: matches upstream Redis interface, which can reduce the learning
+  curve for contributors comfortable with standard clients.
+
+**Cons**
+* No automatic TTL harmonization. Individual features must remember to replicate
+  the `session`/`env`/`arrow`/`cluster` expiry policy, increasing drift risk.
+* No canonical key normalization. Legacy aliases such as `projstate:` are not
+  coerced into the shared `session:` namespace, so duplicate entries accumulate
+  and invalidation misses become likely.
+* Lacks built-in version hashing and pub/sub invalidation. Writers must
+  replicate the `emit_cache_invalidation` pattern by hand, which is easy to
+  forget and undermines the coherence guarantees in `docs/cache_taxonomy.md`.
+* Encourages bespoke cache conventions per feature, making cross-service
+  debugging harder and threatening the shared cache taxonomy.
+
+FeatureCacheClient wrapper
+--------------------------
+**Pros**
+* Enforces consistent TTLs, key shapes, and invalidation events for the core
+  namespaces, aligning every writer/reader with the documented contract.
+* Transparently handles historical keys (`projstate:`) and object-path styles
+  (`arrow:` prefixes), preventing fragmentation and easing migrations.
+* Automatically stamps version hashes for session/env/arrow payloads so
+  subscribers can detect stale entries without probing Redis directly.
+* Centralizes logging and metadata emission, which simplifies observability when
+  diagnosing cache churn or propagation delays.
+
+**Cons**
+* Slight abstraction overhead and tighter coupling: exotic workloads that need
+  non-standard expirations or commands may need to extend the wrapper or reach
+  for the raw client.
+* Requires the wrapper module to stay up to date with Redis features that new
+  code might want (e.g., pipelining), otherwise developers still drop down to
+  the base client.
+* Adds hashing work for large payloads; while usually negligible, it can matter
+  for very large Arrow artifacts unless optimized.
+
+Recommendation
+--------------
+For Trinity's feature atoms, workflows, molecules, and exhibition components,
+`FeatureCacheClient` is the better default. It bakes in the cache taxonomy rules
+and emits the invalidation events that keep FastAPI, Django, and worker
+processes in sync. Reserve the raw Redis client for exceptional cases where the
+wrapper does not yet expose a required command or performance profile; when that
+happens, consider expanding the wrapper so the broader platform retains
+consistent semantics.

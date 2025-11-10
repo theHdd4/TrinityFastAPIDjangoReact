@@ -1,3 +1,4 @@
+import hashlib
 import json
 import io
 from datetime import datetime
@@ -6,9 +7,11 @@ from typing import Dict, Optional
 from app.core.redis import get_sync_redis
 from .DataStorageRetrieval.db import upsert_project_state, fetch_project_state
 from .DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
+from app.core.cache_events import emit_cache_invalidation
 
 TTL = 3600
-NAMESPACE = "projstate"
+NAMESPACE = "session"
+VERSION_SUFFIX = ":version"
 
 
 redis_client = get_sync_redis()
@@ -16,6 +19,15 @@ redis_client = get_sync_redis()
 
 def _redis_key(client_id: str, app_id: str, project_id: str) -> str:
     return f"{NAMESPACE}:{client_id}:{app_id}:{project_id}"
+
+
+def _redis_version_key(client_id: str, app_id: str, project_id: str) -> str:
+    return f"{_redis_key(client_id, app_id, project_id)}{VERSION_SUFFIX}"
+
+
+def _state_version(state: Dict) -> str:
+    payload = json.dumps(state, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _snapshot_prefix(client_id: str, app_id: str, project_id: str) -> str:
@@ -48,9 +60,25 @@ def _load_latest_snapshot(client_id: str, app_id: str, project_id: str) -> Optio
 
 async def save_state(client_id: str, app_id: str, project_id: str, state: Dict) -> None:
     key = _redis_key(client_id, app_id, project_id)
+    version_key = _redis_version_key(client_id, app_id, project_id)
+    version = _state_version(state)
     redis_client.setex(key, TTL, json.dumps(state, default=str))
+    redis_client.setex(version_key, TTL, version)
     await upsert_project_state(client_id, app_id, project_id, state)
     _save_snapshot(client_id, app_id, project_id, state)
+    emit_cache_invalidation(
+        "session",
+        {
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "redis_key": key,
+        },
+        action="write",
+        ttl=TTL,
+        version=version,
+        metadata={"source": "fastapi"},
+    )
 
 
 async def load_state(client_id: str, app_id: str, project_id: str) -> Optional[Dict]:
@@ -64,5 +92,24 @@ async def load_state(client_id: str, app_id: str, project_id: str) -> Optional[D
     db_state = await fetch_project_state(project_id)
     if db_state is not None:
         redis_client.setex(key, TTL, json.dumps(db_state, default=str))
+        redis_client.setex(_redis_version_key(client_id, app_id, project_id), TTL, _state_version(db_state))
         return db_state
     return _load_latest_snapshot(client_id, app_id, project_id)
+
+
+async def delete_state(client_id: str, app_id: str, project_id: str) -> None:
+    key = _redis_key(client_id, app_id, project_id)
+    redis_client.delete(key)
+    redis_client.delete(_redis_version_key(client_id, app_id, project_id))
+    emit_cache_invalidation(
+        "session",
+        {
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "redis_key": key,
+        },
+        action="delete",
+        ttl=0,
+        metadata={"source": "fastapi"},
+    )

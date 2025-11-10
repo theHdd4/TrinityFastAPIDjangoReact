@@ -42,11 +42,11 @@ import uuid
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import json
-from app.core.redis import get_sync_redis
+from app.features.cache_utils import get_feature_cache
 
 router = APIRouter()
 
-redis_binary_client = get_sync_redis()
+redis_binary_client = get_feature_cache()
 
 @router.get("/")
 async def root():

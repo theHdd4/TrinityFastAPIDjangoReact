@@ -6,7 +6,7 @@ import pandas as pd
 from minio import Minio
 
 from app.DataStorageRetrieval.arrow_client import download_dataframe
-from app.core.redis import get_sync_redis
+from app.features.cache_utils import get_feature_cache
 
 # MinIO config
 # Default to the development MinIO service if not explicitly configured
@@ -22,7 +22,7 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
-redis_client = get_sync_redis()
+redis_client = get_feature_cache()
 
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 

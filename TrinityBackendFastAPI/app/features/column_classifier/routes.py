@@ -12,7 +12,7 @@ from app.DataStorageRetrieval.arrow_client import download_dataframe, upload_dat
 from app.DataStorageRetrieval.flight_registry import get_flight_path_for_csv, set_ticket
 from app.DataStorageRetrieval.db import get_dataset_info
 from app.DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
-from app.core.redis import get_sync_redis
+from app.features.cache_utils import get_feature_cache
 
 # Import your existing database functions
 # Change these lines at the top of routes.py:
@@ -53,7 +53,7 @@ extraction_results = {}
 # MinIO client for loading saved dataframes
 minio_client = get_client()
 
-binary_redis = get_sync_redis()
+binary_redis = get_feature_cache()
 redis_client = binary_redis
 
 # =============================================================================

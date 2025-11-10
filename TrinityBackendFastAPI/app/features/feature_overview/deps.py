@@ -3,9 +3,9 @@ import os
 
 from app.core.redis import (
     get_async_redis,
-    get_sync_redis,
     get_redis_settings,
 )
+from app.features.cache_utils import get_feature_cache
 
 MONGO_URI = os.getenv(
     "OVERVIEW_MONGO_URI",
@@ -15,8 +15,8 @@ MONGO_URI = os.getenv(
 client = AsyncIOMotorClient(MONGO_URI)
 db = client["feature_overview_db"]
 
-redis_client = get_sync_redis()
-redis_text_client = get_sync_redis(decode_responses=True)
+redis_client = get_feature_cache()
+redis_text_client = get_feature_cache(decode_responses=True)
 redis_async_client = get_async_redis()
 redis_settings = get_redis_settings()
 

@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 from minio import Minio
 
 from app.core.mongo import build_host_mongo_uri
-from app.core.redis import get_redis_settings, get_sync_redis
+from app.core.redis import get_redis_settings
+from app.features.cache_utils import get_feature_cache
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ minio_client = Minio(
 # --------------------------------------------------------------------------- #
 # Shared Redis configuration
 _redis_settings = get_redis_settings()
-cache = get_sync_redis()
+cache = get_feature_cache()
 
 if os.getenv("ENVIRONMENT", "production").lower() == "development":
     logger.info(

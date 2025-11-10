@@ -8,7 +8,7 @@ import pyarrow.ipc as ipc
 from minio import Minio
 from minio.error import S3Error
 
-from app.core.redis import get_sync_redis
+from app.features.cache_utils import get_feature_cache
 
 # MinIO configuration from environment variables
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -62,7 +62,7 @@ from fastapi import HTTPException
 from typing import Tuple
 
 # Redis configuration from shared helper
-redis_client = get_sync_redis(decode_responses=True)
+redis_client = get_feature_cache(decode_responses=True)
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
 MONGO_DB = os.getenv("MONGO_DB", "trinity")
