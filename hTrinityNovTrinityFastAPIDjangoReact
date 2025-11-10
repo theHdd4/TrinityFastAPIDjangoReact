@@ -1,0 +1,30 @@
+[1mdiff --git a/TrinityFrontend/src/components/StreamAI/StreamAIPanelWebSocket.tsx b/TrinityFrontend/src/components/StreamAI/StreamAIPanelWebSocket.tsx[m
+[1mindex e957aeef..d2ca3e2e 100644[m
+[1m--- a/TrinityFrontend/src/components/StreamAI/StreamAIPanelWebSocket.tsx[m
+[1m+++ b/TrinityFrontend/src/components/StreamAI/StreamAIPanelWebSocket.tsx[m
+[36m@@ -4,6 +4,7 @@[m [mimport { Button } from '@/components/ui/button';[m
+ import { Textarea } from '@/components/ui/textarea';[m
+ import { ScrollArea } from '@/components/ui/scroll-area';[m
+ import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle } from 'lucide-react';[m
+[32m+[m[32mimport { VALIDATE_API } from '@/lib/api';[m
+ import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';[m
+ import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';[m
+ import StreamWorkflowPreview from './StreamWorkflowPreview';[m
+[36m@@ -466,7 +467,7 @@[m [mexport const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT[m
+           }[m
+         }[m
+         [m
+[31m-        const url = `http://localhost:8001/api/data-upload-validate/list_saved_dataframes${query}`;[m
+[32m+[m[32m        const url = `${VALIDATE_API}/list_saved_dataframes${query}`;[m
+         console.log('📂 Fetching from:', url);[m
+         [m
+         const response = await fetch(url);[m
+[36m@@ -510,7 +511,7 @@[m [mexport const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT[m
+         }[m
+       }[m
+       [m
+[31m-      const url = `http://localhost:8001/api/data-upload-validate/list_saved_dataframes${query}`;[m
+[32m+[m[32m      const url = `${VALIDATE_API}/list_saved_dataframes${query}`;[m
+       const response = await fetch(url);[m
+       const data = await response.json();[m
+       [m

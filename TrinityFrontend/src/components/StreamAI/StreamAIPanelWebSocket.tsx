@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle } from 'lucide-react';
+import { VALIDATE_API } from '@/lib/api';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
@@ -83,12 +84,19 @@ interface Chat {
   sessionId?: string; // Backend session ID for this chat
 }
 
+interface TrinityAIBackgroundStatus {
+  isProcessing: boolean;
+  isCollapsed: boolean;
+  hasActiveWorkflow: boolean;
+}
+
 interface TrinityAIPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
+  onBackgroundStatusChange?: (status: TrinityAIBackgroundStatus) => void;
 }
 
-export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle }) => {
+export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle, onBackgroundStatusChange }) => {
   // Chat management
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -106,6 +114,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const backgroundStatusRef = useRef<TrinityAIBackgroundStatus | null>(null);
   
   // WebSocket connection
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
@@ -290,6 +299,30 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
   useEffect(() => {
     wsRef.current = wsConnection;
   }, [wsConnection]);
+
+  useEffect(() => {
+    if (!onBackgroundStatusChange) return;
+
+    const hasActiveWorkflow = Boolean(wsConnection && currentWorkflowMessageId);
+    const status: TrinityAIBackgroundStatus = {
+      isProcessing: isLoading || hasActiveWorkflow,
+      isCollapsed,
+      hasActiveWorkflow
+    };
+
+    const prevStatus = backgroundStatusRef.current;
+    if (
+      prevStatus &&
+      prevStatus.isProcessing === status.isProcessing &&
+      prevStatus.isCollapsed === status.isCollapsed &&
+      prevStatus.hasActiveWorkflow === status.hasActiveWorkflow
+    ) {
+      return;
+    }
+
+    backgroundStatusRef.current = status;
+    onBackgroundStatusChange(status);
+  }, [isCollapsed, isLoading, onBackgroundStatusChange, wsConnection, currentWorkflowMessageId]);
   
   // Cleanup WebSocket ONLY on unmount, NOT on collapse
   useEffect(() => {
@@ -466,7 +499,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
           }
         }
         
-        const url = `http://localhost:8001/api/data-upload-validate/list_saved_dataframes${query}`;
+        const url = `${VALIDATE_API}/list_saved_dataframes${query}`;
         console.log('📂 Fetching from:', url);
         
         const response = await fetch(url);
@@ -510,7 +543,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
         }
       }
       
-      const url = `http://localhost:8001/api/data-upload-validate/list_saved_dataframes${query}`;
+      const url = `${VALIDATE_API}/list_saved_dataframes${query}`;
       const response = await fetch(url);
       const data = await response.json();
       

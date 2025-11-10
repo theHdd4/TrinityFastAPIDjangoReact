@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import SettingsPanel from './SettingsPanel/';
 import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
 import ExhibitionPanel from './ExhibitionPanel';
 import { TrinityAIIcon, TrinityAIPanel } from '@/components/TrinityAI';
 import { Settings, Database, HelpCircle, GalleryHorizontal } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+
+interface TrinityBackgroundStatus {
+  isProcessing: boolean;
+  isCollapsed: boolean;
+  hasActiveWorkflow: boolean;
+}
 
 interface Props {
   selectedAtomId?: string;
@@ -45,6 +52,18 @@ const AuxiliaryMenu: React.FC<Props> = ({
   const openExhibition = () => setActive(active === 'exhibition' ? null : 'exhibition');
   const openTrinityAI = () => setActive(active === 'trinity' ? null : 'trinity');
 
+  const [trinityBackgroundStatus, setTrinityBackgroundStatus] = useState<TrinityBackgroundStatus>({
+    isProcessing: false,
+    isCollapsed: true,
+    hasActiveWorkflow: false
+  });
+
+  const handleTrinityBackgroundStatus = useCallback((status: TrinityBackgroundStatus) => {
+    setTrinityBackgroundStatus(status);
+  }, []);
+
+  const showTrinityBackgroundBanner = trinityBackgroundStatus.isProcessing && trinityBackgroundStatus.isCollapsed;
+
   return (
     <div className="relative z-30 flex h-full">
       {/* Panel Area - Shows when active */}
@@ -72,12 +91,36 @@ const AuxiliaryMenu: React.FC<Props> = ({
         />
       )}
 
-      {/* Trinity AI Panel */}
-      {active === 'trinity' && (
+      {/* Trinity AI Panel (kept mounted for background operations) */}
+      <div className={active === 'trinity' ? '' : 'hidden'}>
         <TrinityAIPanel
-          isCollapsed={false}
-          onToggle={() => setActive(null)}
+          isCollapsed={active !== 'trinity'}
+          onToggle={() => setActive(active === 'trinity' ? null : 'trinity')}
+          onBackgroundStatusChange={handleTrinityBackgroundStatus}
         />
+      </div>
+
+      {showTrinityBackgroundBanner && (
+        <div className="absolute right-16 bottom-8 z-40 pointer-events-none">
+          <div className="pointer-events-auto flex items-center gap-3 bg-white/95 border-2 border-[#458EE2]/30 rounded-2xl shadow-xl px-4 py-3 backdrop-blur-md">
+            <div className="flex flex-col">
+              <span className="text-sm font-semibold text-gray-800 font-inter">
+                Trinity AI is processing in background
+              </span>
+              {trinityBackgroundStatus.hasActiveWorkflow && (
+                <span className="text-xs text-gray-500 font-inter">
+                  Workflow execution continues
+                </span>
+              )}
+            </div>
+            <Button
+              onClick={() => setActive('trinity')}
+              className="h-9 bg-[#458EE2] hover:bg-[#376fba] text-white font-semibold px-4 rounded-xl transition-all duration-200"
+            >
+              Reopen
+            </Button>
+          </div>
+        </div>
       )}
 
       {active === 'exhibition' && <ExhibitionPanel onToggle={() => setActive(null)} />}

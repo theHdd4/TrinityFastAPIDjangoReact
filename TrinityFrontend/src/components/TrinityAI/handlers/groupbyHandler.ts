@@ -232,10 +232,13 @@ export const groupbyHandler: AtomHandler = {
         });
         
         // Convert to FormData format that GroupBy backend expects
+        const normalizedObjectName = singleFileName?.startsWith('/')
+          ? singleFileName.slice(1)
+          : singleFileName;
         const formData = new URLSearchParams({
           validator_atom_id: atomId, // 🔧 CRITICAL: Add required validator_atom_id
           file_key: getFilename(singleFileName), // 🔧 CRITICAL: Add required file_key
-          object_names: getFilename(singleFileName),
+          object_names: normalizedObjectName || getFilename(singleFileName),
           bucket_name: cfg.bucket_name || 'trinity',
           identifiers: JSON.stringify(aiSelectedIdentifiers),
           aggregations: JSON.stringify(aiSelectedMeasures.reduce((acc, m) => {
@@ -259,7 +262,7 @@ export const groupbyHandler: AtomHandler = {
         console.log('📁 Sending groupby data to backend:', {
           validator_atom_id: atomId,
           file_key: getFilename(singleFileName),
-          object_names: getFilename(singleFileName),
+          object_names: normalizedObjectName || getFilename(singleFileName),
           bucket_name: cfg.bucket_name || 'trinity',
           identifiers: aiSelectedIdentifiers,
           aggregations: aiSelectedMeasures.reduce((acc, m) => {
@@ -290,7 +293,8 @@ export const groupbyHandler: AtomHandler = {
             try {
               const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(result.data.result_file)}`);
               if (cachedRes.ok) {
-                const csvText = await cachedRes.text();
+                const cachedJson = await cachedRes.json();
+                const csvText = cachedJson?.data ?? '';
                 console.log('📄 Retrieved CSV data from saved file, length:', csvText.length);
                 
                 // Parse CSV to get actual results
