@@ -1,10 +1,13 @@
-import os
 import json
 from typing import Dict
-from .features.feature_overview.deps import redis_client
+
+from app.core.redis import get_sync_redis
 
 NAMESPACE = "masterconfig"
 TTL = 3600
+
+
+redis_client = get_sync_redis()
 
 def _ns(client_id: str, app_id: str, project_id: str) -> str:
     return f"{client_id}:{app_id}:{project_id}"

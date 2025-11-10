@@ -5,11 +5,15 @@ import sys
 import os
 from typing import Dict, Tuple, Any
 import json
-from app.features.feature_overview.deps import redis_client
+
+from app.core.redis import get_sync_redis
 from app.DataStorageRetrieval.db import fetch_client_app_project
 
 ENV_TTL = 3600
 ENV_NAMESPACE = "env"
+
+
+redis_client = get_sync_redis()
 
 def _redis_env_key(client: str, app: str, project: str) -> str:
     return f"{ENV_NAMESPACE}:{client}:{app}:{project}"

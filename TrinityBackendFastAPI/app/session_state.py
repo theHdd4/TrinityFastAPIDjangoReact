@@ -3,12 +3,15 @@ import io
 from datetime import datetime
 from typing import Dict, Optional
 
-from .features.feature_overview.deps import redis_client
+from app.core.redis import get_sync_redis
 from .DataStorageRetrieval.db import upsert_project_state, fetch_project_state
 from .DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
 
 TTL = 3600
 NAMESPACE = "projstate"
+
+
+redis_client = get_sync_redis()
 
 
 def _redis_key(client_id: str, app_id: str, project_id: str) -> str:
