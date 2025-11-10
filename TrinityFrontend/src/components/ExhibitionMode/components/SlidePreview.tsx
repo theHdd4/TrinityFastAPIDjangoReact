@@ -1,16 +1,14 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
-import {
-  SlideCanvas,
-  CANVAS_STAGE_HEIGHT,
-  DEFAULT_PRESENTATION_WIDTH,
-  PRESENTATION_PADDING,
-} from './slideCanvas';
-import { type LayoutCard } from '../store/exhibitionStore';
+import { SlideCanvas, CANVAS_STAGE_HEIGHT, DEFAULT_PRESENTATION_WIDTH } from './slideCanvas';
+import { type LayoutCard, DEFAULT_PRESENTATION_SETTINGS } from '../store/exhibitionStore';
 
-const PREVIEW_BASE_WIDTH = DEFAULT_PRESENTATION_WIDTH + PRESENTATION_PADDING;
-const PREVIEW_BASE_HEIGHT = CANVAS_STAGE_HEIGHT + PRESENTATION_PADDING;
-const PREVIEW_RATIO = PREVIEW_BASE_HEIGHT / PREVIEW_BASE_WIDTH;
+const CARD_WIDTH_DIMENSIONS = {
+  M: 832,
+  L: 1088,
+} as const;
+
+const PREVIEW_BASE_HEIGHT = CANVAS_STAGE_HEIGHT;
 const FALLBACK_SCALE = 0.25;
 const MIN_SCALE = 0.05;
 
@@ -30,6 +28,15 @@ export const SlidePreview: React.FC<SlidePreviewProps> = React.memo(
     const containerRef = React.useRef<HTMLDivElement | null>(null);
     const [scale, setScale] = React.useState<number>(FALLBACK_SCALE);
 
+    const previewBaseWidth = React.useMemo(() => {
+      const cardWidth = card.presentationSettings?.cardWidth ?? DEFAULT_PRESENTATION_SETTINGS.cardWidth;
+      return CARD_WIDTH_DIMENSIONS[cardWidth] ?? DEFAULT_PRESENTATION_WIDTH;
+    }, [card.presentationSettings?.cardWidth]);
+
+    const previewRatio = React.useMemo(() => {
+      return PREVIEW_BASE_HEIGHT / previewBaseWidth;
+    }, [previewBaseWidth]);
+
     React.useEffect(() => {
       const node = containerRef.current;
       if (!node) {
@@ -40,7 +47,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = React.memo(
         if (!Number.isFinite(width) || width <= 0) {
           return;
         }
-        const nextScale = Math.min(Math.max(width / PREVIEW_BASE_WIDTH, MIN_SCALE), 1);
+        const nextScale = Math.min(Math.max(width / previewBaseWidth, MIN_SCALE), 1);
         setScale(previous => (Math.abs(previous - nextScale) < 0.005 ? previous : nextScale));
       };
 
@@ -61,7 +68,7 @@ export const SlidePreview: React.FC<SlidePreviewProps> = React.memo(
       return () => {
         observer.disconnect();
       };
-    }, []);
+    }, [previewBaseWidth]);
 
     return (
       <div
@@ -71,15 +78,16 @@ export const SlidePreview: React.FC<SlidePreviewProps> = React.memo(
           'shadow-sm transition-colors duration-200',
           className,
         )}
-        style={{ paddingBottom: `${PREVIEW_RATIO * 100}%` }}
+        style={{ paddingBottom: `${previewRatio * 100}%` }}
       >
         <div className="absolute inset-0 flex items-center justify-center">
           <div
-            className="pointer-events-none origin-top-left"
+            className="pointer-events-none"
             style={{
-              width: PREVIEW_BASE_WIDTH,
+              width: previewBaseWidth,
               height: PREVIEW_BASE_HEIGHT,
               transform: `scale(${scale})`,
+              transformOrigin: 'center center',
             }}
             aria-hidden
           >
@@ -91,8 +99,9 @@ export const SlidePreview: React.FC<SlidePreviewProps> = React.memo(
               onDrop={noop}
               draggedAtom={null}
               canEdit={false}
-              presentationMode
+              presentationMode={true}
               viewMode="horizontal"
+              variant="preview"
             />
           </div>
         </div>

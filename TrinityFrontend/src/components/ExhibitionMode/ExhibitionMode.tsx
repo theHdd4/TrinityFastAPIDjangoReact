@@ -1,6 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronRight, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
+import { ChevronRight, Database, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
 import {
   useExhibitionStore,
@@ -58,6 +58,7 @@ import {
   buildTableDataFromManifest,
   clonePlain,
 } from '@/components/AtomList/atoms/feature-overview/utils/exhibitionManifest';
+import SavedDataFramesPanel from '@/components/LaboratoryMode/components/SavedDataFramesPanel';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const DEFAULT_TRANSITION_DURATION = 450;
@@ -165,6 +166,7 @@ const ExhibitionMode = () => {
     updateCard,
     addBlankSlide,
     setCards,
+    reorderSlides,
     lastLoadedContext,
     addSlideObject,
     bulkUpdateSlideObjects,
@@ -199,6 +201,7 @@ const ExhibitionMode = () => {
   >(null);
   const [showThumbnails, setShowThumbnails] = useState(false);
   const [showGridView, setShowGridView] = useState(false);
+  const [showSavedDataframesPanel, setShowSavedDataframesPanel] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
   const [isSaving, setIsSaving] = useState(false);
@@ -241,6 +244,39 @@ const ExhibitionMode = () => {
   const lastSerializedSnapshotRef = useRef<string | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const hasRequestedInitialLoadRef = useRef(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && isPresentationView) {
+        setIsPresentationView(false);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    if (isPresentationView) {
+      if (container.requestFullscreen) {
+        container.requestFullscreen().catch(err => {
+          console.warn('Failed to enter fullscreen:', err);
+        });
+      }
+    } else {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(err => {
+          console.warn('Failed to exit fullscreen:', err);
+        });
+      }
+    }
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, [isPresentationView]);
 
   const generateTextBoxId = useCallback(() => {
     if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
@@ -419,6 +455,43 @@ const ExhibitionMode = () => {
       goToSlide(index, direction);
     },
     [currentSlide, goToSlide, handleStopSlideshow, isSlideshowActive],
+  );
+
+  const handleReorderSlides = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex || exhibitedCards.length === 0) {
+        return;
+      }
+
+      const safeStart = Math.max(0, Math.min(fromIndex, exhibitedCards.length - 1));
+      const safeEnd = Math.max(0, Math.min(toIndex, exhibitedCards.length - 1));
+
+      if (safeStart === safeEnd) {
+        return;
+      }
+
+      const currentCardId = exhibitedCards[currentSlide]?.id;
+
+      const reorderedPreview = (() => {
+        const next = [...exhibitedCards];
+        const [moved] = next.splice(safeStart, 1);
+        next.splice(safeEnd, 0, moved);
+        return next;
+      })();
+
+      reorderSlides(safeStart, safeEnd);
+
+      if (!currentCardId) {
+        setCurrentSlide(previous => Math.max(0, Math.min(previous, reorderedPreview.length - 1)));
+        return;
+      }
+
+      const nextIndex = reorderedPreview.findIndex(card => card.id === currentCardId);
+      if (nextIndex !== -1) {
+        setCurrentSlide(nextIndex);
+      }
+    },
+    [currentSlide, exhibitedCards, reorderSlides],
   );
 
   const handleStartSlideshow = useCallback(() => {
@@ -2177,7 +2250,29 @@ const ExhibitionMode = () => {
                   <Grid3x3 className="h-4 w-4" />
                 </button>
               </div>
+              <div className="p-3 border-b border-border flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => setShowSavedDataframesPanel(current => !current)}
+                  className={cn(
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
+                    showSavedDataframesPanel ? 'text-foreground' : 'text-muted-foreground'
+                  )}
+                  title="Saved DataFrames"
+                  aria-label="Saved DataFrames"
+                  data-saved-dataframes="true"
+                >
+                  <Database className="h-4 w-4" />
+                </button>
+              </div>
             </div>
+
+            {showSavedDataframesPanel && (
+              <SavedDataFramesPanel
+                isOpen={true}
+                onToggle={() => setShowSavedDataframesPanel(false)}
+              />
+            )}
 
             {!isCatalogueCollapsed && !showThumbnails && (
               <ExhibitionCatalogue
@@ -2198,9 +2293,9 @@ const ExhibitionMode = () => {
                 currentSlide={currentSlide}
                 onSlideSelect={index => {
                   handleSlideSelection(index);
-                  setShowThumbnails(false);
                 }}
                 onClose={() => setShowThumbnails(false)}
+                onReorder={handleReorderSlides}
               />
             )}
           </div>
@@ -2386,6 +2481,7 @@ const ExhibitionMode = () => {
             setShowGridView(false);
           }}
           onClose={() => setShowGridView(false)}
+          onReorder={handleReorderSlides}
         />
       )}
 

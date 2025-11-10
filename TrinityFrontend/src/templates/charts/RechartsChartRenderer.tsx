@@ -137,6 +137,28 @@ import {
 } from 'recharts';
 import * as d3 from 'd3';
 
+const RADIAN = Math.PI / 180;
+
+const renderPiePercentageLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+  if (percent === undefined || percent <= 0.02) return null;
+  const radius = innerRadius + (outerRadius - innerRadius) / 2;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#ffffff"
+      textAnchor={x > cx ? 'start' : 'end'}
+      dominantBaseline="central"
+      fontSize={11}
+      fontWeight={600}
+    >
+      {(percent * 100).toFixed(0)}%
+    </text>
+  );
+};
+
 interface Props {
   type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart';
   data: any[];
@@ -1333,6 +1355,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return { pivoted: [], uniqueValues: [], actualXKey: xField };
   }, [type, chartDataForRendering, xField, yField, legendField, sortOrder, sortColumn]);
 
+  useEffect(() => {
+    if (type === 'pie_chart' && legendField && legendValues.length > 0) {
+      onChartTypeChange?.('line_chart');
+    }
+  }, [type, legendField, legendValues, onChartTypeChange]);
+
   // Calculate if all series have data labels enabled (for "select all" behavior)
   const allSeriesDataLabelsEnabled = useMemo(() => {
     // Collect all available series keys
@@ -2072,15 +2100,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (!showChartTypeSubmenu) return null;
 
     const chartTypes = [
-      { 
-        key: 'pie_chart', 
-        label: 'Pie Chart', 
+      ...(!(legendField && legendValues.length > 0) ? [{
+        key: 'pie_chart',
+        label: 'Pie Chart',
         icon: (
           <svg className="w-5 h-5 text-gray-800" fill="currentColor" viewBox="0 0 24 24">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
           </svg>
         )
-      },
+      }] : []),
       { 
         key: 'bar_chart', 
         label: 'Bar Chart', 
@@ -4313,7 +4341,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                       stroke="white"
                       strokeWidth={3}
                       filter="url(#pieShadow)"
-                      label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                      label={currentShowDataLabels ? renderPiePercentageLabel : undefined}
                       labelLine={false}
                       style={{ fontSize: '11px', fontWeight: 500 }}
                     >
@@ -4366,7 +4394,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 stroke="white"
                 strokeWidth={3}
                 filter="url(#pieShadow)"
-                label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                label={currentShowDataLabels ? renderPiePercentageLabel : undefined}
                 labelLine={false}
                 dataKey={primaryYKey}
                 nameKey={xKey}
@@ -4469,7 +4497,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 stroke="white"
                 strokeWidth={3}
                 filter="url(#pieShadow)"
-                label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                label={currentShowDataLabels ? renderPiePercentageLabel : undefined}
                 labelLine={false}
                 dataKey={yKey}
                 nameKey={xKey}

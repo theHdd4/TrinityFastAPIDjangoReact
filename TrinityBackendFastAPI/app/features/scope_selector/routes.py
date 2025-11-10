@@ -94,23 +94,22 @@ async def identifier_options(
     
     cfg: dict[str, Any] | None = None
 
-    # --- Redis lookup -------------------------------------------------------
-    if _redis_client is not None:
-        try:
-            cached = _redis_client.get(key)
-            if cached:
-                cfg = json.loads(cached)
-        except Exception as exc:
-            logger.warning(f"Redis read error for {key}: {exc}")
+    # --- Redis lookup BYPASSED - Always fetch fresh from MongoDB -------------------------------------------------------
+    # if _redis_client is not None:
+    #     try:
+    #         cached = _redis_client.get(key)
+    #         if cached:
+    #             cfg = json.loads(cached)
+    #     except Exception as exc:
+    #         logger.warning(f"Redis read error for {key}: {exc}")
 
-    # --- Mongo fallback ------------------------------------------------------
-    if cfg is None:
-        cfg = get_classifier_config_from_mongo(client_name, app_name, project_name, file_name)
-        if cfg and _redis_client is not None:
-            try:
-                _redis_client.setex(key, CLASSIFIER_CFG_TTL, json.dumps(cfg, default=str))
-            except Exception as exc:
-                logger.warning(f"Redis write error for {key}: {exc}")
+    # --- Always fetch from Mongo (Redis caching bypassed) ------------------------------------------------------
+    cfg = get_classifier_config_from_mongo(client_name, app_name, project_name, file_name)
+    if cfg and _redis_client is not None:
+        try:
+            _redis_client.setex(key, CLASSIFIER_CFG_TTL, json.dumps(cfg, default=str))
+        except Exception as exc:
+            logger.warning(f"Redis write error for {key}: {exc}")
 
     # Return identifiers that are assigned to dimensions from the classifier config
     # Exclude identifiers assigned to "unattributed" dimension
