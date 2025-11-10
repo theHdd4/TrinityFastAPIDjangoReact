@@ -14,7 +14,10 @@ from typing import Dict, Any, Tuple, Optional, Iterable, Mapping
 import numpy as np
 from pymongo import MongoClient
 from fastapi.encoders import jsonable_encoder
-from TrinityAI.redis_client import get_redis_client
+try:
+    from TrinityAI.redis_client import get_redis_client
+except ModuleNotFoundError:  # pragma: no cover - fallback for docker image layout
+    from redis_client import get_redis_client
 
 logger = logging.getLogger("trinity.ai")
 
