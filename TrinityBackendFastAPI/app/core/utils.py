@@ -3,20 +3,39 @@
 from pathlib import Path
 import sys
 import os
+import hashlib
 from typing import Dict, Tuple, Any
 import json
 
 from app.core.redis import get_sync_redis
+from app.core.cache_events import emit_cache_invalidation
 from app.DataStorageRetrieval.db import fetch_client_app_project
 
 ENV_TTL = 3600
 ENV_NAMESPACE = "env"
+ENV_VERSION_SUFFIX = ":version"
 
 
 redis_client = get_sync_redis()
 
+
 def _redis_env_key(client: str, app: str, project: str) -> str:
     return f"{ENV_NAMESPACE}:{client}:{app}:{project}"
+
+
+def _redis_env_version_key(client: str, app: str, project: str) -> str:
+    return f"{_redis_env_key(client, app, project)}{ENV_VERSION_SUFFIX}"
+
+
+def _env_version(payload: Dict[str, Any], client: str, app: str, project: str) -> str:
+    canonical = {
+        "client": client,
+        "app": app,
+        "project": project,
+        "env": payload,
+    }
+    data = json.dumps(canonical, sort_keys=True, default=str)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 try:
     DJANGO_ROOT = Path(__file__).resolve().parents[3] / "TrinityBackendDjango"
@@ -213,12 +232,30 @@ async def get_env_vars(
             pass
 
     key = (client_id, app_id, project_id, client_name, app_name, project_name)
+    redis_version_value = None
+    if use_cache and resolved_client and resolved_project:
+        try:
+            raw_version = redis_client.get(
+                _redis_env_version_key(resolved_client, resolved_app, resolved_project)
+            )
+            if isinstance(raw_version, bytes):
+                redis_version_value = raw_version.decode("utf-8")
+            else:
+                redis_version_value = raw_version
+        except Exception:
+            redis_version_value = None
+
     if use_cache and key in _ENV_CACHE:
         env = _ENV_CACHE[key]
         if (
             (resolved_client and env.get("CLIENT_NAME") != resolved_client)
             or (resolved_app and env.get("APP_NAME") != resolved_app)
             or (resolved_project and env.get("PROJECT_NAME") != resolved_project)
+            or (
+                redis_version_value
+                and env.get("_env_version")
+                and redis_version_value != env.get("_env_version")
+            )
         ):
             # Stale entry; ignore and continue to fetch fresh values
             _ENV_CACHE.pop(key, None)
@@ -233,6 +270,13 @@ async def get_env_vars(
         if cached:
             try:
                 env = json.loads(cached)
+                cached_version = env.get("_env_version")
+                if (
+                    redis_version_value
+                    and cached_version
+                    and redis_version_value != cached_version
+                ):
+                    raise ValueError("env version mismatch")
                 if (
                     (resolved_client and env.get("CLIENT_NAME") != resolved_client)
                     or (resolved_app and env.get("APP_NAME") != resolved_app)
@@ -325,6 +369,29 @@ async def get_env_vars(
         }
     )
 
+    version = _env_version(env, env_client, env_app, env_project)
+    env_with_version = dict(env)
+    env_with_version["_env_version"] = version
+
+    if env_client and env_project:
+        redis_key = _redis_env_key(env_client, env_app, env_project)
+        version_key = _redis_env_version_key(env_client, env_app, env_project)
+        payload = json.dumps(env_with_version, default=str)
+        redis_client.setex(redis_key, ENV_TTL, payload)
+        redis_client.setex(version_key, ENV_TTL, version)
+        emit_cache_invalidation(
+            "env",
+            {
+                "client_name": env_client,
+                "app_name": env_app,
+                "project_name": env_project,
+            },
+            action="write",
+            ttl=ENV_TTL,
+            version=version,
+            metadata={"source": "fastapi"},
+        )
+
     if use_cache:
         cache_key = (
             client_id,
@@ -334,12 +401,13 @@ async def get_env_vars(
             env_app,
             env_project,
         )
-        _ENV_CACHE[cache_key] = env
+        _ENV_CACHE[cache_key] = env_with_version
         if key != cache_key:
             _ENV_CACHE.pop(key, None)
-        if env_client and env_project:
-            redis_key = _redis_env_key(env_client, env_app, env_project)
-            redis_client.setex(redis_key, ENV_TTL, json.dumps(env, default=str))
+    else:
+        _ENV_CACHE.pop(key, None)
+
+    env = env_with_version
 
     print(f"🔧 db_env_vars{key} -> {env} (source={source})")
     return (env, source) if return_source else env
