@@ -110,6 +110,18 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     // Merge updates into migrated chart first
     let updatedChart: ChartMakerConfig = { ...migratedChart, ...updates } as ChartMakerConfig;
 
+    // Enforce chart type compatibility with legend selections
+    const nextLegendField = updates.legendField !== undefined ? updates.legendField : updatedChart.legendField;
+    const legendActive = nextLegendField && nextLegendField !== 'aggregate';
+    const nextType = updates.type !== undefined ? updates.type : updatedChart.type;
+
+    if (legendActive && nextType === 'pie') {
+      updatedChart = {
+        ...updatedChart,
+        type: 'line'
+      };
+    }
+
     // If axes changed, strip any existing filters that target those axes
     const axisSelections: string[] = [];
     if (updates.xAxis) axisSelections.push(updates.xAxis);
@@ -182,23 +194,6 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     setChartToDelete(null);
   };
 
-  const getAvailableColumns = () => {
-    if (!settings.uploadedData) return { numeric: [], categorical: [] };
-    
-    const numeric = settings.uploadedData.numericColumns || [];
-    const categorical = settings.uploadedData.categoricalColumns || [];
-    const allColumns = settings.uploadedData.allColumns || [];
-    
-    // Find any columns that aren't categorized and add them to categorical
-    const categorizedColumns = new Set([...numeric, ...categorical]);
-    const uncategorizedColumns = allColumns.filter(col => !categorizedColumns.has(col));
-    
-    return {
-      numeric,
-      categorical: [...categorical, ...uncategorizedColumns],
-    };
-  };
-
   const getUniqueValues = (column: string) => {
     if (!settings.uploadedData) return [];
     
@@ -210,6 +205,72 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     // Fallback to frontend calculation for sample data
     const values = new Set(settings.uploadedData.rows.map(row => String(row[column])));
     return Array.from(values).filter(v => v !== '');
+  };
+
+  const toNumericValue = (value: unknown): number | null => {
+    if (value === null || value === undefined) return null;
+    
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed === '') return null;
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    if (typeof value === 'bigint') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    return null;
+  };
+
+  const hasSufficientUniqueValues = (column: string) => getUniqueValues(column).length > 1;
+
+  const hasValidNumericValues = (column: string) => {
+    if (!settings.uploadedData) return false;
+    const values = settings.uploadedData.rows.map(row => toNumericValue(row[column]));
+    if (values.length === 0) return false;
+    return values.some(value => value !== null && value !== 0);
+  };
+
+  const getNumericColumns = () => {
+    if (!settings.uploadedData) return [];
+
+    const sourceColumns = (settings.uploadedData.numericColumns && settings.uploadedData.numericColumns.length > 0)
+      ? settings.uploadedData.numericColumns
+      : settings.uploadedData.columns;
+
+    return sourceColumns.filter(hasValidNumericValues);
+  };
+
+  const getXAxisColumns = () => {
+    if (!settings.uploadedData) return [];
+    const numericColumns = new Set(getNumericColumns());
+    const categoricalColumns = new Set(getCategoricalColumns());
+    const allColumns = settings.uploadedData.allColumns || settings.uploadedData.columns;
+    return allColumns.filter(column => numericColumns.has(column) || categoricalColumns.has(column));
+  };
+
+  const getAvailableColumns = () => {
+    if (!settings.uploadedData) return { numeric: [], categorical: [] };
+    
+    const numeric = getNumericColumns();
+    const categorical = settings.uploadedData.categoricalColumns || [];
+    const allColumns = settings.uploadedData.allColumns || [];
+    
+    // Find any columns that aren't categorized and add them to categorical
+    const categorizedColumns = new Set([...numeric, ...categorical]);
+    const uncategorizedColumns = allColumns.filter(col => !categorizedColumns.has(col));
+    
+    return {
+      numeric,
+      categorical: [...categorical, ...uncategorizedColumns].filter(hasSufficientUniqueValues),
+    };
   };
 
   const isCategoricalColumn = (column: string) => {
@@ -244,11 +305,23 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     
     // Use backend classification if available
     if (settings.uploadedData.categoricalColumns) {
-      return settings.uploadedData.categoricalColumns;
+      return settings.uploadedData.categoricalColumns.filter(hasSufficientUniqueValues);
     }
     
     // Fallback to frontend calculation
-    return settings.uploadedData.columns.filter(column => isCategoricalColumn(column));
+    return settings.uploadedData.columns.filter(column => isCategoricalColumn(column) && hasSufficientUniqueValues(column));
+  };
+
+  const getLegendColumns = () => {
+    if (!settings.uploadedData) return [];
+
+    const categorical = getCategoricalColumns();
+    const numericColumns = getNumericColumns();
+    const filteredNumeric = numericColumns
+      .filter(column => getUniqueValues(column).length < 20)
+      .filter(hasSufficientUniqueValues);
+
+    return Array.from(new Set([...categorical, ...filteredNumeric]));
   };
 
   const updateFilter = (chartIndex: number, column: string, values: string[]) => {
@@ -270,9 +343,13 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
   // Return ALL columns for filtering
   const getAvailableFilterColumns = () => {
     if (!settings.uploadedData) return [];
-    // Return all columns (both numeric and categorical)
-    return settings.uploadedData.allColumns || 
-           [...(settings.uploadedData.numericColumns || []), ...(settings.uploadedData.categoricalColumns || [])];
+
+    const numeric = new Set(getNumericColumns());
+    const categorical = new Set(getCategoricalColumns());
+    const allColumns = settings.uploadedData.allColumns ||
+      [...(settings.uploadedData.numericColumns || []), ...(settings.uploadedData.categoricalColumns || [])];
+
+    return allColumns.filter(column => numeric.has(column) || categorical.has(column));
   };
 
   // Remove filters for columns that no longer exist in the dataset
@@ -444,7 +521,9 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                                 )}
                                 <SelectItem value="area">Area Chart</SelectItem>
                                 <SelectItem value="scatter">Scatter Plot</SelectItem>
-                                <SelectItem value="pie">Pie Chart</SelectItem>
+                                {(!chart.legendField || chart.legendField === 'aggregate') && (
+                                  <SelectItem value="pie">Pie Chart</SelectItem>
+                                )}
                               </SelectContent>
                             </Select>
                           </div>
@@ -458,10 +537,10 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                               <SelectTrigger className="mt-1">
                                 <SelectValue placeholder="Select X-axis column" />
                               </SelectTrigger>
-                              <SelectContent>
-                                {(settings.uploadedData.allColumns || settings.uploadedData.columns).map((column) => (
-                                  <SelectItem key={column} value={column}>{column}</SelectItem>
-                                ))}
+                               <SelectContent>
+                                 {getXAxisColumns().map((column) => (
+                                   <SelectItem key={column} value={column}>{column}</SelectItem>
+                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -508,7 +587,9 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                                 )}
                                 <SelectItem value="area">Area Chart</SelectItem>
                                 <SelectItem value="scatter">Scatter Plot</SelectItem>
-                                <SelectItem value="pie">Pie Chart</SelectItem>
+                                {(!chart.legendField || chart.legendField === 'aggregate') && (
+                                  <SelectItem value="pie">Pie Chart</SelectItem>
+                                )}
                               </SelectContent>
                             </Select>
                           </div>
@@ -525,10 +606,10 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                               <SelectTrigger className="mt-1">
                                 <SelectValue placeholder="Select X-axis column" />
                               </SelectTrigger>
-                              <SelectContent>
-                                {(settings.uploadedData.allColumns || settings.uploadedData.columns).map((column) => (
-                                  <SelectItem key={column} value={column}>{column}</SelectItem>
-                                ))}
+                               <SelectContent>
+                                 {getXAxisColumns().map((column) => (
+                                   <SelectItem key={column} value={column}>{column}</SelectItem>
+                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
@@ -546,7 +627,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                                   </SelectValue>
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {(settings.uploadedData.numericColumns || settings.uploadedData.columns).map((column) => (
+                                  {getNumericColumns().map((column) => (
                                     <SelectItem key={column} value={column}>{column}</SelectItem>
                                   ))}
                                 </SelectContent>
@@ -599,7 +680,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                                       </SelectValue>
                                     </SelectTrigger>
                                     <SelectContent>
-                                      {(settings.uploadedData.numericColumns || settings.uploadedData.columns).map((column) => (
+                                      {getNumericColumns().map((column) => (
                                         <SelectItem key={column} value={column}>{column}</SelectItem>
                                       ))}
                                     </SelectContent>
@@ -650,7 +731,7 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="aggregate">Show Aggregate</SelectItem>
-                            {getAvailableFilterColumns().map((column) => (
+                            {getLegendColumns().map((column) => (
                               <SelectItem key={column} value={column}>{column}</SelectItem>
                             ))}
                           </SelectContent>

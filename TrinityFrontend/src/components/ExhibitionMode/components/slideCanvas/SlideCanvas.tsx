@@ -139,6 +139,7 @@ interface SlideCanvasProps {
   onPositionPanelChange?: (panel: ReactNode | null) => void;
   onUndo?: () => void;
   presentationMode?: boolean;
+  variant?: 'default' | 'preview';
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -158,7 +159,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onPositionPanelChange,
   onUndo,
   presentationMode = false,
+  variant = 'default',
 }) => {
+  const isPreview = variant === 'preview';
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
   const [settings, setSettings] = useState<PresentationSettings>(() => ({
@@ -169,9 +172,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
-  const [canvasDimensions, setCanvasDimensions] = useState({
-    width: DEFAULT_PRESENTATION_WIDTH,
-    height: CANVAS_STAGE_HEIGHT,
+  const [canvasDimensions, setCanvasDimensions] = useState(() => {
+    const cardWidth = card.presentationSettings?.cardWidth ?? DEFAULT_PRESENTATION_SETTINGS.cardWidth;
+    const width = CARD_WIDTH_DIMENSIONS[cardWidth] ?? DEFAULT_PRESENTATION_WIDTH;
+    return {
+      width,
+      height: CANVAS_STAGE_HEIGHT,
+    };
   });
   const latestCanvasDimensionsRef = useRef(canvasDimensions);
   const presentationModeRef = useRef(presentationMode);
@@ -180,6 +187,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     height: number;
   } | null>(null);
   const [presentationScale, setPresentationScale] = useState(1);
+  const [isCanvasActive, setIsCanvasActive] = useState(false);
+  const effectiveCanvasWidth = useMemo(() => {
+    const cardWidth = settings.cardWidth ?? DEFAULT_PRESENTATION_SETTINGS.cardWidth;
+    return CARD_WIDTH_DIMENSIONS[cardWidth] ?? DEFAULT_PRESENTATION_WIDTH;
+  }, [settings.cardWidth]);
   const effectiveGridSize = useMemo(() => {
     const candidate = Number.isFinite(settings.gridSize) ? Number(settings.gridSize) : DEFAULT_PRESENTATION_SETTINGS.gridSize;
     return Math.min(200, Math.max(4, Math.round(candidate)));
@@ -257,6 +269,32 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       }),
     [slideObjects, titleObjectId],
   );
+
+  useEffect(() => {
+    const node = canvasRef.current;
+    if (!node) {
+      return undefined;
+    }
+
+    const handleFocusIn = () => {
+      setIsCanvasActive(true);
+    };
+
+    const handleFocusOut = () => {
+      const activeElement = document.activeElement;
+      if (!activeElement || !node.contains(activeElement)) {
+        setIsCanvasActive(false);
+      }
+    };
+
+    node.addEventListener('focusin', handleFocusIn);
+    node.addEventListener('focusout', handleFocusOut);
+
+    return () => {
+      node.removeEventListener('focusin', handleFocusIn);
+      node.removeEventListener('focusout', handleFocusOut);
+    };
+  }, []);
 
   const positionPanelObject = useMemo(() => {
     if (!positionPanelTarget) {
@@ -350,8 +388,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         return;
       }
 
-      const availableWidth = Math.max(container.clientWidth - PRESENTATION_PADDING, 0);
-      const availableHeight = Math.max(container.clientHeight - PRESENTATION_PADDING, 0);
+      const availableWidth = Math.max(container.clientWidth, 0);
+      const availableHeight = Math.max(container.clientHeight, 0);
       if (availableWidth === 0 || availableHeight === 0) {
         setPresentationScale(1);
         return;
@@ -380,7 +418,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         resizeObserver.disconnect();
       }
     };
-  }, [canvasDimensions.height, canvasDimensions.width, presentationMode]);
+  }, [canvasDimensions.height, canvasDimensions.width, presentationMode, isPreview]);
 
   const handleBulkUpdate = useCallback(
     (updates: Record<string, Partial<SlideObject>>) => {
@@ -1237,15 +1275,19 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   );
 
   const containerClasses = presentationMode
-    ? 'flex-1 h-full overflow-hidden bg-neutral-950 flex items-center justify-center'
-    : viewMode === 'horizontal'
-      ? 'flex-1 h-full overflow-auto bg-muted/20'
-      : cn(
-          'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm bg-muted/20',
-          isActive
-            ? 'border-primary shadow-elegant ring-1 ring-primary/30'
-            : 'border-border hover:border-primary/40'
-        );
+    ? isPreview
+      ? 'flex h-full w-full items-center justify-center bg-transparent'
+      : 'flex-1 h-full overflow-hidden bg-neutral-950 flex items-center justify-center'
+    : isPreview
+      ? 'w-full overflow-hidden rounded-3xl border border-border bg-background'
+      : viewMode === 'horizontal'
+        ? 'flex-1 h-full overflow-auto bg-muted/20'
+        : cn(
+            'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm bg-muted/20',
+            isActive
+              ? 'border-primary shadow-elegant ring-1 ring-primary/30'
+              : 'border-border hover:border-primary/40'
+          );
 
   const containerClassName = cn(
     containerClasses,
@@ -1277,8 +1319,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
           presentationMode
-            ? 'flex h-full w-full items-center justify-center p-12 bg-neutral-950'
-            : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
+            ? isPreview
+              ? 'flex h-full w-full items-center justify-center'
+              : 'flex h-full w-full items-center justify-center bg-neutral-950'
+            : isPreview
+              ? 'flex h-full w-full items-center justify-center'
+              : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
         }
       >
         {viewMode === 'vertical' && (
@@ -1294,7 +1340,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
         )}
 
-        <div className="space-y-4">
+        <div className={cn('space-y-4', isPreview && 'space-y-0')}>
           <div className="relative">
             {!presentationMode && canEdit && (
               <div
@@ -1325,10 +1371,22 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       ? 'rounded-none border-0'
                       : 'rounded-[28px] border border-border/60',
                     isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                    !canEdit && !presentationMode && 'opacity-90'
+                    !canEdit && !presentationMode && 'opacity-90',
+                    isCanvasActive && !presentationMode
+                      ? 'ring-2 ring-amber-400 shadow-[0_0_18px_rgba(251,191,36,0.28)] border-amber-200'
+                      : undefined
                   )}
                   data-exhibition-slide="true"
                   data-exhibition-slide-id={card.id}
+                  onPointerEnter={() => {
+                    setIsCanvasActive(true);
+                  }}
+                  onPointerLeave={() => {
+                    const activeElement = document.activeElement;
+                    if (!activeElement || !canvasRef.current?.contains(activeElement)) {
+                      setIsCanvasActive(false);
+                    }
+                  }}
                 style={
                   presentationMode
                     ? {
@@ -1338,7 +1396,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                           CANVAS_STAGE_HEIGHT,
                         width:
                           (presentationBaseDimensionsRef.current?.width ?? canvasDimensions.width) ||
-                          DEFAULT_PRESENTATION_WIDTH,
+                          effectiveCanvasWidth,
                         transform: `scale(${presentationScale})`,
                         transformOrigin: 'center center',
                         margin: '0 auto',
@@ -1346,6 +1404,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     : {
                         ...slideThemeStyle,
                         height: CANVAS_STAGE_HEIGHT,
+                        width: effectiveCanvasWidth,
+                        margin: '0 auto',
                       }
                 }
                 onDragOver={presentationMode ? undefined : handleDragOver}
@@ -1455,7 +1515,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           </div>
 
-          {!presentationMode && (
+          {!presentationMode && !isPreview && (
             <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-2 text-foreground">
                 <User className="h-4 w-4" />
@@ -1469,17 +1529,19 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
               </div>
             </div>
           )}
-          <OverviewSection
-            visible={showOverview}
-            outerClassName={layoutConfig.overviewOuterClass}
-            containerClassName={layoutConfig.overviewContainerClass}
-            gridClassName={layoutConfig.gridClass}
-            atomObjects={atomObjects}
-            canEdit={canEdit}
-            onRemoveAtom={handleAtomRemove}
-          />
+          {!isPreview && (
+            <OverviewSection
+              visible={showOverview}
+              outerClassName={layoutConfig.overviewOuterClass}
+              containerClassName={layoutConfig.overviewContainerClass}
+              gridClassName={layoutConfig.gridClass}
+              atomObjects={atomObjects}
+              canEdit={canEdit}
+              onRemoveAtom={handleAtomRemove}
+            />
+          )}
 
-          {viewMode === 'horizontal' && !presentationMode && (
+          {viewMode === 'horizontal' && !presentationMode && !isPreview && (
             <div className="mt-6 text-center">
               <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
                 Slide {slideNumber} of {totalSlides}
@@ -1529,6 +1591,11 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
 export const CANVAS_STAGE_HEIGHT = 520;
 export const DEFAULT_PRESENTATION_WIDTH = 960;
 export const PRESENTATION_PADDING = 160;
+
+const CARD_WIDTH_DIMENSIONS = {
+  M: 832,
+  L: 1088,
+} as const;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
@@ -3896,7 +3963,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         const isLocked = isSlideObjectLocked(targetObject);
 
         const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
-        const resolveSelection = () => {
+        const resolveSelection = (): string[] => {
           const baseSelection = isMulti
             ? selectedIds.includes(objectId)
               ? selectedIds

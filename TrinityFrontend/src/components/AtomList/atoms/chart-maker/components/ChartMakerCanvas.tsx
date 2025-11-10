@@ -653,6 +653,7 @@ const renderChart = (
   // Prioritize chart.type (user selection) over config.chart_type (backend response)
   // since backend converts stacked_bar to bar, but we want to preserve user's selection
   const rawType = previewType || chart.type || config.chart_type;
+  const legendActive = chart.legendField && chart.legendField !== 'aggregate';
   const typeMap: Record<string, string> = {
     line: 'line_chart',
     bar: 'bar_chart',
@@ -667,7 +668,8 @@ const renderChart = (
     pie_chart: 'pie_chart',
     scatter_chart: 'scatter_chart',
   };
-  const rendererType = typeMap[rawType] || 'line_chart';
+  const normalizedType = legendActive && rawType === 'pie' ? 'line' : rawType;
+  const rendererType = typeMap[normalizedType] || 'line_chart';
   const chartData = config.data || getFilteredData(chart);
   const traces = config.traces || [];
   const xAxisConfig = chart.chartRendered && config.x_axis
