@@ -21,6 +21,7 @@ import time
 from datetime import datetime
 
 from app.DataStorageRetrieval.db import  fetch_client_app_project
+from app.core.redis import get_sync_redis
 from app.core.utils import get_env_vars
 
 # Lazy-loaded MinIO client
@@ -538,8 +539,7 @@ def save_clusters_to_minio(df: pd.DataFrame, labels: np.ndarray, file_path: str)
     
     # Cache in Redis for 1 hour
     try:
-        import redis
-        redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
+        redis_client = get_sync_redis()
         redis_client.setex(f"{bucket_name}/{out_path}", 3600, arrow_bytes)
         print(f"✅ Cached clustered data in Redis: {bucket_name}/{out_path}")
     except Exception as e:
@@ -649,8 +649,7 @@ async def save_filtered_data_to_minio(df: pd.DataFrame, original_path: str, filt
     
     # Cache in Redis for 1 hour
     try:
-        import redis
-        redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
+        redis_client = get_sync_redis()
         redis_client.setex(f"{bucket_name}/{filtered_path}", 3600, arrow_bytes)
         print(f"✅ Cached filtered data in Redis: {bucket_name}/{filtered_path}")
     except Exception as e:

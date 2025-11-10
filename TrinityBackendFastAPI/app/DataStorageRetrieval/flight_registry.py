@@ -2,16 +2,15 @@ from typing import Dict, Tuple
 import json
 import os
 import logging
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+from app.core.redis import get_sync_redis
 
 try:
-    import redis  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover
-    redis = None
-
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-_redis = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True) if redis else None
+    _redis = get_sync_redis(decode_responses=True)
+except Exception:  # pragma: no cover - offline tools may skip redis
+    _redis = None
 
 REGISTRY_PATH = Path(os.getenv("FLIGHT_REGISTRY_FILE", "arrow_data/flight_registry.json"))
 

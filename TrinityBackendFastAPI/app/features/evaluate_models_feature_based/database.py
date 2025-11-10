@@ -6,7 +6,8 @@ from urllib.parse import urlparse
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from minio import Minio
-import redis
+
+from app.core.redis import get_redis_settings, get_sync_redis
 
 from .config import settings
 
@@ -113,28 +114,24 @@ def get_mongo() -> AsyncIOMotorClient:
 @lru_cache()
 def get_redis():
     """Return a configured Redis client consistent with other atoms."""
-    host = os.getenv("REDIS_HOST", "redis")
-    port = int(os.getenv("REDIS_PORT", 6379))
-    db = int(os.getenv("REDIS_DB", 0))
-    password = os.getenv("REDIS_PASSWORD") or None
+    settings = get_redis_settings()
     try:
-        client = redis.Redis(
-            host=host,
-            port=port,
-            db=db,
-            password=password,
-            decode_responses=False,
-            socket_timeout=5.0,
-            socket_connect_timeout=5.0,
-            retry_on_timeout=True,
-            max_connections=100,
-            health_check_interval=30,
-        )
+        client = get_sync_redis()
         client.ping()
-        logger.info(f"Connected to Redis at {host}:{port} (DB: {db})")
+        logger.info(
+            "Connected to Redis at %s:%s (DB: %s)",
+            settings.host,
+            settings.port,
+            settings.db,
+        )
         return client
     except Exception as exc:
-        logger.warning(f"Failed to connect to Redis at {host}:{port}: {exc}")
+        logger.warning(
+            "Failed to connect to Redis at %s:%s: %s",
+            settings.host,
+            settings.port,
+            exc,
+        )
         return None
 
 

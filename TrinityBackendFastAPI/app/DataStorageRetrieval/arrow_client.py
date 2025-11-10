@@ -19,17 +19,14 @@ if not ENV_FILE.exists():
     ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(ENV_FILE, override=False)
 
-try:
-    import redis  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - redis optional
-    redis = None
+from app.core.redis import get_sync_redis
 
 from .flight_registry import get_arrow_for_flight_path
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-_redis_client = (
-    redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True) if redis else None
-)
+try:
+    _redis_client = get_sync_redis(decode_responses=True)
+except Exception:  # pragma: no cover - redis optional in offline tooling
+    _redis_client = None
 
 
 def load_env_from_redis() -> Dict[str, str]:

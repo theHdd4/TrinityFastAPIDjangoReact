@@ -1,12 +1,14 @@
-import os
-import pandas as pd
+import asyncio
 import io
+import os
+
+import pandas as pd
 from minio import Minio
 from motor.motor_asyncio import AsyncIOMotorClient
-from app.DataStorageRetrieval.db import fetch_client_app_project
+
 from app.DataStorageRetrieval.arrow_client import download_dataframe
-import asyncio
-import redis  # <-- Add Redis import
+from app.DataStorageRetrieval.db import fetch_client_app_project
+from app.core.redis import get_redis_settings, get_sync_redis
 
 # MinIO config
 # Default to the development MinIO service if not explicitly configured
@@ -22,34 +24,13 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
-# Redis configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_DB = int(os.getenv("REDIS_DB", 0))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
+_redis_settings = get_redis_settings()
+redis_client = get_sync_redis()
 
-# Initialize Redis client with connection pooling and timeouts
-redis_client = None
-try:
-    redis_client = redis.Redis(
-        host=REDIS_HOST,
-        port=REDIS_PORT,
-        db=REDIS_DB,
-        password=REDIS_PASSWORD or None,
-        decode_responses=False,  # Keep as bytes for binary data
-        socket_timeout=5.0,      # 5 second timeout
-        socket_connect_timeout=5.0,
-        retry_on_timeout=True,
-        max_connections=100,
-        health_check_interval=30  # Check connection every 30 seconds
+if os.getenv("ENVIRONMENT", "production").lower() == "development":
+    print(
+        f"✅ [dev] Concat atom using shared Redis {_redis_settings.host}:{_redis_settings.port}"
     )
-    # Test the connection
-    redis_client.ping()
-    print(f"✅ Connected to Redis at {REDIS_HOST}:{REDIS_PORT} (DB: {REDIS_DB})")
-except Exception as e:
-    print(f"⚠️ Failed to connect to Redis at {REDIS_HOST}:{REDIS_PORT}: {e}")
-    print("⚠️ Some features may be limited without Redis.")
-    redis_client = None
 
 
 def load_names_from_db() -> None:

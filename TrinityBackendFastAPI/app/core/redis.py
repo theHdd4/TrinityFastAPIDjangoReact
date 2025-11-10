@@ -5,6 +5,7 @@ same environment-driven configuration across sync and async code paths.
 """
 from __future__ import annotations
 
+import logging
 import os
 import ssl
 from dataclasses import dataclass
@@ -21,6 +22,9 @@ from redis.connection import (
     BlockingConnectionPool as SyncBlockingConnectionPool,
     ConnectionPool as SyncConnectionPool,
 )
+
+
+logger = logging.getLogger("app.core.redis")
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -222,6 +226,15 @@ def get_async_redis(decode_responses: bool = False) -> AsyncRedis:
 
 redis_sync_client = get_sync_redis()
 redis_async_client = get_async_redis()
+
+if os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "production")).lower() == "development":
+    dev_settings = get_redis_settings()
+    endpoint = dev_settings.url or f"{dev_settings.host}:{dev_settings.port}/{dev_settings.db}"
+    logger.info(
+        "Shared Redis configured for %s (client: %s)",
+        endpoint,
+        dev_settings.client_name or "-",
+    )
 
 __all__ = [
     "get_async_pool",

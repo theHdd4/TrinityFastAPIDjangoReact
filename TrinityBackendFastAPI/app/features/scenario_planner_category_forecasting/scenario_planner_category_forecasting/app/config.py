@@ -1,14 +1,15 @@
 # app/config.py
 
-import os
-from dotenv import load_dotenv
-import motor.motor_asyncio
-import redis
 import logging
+import os
 from typing import Optional
+
+import motor.motor_asyncio
+from dotenv import load_dotenv
 from minio import Minio
 
 from app.core.mongo import build_host_mongo_uri
+from app.core.redis import get_redis_settings, get_sync_redis
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -91,29 +92,17 @@ minio_client = Minio(
 # --------------------------------------------------------------------------- #
 # Redis                                                                       #
 # --------------------------------------------------------------------------- #
-# Use the same Redis configuration as other atoms (Docker service name)
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+# Shared Redis configuration
+_redis_settings = get_redis_settings()
+cache = get_sync_redis()
 
-# Debug: Log environment variables to see what's being set
-logger.info("Environment REDIS_HOST: %s", os.getenv("REDIS_HOST"))
-logger.info("Environment REDIS_PORT: %s", os.getenv("REDIS_PORT"))
-logger.info("Using REDIS_HOST: %s, REDIS_PORT: %s", REDIS_HOST, REDIS_PORT)
-
-# DB 0 → lightweight text / flag cache (existing `cache` object)
-cache = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    db=0,
-    decode_responses=False,   # UTF-8 strings
-    socket_connect_timeout=5,
-    socket_timeout=5,
-    retry_on_timeout=True,    # Retry on connection timeout
-    health_check_interval=30  # Health check every 30 seconds
-)
-
-# Don't test connection at import time - let it fail gracefully when used
-logger.info("Redis client configured for %s:%s (connection will be tested when used)", REDIS_HOST, REDIS_PORT)
+if os.getenv("ENVIRONMENT", "production").lower() == "development":
+    logger.info(
+        "Redis client configured for %s:%s (db %s)",
+        _redis_settings.host,
+        _redis_settings.port,
+        _redis_settings.db,
+    )
 
 # --------------------------------------------------------------------------- #
 # Local output folder for CSVs                                                #
