@@ -13,8 +13,14 @@ from typing import Any, Dict, Optional
 
 from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
-from redis.asyncio.connection import ConnectionPool as AsyncConnectionPool
-from redis.connection import ConnectionPool as SyncConnectionPool
+from redis.asyncio.connection import (
+    BlockingConnectionPool as AsyncBlockingConnectionPool,
+    ConnectionPool as AsyncConnectionPool,
+)
+from redis.connection import (
+    BlockingConnectionPool as SyncBlockingConnectionPool,
+    ConnectionPool as SyncConnectionPool,
+)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -118,11 +124,8 @@ def get_redis_settings() -> RedisSettings:
 
 def _shared_connection_kwargs(settings: RedisSettings, decode_responses: bool) -> Dict[str, Any]:
     kwargs: Dict[str, Any] = {
-        "max_connections": settings.max_connections,
         "decode_responses": decode_responses,
     }
-    if settings.pool_timeout is not None:
-        kwargs["timeout"] = settings.pool_timeout
     if settings.socket_timeout is not None:
         kwargs["socket_timeout"] = settings.socket_timeout
     if settings.socket_connect_timeout is not None:
@@ -146,38 +149,58 @@ def _shared_connection_kwargs(settings: RedisSettings, decode_responses: bool) -
 @lru_cache(maxsize=None)
 def get_sync_pool(decode_responses: bool = False) -> SyncConnectionPool:
     settings = get_redis_settings()
-    kwargs = _shared_connection_kwargs(settings, decode_responses)
+    connection_kwargs = _shared_connection_kwargs(settings, decode_responses)
+    pool_kwargs: Dict[str, Any] = {
+        "max_connections": settings.max_connections,
+        **connection_kwargs,
+    }
+    pool_class: type[SyncConnectionPool]
+    if settings.pool_timeout is not None:
+        pool_class = SyncBlockingConnectionPool
+        pool_kwargs["timeout"] = settings.pool_timeout
+    else:
+        pool_class = SyncConnectionPool
     if settings.url:
-        return SyncConnectionPool.from_url(
+        return pool_class.from_url(
             settings.url,
-            **kwargs,
+            **pool_kwargs,
         )
-    return SyncConnectionPool(
+    return pool_class(
         host=settings.host,
         port=settings.port,
         username=settings.username,
         password=settings.password,
         db=settings.db,
-        **kwargs,
+        **pool_kwargs,
     )
 
 
 @lru_cache(maxsize=None)
 def get_async_pool(decode_responses: bool = False) -> AsyncConnectionPool:
     settings = get_redis_settings()
-    kwargs = _shared_connection_kwargs(settings, decode_responses)
+    connection_kwargs = _shared_connection_kwargs(settings, decode_responses)
+    pool_kwargs: Dict[str, Any] = {
+        "max_connections": settings.max_connections,
+        **connection_kwargs,
+    }
+    pool_class: type[AsyncConnectionPool]
+    if settings.pool_timeout is not None:
+        pool_class = AsyncBlockingConnectionPool
+        pool_kwargs["timeout"] = settings.pool_timeout
+    else:
+        pool_class = AsyncConnectionPool
     if settings.url:
-        return AsyncConnectionPool.from_url(
+        return pool_class.from_url(
             settings.url,
-            **kwargs,
+            **pool_kwargs,
         )
-    return AsyncConnectionPool(
+    return pool_class(
         host=settings.host,
         port=settings.port,
         username=settings.username,
         password=settings.password,
         db=settings.db,
-        **kwargs,
+        **pool_kwargs,
     )
 
 

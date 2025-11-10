@@ -12,7 +12,7 @@ from functools import lru_cache
 from typing import Any, Dict, Optional
 
 from redis import Redis
-from redis.connection import ConnectionPool
+from redis.connection import BlockingConnectionPool, ConnectionPool
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -114,13 +114,10 @@ def get_redis_settings() -> RedisSettings:
     )
 
 
-def _pool_kwargs(settings: RedisSettings, decode_responses: bool) -> Dict[str, Any]:
+def _connection_kwargs(settings: RedisSettings, decode_responses: bool) -> Dict[str, Any]:
     kwargs: Dict[str, Any] = {
-        "max_connections": settings.max_connections,
         "decode_responses": decode_responses,
     }
-    if settings.pool_timeout is not None:
-        kwargs["timeout"] = settings.pool_timeout
     if settings.socket_timeout is not None:
         kwargs["socket_timeout"] = settings.socket_timeout
     if settings.socket_connect_timeout is not None:
@@ -144,16 +141,26 @@ def _pool_kwargs(settings: RedisSettings, decode_responses: bool) -> Dict[str, A
 @lru_cache(maxsize=None)
 def get_connection_pool(decode_responses: bool = True) -> ConnectionPool:
     settings = get_redis_settings()
-    kwargs = _pool_kwargs(settings, decode_responses)
+    connection_kwargs = _connection_kwargs(settings, decode_responses)
+    pool_kwargs: Dict[str, Any] = {
+        "max_connections": settings.max_connections,
+        **connection_kwargs,
+    }
+    pool_class: type[ConnectionPool]
+    if settings.pool_timeout is not None:
+        pool_class = BlockingConnectionPool
+        pool_kwargs["timeout"] = settings.pool_timeout
+    else:
+        pool_class = ConnectionPool
     if settings.url:
-        return ConnectionPool.from_url(settings.url, **kwargs)
-    return ConnectionPool(
+        return pool_class.from_url(settings.url, **pool_kwargs)
+    return pool_class(
         host=settings.host,
         port=settings.port,
         username=settings.username,
         password=settings.password,
         db=settings.db,
-        **kwargs,
+        **pool_kwargs,
     )
 
 
