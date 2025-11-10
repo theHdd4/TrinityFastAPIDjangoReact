@@ -3,7 +3,6 @@ import sys
 import time
 import logging
 import json
-import redis
 import requests
 import uvicorn
 import asyncio
@@ -15,6 +14,7 @@ from typing import Dict, Any, Tuple, Optional, Iterable, Mapping
 import numpy as np
 from pymongo import MongoClient
 from fastapi.encoders import jsonable_encoder
+from TrinityAI.redis_client import get_redis_client
 
 logger = logging.getLogger("trinity.ai")
 
@@ -123,8 +123,7 @@ load_env_from_redis()
 # ---------------------------------------------------------------------------
 # Redis and Mongo configuration
 # ---------------------------------------------------------------------------
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+redis_client = get_redis_client()
 
 DEFAULT_MONGO_URI = build_host_mongo_uri()
 MONGO_URI = (

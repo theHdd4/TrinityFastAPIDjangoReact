@@ -1,5 +1,33 @@
 name: trinity-prod
 
+x-redis-env: &redis-env
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  REDIS_DB: ${REDIS_DB:-0}
+  REDIS_USERNAME: ${REDIS_USERNAME:-}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  REDIS_CLIENT_NAME: ${REDIS_CLIENT_NAME:-trinity}
+  REDIS_USE_TLS: ${REDIS_USE_TLS:-false}
+  REDIS_TLS_CA_FILE: ${REDIS_TLS_CA_FILE:-}
+  REDIS_TLS_CERT_FILE: ${REDIS_TLS_CERT_FILE:-}
+  REDIS_TLS_KEY_FILE: ${REDIS_TLS_KEY_FILE:-}
+  REDIS_TLS_CERT_REQS: ${REDIS_TLS_CERT_REQS:-required}
+  REDIS_POOL_MAX_CONNECTIONS: ${REDIS_POOL_MAX_CONNECTIONS:-50}
+  REDIS_POOL_TIMEOUT: ${REDIS_POOL_TIMEOUT:-10}
+  REDIS_SOCKET_TIMEOUT: ${REDIS_SOCKET_TIMEOUT:-5}
+  REDIS_SOCKET_CONNECT_TIMEOUT: ${REDIS_SOCKET_CONNECT_TIMEOUT:-5}
+  REDIS_HEALTH_CHECK_INTERVAL: ${REDIS_HEALTH_CHECK_INTERVAL:-15}
+
+x-redis-healthcheck: &redis-healthcheck
+  test:
+    - CMD-SHELL
+    - if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -h 127.0.0.1 -p ${REDIS_PORT:-6379} -a "$$REDIS_PASSWORD" ping; else redis-cli -h 127.0.0.1 -p ${REDIS_PORT:-6379} ping; fi
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 5s
+
 services:
   postgres:
     image: postgres:15
@@ -30,6 +58,9 @@ services:
 
   redis:
     image: redis:7
+    environment:
+      <<: *redis-env
+    healthcheck: *redis-healthcheck
     volumes:
       - redis_data:/data
     networks:
@@ -97,6 +128,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      <<: *redis-env
       DEBUG: "False"
       DJANGO_LOG_LEVEL: "WARNING"
       HOST_IP: ${HOST_IP:-10.2.4.48}
@@ -140,6 +172,7 @@ services:
     networks:
       - trinity-net
     environment:
+      <<: *redis-env
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
@@ -159,6 +192,7 @@ services:
     env_file:
       - ./TrinityBackendDjango/.env
     environment:
+      <<: *redis-env
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
@@ -209,6 +243,7 @@ services:
     env_file:
       - ./TrinityBackendDjango/.env
     environment:
+      <<: *redis-env
       OLLAMA_IP: 10.2.4.48
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro

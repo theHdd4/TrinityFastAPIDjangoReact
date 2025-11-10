@@ -1,10 +1,16 @@
-import os
-import redis
+from __future__ import annotations
 
-# Use the REDIS_URL from Django settings or environment
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+import sys
+from pathlib import Path
 
-# Create a StrictRedis client from URL
-redis_client = redis.StrictRedis.from_url(REDIS_URL, decode_responses=True)
+# Ensure the shared FastAPI package is on the import path when Django boots.
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.append(str(ROOT))
 
-__all__ = ["redis_client"]
+from TrinityBackendFastAPI.app.core.redis import get_redis_settings, get_sync_redis
+
+redis_client = get_sync_redis(decode_responses=True)
+redis_settings = get_redis_settings()
+
+__all__ = ["redis_client", "redis_settings", "get_sync_redis", "get_redis_settings"]

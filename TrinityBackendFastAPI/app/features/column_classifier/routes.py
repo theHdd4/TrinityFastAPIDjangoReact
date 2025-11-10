@@ -5,7 +5,6 @@ import json
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from urllib.parse import unquote, quote
-import os
 import pyarrow as pa
 import pyarrow.ipc as ipc
 from minio.error import S3Error
@@ -13,8 +12,7 @@ from app.DataStorageRetrieval.arrow_client import download_dataframe, upload_dat
 from app.DataStorageRetrieval.flight_registry import get_flight_path_for_csv, set_ticket
 from app.DataStorageRetrieval.db import get_dataset_info
 from app.DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
-from app.features.feature_overview.deps import redis_client
-import redis
+from app.core.redis import get_sync_redis
 
 # Import your existing database functions
 # Change these lines at the top of routes.py:
@@ -55,8 +53,8 @@ extraction_results = {}
 # MinIO client for loading saved dataframes
 minio_client = get_client()
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-binary_redis = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=False)
+binary_redis = get_sync_redis()
+redis_client = binary_redis
 
 # =============================================================================
 # HEALTH CHECK ENDPOINT
