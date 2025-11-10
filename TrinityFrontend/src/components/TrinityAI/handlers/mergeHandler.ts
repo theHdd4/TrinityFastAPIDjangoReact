@@ -219,28 +219,30 @@ export const mergeHandler: AtomHandler = {
     });
 
     // 🔧 CRITICAL FIX: Call perform endpoint immediately (like create-column)
+    let performResult: any = null;
     try {
       console.log('🚀 Calling Merge perform endpoint immediately (like create-column)');
       console.log('📋 Configuration to execute:', { file1: mappedFile1, file2: mappedFile2, joinColumns, joinType });
       
-      // Extract just the filename if it's a full path
-      const filename1 = getFilename(file1);
-      const filename2 = getFilename(file2);
+      // Preserve folder structure when available (auto-saved files live under concatenated-data/)
+      const backendFile1 = mappedFile1?.includes('/') ? mappedFile1 : getFilename(file1);
+      const backendFile2 = mappedFile2?.includes('/') ? mappedFile2 : getFilename(file2);
+      console.log('📁 Normalized backend file paths for merge:', { backendFile1, backendFile2 });
       
       // Convert join columns to lowercase (backend requirement)
       const lowercaseJoinColumns = joinColumns.map((col: string) => col.toLowerCase());
       
       const formData = new URLSearchParams({
-        file1: filename1,
-        file2: filename2,
+        file1: backendFile1,
+        file2: backendFile2,
         bucket_name: bucketName,
         join_columns: JSON.stringify(lowercaseJoinColumns),
         join_type: joinType,
       });
       
       console.log('📁 Auto-executing with form data:', {
-        file1: filename1,
-        file2: filename2,
+        file1: backendFile1,
+        file2: backendFile2,
         bucket_name: bucketName,
         join_columns: lowercaseJoinColumns,
         join_type: joinType
@@ -249,8 +251,8 @@ export const mergeHandler: AtomHandler = {
       const performEndpoint = `${MERGE_API}/perform`;
       console.log('📡 Calling perform endpoint:', performEndpoint);
       console.log('📦 FormData payload:', {
-        file1: filename1,
-        file2: filename2,
+        file1: backendFile1,
+        file2: backendFile2,
         bucket_name: bucketName,
         join_columns: JSON.stringify(lowercaseJoinColumns),
         join_type: joinType
@@ -265,8 +267,8 @@ export const mergeHandler: AtomHandler = {
       console.log('📨 Perform endpoint response status:', res2.status);
       
       if (res2.ok) {
-        const result = await res2.json();
-        console.log('✅ Auto-execution successful:', result);
+        performResult = await res2.json();
+        console.log('✅ Auto-execution successful:', performResult);
         
         // Update atom settings with results
         updateAtomSettings(atomId, {
@@ -276,9 +278,9 @@ export const mergeHandler: AtomHandler = {
           joinType,
           availableColumns: joinColumns,
           mergeResults: {
-            ...result,
+            ...performResult,
             result_file: null,
-            unsaved_data: result.data,
+            unsaved_data: performResult.data,
           },
           operationCompleted: true,
           lastUpdateTime: Date.now()
@@ -289,9 +291,9 @@ export const mergeHandler: AtomHandler = {
           'Files': `${mappedFile1} + ${mappedFile2}`,
           'Join Type': joinType,
           'Join Columns': joinColumns.join(', '),
-          'Result ID': result.merge_id || 'N/A',
-          'Shape': result.result_shape || 'N/A',
-          'Columns': result.columns?.length || 0
+          'Result ID': performResult.merge_id || 'N/A',
+          'Shape': performResult.result_shape || 'N/A',
+          'Columns': performResult.columns?.length || 0
         };
         const completionMsg = createSuccessMessage('Merge operation', completionDetails);
         completionMsg.content += '\n\n📊 Results are ready! The files have been merged.\n\n💡 You can now view the merged data in the Merge interface.';
@@ -344,7 +346,7 @@ export const mergeHandler: AtomHandler = {
         atomType: 'merge',
         atomId,
         stepAlias,
-        result,
+        result: performResult,
         updateAtomSettings,
         setMessages,
         isStreamMode: context.isStreamMode,

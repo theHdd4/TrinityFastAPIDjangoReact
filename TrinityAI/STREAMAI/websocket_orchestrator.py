@@ -295,7 +295,7 @@ WORKFLOW PLANNING RULES:
             display = file_path.split('/')[-1] if '/' in file_path else file_path
             display_names.append(display)
             key = display.lower()
-            lookup.setdefault(key, []).append(display)
+            lookup.setdefault(key, []).append(file_path)
         return display_names, lookup
 
     def _match_prompt_files_to_available(
@@ -1454,14 +1454,22 @@ Respond ONLY with valid JSON array, no other text:
         return str(value).strip()
 
     def _extract_filename(self, value: str) -> str:
-        """Extract filename component from possible path."""
+        """Normalize stored object names for downstream API calls.
+
+        Keep full object path when provided (e.g. includes sub-directories like
+        `concatenated-data/`), but strip leading control characters such as '@'
+        and normalise path separators.
+        """
         if not value:
             return value
-        if "/" in value:
-            value = value.split("/")[-1]
-        if "\\" in value:
-            value = value.split("\\")[-1]
-        return value
+
+        normalized = str(value).strip()
+        if normalized.startswith("@"):
+            normalized = normalized[1:]
+
+        normalized = normalized.replace("\\", "/")
+        logger.info(f"📁 Normalized file reference: original='{value}' normalized='{normalized}'")
+        return normalized
 
     def _build_auto_save_filename(
         self,

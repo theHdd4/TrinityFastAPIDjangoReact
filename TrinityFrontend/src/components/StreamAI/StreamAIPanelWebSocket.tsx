@@ -84,12 +84,19 @@ interface Chat {
   sessionId?: string; // Backend session ID for this chat
 }
 
+interface TrinityAIBackgroundStatus {
+  isProcessing: boolean;
+  isCollapsed: boolean;
+  hasActiveWorkflow: boolean;
+}
+
 interface TrinityAIPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
+  onBackgroundStatusChange?: (status: TrinityAIBackgroundStatus) => void;
 }
 
-export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle }) => {
+export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle, onBackgroundStatusChange }) => {
   // Chat management
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -107,6 +114,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const backgroundStatusRef = useRef<TrinityAIBackgroundStatus | null>(null);
   
   // WebSocket connection
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
@@ -291,6 +299,30 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
   useEffect(() => {
     wsRef.current = wsConnection;
   }, [wsConnection]);
+
+  useEffect(() => {
+    if (!onBackgroundStatusChange) return;
+
+    const hasActiveWorkflow = Boolean(wsConnection && currentWorkflowMessageId);
+    const status: TrinityAIBackgroundStatus = {
+      isProcessing: isLoading || hasActiveWorkflow,
+      isCollapsed,
+      hasActiveWorkflow
+    };
+
+    const prevStatus = backgroundStatusRef.current;
+    if (
+      prevStatus &&
+      prevStatus.isProcessing === status.isProcessing &&
+      prevStatus.isCollapsed === status.isCollapsed &&
+      prevStatus.hasActiveWorkflow === status.hasActiveWorkflow
+    ) {
+      return;
+    }
+
+    backgroundStatusRef.current = status;
+    onBackgroundStatusChange(status);
+  }, [isCollapsed, isLoading, onBackgroundStatusChange, wsConnection, currentWorkflowMessageId]);
   
   // Cleanup WebSocket ONLY on unmount, NOT on collapse
   useEffect(() => {

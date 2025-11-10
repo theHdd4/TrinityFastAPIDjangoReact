@@ -86,6 +86,12 @@ interface Chat {
   createdAt: Date;
 }
 
+interface WorkflowAIBackgroundStatus {
+  isProcessing: boolean;
+  isCollapsed: boolean;
+  hasSuggestedMolecules: boolean;
+}
+
 interface WorkflowAIPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
@@ -100,6 +106,7 @@ interface WorkflowAIPanelProps {
   onGetAICreatedMolecules?: () => string[]; // Get AI-created molecule IDs
   onClearAIMolecules?: () => void; // Clear AI-created molecules
   onGetRightmostPosition?: () => number; // Get rightmost molecule position
+  onBackgroundStatusChange?: (status: WorkflowAIBackgroundStatus) => void;
 }
 
 const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({ 
@@ -111,7 +118,8 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   onCheckCanvasHasMolecules,
   onGetAICreatedMolecules,
   onClearAIMolecules,
-  onGetRightmostPosition
+  onGetRightmostPosition,
+  onBackgroundStatusChange
 }) => {
   // Chat management state
   const [chats, setChats] = useState<Chat[]>([]);
@@ -258,6 +266,38 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   useEffect(() => {
     wsRef.current = wsConnection;
   }, [wsConnection]);
+
+  const backgroundStatusRef = useRef<WorkflowAIBackgroundStatus | null>(null);
+
+  useEffect(() => {
+    if (!onBackgroundStatusChange) return;
+
+    const status: WorkflowAIBackgroundStatus = {
+      isProcessing: isLoading || (wsConnection !== null && wsConnected),
+      isCollapsed,
+      hasSuggestedMolecules: suggestedMolecules.length > 0
+    };
+
+    const prevStatus = backgroundStatusRef.current;
+    if (
+      prevStatus &&
+      prevStatus.isProcessing === status.isProcessing &&
+      prevStatus.isCollapsed === status.isCollapsed &&
+      prevStatus.hasSuggestedMolecules === status.hasSuggestedMolecules
+    ) {
+      return;
+    }
+
+    backgroundStatusRef.current = status;
+    onBackgroundStatusChange(status);
+  }, [
+    isCollapsed,
+    isLoading,
+    onBackgroundStatusChange,
+    suggestedMolecules.length,
+    wsConnected,
+    wsConnection
+  ]);
 
   // Debug: Log when isCollapsed changes
   useEffect(() => {
