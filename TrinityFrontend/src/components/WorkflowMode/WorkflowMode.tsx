@@ -156,6 +156,34 @@ const WorkflowMode = () => {
     console.log('✅ Updated molecule positions:', positions);
   };
 
+  const handleAtomOrderChange = useCallback((moleculeId: string, newOrder: string[]) => {
+    const nextOrder = Array.isArray(newOrder) ? [...newOrder] : [];
+
+    setCanvasMolecules(prev =>
+      prev.map(mol =>
+        mol.id === moleculeId
+          ? {
+              ...mol,
+              atomOrder: [...nextOrder],
+              atoms: [...nextOrder]
+            }
+          : mol
+      )
+    );
+
+    setCustomMolecules(prev =>
+      prev.map(mol =>
+        mol.id === moleculeId
+          ? {
+              ...mol,
+              atomOrder: [...nextOrder],
+              atoms: [...nextOrder]
+            }
+          : mol
+      )
+    );
+  }, []);
+
   const handleInsertMolecule = (referenceMoleculeId: string, position: 'left' | 'right') => {
     // Generate numbered name automatically
     const existingNewMolecules = canvasMolecules.filter(m => 
@@ -1482,6 +1510,8 @@ const WorkflowMode = () => {
         const sortedCards: LayoutCard[] = [];
         const workflowCards = cardsToSort.filter(card => card.moleculeId);
         const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
+        const normalizeAtomId = (atomId?: string) =>
+          (atomId || '').toLowerCase().replace(/[\s_-]/g, '');
 
         // FIX 1: Create a map of moleculeId to moleculeIndex using FULL list (includes inactive)
         // This ensures consistent indexing with Laboratory Mode
@@ -1611,16 +1641,26 @@ const WorkflowMode = () => {
           const isActiveMolecule = workflowMoleculeIds.has(molecule.id);
           
           if (isActiveMolecule) {
-            // Add all workflow cards for this active molecule first (maintain their relative order)
-          const moleculeCards = workflowCards
-            .filter(card => card.moleculeId === molecule.id)
-            .sort((a, b) => {
-              // Maintain original order within molecule
-              const indexA = cardsToSort.findIndex(c => c.id === a.id);
-              const indexB = cardsToSort.findIndex(c => c.id === b.id);
-              return indexA - indexB;
-            });
-          sortedCards.push(...moleculeCards);
+            const workflowOrder = (molecule.atomOrder && molecule.atomOrder.length > 0)
+              ? molecule.atomOrder
+              : molecule.atoms;
+
+            const moleculeCards = workflowCards
+              .filter(card => card.moleculeId === molecule.id)
+              .sort((a, b) => {
+                const atomA = normalizeAtomId(a.atoms[0]?.atomId);
+                const atomB = normalizeAtomId(b.atoms[0]?.atomId);
+                const orderA = workflowOrder.findIndex(atom => normalizeAtomId(atom) === atomA);
+                const orderB = workflowOrder.findIndex(atom => normalizeAtomId(atom) === atomB);
+                return (orderA === -1 ? Number.MAX_SAFE_INTEGER : orderA) -
+                       (orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB);
+              })
+              .map((card, cardIndex) => ({
+                ...card,
+                order: (fullMoleculeIndex * 1000) + cardIndex
+              }));
+
+            sortedCards.push(...moleculeCards);
           }
 
           // Add standalone cards that should appear after this molecule (based on references)
@@ -1880,14 +1920,17 @@ const WorkflowMode = () => {
       // Save workflow molecules to localStorage in format expected by Laboratory Mode
       // This ensures Laboratory Mode can sort cards correctly based on workflow molecule order
       // Format: [{ moleculeId, moleculeTitle, atoms: [{ atomName, order }] }]
-      const workflowMoleculesForLab = workflowMolecules.map(mol => ({
-        moleculeId: mol.id,
-        moleculeTitle: mol.title,
-        atoms: mol.atoms.map((atomId, index) => ({
-          atomName: atomId,
-          order: index
-        }))
-      }));
+      const workflowMoleculesForLab = workflowMolecules.map(mol => {
+        const orderSource = mol.atomOrder && mol.atomOrder.length > 0 ? mol.atomOrder : mol.atoms;
+        return {
+          moleculeId: mol.id,
+          moleculeTitle: mol.title,
+          atoms: orderSource.map((atomId, index) => ({
+            atomName: atomId,
+            order: index
+          }))
+        };
+      });
       localStorage.setItem('workflow-molecules', JSON.stringify(workflowMoleculesForLab));
       console.log('💾 Saved workflow molecules to localStorage for Laboratory Mode sorting:', workflowMoleculesForLab);
     
@@ -2200,6 +2243,8 @@ const WorkflowMode = () => {
         const sortedCards: LayoutCard[] = [];
         const workflowCards = cardsToSort.filter(card => card.moleculeId);
         const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
+        const normalizeAtomId = (atomId?: string) =>
+          (atomId || '').toLowerCase().replace(/[\s_-]/g, '');
 
         const moleculeIndexMap = new Map<string, number>();
         allMoleculesForIndexing.forEach((molecule, index) => {
@@ -2210,13 +2255,25 @@ const WorkflowMode = () => {
           const isActiveMolecule = workflowMoleculeIds.has(molecule.id);
           
           if (isActiveMolecule) {
+            const workflowOrder = (molecule.atomOrder && molecule.atomOrder.length > 0)
+              ? molecule.atomOrder
+              : molecule.atoms;
+
             const moleculeCards = workflowCards
               .filter(card => card.moleculeId === molecule.id)
               .sort((a, b) => {
-                const indexA = cardsToSort.findIndex(c => c.id === a.id);
-                const indexB = cardsToSort.findIndex(c => c.id === b.id);
-                return indexA - indexB;
-              });
+                const atomA = normalizeAtomId(a.atoms[0]?.atomId);
+                const atomB = normalizeAtomId(b.atoms[0]?.atomId);
+                const orderA = workflowOrder.findIndex(atom => normalizeAtomId(atom) === atomA);
+                const orderB = workflowOrder.findIndex(atom => normalizeAtomId(atom) === atomB);
+                return (orderA === -1 ? Number.MAX_SAFE_INTEGER : orderA) -
+                       (orderB === -1 ? Number.MAX_SAFE_INTEGER : orderB);
+              })
+              .map((card, cardIndex) => ({
+                ...card,
+                order: (fullMoleculeIndex * 1000) + cardIndex
+              }));
+
             sortedCards.push(...moleculeCards);
           }
 
@@ -2234,6 +2291,10 @@ const WorkflowMode = () => {
             return subOrderA - subOrderB;
           });
 
+          cardsAfterThisMolecule.forEach((card, index) => {
+            const subOrder = typeof card.order === 'number' ? (card.order % 1000) : (index + 1);
+            card.order = (fullMoleculeIndex * 1000) + subOrder;
+          });
           sortedCards.push(...cardsAfterThisMolecule);
         });
 
@@ -2382,14 +2443,17 @@ const WorkflowMode = () => {
       }
 
       // Save workflow molecules to localStorage
-      const workflowMoleculesForLab = workflowMolecules.map(mol => ({
-        moleculeId: mol.id,
-        moleculeTitle: mol.title,
-        atoms: mol.atoms.map((atomId, index) => ({
-          atomName: atomId,
-          order: index
-        }))
-      }));
+      const workflowMoleculesForLab = workflowMolecules.map(mol => {
+        const orderSource = mol.atomOrder && mol.atomOrder.length > 0 ? mol.atomOrder : mol.atoms;
+        return {
+          moleculeId: mol.id,
+          moleculeTitle: mol.title,
+          atoms: orderSource.map((atomId, index) => ({
+            atomName: atomId,
+            order: index
+          }))
+        };
+      });
       localStorage.setItem('workflow-molecules', JSON.stringify(workflowMoleculesForLab));
 
       console.log('✅ Laboratory configuration synced successfully');
@@ -2919,6 +2983,7 @@ const WorkflowMode = () => {
             onMoleculeReplace={handleMoleculeReplace}
             onMoleculePositionsUpdate={handleMoleculePositionsUpdate}
             onInsertMolecule={handleInsertMolecule}
+            onAtomOrderChange={handleAtomOrderChange}
             isLibraryVisible={isLibraryVisible}
             isRightPanelVisible={isRightPanelVisible}
             isAtomLibraryVisible={isAtomLibraryVisible}
