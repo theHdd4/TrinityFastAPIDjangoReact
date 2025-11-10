@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle } from 'lucide-react';
+import { VALIDATE_API } from '@/lib/api';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
@@ -466,7 +467,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
           }
         }
         
-        const url = `http://localhost:8001/api/data-upload-validate/list_saved_dataframes${query}`;
+        const url = `${VALIDATE_API}/list_saved_dataframes${query}`;
         console.log('📂 Fetching from:', url);
         
         const response = await fetch(url);
@@ -510,7 +511,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
         }
       }
       
-      const url = `http://localhost:8001/api/data-upload-validate/list_saved_dataframes${query}`;
+      const url = `${VALIDATE_API}/list_saved_dataframes${query}`;
       const response = await fetch(url);
       const data = await response.json();
       

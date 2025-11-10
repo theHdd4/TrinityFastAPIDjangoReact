@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Send, X, Bot, User, Sparkles, Plus, Trash2, MessageCircle, RotateCcw, Clock, Settings, Paperclip, Mic, Minus, Square, File, Play } from 'lucide-react';
-import { VALIDATE_API } from '@/lib/api';
+import { TRINITY_AI_API, VALIDATE_API } from '@/lib/api';
 import WorkflowOverwriteDialog from '@/components/WorkflowMode/components/WorkflowOverwriteDialog';
 
 // Workflow Mode AI Panel - Completely separate from SuperAgent
@@ -361,29 +361,26 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
 
     try {
       // Connect to Workflow Agent WebSocket
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsHost = import.meta.env.VITE_TRINITY_AI_WS_HOST || window.location.hostname;
-      
-      // Determine port based on environment
-      // For domain access (trinity-dev.quantmatrixai.com), use same port as page (default 80/443)
-      // This allows routing through Cloudflare → Traefik → trinity-ai service
-      let wsPort = '';
-      if (import.meta.env.VITE_TRINITY_AI_WS_PORT) {
-        // Explicit environment variable takes precedence
-        wsPort = `:${import.meta.env.VITE_TRINITY_AI_WS_PORT}`;
-      } else if (window.location.port === '8081') {
-        // Dev stack specific port
-        wsPort = ':8005';
-      } else if (window.location.port === '8080') {
-        // Production stack local access
-        wsPort = ':8080';
-      } else if (window.location.port) {
-        // Use whatever port the page was loaded from
-        wsPort = `:${window.location.port}`;
-      }
-      // If no port (domain access), wsPort remains empty (uses default 80/443 based on protocol)
-      
-      const wsUrl = `${wsProtocol}//${wsHost}${wsPort}/trinityai/workflow/compose-ws`;
+      const resolveWorkflowWsUrl = () => {
+        try {
+          const baseUrl = new URL(TRINITY_AI_API);
+          const cleanedPath = baseUrl.pathname.replace(/\/$/, '');
+          baseUrl.pathname = `${cleanedPath}/workflow/compose-ws`;
+          baseUrl.protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+          return baseUrl.toString();
+        } catch (error) {
+          console.warn('Failed to build WebSocket URL from TRINITY_AI_API:', error);
+          if (typeof window !== 'undefined') {
+            const fallback = new URL(
+              `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/trinityai/workflow/compose-ws`
+            );
+            return fallback.toString();
+          }
+          throw error;
+        }
+      };
+
+      const wsUrl = resolveWorkflowWsUrl();
 
       console.log('🔗 Connecting to Workflow Agent:', wsUrl);
       const ws = new WebSocket(wsUrl);
