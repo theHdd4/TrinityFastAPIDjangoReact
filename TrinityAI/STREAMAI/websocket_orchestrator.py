@@ -9,7 +9,7 @@ Follows the exact SuperAgent pattern for proper card and result handling.
 import asyncio
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 import uuid
 
@@ -25,6 +25,42 @@ class WebSocketEvent:
     def to_json(self) -> str:
         """Convert to JSON string"""
         return json.dumps({"type": self.type, **self.data})
+
+
+@dataclass
+class WorkflowStepPlan:
+    """Represents a single workflow step with prompt metadata."""
+    step_number: int
+    atom_id: str
+    description: str
+    prompt: str
+    files_used: List[str]
+    inputs: List[str]
+    output_alias: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "step_number": self.step_number,
+            "atom_id": self.atom_id,
+            "description": self.description,
+            "prompt": self.prompt,
+            "files_used": self.files_used,
+            "inputs": self.inputs,
+            "output_alias": self.output_alias
+        }
+
+
+@dataclass
+class WorkflowPlan:
+    """Plan containing ordered workflow steps."""
+    workflow_steps: List[WorkflowStepPlan]
+    total_steps: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "workflow_steps": [step.to_dict() for step in self.workflow_steps],
+            "total_steps": self.total_steps
+        }
 
 
 class StreamWebSocketOrchestrator:
@@ -170,15 +206,22 @@ WORKFLOW PLANNING RULES:
             r'([A-Za-z0-9_\-]+\.xlsx)',      # filename.xlsx
         ]
         
-        found_files = []
+        found_files: List[str] = []
         for pattern in patterns:
             matches = re.findall(pattern, user_prompt, re.IGNORECASE)
             found_files.extend(matches)
         
-        # Remove duplicates and normalize
-        found_files = list(set([f.lower() for f in found_files]))
-        logger.info(f"📂 Extracted files from prompt: {found_files}")
-        return found_files
+        # Remove duplicates while preserving order and original casing
+        unique_files: List[str] = []
+        seen = set()
+        for file_name in found_files:
+            normalized = file_name.lower()
+            if normalized not in seen:
+                seen.add(normalized)
+                unique_files.append(file_name)
+        
+        logger.info(f"📂 Extracted files from prompt: {[f.lower() for f in unique_files]}")
+        return unique_files
     
     def _match_files_with_available(self, prompt_files: List[str], available_files: List[str]) -> bool:
         """
@@ -215,11 +258,173 @@ WORKFLOW PLANNING RULES:
             logger.info(f"⚠️ No matching files found. Prompt files: {prompt_files}, Available: {available_normalized[:3]}...")
             return False
     
+    def _prepare_available_file_context(self, available_files: List[str]) -> Tuple[List[str], Dict[str, List[str]]]:
+        """Return display-friendly list of available file names and lookup map."""
+        display_names: List[str] = []
+        lookup: Dict[str, List[str]] = {}
+        for file_path in available_files:
+            display = file_path.split('/')[-1] if '/' in file_path else file_path
+            display_names.append(display)
+            key = display.lower()
+            lookup.setdefault(key, []).append(display)
+        return display_names, lookup
+
+    def _match_prompt_files_to_available(
+        self,
+        prompt_files: List[str],
+        available_lookup: Dict[str, List[str]]
+    ) -> List[str]:
+        """Map files mentioned by the user to available files when possible."""
+        matched: List[str] = []
+        for raw_name in prompt_files:
+            cleaned = raw_name.lstrip('@')
+            key = cleaned.lower()
+            actual = None
+
+            if key in available_lookup and available_lookup[key]:
+                actual = available_lookup[key].pop(0)
+            else:
+                for lookup_key, names in available_lookup.items():
+                    if names and (key in lookup_key or lookup_key in key):
+                        actual = names.pop(0)
+                        break
+
+            if actual:
+                matched.append(actual)
+            else:
+                matched.append(cleaned)
+
+        return matched
+
+    def _compose_prompt(
+        self,
+        atom_id: str,
+        description: str,
+        guidance: Dict[str, Any],
+        files_used: List[str],
+        inputs: List[str],
+        output_alias: str
+    ) -> str:
+        """Build a natural language prompt for downstream atom execution."""
+        description_text = description.strip() or guidance.get("purpose", "Perform the requested operation")
+        if not description_text.endswith('.'):  # ensure sentence end
+            description_text += '.'
+
+        lines: List[str] = []
+
+        if files_used:
+            if len(files_used) == 1:
+                lines.append(f"Use dataset `{files_used[0]}` as the primary input.")
+            else:
+                formatted = ', '.join(f"`{name}`" for name in files_used)
+                lines.append(f"Use datasets {formatted} as inputs.")
+        elif inputs:
+            if len(inputs) == 1:
+                lines.append(f"Use dataset `{inputs[0]}` produced in earlier steps.")
+            else:
+                formatted = ', '.join(f"`{alias}`" for alias in inputs)
+                lines.append(f"Use datasets {formatted} produced in earlier steps.")
+        else:
+            lines.append("Ask the user to provide or confirm the correct dataset before executing this atom.")
+
+        lines.append(description_text)
+
+        guidelines = guidance.get("prompt_guidelines", [])
+        if guidelines:
+            lines.append("Ensure you:")
+            for guideline in guidelines:
+                lines.append(f"- {guideline}")
+
+        dynamic_slots = guidance.get("dynamic_slots", {})
+        if dynamic_slots:
+            lines.append("Capture details for:")
+            for key, value in dynamic_slots.items():
+                lines.append(f"- {key}: {value}")
+
+        lines.append(f"Return the result as `{output_alias}` for downstream steps.")
+
+        return "\n".join(lines)
+
+    def _build_enriched_plan(
+        self,
+        workflow_steps_raw: List[Dict[str, Any]],
+        prompt_files: List[str],
+        available_files: List[str],
+        start_index: int = 1,
+        initial_previous_alias: Optional[str] = None
+    ) -> List[WorkflowStepPlan]:
+        """Combine raw workflow outline with prompt guidance and file context."""
+        display_names, lookup = self._prepare_available_file_context(available_files)
+        lookup_for_match = {key: names[:] for key, names in lookup.items()}
+        matched_prompt_files = self._match_prompt_files_to_available(prompt_files, lookup_for_match)
+
+        remaining_available: List[str] = []
+        for names in lookup_for_match.values():
+            remaining_available.extend(names)
+
+        matched_queue = matched_prompt_files.copy()
+
+        enriched_steps: List[WorkflowStepPlan] = []
+        previous_alias: Optional[str] = initial_previous_alias
+
+        for idx, raw_step in enumerate(workflow_steps_raw, start_index):
+            atom_id = raw_step.get("atom_id", "unknown")
+            description = raw_step.get("description", "").strip()
+            output_alias = f"{atom_id.replace('-', '_')}_step_{idx}"
+
+            guidance = {}
+            if self.rag_engine:
+                guidance = self.rag_engine.get_atom_prompt_guidance(atom_id)
+
+            files_required = 0
+            if atom_id == "data-upload-validate":
+                files_required = 1
+            elif atom_id in {"merge", "concat"}:
+                files_required = 2
+
+            files_used: List[str] = []
+            for _ in range(files_required):
+                if matched_queue:
+                    files_used.append(matched_queue.pop(0))
+                elif remaining_available:
+                    files_used.append(remaining_available.pop(0))
+
+            inputs: List[str] = []
+            if atom_id in {"merge", "concat"}:
+                inputs = files_used.copy()
+                if len(inputs) < files_required and previous_alias:
+                    inputs.append(previous_alias)
+            elif atom_id == "data-upload-validate":
+                inputs = []
+            else:
+                if previous_alias:
+                    inputs = [previous_alias]
+                elif files_used:
+                    inputs = files_used.copy()
+
+            prompt_text = self._compose_prompt(atom_id, description, guidance, files_used, inputs, output_alias)
+
+            enriched_steps.append(
+                WorkflowStepPlan(
+                    step_number=idx,
+                    atom_id=atom_id,
+                    description=description or guidance.get("purpose", ""),
+                    prompt=prompt_text,
+                    files_used=files_used,
+                    inputs=inputs,
+                    output_alias=output_alias
+                )
+            )
+
+            previous_alias = output_alias
+
+        return enriched_steps
+
     async def _generate_workflow_with_llm(
         self,
         user_prompt: str,
         available_files: List[str]
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], List[str], bool]:
         """
         Use LLM to generate workflow plan based on user prompt and atom capabilities.
         
@@ -228,7 +433,7 @@ WORKFLOW PLANNING RULES:
             available_files: List of available file names
             
         Returns:
-            List of workflow steps with atom_id and description
+            Tuple of (workflow steps, files detected in user prompt, whether existing files matched)
         """
         import aiohttp
         
@@ -338,13 +543,13 @@ Respond ONLY with valid JSON array, no other text:
                     for i, step in enumerate(workflow_steps, 1):
                         logger.info(f"   Step {i}: {step.get('atom_id')} - {step.get('description')}")
                     
-                    return workflow_steps
+                    return workflow_steps, prompt_files, files_exist
                     
         except json.JSONDecodeError as e:
             logger.error(f"❌ Failed to parse LLM response as JSON: {e}")
             logger.error(f"   Content: {content}")
             # Fallback to keyword-based
-            return self._fallback_to_keywords(user_prompt, available_files)
+            return self._fallback_to_keywords(user_prompt, available_files), prompt_files, files_exist
         except Exception as e:
             logger.error(f"❌ LLM workflow generation failed: {e}")
             import traceback
@@ -433,41 +638,21 @@ Respond ONLY with valid JSON array, no other text:
             logger.info("📋 PHASE 1: Generating workflow plan with LLM...")
             
             # Use LLM to generate intelligent workflow
-            workflow_steps_raw = await self._generate_workflow_with_llm(
+            workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
                 user_prompt=user_prompt,
                 available_files=available_files
             )
             
             # Create plan structure
-            from dataclasses import dataclass
-            
-            @dataclass
-            class SimpleStep:
-                step_number: int
-                atom_id: str
-                description: str
-            
-            @dataclass
-            class SimplePlan:
-                workflow_steps: List[SimpleStep]
-                total_steps: int
-                
-                def to_dict(self):
-                    return {
-                        "workflow_steps": [{"step_number": s.step_number, "atom_id": s.atom_id, "description": s.description} for s in self.workflow_steps],
-                        "total_steps": self.total_steps
-                    }
-            
-            plan = SimplePlan(
-                workflow_steps=[
-                    SimpleStep(
-                        step_number=idx + 1,
-                        atom_id=step.get('atom_id'),
-                        description=step.get('description', '')
-                    )
-                    for idx, step in enumerate(workflow_steps_raw)
-                ],
-                total_steps=len(workflow_steps_raw)
+            enriched_steps = self._build_enriched_plan(
+                workflow_steps_raw=workflow_steps_raw,
+                prompt_files=prompt_files,
+                available_files=available_files
+            )
+
+            plan = WorkflowPlan(
+                workflow_steps=enriched_steps,
+                total_steps=len(enriched_steps)
             )
             
             logger.info(f"✅ Generated workflow with {plan.total_steps} steps")
@@ -523,22 +708,20 @@ Respond ONLY with valid JSON array, no other text:
                         logger.info(f"➕ Regenerating workflow with additional info: {additional_info}")
                         
                         # Regenerate workflow with combined prompt
-                        workflow_steps_raw = await self._generate_workflow_with_llm(
+                        workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
                             user_prompt=combined_prompt,
                             available_files=available_files
                         )
                         
-                        # Rebuild plan
+                        enriched_steps = self._build_enriched_plan(
+                            workflow_steps_raw=workflow_steps_raw,
+                            prompt_files=prompt_files,
+                            available_files=available_files
+                        )
+
                         plan = WorkflowPlan(
-                            workflow_steps=[
-                                WorkflowStep(
-                                    step_number=idx + 1,
-                                    atom_id=step.get('atom_id'),
-                                    description=step.get('description', '')
-                                )
-                                for idx, step in enumerate(workflow_steps_raw)
-                            ],
-                            total_steps=len(workflow_steps_raw)
+                            workflow_steps=enriched_steps,
+                            total_steps=len(enriched_steps)
                         )
                         
                         # Send updated plan
@@ -601,6 +784,25 @@ Respond ONLY with valid JSON array, no other text:
                             
                             if approval_msg.get('type') == 'approve_step':
                                 if approval_msg.get('step_number') == step.step_number:
+                                    try:
+                                        await self._auto_save_step(
+                                            sequence_id=sequence_id,
+                                            step_number=step.step_number,
+                                            workflow_step=step
+                                        )
+                                    except Exception as save_error:
+                                        logger.error(f"❌ Auto-save failed for step {step.step_number}: {save_error}")
+                                        await websocket.send_text(WebSocketEvent(
+                                            "error",
+                                            {
+                                                "sequence_id": sequence_id,
+                                                "error": str(save_error),
+                                                "message": f"Auto-save failed for step {step.step_number}: {save_error}"
+                                            }
+                                        ).to_json())
+                                        workflow_rejected = True
+                                        break
+
                                     step_approved = True
                                     logger.info(f"✅ Step {step.step_number} approved - continuing to next step")
                                 else:
@@ -632,21 +834,20 @@ Respond ONLY with valid JSON array, no other text:
                                     combined_prompt = f"{original_prompt}. Additional requirements for remaining steps: {additional_info}"
                                     
                                     # Regenerate workflow and filter to remaining steps
-                                    new_workflow_steps = await self._generate_workflow_with_llm(
+                                    new_workflow_steps, prompt_files, files_exist = await self._generate_workflow_with_llm(
                                         user_prompt=combined_prompt,
                                         available_files=available_files
                                     )
                                     
-                                    # Update plan with new remaining steps
-                                    new_remaining_steps = [
-                                        WorkflowStep(
-                                            step_number=idx + step.step_number + 1,
-                                            atom_id=s.get('atom_id'),
-                                            description=s.get('description', '')
-                                        )
-                                        for idx, s in enumerate(new_workflow_steps)
-                                    ]
-                                    
+                                    # Update plan with new remaining steps enriched with prompts
+                                    new_remaining_steps = self._build_enriched_plan(
+                                        workflow_steps_raw=new_workflow_steps,
+                                        prompt_files=prompt_files,
+                                        available_files=available_files,
+                                        start_index=step.step_number + 1,
+                                        initial_previous_alias=step.output_alias
+                                    )
+
                                     # Replace remaining steps in plan
                                     plan.workflow_steps = plan.workflow_steps[:idx + 1] + new_remaining_steps
                                     plan.total_steps = len(plan.workflow_steps)
@@ -699,7 +900,6 @@ Respond ONLY with valid JSON array, no other text:
                     "message": f"Workflow failed: {str(e)}"
                 }
             ).to_json())
-    
     async def _execute_step_with_events(
         self,
         websocket,
@@ -751,7 +951,8 @@ Respond ONLY with valid JSON array, no other text:
             parameters = await self._generate_simple_parameters(
                 atom_id=atom_id,
                 original_prompt=original_prompt,
-                available_files=available_files
+                available_files=available_files,
+                step_prompt=getattr(step, "prompt", None)
             )
             
             logger.info(f"✅ Parameters: {json.dumps(parameters, indent=2)[:150]}...")
@@ -790,7 +991,6 @@ Respond ONLY with valid JSON array, no other text:
             )
             
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
-            
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
             # ================================================================
@@ -803,6 +1003,7 @@ Respond ONLY with valid JSON array, no other text:
                     "action": "AGENT_EXECUTION",
                     "result": execution_result,  # merge_json, groupby_json, etc.
                     "sequence_id": sequence_id,
+                    "output_alias": step.output_alias,
                     "summary": f"Executed {atom_id}"
                 }
             ).to_json())
@@ -841,13 +1042,14 @@ Respond ONLY with valid JSON array, no other text:
         self,
         atom_id: str,
         original_prompt: str,
-        available_files: List[str]
+        available_files: List[str],
+        step_prompt: Optional[str] = None
     ) -> Dict[str, Any]:
         """Generate simple parameters from prompt"""
         # For atoms, just pass the prompt
         # The agent will use its own LLM to generate proper configuration
         return {
-            "prompt": original_prompt,
+            "prompt": step_prompt or original_prompt,
             "available_files": available_files
         }
     

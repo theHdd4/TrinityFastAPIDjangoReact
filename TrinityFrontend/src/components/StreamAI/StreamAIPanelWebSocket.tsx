@@ -9,6 +9,7 @@ import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
 import StreamStepMonitor from './StreamStepMonitor';
 import StreamStepApproval from './StreamStepApproval';
+import { autoSaveStepResult } from '../TrinityAI/handlers/utils';
 
 // FastAPI base URL
 const FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || 'http://localhost:8002';
@@ -759,6 +760,7 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
               const card = currentCards.find(c => c.id === cardId);
               
               if (card) {
+                const stepAlias = data.output_alias;
                 // Import atom info
                 const {atoms: allAtoms} = await import('@/components/AtomList/data');
                 const atomInfo = allAtoms.find((a: any) => a.id === data.atom_id);
@@ -806,9 +808,24 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                   },
                   sessionId: data.sequence_id,
                   isStreamMode: false,
+                  stepAlias,
                 };
                   
                   await handler.handleSuccess(data.result, handlerContext);
+
+                  try {
+                    await autoSaveStepResult({
+                      atomType: data.atom_id,
+                      atomId: atomInstanceId,
+                      stepAlias,
+                      result: data.result,
+                      updateAtomSettings: handlerContext.updateAtomSettings,
+                      setMessages,
+                      isStreamMode: handlerContext.isStreamMode,
+                    });
+                  } catch (autoSaveError) {
+                    console.error('❌ Auto-save error:', autoSaveError);
+                  }
                   
                   // Save to localStorage
                   const cards = useLaboratoryStore.getState().cards;
@@ -856,6 +873,8 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                 // Set completed step number for handlers
                 setCompletedStepNumber(data.step);
                 
+                const stepInfo = workflowMsg.data.steps.find((s: any) => s.step_number === data.step);
+
                 // Add step approval message after workflow monitor
                 const approvalMsg: Message = {
                   id: `step-approval-${data.sequence_id}-${data.step}-${Date.now()}`,
@@ -866,7 +885,11 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                   data: {
                     stepNumber: data.step,
                     totalSteps: workflowMsg.data.steps.length,
-                    stepDescription: workflowMsg.data.steps.find((s: any) => s.step_number === data.step)?.description || '',
+                    stepDescription: stepInfo?.description || '',
+                    stepPrompt: stepInfo?.prompt || '',
+                    filesUsed: stepInfo?.files_used || [],
+                    inputs: stepInfo?.inputs || [],
+                    outputAlias: stepInfo?.output_alias || '',
                     sequence_id: data.sequence_id  // Store sequence ID for routing
                   }
                 };
@@ -1289,6 +1312,10 @@ export const StreamAIPanelWebSocket: React.FC<StreamAIPanelProps> = ({ isCollaps
                       stepNumber={msg.data.stepNumber}
                       totalSteps={msg.data.totalSteps}
                       stepDescription={msg.data.stepDescription}
+                      stepPrompt={msg.data.stepPrompt}
+                      filesUsed={msg.data.filesUsed}
+                      inputs={msg.data.inputs}
+                      outputAlias={msg.data.outputAlias}
                       onAccept={() => {
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           wsConnection.send(JSON.stringify({

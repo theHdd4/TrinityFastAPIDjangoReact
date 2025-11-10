@@ -8,6 +8,7 @@ interface StepStatus {
   status: 'pending' | 'running' | 'completed' | 'failed';
   summary?: string;
   error?: string;
+  output_alias?: string;
 }
 
 interface StreamStepMonitorProps {
@@ -117,6 +118,12 @@ const StreamStepMonitor: React.FC<StreamStepMonitorProps> = ({
               <p className="text-xs text-gray-600 font-inter leading-relaxed">
                 {step.description}
               </p>
+
+              {step.output_alias && (
+                <p className="text-[11px] text-gray-500 font-inter mt-1 italic">
+                  Output alias: <span className="font-semibold text-gray-700">{step.output_alias}</span>
+                </p>
+              )}
 
               {step.status === 'running' && (
                 <p className="text-xs text-blue-600 mt-2 font-inter flex items-center">

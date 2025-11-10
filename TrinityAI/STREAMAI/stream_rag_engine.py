@@ -58,10 +58,15 @@ class StreamRAGEngine:
         self.atom_requirements = self._load_json("atom_requirements.json")
         self.atom_params = self.atom_requirements.get("atoms", {})
         self.extraction_guide = self.atom_requirements.get("parameter_extraction_guide", {})
+
+        # Load prompt knowledge base for atoms
+        prompt_knowledge = self._load_json("atom_knowledge_prompts.json")
+        self.atom_prompt_guidance = prompt_knowledge.get("atoms", {})
         
         logger.info(f"✅ Loaded {len(self.sequences)} sequence patterns")
         logger.info(f"✅ Loaded {len(self.dependency_rules)} dependency rules")
         logger.info(f"✅ Loaded {len(self.atom_params)} atom parameter specs")
+        logger.info(f"✅ Loaded prompt guidance for {len(self.atom_prompt_guidance)} atoms")
     
     def _load_json(self, filename: str) -> Dict:
         """Load JSON file from rag directory"""
@@ -146,6 +151,10 @@ class StreamRAGEngine:
             Enhanced metadata including input/output types
         """
         return self.atom_metadata.get(atom_id, {})
+
+    def get_atom_prompt_guidance(self, atom_id: str) -> Dict[str, Any]:
+        """Return prompt crafting guidance for a given atom."""
+        return self.atom_prompt_guidance.get(atom_id, {})
     
     def validate_sequence(self, atom_sequence: List[str]) -> Tuple[bool, List[str]]:
         """

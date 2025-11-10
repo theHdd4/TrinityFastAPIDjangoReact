@@ -7,6 +7,10 @@ interface StreamStepApprovalProps {
   stepNumber: number;
   totalSteps: number;
   stepDescription: string;
+  stepPrompt?: string;
+  filesUsed?: string[];
+  outputAlias?: string;
+  inputs?: string[];
   onAccept: () => void;
   onReject: () => void;
   onAdd: (additionalInfo: string) => void;
@@ -18,6 +22,10 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
   stepNumber,
   totalSteps,
   stepDescription,
+  stepPrompt,
+  filesUsed,
+  outputAlias,
+  inputs,
   onAccept,
   onReject,
   onAdd,
@@ -58,6 +66,44 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
           <p className="text-xs text-blue-700 font-inter">
             💡 Review this step and decide: Continue to next step, reject workflow, or add more information to refine the workflow.
           </p>
+        </div>
+
+        {/* Step Context */}
+        <div className="grid gap-3 md:grid-cols-2">
+          {filesUsed && filesUsed.length > 0 && (
+            <div className="bg-white border-2 border-gray-200 rounded-xl p-3 shadow-sm">
+              <p className="text-xs font-semibold text-gray-700 font-inter mb-2">Files Referenced</p>
+              <ul className="space-y-1 text-xs text-gray-600 font-inter list-disc list-inside">
+                {filesUsed.map((file) => (
+                  <li key={file}>{file}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {(inputs && inputs.length > 0) && (
+            <div className="bg-white border-2 border-gray-200 rounded-xl p-3 shadow-sm">
+              <p className="text-xs font-semibold text-gray-700 font-inter mb-2">Inputs Used</p>
+              <ul className="space-y-1 text-xs text-gray-600 font-inter list-disc list-inside">
+                {inputs.map((input) => (
+                  <li key={input}>{input}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {stepPrompt && (
+            <div className="md:col-span-2 bg-[#F8FBFF] border-2 border-blue-200 rounded-xl p-3 shadow-sm">
+              <p className="text-xs font-semibold text-[#2761A3] font-inter mb-2">LLM Prompt Sent to Atom</p>
+              <pre className="text-xs text-gray-700 font-inter whitespace-pre-wrap leading-relaxed">{stepPrompt}</pre>
+            </div>
+          )}
+
+          {outputAlias && (
+            <div className="md:col-span-2 bg-white border-2 border-gray-200 rounded-xl p-3 shadow-sm">
+              <p className="text-xs text-gray-600 font-inter">Output stored as <span className="font-semibold text-gray-800">{outputAlias}</span> for upcoming steps.</p>
+            </div>
+          )}
         </div>
 
         {/* Action Buttons */}

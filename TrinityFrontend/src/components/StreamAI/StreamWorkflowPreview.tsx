@@ -7,6 +7,10 @@ interface WorkflowStep {
   step_number: number;
   atom_id: string;
   description: string;
+  prompt?: string;
+  files_used?: string[];
+  inputs?: string[];
+  output_alias?: string;
 }
 
 interface StreamWorkflowPreviewProps {
@@ -109,6 +113,28 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
                   <p className="text-xs text-gray-600 font-inter leading-relaxed">
                     {step.description}
                   </p>
+
+                  {step.files_used && step.files_used.length > 0 && (
+                    <div className="mt-2 bg-gray-50 border border-gray-200 rounded-lg p-2">
+                      <p className="text-xs font-semibold text-gray-700 font-inter">Files Referenced:</p>
+                      <ul className="text-xs text-gray-600 font-inter list-disc list-inside space-y-1">
+                        {step.files_used.map((file) => (
+                          <li key={file}>{file}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {step.prompt && (
+                    <div className="mt-2 bg-[#F8FBFF] border border-blue-200 rounded-lg p-3">
+                      <p className="text-xs font-semibold text-[#2761A3] font-inter mb-1">LLM Prompt:</p>
+                      <pre className="text-xs text-gray-700 font-inter whitespace-pre-wrap leading-relaxed">{step.prompt}</pre>
+                    </div>
+                  )}
+
+                  {step.output_alias && (
+                    <p className="text-[11px] text-gray-500 font-inter mt-2 italic">Output saved as: <span className="font-semibold">{step.output_alias}</span></p>
+                  )}
                 </div>
 
                 {/* Status Indicator */}

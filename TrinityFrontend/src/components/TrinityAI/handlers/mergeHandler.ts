@@ -8,7 +8,8 @@ import {
   createErrorMessage,
   processSmartResponse,
   executePerformOperation,
-  validateFileInput 
+  validateFileInput,
+  autoSaveStepResult
 } from './utils';
 
 export const mergeHandler: AtomHandler = {
@@ -18,7 +19,7 @@ export const mergeHandler: AtomHandler = {
     console.log('🆔 AtomId:', context.atomId);
     console.log('🔢 SessionId:', context.sessionId);
     
-    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId, stepAlias } = context;
     
     // 🚨 FORCED TEST MESSAGE - This MUST appear if handler is called
     console.log('🚨🚨🚨 MERGE HANDLER CALLED - FORCING TEST MESSAGE');
@@ -338,6 +339,20 @@ export const mergeHandler: AtomHandler = {
       });
     }
     
+    try {
+      await autoSaveStepResult({
+        atomType: 'merge',
+        atomId,
+        stepAlias,
+        result,
+        updateAtomSettings,
+        setMessages,
+        isStreamMode: context.isStreamMode,
+      });
+    } catch (autoSaveError) {
+      console.error('❌ Merge auto-save failed:', autoSaveError);
+    }
+
     console.log('🏁 MERGE HANDLER - handleSuccess COMPLETE');
     return { success: true };
   },

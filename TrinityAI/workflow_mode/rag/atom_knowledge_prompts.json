@@ -1,0 +1,373 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "source": "atoms_knowledge_base.json",
+    "generated_at": "2025-11-07T00:00:00Z",
+    "description": "Prompt design guidance per atom so Stream AI can craft context-rich instructions for downstream agents."
+  },
+  "atoms": {
+    "data-upload-validate": {
+      "purpose": "Ingest a raw dataset into Stream AI while running schema and quality checks.",
+      "prompt_guidelines": [
+        "State the file to load using the exact name if the user referenced an uploaded asset; otherwise instruct the assistant to ask the user for the file path.",
+        "Describe any validation expectations (schema inference, missing value scan, duplicate detection).",
+        "If multiple files are implied, mention that each must be ingested separately or call out the specific file required for downstream steps."
+      ],
+      "dynamic_slots": {
+        "file_reference": "Filename or identifier the user mentioned (e.g., sales.arrow).",
+        "validation_focus": "Optional list such as ['infer schema', 'detect duplicates', 'score data quality']."
+      },
+      "example_templates": [
+        {
+          "scenario": "Single Arrow already in MinIO",
+          "prompt": "Load the already uploaded dataset `{{file_reference}}`, run full schema inference, highlight missing values, and generate a quality score before handing the validated frame to downstream steps."
+        },
+        {
+          "scenario": "User describes a CSV path",
+          "prompt": "Upload and validate the file provided by the user (ask for the CSV path if not given), infer column types, and surface any data quality warnings before continuing."
+        }
+      ]
+    },
+    "feature-overview": {
+      "purpose": "Produce an exploratory profile outlining statistics and data quality signals across all columns.",
+      "prompt_guidelines": [
+        "Reference the upstream dataset alias (e.g., `{{previous_output}}`).",
+        "Request descriptive stats, missing value percentages, outlier detection, and distribution insights relevant to the user intent.",
+        "Call out any domain-specific metrics the user requested (e.g., product category summaries)."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Identifier from the previous step, like validated_data or merged_data.",
+        "focus_columns": "Optional subset of columns the user emphasized."
+      },
+      "example_templates": [
+        {
+          "scenario": "General profile",
+          "prompt": "Run a full feature overview on `{{input_alias}}`, covering summary statistics, missing value heatmap, outlier flags, and correlation highlights."
+        },
+        {
+          "scenario": "Column-specific EDA",
+          "prompt": "Profile `{{input_alias}}` with extra emphasis on {{focus_columns}}: compute distribution shapes, detect anomalies, and summarize category balance."
+        }
+      ]
+    },
+    "dataframe-operations": {
+      "purpose": "Apply filter, sort, select, and cleanup actions on a tabular dataset through natural language.",
+      "prompt_guidelines": [
+        "Begin with the dataset alias that should be transformed.",
+        "Enumerate the operations in execution order (filter conditions, sorts, column reordering, deduplication, replacements, etc.).",
+        "Translate user phrasing into explicit logic while keeping natural language clarity (e.g., 'Filter orders where revenue > 1000 and region = \"EMEA\"')."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Dataset name coming from previous step or selected file.",
+        "operations": "Ordered array describing each transformation object or phrase."
+      },
+      "example_templates": [
+        {
+          "scenario": "Filter and sort",
+          "prompt": "Using `{{input_alias}}`, filter rows to keep {{operations[0]}}, then sort by {{operations[1]}} in descending order and drop any placeholder columns." 
+        },
+        {
+          "scenario": "Cleanup and rename",
+          "prompt": "Clean `{{input_alias}}` by removing duplicates on invoice_id, forward-fill missing shipment_date, and rename revenue_usd to net_revenue."
+        }
+      ]
+    },
+    "create-and-transform-features": {
+      "purpose": "Engineer new calculated columns or transform existing ones for modeling readiness.",
+      "prompt_guidelines": [
+        "Mention the base dataset alias.",
+        "List each feature to create or transform, including formulas or logic (e.g., profit = revenue - cost).",
+        "Specify any required handling for null values or units so the agent produces production-safe columns."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Dataset being enriched.",
+        "feature_instructions": "Array of dictionaries describing column_name, expression, and notes."
+      },
+      "example_templates": [
+        {
+          "scenario": "Profitability features",
+          "prompt": "On `{{input_alias}}`, create `gross_profit = revenue - cost`, `margin_pct = gross_profit / revenue`, and bucket avg_order_value into quantiles for downstream segmentation."
+        },
+        {
+          "scenario": "Date-derived fields",
+          "prompt": "Transform `{{input_alias}}` by extracting order_year and order_month from order_date and flag is_holiday when date aligns with the provided holiday calendar." 
+        }
+      ]
+    },
+    "create-column": {
+      "purpose": "Add a single calculated column using arithmetic, conditional logic, or text operations.",
+      "prompt_guidelines": [
+        "Capture the transformation as an explicit expression referencing existing columns.",
+        "Note any casting or rounding requirements.",
+        "If the user described conditional logic, translate it into readable IF/ELSE phrasing."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Dataset receiving the new column.",
+        "new_column": "Name of the column to add.",
+        "expression": "Formula or conditional statement to compute values."
+      },
+      "example_templates": [
+        {
+          "scenario": "Margin calculation",
+          "prompt": "In `{{input_alias}}`, create a column `margin_pct` with expression `(revenue - cost) / revenue`, rounding to two decimals and treating null revenue as zero." 
+        },
+        {
+          "scenario": "Conditional label",
+          "prompt": "Add `priority_flag` to `{{input_alias}}` that equals 'High' when sla_hours < 4 and ticket_status = 'Open', otherwise 'Standard'."
+        }
+      ]
+    },
+    "groupby-wtg-avg": {
+      "purpose": "Aggregate a dataset by categories while computing weighted metrics and standard summaries.",
+      "prompt_guidelines": [
+        "Identify the dataset alias and grouping columns explicitly.",
+        "List metrics to compute (sums, counts, averages, weighted averages) and name the weight column when applicable.",
+        "Mention any sorting or ranking the user expects in the output."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Dataset being aggregated.",
+        "group_columns": "Array of dimensions such as ['region', 'product'].",
+        "aggregations": "Array describing metric_name and operation, including weight_col if needed."
+      },
+      "example_templates": [
+        {
+          "scenario": "Revenue by product",
+          "prompt": "Aggregate `{{input_alias}}` by region and product_category to compute total_revenue (sum of revenue), order_count (count of order_id), and weighted_avg_price (weighted by units_sold)."
+        },
+        {
+          "scenario": "Ranked KPIs",
+          "prompt": "Group `{{input_alias}}` by customer_segment, calculate weighted_avg_nps using weight column survey_weight, add total_responses, and rank segments by weighted_avg_nps."
+        }
+      ]
+    },
+    "merge": {
+      "purpose": "Join two datasets on matching keys to combine related attributes.",
+      "prompt_guidelines": [
+        "Provide the file or dataset aliases for left and right inputs (or instruct the agent to fetch the files the user referenced).",
+        "Specify the join type and key columns; include any suffix handling or mismatch resolution the user expects.",
+        "Mention downstream objectives so the agent can keep only relevant columns if needed."
+      ],
+      "dynamic_slots": {
+        "left_source": "Primary dataset alias or file name.",
+        "right_source": "Secondary dataset alias or file name.",
+        "join_columns": "Array of join keys such as ['customer_id'].",
+        "join_type": "inner | left | right | outer",
+        "post_merge_actions": "Optional instructions like drop duplicates or retain specific columns."
+      },
+      "example_templates": [
+        {
+          "scenario": "Exact key match",
+          "prompt": "Merge `{{left_source}}` with `{{right_source}}` using an inner join on ['customer_id'], resolve duplicate column names with '_right' suffix, and keep only columns the user highlighted." 
+        },
+        {
+          "scenario": "Left join with cleanup",
+          "prompt": "Perform a left join from `{{left_source}}` onto `{{right_source}}` on order_id and sku, fill missing attributes with 'Unknown', and flag unmatched rows." 
+        }
+      ]
+    },
+    "concat": {
+      "purpose": "Stack datasets vertically or append columns when structures align.",
+      "prompt_guidelines": [
+        "Clarify whether the concat direction is vertical (rows) or horizontal (columns).",
+        "List the ordered sources and note if schema alignment or column harmonization is required.",
+        "Instruct on duplicate handling, sorting, or column realignment post-concatenation."
+      ],
+      "dynamic_slots": {
+        "sources": "Ordered list of datasets or filenames.",
+        "direction": "vertical | horizontal",
+        "post_concat_actions": "Optional cleanup such as remove duplicates or add source column."
+      },
+      "example_templates": [
+        {
+          "scenario": "Quarterly stacking",
+          "prompt": "Vertically concatenate [{{sources}}], align columns by header, add a source_quarter column inferred from each file name, and remove exact duplicate rows." 
+        },
+        {
+          "scenario": "Feature enrichment",
+          "prompt": "Horizontally append {{sources[1]}} columns onto {{sources[0]}}, matching on row order, and rename overlapping fields before merging." 
+        }
+      ]
+    },
+    "explore": {
+      "purpose": "Open an interactive exploration session that surfaces insights and anomalies for the selected dataset.",
+      "prompt_guidelines": [
+        "Reference the dataset alias and mention any focus areas requested by the user (columns, filters, segments).",
+        "Ask for interactive filters or quick comparisons the user cares about.",
+        "Encourage surfacing AI-generated observations aligned with the business question."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Dataset for exploration.",
+        "focus": "Optional description of metrics or segments of interest."
+      },
+      "example_templates": [
+        {
+          "scenario": "Baseline exploration",
+          "prompt": "Launch Explore on `{{input_alias}}` to review numeric distributions, categorical balance, and missing value hotspots; highlight any anomalies tied to {{focus}}." 
+        },
+        {
+          "scenario": "Segment drill-down",
+          "prompt": "Use Explore on `{{input_alias}}` with pre-set filters for enterprise customers and surface notable trends in churn_rate and expansion_revenue." 
+        }
+      ]
+    },
+    "correlation": {
+      "purpose": "Quantify linear or rank-based relationships among numeric features, optionally targeted to a label.",
+      "prompt_guidelines": [
+        "Declare the dataset alias and whether to compute Pearson or Spearman correlations.",
+        "List any specific column subset or target column emphasis.",
+        "Request visual artifacts such as heatmaps when that helps downstream reasoning."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Dataset to analyze.",
+        "columns": "Optional array of columns to include.",
+        "target_column": "Optional focus feature to correlate against.",
+        "method": "pearson | spearman"
+      },
+      "example_templates": [
+        {
+          "scenario": "Full matrix",
+          "prompt": "Compute a Pearson correlation matrix on `{{input_alias}}` for all numeric fields, flag pairs with |r| > 0.7, and generate a heatmap visualization." 
+        },
+        {
+          "scenario": "Targeted analysis",
+          "prompt": "Calculate Spearman correlations between {{columns}} and target `{{target_column}}`, highlight the strongest positive and negative drivers, and explain potential multicollinearity." 
+        }
+      ]
+    },
+    "chart-maker": {
+      "purpose": "Generate polished visualizations or dashboards from structured data.",
+      "prompt_guidelines": [
+        "Identify the dataset alias that feeds the chart.",
+        "Specify the chart type, axes, encoding fields, groupings, and stylistic cues aligned with Quant Matrix AI brand (colors, fonts).",
+        "Add narrative intentions (e.g., highlight top segments, show trend over time) so the agent can annotate appropriately."
+      ],
+      "dynamic_slots": {
+        "data_source": "Dataset alias.",
+        "chart_type": "bar | line | area | pie | scatter | heatmap | waterfall | combo",
+        "encodings": "Object describing x_field, y_field, color_by, facet, etc.",
+        "styling": "Optional brand-aligned instructions (use primary green, Inter font)."
+      },
+      "example_templates": [
+        {
+          "scenario": "Sales by region",
+          "prompt": "Build a clustered bar chart from `{{data_source}}` showing revenue by region and quarter, color bars with Quant Matrix green/blue palette, and annotate the top region." 
+        },
+        {
+          "scenario": "Trend line",
+          "prompt": "Create a smooth line chart using `{{data_source}}` to plot monthly active users over time, add a rolling average overlay, and keep styling on-brand (Inter font, #458EE2 line)."
+        }
+      ]
+    },
+    "auto-regressive-models": {
+      "purpose": "Forecast time series data using ARIMA with seasonality handling.",
+      "prompt_guidelines": [
+        "Name the dataset alias and identify the date/time index and target metric.",
+        "Mention forecast horizon, seasonal period, and any transformations (log, differencing) to apply before modeling.",
+        "Ask for confidence intervals and key diagnostic plots to validate the model."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Time series dataset.",
+        "date_column": "Timestamp field.",
+        "target_column": "Metric to forecast.",
+        "forecast_horizon": "Number of periods ahead.",
+        "seasonality": "Optional season length (e.g., 12 for monthly)."
+      },
+      "example_templates": [
+        {
+          "scenario": "Monthly revenue forecast",
+          "prompt": "Forecast `{{target_column}}` from `{{input_alias}}` using ARIMA with monthly seasonality (period 12), produce a 6-period forecast, and include decomposition plus confidence bands." 
+        },
+        {
+          "scenario": "Daily demand planning",
+          "prompt": "Model `{{target_column}}` in `{{input_alias}}` with daily granularity, account for weekly seasonality (7), and return next 30-day forecast with anomaly flags." 
+        }
+      ]
+    },
+    "regression-feature-based": {
+      "purpose": "Train regression models on structured features to predict a continuous outcome.",
+      "prompt_guidelines": [
+        "Describe the dataset alias, target column, and any feature exclusions or derivations already done.",
+        "Specify if feature scaling, train/validation split, or regularization should be applied.",
+        "Request key metrics (R^2, RMSE, MAE) and interpretation of top coefficients."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Training dataset.",
+        "target_column": "Outcome variable.",
+        "feature_hints": "Optional list of important features or ones to drop.",
+        "evaluation_metrics": "Array of metrics to prioritize."
+      },
+      "example_templates": [
+        {
+          "scenario": "Sales prediction",
+          "prompt": "Train a regression model on `{{input_alias}}` to predict `{{target_column}}`, drop identifier columns, use 80/20 split, and report R^2, RMSE, plus feature importance." 
+        },
+        {
+          "scenario": "Pricing elasticity",
+          "prompt": "Model `{{target_column}}` using `{{input_alias}}`, include polynomial terms for price and promotions, apply cross-validation, and summarize coefficients with business interpretation." 
+        }
+      ]
+    },
+    "evaluate-models-feature": {
+      "purpose": "Assess trained regression models with diagnostics and residual analysis.",
+      "prompt_guidelines": [
+        "Point to the model results dataset or artifact from a previous step.",
+        "Define which metrics, plots, or error segmentations to compute.",
+        "Request recommendations for improvements or next steps based on evaluation outcomes."
+      ],
+      "dynamic_slots": {
+        "model_reference": "Identifier or dataset containing model outputs.",
+        "focus_metrics": "Metrics to emphasize (e.g., RMSE, MAE).",
+        "diagnostics": "List of desired plots or analyses (residuals_vs_fitted, prediction_vs_actual)."
+      },
+      "example_templates": [
+        {
+          "scenario": "Standard evaluation",
+          "prompt": "Evaluate the regression model stored in `{{model_reference}}`, report R^2, RMSE, MAE, inspect residual distributions, and flag any heteroscedasticity concerns." 
+        },
+        {
+          "scenario": "Segmented diagnostics",
+          "prompt": "Assess the model results in `{{model_reference}}`, compare errors across customer segments, and recommend feature engineering tweaks when error variance is high." 
+        }
+      ]
+    },
+    "chart-maker-dashboard": {
+      "purpose": "Assemble multi-chart dashboards when the workflow requires several linked visuals.",
+      "prompt_guidelines": [
+        "Outline each visual element (chart type, data source, key message).",
+        "Describe layout preferences (grid, stacking) and interactive behaviors (filters, drilldowns).",
+        "Maintain Quant Matrix color and typography conventions across panels."
+      ],
+      "dynamic_slots": {
+        "panels": "Array describing each chart with type, data_source, encodings, annotations.",
+        "interactions": "Optional instructions for filters or cross-highlighting."
+      },
+      "example_templates": [
+        {
+          "scenario": "Executive KPI dashboard",
+          "prompt": "Create a three-panel dashboard: (1) bar chart of revenue by region, (2) line chart of monthly growth, (3) KPI cards summarizing YoY change; keep layout responsive and on-brand." 
+        }
+      ]
+    },
+    "scenario-planner": {
+      "purpose": "Evaluate what-if scenarios by adjusting key variables and comparing outcomes side-by-side.",
+      "prompt_guidelines": [
+        "Define the base dataset alias and the levers to manipulate (prices, budgets, volumes).",
+        "List the scenarios or ranges to explore and the KPIs to compute per scenario.",
+        "Request summary visuals or tables highlighting best and worst cases."
+      ],
+      "dynamic_slots": {
+        "input_alias": "Baseline dataset used for planning.",
+        "scenarios": "Array of scenario definitions with lever adjustments.",
+        "kpis": "Metrics to compare across scenarios."
+      },
+      "example_templates": [
+        {
+          "scenario": "Marketing budget planning",
+          "prompt": "Run Scenario Planner on `{{input_alias}}` with three budgets (baseline, +10%, -10%), vary acquisition_spend accordingly, and compare ROI, CAC, and projected revenue across scenarios." 
+        }
+      ]
+    }
+  }
+}
+
+
