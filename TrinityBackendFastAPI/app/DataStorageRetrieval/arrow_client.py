@@ -19,12 +19,37 @@ if not ENV_FILE.exists():
     ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(ENV_FILE, override=False)
 
-from app.core.redis import get_sync_redis
+try:
+    from app.core.redis import get_sync_redis
+except ModuleNotFoundError:  # pragma: no cover - fallback for AI worker image
+    try:
+        from TrinityBackendFastAPI.app.core.redis import get_sync_redis  # type: ignore
+    except ModuleNotFoundError:  # pragma: no cover - Docker image without backend package
+        _fallback_redis_factory = None
+        try:
+            from TrinityAI.redis_client import (  # type: ignore
+                get_redis_client as _fallback_redis_factory,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - alternate image layout
+            try:
+                from redis_client import (  # type: ignore
+                    get_redis_client as _fallback_redis_factory,
+                )
+            except ModuleNotFoundError:  # pragma: no cover - redis optional in tooling
+                _fallback_redis_factory = None
+
+        if _fallback_redis_factory is not None:
+            def get_sync_redis(*, decode_responses: bool = True):  # type: ignore
+                return _fallback_redis_factory(decode_responses=decode_responses)
+        else:
+            get_sync_redis = None  # type: ignore
 
 from .flight_registry import get_arrow_for_flight_path
 
 try:
-    _redis_client = get_sync_redis(decode_responses=True)
+    if get_sync_redis is None:  # type: ignore
+        raise RuntimeError("redis helper unavailable")
+    _redis_client = get_sync_redis(decode_responses=True)  # type: ignore[misc]
 except Exception:  # pragma: no cover - redis optional in offline tooling
     _redis_client = None
 
