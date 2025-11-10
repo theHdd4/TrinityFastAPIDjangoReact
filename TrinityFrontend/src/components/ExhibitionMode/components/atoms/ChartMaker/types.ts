@@ -9,6 +9,19 @@ export interface ChartMakerMetadata {
     uploadedData?: any;
     chartConfig?: {
       data?: any[];
+      theme?: string;
+      showLegend?: boolean;
+      showXAxisLabels?: boolean;
+      showYAxisLabels?: boolean;
+      showDataLabels?: boolean;
+      showGrid?: boolean;
+      sortOrder?: 'asc' | 'desc' | null;
+      sortColumn?: string;
+      enableScroll?: boolean;
+      chartsPerRow?: number;
+      colors?: string[];
+      seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
+      [key: string]: any; // Allow other properties
     };
   };
   capturedAt?: string;

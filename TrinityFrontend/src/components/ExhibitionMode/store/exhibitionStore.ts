@@ -38,7 +38,7 @@ export type CardWidth = 'M' | 'L';
 export type ContentAlignment = 'top' | 'center' | 'bottom';
 export type CardLayout = 'none' | 'top' | 'bottom' | 'right' | 'left' | 'full';
 
-const DEFAULT_CARD_LAYOUT: CardLayout = 'right';
+const DEFAULT_CARD_LAYOUT: CardLayout = 'none';
 
 const CARD_LAYOUTS: readonly CardLayout[] = ['none', 'top', 'bottom', 'right', 'left', 'full'] as const;
 const SLIDE_BACKGROUND_PRESETS: readonly SlideBackgroundPreset[] = [
@@ -330,6 +330,7 @@ interface ExhibitionStore {
     cards: LayoutCard[] | unknown,
     slideObjects?: Record<string, SlideObject[] | undefined>,
   ) => void;
+  reorderSlides: (fromIndex: number, toIndex: number) => void;
   addSlideObject: (cardId: string, object: SlideObject) => void;
   bulkUpdateSlideObjects: (cardId: string, updates: Record<string, Partial<SlideObject>>) => void;
   removeSlideObject: (cardId: string, objectId: string) => void;
@@ -1367,6 +1368,20 @@ const createBlankSlide = (theme?: ExhibitionTheme | null): LayoutCard =>
     presentationSettings: theme ? buildPresentationForTheme(theme) : undefined,
   });
 
+const moveItem = <T,>(items: T[], fromIndex: number, toIndex: number): T[] => {
+  if (fromIndex === toIndex) {
+    return [...items];
+  }
+
+  const next = [...items];
+  const start = Math.max(0, Math.min(fromIndex, next.length - 1));
+  const end = Math.max(0, Math.min(toIndex, next.length - 1));
+
+  const [moved] = next.splice(start, 1);
+  next.splice(end, 0, moved);
+  return next;
+};
+
 const normaliseProjectContext = (context?: ProjectContext | null): ProjectContext | null => {
   if (!context) {
     return null;
@@ -1789,6 +1804,41 @@ export const useExhibitionStore = create<ExhibitionStore>(set => ({
         catalogueCards: state.catalogueCards,
         catalogueEntries: state.catalogueEntries,
         slideObjectsByCardId: nextSlideObjects,
+      };
+    });
+  },
+  reorderSlides: (fromIndex: number, toIndex: number) => {
+    set(state => {
+      const exhibited = state.cards.filter(card => card.isExhibited);
+      if (exhibited.length === 0) {
+        return {};
+      }
+
+      const start = Math.max(0, Math.min(fromIndex, exhibited.length - 1));
+      const end = Math.max(0, Math.min(toIndex, exhibited.length - 1));
+
+      if (start === end) {
+        return {};
+      }
+
+      const reorderedExhibited = moveItem(exhibited, start, end);
+
+      let exhibitedPointer = 0;
+      const cards = state.cards.map(card => {
+        if (!card.isExhibited) {
+          return card;
+        }
+
+        const nextCard = reorderedExhibited[exhibitedPointer];
+        exhibitedPointer += 1;
+        return nextCard;
+      });
+
+      return {
+        cards,
+        exhibitedCards: reorderedExhibited,
+        catalogueCards: state.catalogueCards,
+        catalogueEntries: state.catalogueEntries,
       };
     });
   },

@@ -275,7 +275,7 @@ export const DEFAULT_EXHIBITION_THEME: ExhibitionTheme = {
   },
   presentation: {
     cardColor: 'purple',
-    cardLayout: 'right',
+    cardLayout: 'none',
     cardWidth: 'L',
     contentAlignment: 'center',
     fullBleed: false,

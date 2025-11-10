@@ -20,10 +20,14 @@ import {
   Upload, Download, Search, Filter, ArrowUpDown, Pin, Palette, Trash2, Plus, 
   GripVertical, RotateCcw, FileText, Check, AlertCircle, Info, Edit2,
   ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save, Replace,
-  AlignLeft, AlignCenter, AlignRight
+  AlignLeft, AlignCenter, AlignRight, Grid3x3
 } from 'lucide-react';
 import { DataFrameData, DataFrameSettings } from '../DataFrameOperationsAtom';
-import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
+import {
+  DATAFRAME_OPERATIONS_API,
+  VALIDATE_API,
+  PIVOT_API,
+} from '@/lib/api';
 import {
   loadDataframe,
   editCell as apiEditCell,
@@ -51,6 +55,11 @@ import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
 import FormularBar from './FormularBar';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
+import {
+  PivotTableSettings as PivotSettings,
+  DEFAULT_PIVOT_TABLE_SETTINGS,
+} from '@/components/LaboratoryMode/store/laboratoryStore';
+import PivotTableCanvas from '@/components/AtomList/atoms/pivot-table/components/PivotTableCanvas';
 
 interface DataFrameOperationsCanvasProps {
   atomId: string;
@@ -450,6 +459,16 @@ const areFormulaMapsEqual = (a: Record<string, string>, b: Record<string, string
   return aKeys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && b[key] === a[key]);
 };
 
+const shallowEqualArray = (a?: string[], b?: string[]) => {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+};
+
 // Helper to generate a unique valid column key
 function getNextColKey(headers: string[]): string {
   let idx = 1;
@@ -625,6 +644,331 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     isOpen: false,
     rowsToDelete: [],
   });
+
+  const pivotSettings = useMemo<PivotSettings>(() => ({
+        ...DEFAULT_PIVOT_TABLE_SETTINGS,
+    ...(settings.pivotSettings || {}),
+  }), [settings.pivotSettings]);
+
+  const [pivotVisible, setPivotVisible] = useState(false);
+  const [pivotIsComputing, setPivotIsComputing] = useState(false);
+  const [pivotComputeError, setPivotComputeError] = useState<string | null>(null);
+  const [pivotManualRefreshToken, setPivotManualRefreshToken] = useState(0);
+  const [pivotIsSaving, setPivotIsSaving] = useState(false);
+  const [pivotSaveError, setPivotSaveError] = useState<string | null>(null);
+  const [pivotSaveMessage, setPivotSaveMessage] = useState<string | null>(null);
+
+  const updatePivotSettings = useCallback(
+    (partial: Partial<PivotSettings>) => {
+      onSettingsChange({
+        pivotSettings: {
+          ...pivotSettings,
+          ...partial,
+        },
+      });
+    },
+    [pivotSettings, onSettingsChange],
+  );
+
+  const pivotSettingsRef = useRef(pivotSettings);
+  useEffect(() => {
+    pivotSettingsRef.current = pivotSettings;
+  }, [pivotSettings]);
+
+  const updatePivotSettingsRef = useRef(updatePivotSettings);
+  useEffect(() => {
+    updatePivotSettingsRef.current = updatePivotSettings;
+  }, [updatePivotSettings]);
+
+  useEffect(() => {
+    const optionsMap = pivotSettings.pivotFilterOptions ?? {};
+    const selectionsMap = pivotSettings.pivotFilterSelections ?? {};
+    let updated = false;
+    const nextSelections: Record<string, string[]> = { ...selectionsMap };
+
+    const normalize = (field: string) => field.toLowerCase();
+
+    pivotSettings.filterFields.forEach((field) => {
+      const key = normalize(field);
+      const options = optionsMap[field] ?? optionsMap[key] ?? [];
+      const existing = selectionsMap[field] ?? selectionsMap[key];
+
+      const shouldSync =
+        !existing ||
+        (existing.length === 0 && options.length > 0);
+
+      if (shouldSync) {
+        const next = options.slice();
+        if (!shallowEqualArray(existing, next)) {
+          nextSelections[field] = next;
+          nextSelections[key] = next;
+          updated = true;
+        }
+      }
+    });
+
+    Object.keys(nextSelections).forEach((key) => {
+      const canonicalField = pivotSettings.filterFields.find(
+        (field) => key === field || key === field.toLowerCase(),
+      );
+      if (!canonicalField) {
+        delete nextSelections[key];
+        updated = true;
+      }
+    });
+
+    if (updated) {
+      updatePivotSettingsRef.current({ pivotFilterSelections: nextSelections });
+    }
+  }, [pivotSettings.filterFields, pivotSettings.pivotFilterOptions]);
+
+  const pivotComputeSignature = useMemo(() => {
+    const selectionsSnapshot = pivotSettings.filterFields.reduce<Record<string, string[]>>((acc, field) => {
+        const key = field.toLowerCase();
+        const selection =
+          pivotSettings.pivotFilterSelections?.[field] ??
+          pivotSettings.pivotFilterSelections?.[key];
+        if (selection) {
+          acc[field] = [...selection].sort();
+        }
+        return acc;
+    }, {});
+    const payload = {
+      dataSource: pivotSettings.dataSource,
+      rows: pivotSettings.rowFields,
+      columns: pivotSettings.columnFields,
+      values: pivotSettings.valueFields,
+      filters: pivotSettings.filterFields,
+      selections: selectionsSnapshot,
+      grandTotals: pivotSettings.grandTotalsMode,
+    };
+    return JSON.stringify(payload);
+  }, [
+    pivotSettings.dataSource,
+    pivotSettings.rowFields,
+    pivotSettings.columnFields,
+    pivotSettings.valueFields,
+    pivotSettings.filterFields,
+    pivotSettings.pivotFilterSelections,
+    pivotSettings.grandTotalsMode,
+  ]);
+
+  useEffect(() => {
+    setPivotSaveMessage(null);
+    setPivotSaveError(null);
+
+    const latestSettings = pivotSettingsRef.current;
+
+    const readyForCompute =
+      !!latestSettings.dataSource &&
+      Array.isArray(latestSettings.valueFields) &&
+      latestSettings.valueFields.length > 0;
+
+    if (!readyForCompute) {
+      setPivotIsComputing(false);
+      setPivotComputeError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+
+    const runCompute = async () => {
+      setPivotIsComputing(true);
+      setPivotComputeError(null);
+      updatePivotSettingsRef.current({
+        pivotStatus: 'pending',
+        pivotError: null,
+      });
+
+      try {
+        const payload = {
+          data_source: latestSettings.dataSource,
+          rows: latestSettings.rowFields.filter(Boolean),
+          columns: latestSettings.columnFields.filter(Boolean),
+          values: latestSettings.valueFields
+            .filter((item) => item?.field)
+            .map((item) => ({
+              field: item.field,
+              aggregation: item.aggregation || 'sum',
+            })),
+          filters: latestSettings.filterFields.filter(Boolean).map((field) => {
+              const key = field.toLowerCase();
+              const selections =
+              latestSettings.pivotFilterSelections?.[field] ??
+              latestSettings.pivotFilterSelections?.[key] ?? [];
+              const options =
+              latestSettings.pivotFilterOptions?.[field] ??
+              latestSettings.pivotFilterOptions?.[key] ?? [];
+
+              const includeValues =
+                selections.length > 0 && selections.length !== options.length
+                  ? selections
+                  : undefined;
+
+            return includeValues
+              ? { field, include: includeValues }
+              : { field };
+            }),
+          grand_totals: latestSettings.grandTotalsMode || 'off',
+        };
+
+        const response = await fetch(
+          `${PIVOT_API}/${encodeURIComponent(atomId)}/compute`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Pivot compute failed (${response.status})`);
+        }
+
+        const result = await response.json();
+        updatePivotSettingsRef.current({
+          pivotResults: result?.data ?? [],
+          pivotStatus: result?.status ?? 'success',
+          pivotError: null,
+          pivotUpdatedAt: result?.updated_at,
+          pivotRowCount: result?.rows,
+          pivotHierarchy: Array.isArray(result?.hierarchy) ? result.hierarchy : [],
+          pivotColumnHierarchy: Array.isArray(result?.column_hierarchy)
+            ? result.column_hierarchy
+            : [],
+          collapsedKeys: [],
+        });
+        setPivotIsComputing(false);
+        setPivotComputeError(null);
+      } catch (error) {
+        if ((error as any)?.name === 'AbortError') {
+          return;
+        }
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Pivot computation failed. Please try again.';
+        setPivotIsComputing(false);
+        setPivotComputeError(message);
+        updatePivotSettingsRef.current({
+          pivotStatus: 'failed',
+          pivotError: message,
+        });
+      }
+    };
+
+    runCompute();
+
+    return () => {
+      controller.abort();
+    };
+  }, [atomId, pivotComputeSignature, pivotManualRefreshToken]);
+
+  const handlePivotRefresh = useCallback(() => {
+    setPivotManualRefreshToken((prev) => prev + 1);
+  }, []);
+
+  const handlePivotSave = useCallback(async () => {
+    const latestSettings = pivotSettingsRef.current;
+    if (!latestSettings.dataSource || !(latestSettings.pivotResults?.length ?? 0)) {
+      return;
+    }
+    setPivotIsSaving(true);
+    setPivotSaveError(null);
+    setPivotSaveMessage(null);
+    try {
+      const response = await fetch(
+        `${PIVOT_API}/${encodeURIComponent(atomId)}/save`,
+        {
+          method: 'POST',
+        }
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Pivot save failed (${response.status})`);
+      }
+      const result = await response.json();
+      const message = result?.object_name
+        ? `Saved pivot to ${result.object_name}`
+        : 'Pivot table saved successfully';
+      setPivotSaveMessage(message);
+      updatePivotSettingsRef.current({
+        pivotLastSavedPath: result?.object_name ?? null,
+        pivotLastSavedAt: result?.updated_at ?? null,
+      });
+        } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to save pivot table. Please try again.';
+      setPivotSaveError(message);
+    } finally {
+      setPivotIsSaving(false);
+    }
+  }, [atomId]);
+
+  const pivotReadinessMessage = useMemo(() => {
+    if (!pivotSettings.dataSource) {
+      return 'Select a data source from the Input Files tab to generate a pivot table.';
+    }
+    if (!pivotSettings.valueFields || pivotSettings.valueFields.length === 0) {
+      return 'Add at least one field to the Values area to compute the pivot table.';
+    }
+    return null;
+  }, [pivotSettings.dataSource, pivotSettings.valueFields]);
+
+  const handlePivotDataChange = useCallback((newData: Partial<PivotSettings>) => {
+    const latest = pivotSettingsRef.current;
+    const merged: PivotSettings = {
+      ...DEFAULT_PIVOT_TABLE_SETTINGS,
+      ...latest,
+      ...newData,
+    };
+    pivotSettingsRef.current = merged;
+    updatePivotSettingsRef.current(merged);
+  }, []);
+
+  const handlePivotGrandTotalsChange = useCallback((mode: 'off' | 'rows' | 'columns' | 'both') => {
+    updatePivotSettingsRef.current({ grandTotalsMode: mode });
+  }, []);
+
+  const handlePivotSubtotalsChange = useCallback((mode: 'off' | 'top' | 'bottom') => {
+    updatePivotSettingsRef.current({ subtotalsMode: mode });
+  }, []);
+
+  const handlePivotStyleChange = useCallback((styleId: string) => {
+    updatePivotSettingsRef.current({ pivotStyleId: styleId });
+  }, []);
+
+  const handlePivotStyleOptionsChange = useCallback(
+    (options: PivotSettings['pivotStyleOptions']) => {
+      updatePivotSettingsRef.current({ pivotStyleOptions: options });
+    },
+    [],
+  );
+
+  const handlePivotReportLayoutChange = useCallback((layout: 'compact' | 'outline' | 'tabular') => {
+    updatePivotSettingsRef.current({ reportLayout: layout });
+  }, []);
+
+  const handlePivotToggleCollapse = useCallback((key: string) => {
+    const current = new Set(pivotSettingsRef.current.collapsedKeys ?? []);
+    if (current.has(key)) {
+      current.delete(key);
+    } else {
+      current.add(key);
+    }
+    updatePivotSettingsRef.current({ collapsedKeys: Array.from(current) });
+  }, []);
+
+  const pivotFilterOptions = pivotSettings.pivotFilterOptions ?? {};
+  const pivotFilterSelections = pivotSettings.pivotFilterSelections ?? {};
+  const pivotCollapsedKeys = pivotSettings.collapsedKeys ?? [];
+  const pivotReportLayout = pivotSettings.reportLayout ?? 'compact';
+
+  const pivotContainerRef = useRef<HTMLDivElement | null>(null);
   // 1. Add a ref to track the currently editing cell/header
   const editingCellRef = useRef<{ row: number; col: string } | null>(null);
   const editingHeaderRef = useRef<string | null>(null);
@@ -3801,6 +4145,26 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </button>
+                <button
+                  onClick={() => {
+                    setPivotVisible(prev => {
+                      const next = !prev;
+                      if (!prev && pivotContainerRef.current) {
+                        requestAnimationFrame(() => {
+                          pivotContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        });
+                      }
+                      return next;
+                    });
+                  }}
+                  className={`p-2 mx-1 rounded-md transition-colors ${
+                    pivotVisible ? 'bg-emerald-50' : 'hover:bg-emerald-50'
+                  }`}
+                  title={pivotVisible ? 'Hide Pivot Table' : 'Show Pivot Table'}
+                  aria-pressed={pivotVisible}
+                >
+                  <Grid3x3 className={`w-6 h-6 ${pivotVisible ? 'text-emerald-600' : 'text-emerald-500'}`} />
+                </button>
               </div>
             )}
             <div className="flex-1 min-h-0" style={{maxHeight: 'calc(100vh - 300px)'}}>
@@ -5164,6 +5528,38 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {pivotVisible && (
+        <div ref={pivotContainerRef} className="mt-4 border border-slate-200 rounded-lg bg-white shadow-sm">
+          <PivotTableCanvas
+            data={pivotSettings}
+            onDataChange={handlePivotDataChange}
+            isLoading={pivotIsComputing}
+            error={pivotComputeError}
+            infoMessage={pivotReadinessMessage}
+            isSaving={pivotIsSaving}
+            saveError={pivotSaveError}
+            saveMessage={
+              pivotSaveMessage ||
+              (pivotSettings.pivotLastSavedPath
+                ? `Last saved: ${pivotSettings.pivotLastSavedPath}`
+                : null)
+            }
+            onRefresh={handlePivotRefresh}
+            onSave={handlePivotSave}
+            filterOptions={pivotFilterOptions}
+            filterSelections={pivotFilterSelections}
+            onGrandTotalsChange={handlePivotGrandTotalsChange}
+            onSubtotalsChange={handlePivotSubtotalsChange}
+            onStyleChange={handlePivotStyleChange}
+            onStyleOptionsChange={handlePivotStyleOptionsChange}
+            reportLayout={pivotReportLayout}
+            onReportLayoutChange={handlePivotReportLayoutChange}
+            collapsedKeys={pivotCollapsedKeys}
+            onToggleCollapse={handlePivotToggleCollapse}
+          />
         </div>
       )}
 

@@ -19,6 +19,7 @@ export interface FeatureOverviewChartState {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewStatistics {

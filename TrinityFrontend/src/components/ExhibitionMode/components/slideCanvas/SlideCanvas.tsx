@@ -23,6 +23,9 @@ import {
   Unlock,
   MessageSquarePlus,
   Edit3,
+  Maximize2,
+  Crop,
+  ImagePlus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -57,11 +60,13 @@ import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from '../operationsPa
 import type { TextBoxFormatting } from '../operationsPalette/textBox/types';
 import { TextBoxPositionPanel } from '../operationsPalette/textBox/TextBoxPositionPanel';
 import { CardFormattingPanel } from '../operationsPalette/CardFormattingPanel';
-import { ExhibitionTable } from '../operationsPalette/tables/ExhibitionTable';
+import { ExhibitionTable, type TableCellEditTarget } from '../operationsPalette/tables/ExhibitionTable';
 import { SlideShapeObject } from '../operationsPalette/shapes';
 import type { ShapeObjectProps } from '../operationsPalette/shapes/constants';
-import { SlideChart, ChartDataEditor, parseChartObjectProps, isEditableChartType } from '../operationsPalette/charts';
+import { ChartDataEditor, parseChartObjectProps, isEditableChartType } from '../operationsPalette/charts';
+import { SlideChartObject } from '../operationsPalette/charts/SlideChartObject';
 import type { ChartConfig, ChartDataRow } from '../operationsPalette/charts';
+import { SlideImageObject } from '../operationsPalette/images/SlideImageObject';
 import {
   cloneTableHeaders,
   cloneTableMatrix,
@@ -69,12 +74,20 @@ import {
   createEmptyCell,
   createEmptyTableRow,
   ensureTableStyleId,
+  DEFAULT_TABLE_COLUMN_WIDTH,
+  MIN_TABLE_COLUMN_WIDTH,
+  MAX_TABLE_COLUMN_WIDTH,
+  DEFAULT_TABLE_ROW_HEIGHT,
+  MIN_TABLE_ROW_HEIGHT,
+  MAX_TABLE_ROW_HEIGHT,
+  renumberDefaultTableHeaders,
   type TableCellFormatting,
 } from '../operationsPalette/tables/constants';
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuCheckboxItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
   ContextMenuSub,
@@ -99,6 +112,7 @@ import {
 } from './utils';
 import { resolveFeatureOverviewTransparency, resolveSlideBackground } from './background';
 import { formattingShallowEqual, readTableState, tableStatesEqual, type TableState } from './table';
+import { ImageCropInsets, sanitizeImageCrop } from '../operationsPalette/images/toolbar/Crop';
 
 
 
@@ -125,6 +139,7 @@ interface SlideCanvasProps {
   onPositionPanelChange?: (panel: ReactNode | null) => void;
   onUndo?: () => void;
   presentationMode?: boolean;
+  variant?: 'default' | 'preview';
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -144,7 +159,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onPositionPanelChange,
   onUndo,
   presentationMode = false,
+  variant = 'default',
 }) => {
+  const isPreview = variant === 'preview';
   const [isDragOver, setIsDragOver] = useState(false);
   const [showFormatPanel, setShowFormatPanel] = useState(false);
   const [settings, setSettings] = useState<PresentationSettings>(() => ({
@@ -155,9 +172,13 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   const [positionPanelTarget, setPositionPanelTarget] = useState<{ objectId: string } | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const presentationContainerRef = useRef<HTMLDivElement | null>(null);
-  const [canvasDimensions, setCanvasDimensions] = useState({
-    width: DEFAULT_PRESENTATION_WIDTH,
-    height: CANVAS_STAGE_HEIGHT,
+  const [canvasDimensions, setCanvasDimensions] = useState(() => {
+    const cardWidth = card.presentationSettings?.cardWidth ?? DEFAULT_PRESENTATION_SETTINGS.cardWidth;
+    const width = CARD_WIDTH_DIMENSIONS[cardWidth] ?? DEFAULT_PRESENTATION_WIDTH;
+    return {
+      width,
+      height: CANVAS_STAGE_HEIGHT,
+    };
   });
   const latestCanvasDimensionsRef = useRef(canvasDimensions);
   const presentationModeRef = useRef(presentationMode);
@@ -166,6 +187,11 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     height: number;
   } | null>(null);
   const [presentationScale, setPresentationScale] = useState(1);
+  const [isCanvasActive, setIsCanvasActive] = useState(false);
+  const effectiveCanvasWidth = useMemo(() => {
+    const cardWidth = settings.cardWidth ?? DEFAULT_PRESENTATION_SETTINGS.cardWidth;
+    return CARD_WIDTH_DIMENSIONS[cardWidth] ?? DEFAULT_PRESENTATION_WIDTH;
+  }, [settings.cardWidth]);
   const effectiveGridSize = useMemo(() => {
     const candidate = Number.isFinite(settings.gridSize) ? Number(settings.gridSize) : DEFAULT_PRESENTATION_SETTINGS.gridSize;
     return Math.min(200, Math.max(4, Math.round(candidate)));
@@ -244,14 +270,47 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [slideObjects, titleObjectId],
   );
 
+  useEffect(() => {
+    const node = canvasRef.current;
+    if (!node) {
+      return undefined;
+    }
+
+    const handleFocusIn = () => {
+      setIsCanvasActive(true);
+    };
+
+    const handleFocusOut = () => {
+      const activeElement = document.activeElement;
+      if (!activeElement || !node.contains(activeElement)) {
+        setIsCanvasActive(false);
+      }
+    };
+
+    node.addEventListener('focusin', handleFocusIn);
+    node.addEventListener('focusout', handleFocusOut);
+
+    return () => {
+      node.removeEventListener('focusin', handleFocusIn);
+      node.removeEventListener('focusout', handleFocusOut);
+    };
+  }, []);
+
   const positionPanelObject = useMemo(() => {
     if (!positionPanelTarget) {
       return null;
     }
-    const match = slideObjects.find(
-      object => object.id === positionPanelTarget.objectId && object.type === 'text-box',
-    );
-    return match ?? null;
+
+    const match = slideObjects.find(object => object.id === positionPanelTarget.objectId);
+    if (!match) {
+      return null;
+    }
+
+    if (match.type === 'text-box' || match.type === 'image') {
+      return match;
+    }
+
+    return null;
   }, [positionPanelTarget, slideObjects]);
 
   useLayoutEffect(() => {
@@ -329,8 +388,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         return;
       }
 
-      const availableWidth = Math.max(container.clientWidth - PRESENTATION_PADDING, 0);
-      const availableHeight = Math.max(container.clientHeight - PRESENTATION_PADDING, 0);
+      const availableWidth = Math.max(container.clientWidth, 0);
+      const availableHeight = Math.max(container.clientHeight, 0);
       if (availableWidth === 0 || availableHeight === 0) {
         setPresentationScale(1);
         return;
@@ -359,7 +418,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         resizeObserver.disconnect();
       }
     };
-  }, [canvasDimensions.height, canvasDimensions.width, presentationMode]);
+  }, [canvasDimensions.height, canvasDimensions.width, presentationMode, isPreview]);
 
   const handleBulkUpdate = useCallback(
     (updates: Record<string, Partial<SlideObject>>) => {
@@ -831,6 +890,90 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [canEdit, handleBulkUpdate, handleCanvasInteraction, slideObjects],
   );
 
+  const updateImageGeometry = useCallback(
+    (
+      objectId: string,
+      updates: { width?: number; height?: number; x?: number; y?: number; rotation?: number },
+    ) => {
+      if (!canEdit) {
+        return;
+      }
+
+      const target = slideObjects.find(object => object.id === objectId && object.type === 'image');
+      if (!target) {
+        return;
+      }
+
+      const canvas = canvasRef.current;
+
+      const rawWidth = updates.width;
+      const rawHeight = updates.height;
+
+      let nextWidth =
+        typeof rawWidth === 'number' && Number.isFinite(rawWidth) ? rawWidth : target.width;
+      let nextHeight =
+        typeof rawHeight === 'number' && Number.isFinite(rawHeight) ? rawHeight : target.height;
+
+      nextWidth = Math.max(MIN_IMAGE_OBJECT_WIDTH, nextWidth);
+      nextHeight = Math.max(MIN_IMAGE_OBJECT_HEIGHT, nextHeight);
+
+      if (canvas) {
+        nextWidth = Math.max(MIN_IMAGE_OBJECT_WIDTH, Math.min(nextWidth, canvas.clientWidth));
+        nextHeight = Math.max(MIN_IMAGE_OBJECT_HEIGHT, Math.min(nextHeight, canvas.clientHeight));
+      }
+
+      const rawX = updates.x;
+      const rawY = updates.y;
+
+      let nextX = typeof rawX === 'number' && Number.isFinite(rawX) ? rawX : target.x;
+      let nextY = typeof rawY === 'number' && Number.isFinite(rawY) ? rawY : target.y;
+
+      if (canvas) {
+        const maxX = Math.max(0, canvas.clientWidth - nextWidth);
+        const maxY = Math.max(0, canvas.clientHeight - nextHeight);
+        nextX = Math.min(Math.max(0, nextX), maxX);
+        nextY = Math.min(Math.max(0, nextY), maxY);
+      } else {
+        nextX = Math.max(0, nextX);
+        nextY = Math.max(0, nextY);
+      }
+
+      const currentRotation = typeof target.rotation === 'number' ? target.rotation : 0;
+      let nextRotation = currentRotation;
+      if (typeof updates.rotation === 'number' && Number.isFinite(updates.rotation)) {
+        nextRotation = updates.rotation;
+      }
+
+      const payload: Partial<SlideObject> = {};
+
+      if (nextWidth !== target.width) {
+        payload.width = nextWidth;
+      }
+      if (nextHeight !== target.height) {
+        payload.height = nextHeight;
+      }
+      if (nextX !== target.x) {
+        payload.x = nextX;
+      }
+      if (nextY !== target.y) {
+        payload.y = nextY;
+      }
+      if (nextRotation !== currentRotation) {
+        payload.rotation = nextRotation;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        return;
+      }
+
+      handleCanvasInteraction();
+      handleBulkUpdate({
+        [objectId]: payload,
+      });
+    },
+    [canEdit, handleBulkUpdate, handleCanvasInteraction, slideObjects],
+  );
+
   const alignTextBoxToCanvas = useCallback(
     (objectId: string, alignment: 'top' | 'middle' | 'bottom' | 'left' | 'center' | 'right') => {
       const canvas = canvasRef.current;
@@ -868,6 +1011,43 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     [slideObjects, updateTextBoxGeometry],
   );
 
+  const alignImageToCanvas = useCallback(
+    (objectId: string, alignment: 'top' | 'middle' | 'bottom' | 'left' | 'center' | 'right') => {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        return;
+      }
+
+      const target = slideObjects.find(object => object.id === objectId && object.type === 'image');
+      if (!target) {
+        return;
+      }
+
+      const updates: { x?: number; y?: number } = {};
+
+      if (alignment === 'top') {
+        updates.y = 0;
+      } else if (alignment === 'middle') {
+        updates.y = (canvas.clientHeight - target.height) / 2;
+      } else if (alignment === 'bottom') {
+        updates.y = canvas.clientHeight - target.height;
+      } else if (alignment === 'left') {
+        updates.x = 0;
+      } else if (alignment === 'center') {
+        updates.x = (canvas.clientWidth - target.width) / 2;
+      } else if (alignment === 'right') {
+        updates.x = canvas.clientWidth - target.width;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return;
+      }
+
+      updateImageGeometry(objectId, updates);
+    },
+    [slideObjects, updateImageGeometry],
+  );
+
   const closePositionPanel = useCallback(() => {
     setPositionPanelTarget(null);
   }, []);
@@ -877,19 +1057,39 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
       return null;
     }
 
-    return (
-      <TextBoxPositionPanel
-        object={positionPanelObject}
-        onClose={closePositionPanel}
-        onBringForward={() => handleBringForward(positionPanelObject.id)}
-        onSendBackward={() => handleSendBackward(positionPanelObject.id)}
-        onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
-        onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
-        onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
-        onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
-      />
-    );
+    if (positionPanelObject.type === 'text-box') {
+      return (
+        <TextBoxPositionPanel
+          object={positionPanelObject}
+          onClose={closePositionPanel}
+          onBringForward={() => handleBringForward(positionPanelObject.id)}
+          onSendBackward={() => handleSendBackward(positionPanelObject.id)}
+          onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
+          onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
+          onAlign={alignment => alignTextBoxToCanvas(positionPanelObject.id, alignment)}
+          onGeometryChange={updates => updateTextBoxGeometry(positionPanelObject.id, updates)}
+        />
+      );
+    }
+
+    if (positionPanelObject.type === 'image') {
+      return (
+        <TextBoxPositionPanel
+          object={positionPanelObject}
+          onClose={closePositionPanel}
+          onBringForward={() => handleBringForward(positionPanelObject.id)}
+          onSendBackward={() => handleSendBackward(positionPanelObject.id)}
+          onBringToFront={() => handlePanelBringToFront(positionPanelObject.id)}
+          onSendToBack={() => handlePanelSendToBack(positionPanelObject.id)}
+          onAlign={alignment => alignImageToCanvas(positionPanelObject.id, alignment)}
+          onGeometryChange={updates => updateImageGeometry(positionPanelObject.id, updates)}
+        />
+      );
+    }
+
+    return null;
   }, [
+    alignImageToCanvas,
     alignTextBoxToCanvas,
     canEdit,
     closePositionPanel,
@@ -898,6 +1098,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     handlePanelSendToBack,
     handleSendBackward,
     positionPanelObject,
+    updateImageGeometry,
     updateTextBoxGeometry,
   ]);
 
@@ -1074,15 +1275,19 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   );
 
   const containerClasses = presentationMode
-    ? 'flex-1 h-full overflow-hidden bg-neutral-950 flex items-center justify-center'
-    : viewMode === 'horizontal'
-      ? 'flex-1 h-full overflow-auto bg-muted/20'
-      : cn(
-          'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm bg-muted/20',
-          isActive
-            ? 'border-primary shadow-elegant ring-1 ring-primary/30'
-            : 'border-border hover:border-primary/40'
-        );
+    ? isPreview
+      ? 'flex h-full w-full items-center justify-center bg-transparent'
+      : 'flex-1 h-full overflow-hidden bg-neutral-950 flex items-center justify-center'
+    : isPreview
+      ? 'w-full overflow-hidden rounded-3xl border border-border bg-background'
+      : viewMode === 'horizontal'
+        ? 'flex-1 h-full overflow-auto bg-muted/20'
+        : cn(
+            'w-full overflow-hidden border rounded-3xl transition-all duration-300 shadow-sm bg-muted/20',
+            isActive
+              ? 'border-primary shadow-elegant ring-1 ring-primary/30'
+              : 'border-border hover:border-primary/40'
+          );
 
   const containerClassName = cn(
     containerClasses,
@@ -1114,8 +1319,12 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
         ref={presentationMode ? presentationContainerRef : undefined}
         className={
           presentationMode
-            ? 'flex h-full w-full items-center justify-center p-12 bg-neutral-950'
-            : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
+            ? isPreview
+              ? 'flex h-full w-full items-center justify-center'
+              : 'flex h-full w-full items-center justify-center bg-neutral-950'
+            : isPreview
+              ? 'flex h-full w-full items-center justify-center'
+              : cn('mx-auto transition-all duration-300 p-8', cardWidthClass)
         }
       >
         {viewMode === 'vertical' && (
@@ -1131,7 +1340,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
           </div>
         )}
 
-        <div className="space-y-4">
+        <div className={cn('space-y-4', isPreview && 'space-y-0')}>
           <div className="relative">
             {!presentationMode && canEdit && (
               <div
@@ -1162,10 +1371,22 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                       ? 'rounded-none border-0'
                       : 'rounded-[28px] border border-border/60',
                     isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
-                    !canEdit && !presentationMode && 'opacity-90'
+                    !canEdit && !presentationMode && 'opacity-90',
+                    isCanvasActive && !presentationMode
+                      ? 'ring-2 ring-amber-400 shadow-[0_0_18px_rgba(251,191,36,0.28)] border-amber-200'
+                      : undefined
                   )}
                   data-exhibition-slide="true"
                   data-exhibition-slide-id={card.id}
+                  onPointerEnter={() => {
+                    setIsCanvasActive(true);
+                  }}
+                  onPointerLeave={() => {
+                    const activeElement = document.activeElement;
+                    if (!activeElement || !canvasRef.current?.contains(activeElement)) {
+                      setIsCanvasActive(false);
+                    }
+                  }}
                 style={
                   presentationMode
                     ? {
@@ -1175,7 +1396,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                           CANVAS_STAGE_HEIGHT,
                         width:
                           (presentationBaseDimensionsRef.current?.width ?? canvasDimensions.width) ||
-                          DEFAULT_PRESENTATION_WIDTH,
+                          effectiveCanvasWidth,
                         transform: `scale(${presentationScale})`,
                         transformOrigin: 'center center',
                         margin: '0 auto',
@@ -1183,6 +1404,8 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     : {
                         ...slideThemeStyle,
                         height: CANVAS_STAGE_HEIGHT,
+                        width: effectiveCanvasWidth,
+                        margin: '0 auto',
                       }
                 }
                 onDragOver={presentationMode ? undefined : handleDragOver}
@@ -1292,7 +1515,7 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
             </div>
           </div>
 
-          {!presentationMode && (
+          {!presentationMode && !isPreview && (
             <div className="flex flex-col gap-2 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-2 text-foreground">
                 <User className="h-4 w-4" />
@@ -1306,17 +1529,19 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
               </div>
             </div>
           )}
-          <OverviewSection
-            visible={showOverview}
-            outerClassName={layoutConfig.overviewOuterClass}
-            containerClassName={layoutConfig.overviewContainerClass}
-            gridClassName={layoutConfig.gridClass}
-            atomObjects={atomObjects}
-            canEdit={canEdit}
-            onRemoveAtom={handleAtomRemove}
-          />
+          {!isPreview && (
+            <OverviewSection
+              visible={showOverview}
+              outerClassName={layoutConfig.overviewOuterClass}
+              containerClassName={layoutConfig.overviewContainerClass}
+              gridClassName={layoutConfig.gridClass}
+              atomObjects={atomObjects}
+              canEdit={canEdit}
+              onRemoveAtom={handleAtomRemove}
+            />
+          )}
 
-          {viewMode === 'horizontal' && !presentationMode && (
+          {viewMode === 'horizontal' && !presentationMode && !isPreview && (
             <div className="mt-6 text-center">
               <span className="inline-block px-4 py-2 bg-muted rounded-full text-sm font-medium text-muted-foreground">
                 Slide {slideNumber} of {totalSlides}
@@ -1334,6 +1559,8 @@ const MIN_OBJECT_WIDTH = 220;
 const MIN_OBJECT_HEIGHT = 120;
 const MIN_TEXT_OBJECT_WIDTH = 140;
 const MIN_TEXT_OBJECT_HEIGHT = 60;
+const MIN_IMAGE_OBJECT_WIDTH = 160;
+const MIN_IMAGE_OBJECT_HEIGHT = 120;
 
 const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
   if (isSolidToken(color)) {
@@ -1364,6 +1591,11 @@ const resolveCardOverlayStyle = (color: CardColor): React.CSSProperties => {
 export const CANVAS_STAGE_HEIGHT = 520;
 export const DEFAULT_PRESENTATION_WIDTH = 960;
 export const PRESENTATION_PADDING = 160;
+
+const CARD_WIDTH_DIMENSIONS = {
+  M: 832,
+  L: 1088,
+} as const;
 const TOP_LAYOUT_MIN_HEIGHT = 210;
 const BOTTOM_LAYOUT_MIN_HEIGHT = 220;
 const SIDE_LAYOUT_MIN_WIDTH = 280;
@@ -1618,6 +1850,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     );
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [activeImageCropId, setActiveImageCropId] = useState<string | null>(null);
     const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
     const [editingTextState, setEditingTextState] = useState<EditingTextState | null>(null);
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
@@ -2040,6 +2273,244 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       ],
     );
 
+    const updateImageProps = useCallback(
+      (
+        objectId: string,
+        updater: (props: Record<string, unknown>) => Record<string, unknown> | null | undefined,
+      ) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'image') {
+          return;
+        }
+
+        if (isSlideObjectLocked(object)) {
+          toast({
+            title: 'Image locked',
+            description: 'Unlock the image to modify its properties.',
+          });
+          return;
+        }
+
+        const nextProps = updater({ ...(object.props ?? {}) } as Record<string, unknown>);
+        if (!nextProps) {
+          return;
+        }
+
+        onInteract();
+        onBulkUpdate({
+          [objectId]: {
+            props: nextProps,
+          },
+        });
+      },
+        [onBulkUpdate, onInteract, objectsMap],
+    );
+
+    const handleToggleImageFit = useCallback(
+      (objectId: string) => {
+        updateImageProps(objectId, props => {
+          const rawFit = typeof props.fit === 'string' ? props.fit.toLowerCase() : '';
+          const currentFit = rawFit === 'contain' ? 'contain' : 'cover';
+          return { ...props, fit: currentFit === 'cover' ? 'contain' : 'cover' };
+        });
+      },
+      [updateImageProps],
+    );
+
+    const handleFlipImage = useCallback(
+      (objectId: string, axis: 'horizontal' | 'vertical') => {
+        updateImageProps(objectId, props => {
+          const currentFlipX = props.flipX === true || props.flipHorizontal === true;
+          const currentFlipY = props.flipY === true || props.flipVertical === true;
+
+          if (axis === 'horizontal') {
+            const nextFlipX = !currentFlipX;
+            return {
+              ...props,
+              flipX: nextFlipX,
+              flipHorizontal: nextFlipX,
+              flipY: currentFlipY,
+              flipVertical: currentFlipY,
+            };
+          }
+
+          const nextFlipY = !currentFlipY;
+          return {
+            ...props,
+            flipX: currentFlipX,
+            flipHorizontal: currentFlipX,
+            flipY: nextFlipY,
+            flipVertical: nextFlipY,
+          };
+        });
+      },
+      [updateImageProps],
+    );
+
+    const handleFlipImageHorizontal = useCallback(
+      (objectId: string) => {
+        handleFlipImage(objectId, 'horizontal');
+      },
+      [handleFlipImage],
+    );
+
+    const handleFlipImageVertical = useCallback(
+      (objectId: string) => {
+        handleFlipImage(objectId, 'vertical');
+      },
+      [handleFlipImage],
+    );
+
+    const handleSetImageOpacity = useCallback(
+      (objectId: string, value: number) => {
+        const clamped = Math.min(Math.max(Number.isFinite(value) ? value : 1, 0), 1);
+        updateImageProps(objectId, props => ({
+          ...props,
+          opacity: clamped,
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleSetImageCrop = useCallback(
+      (objectId: string, nextCrop: ImageCropInsets) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          crop: sanitizeImageCrop(nextCrop),
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleResetImageCrop = useCallback(
+      (objectId: string) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          crop: sanitizeImageCrop({ top: 0, right: 0, bottom: 0, left: 0 }),
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleToggleImageCrop = useCallback(
+      (objectId: string) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'image') {
+          return;
+        }
+
+        if (isSlideObjectLocked(object)) {
+          toast({
+            title: 'Image locked',
+            description: 'Unlock the image to crop it.',
+          });
+          return;
+        }
+
+        setActiveImageCropId(prev => (prev === objectId ? null : objectId));
+        onInteract();
+      },
+      [objectsMap, onInteract],
+    );
+
+    const handleToggleImageAnimation = useCallback(
+      (objectId: string) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          animate: !(props.animate === true),
+        }));
+      },
+      [updateImageProps],
+    );
+
+    const handleReplaceImage = useCallback(
+      (objectId: string) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'image') {
+          return;
+        }
+
+        if (isSlideObjectLocked(object)) {
+          toast({
+            title: 'Image locked',
+            description: 'Unlock the image to replace it.',
+          });
+          return;
+        }
+
+        if (typeof window === 'undefined') {
+          toast({
+            title: 'Replace image unavailable',
+            description: 'Image replacement is only available in a browser environment.',
+          });
+          return;
+        }
+
+        const currentSrc = typeof object.props?.src === 'string' ? object.props.src : '';
+        const input = window.prompt('Enter the URL of the new image', currentSrc);
+        if (input === null) {
+          return;
+        }
+
+        const trimmed = input.trim();
+        if (trimmed.length === 0) {
+          toast({
+            title: 'No image provided',
+            description: 'Provide an image URL to replace the current image.',
+          });
+          return;
+        }
+
+        updateImageProps(objectId, props => {
+          const next = { ...props, src: trimmed, source: 'custom-url' } as Record<string, unknown>;
+          if (typeof next.name !== 'string' || next.name.trim().length === 0) {
+            next.name = 'Custom image';
+          }
+          return next;
+        });
+
+        toast({
+          title: 'Image updated',
+          description: 'Replaced the selected image.',
+        });
+      },
+      [objectsMap, updateImageProps],
+    );
+
+    const handleToggleImageFullBleed = useCallback(
+      (targetIds: string[], nextValue: boolean) => {
+        if (!Array.isArray(targetIds) || targetIds.length === 0) {
+          return;
+        }
+
+        const updates: Record<string, Partial<SlideObject>> = {};
+
+        targetIds.forEach(id => {
+          const object = objectsMap.get(id);
+          if (!object || object.type !== 'image' || isSlideObjectLocked(object)) {
+            return;
+          }
+
+          const nextProps = {
+            ...(object.props ?? {}),
+            fullBleed: nextValue,
+          } as Record<string, unknown>;
+
+          updates[object.id] = {
+            props: nextProps,
+          };
+        });
+
+        if (Object.keys(updates).length === 0) {
+          return;
+        }
+
+        onInteract();
+        onBulkUpdate(updates);
+      },
+      [objectsMap, onBulkUpdate, onInteract],
+    );
+
     const handleLinkSelection = useCallback(() => {
       if (selectedObjects.length === 0) {
         toast({
@@ -2333,15 +2804,31 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       };
     }, [onTextToolbarChange]);
 
+    useEffect(() => {
+      if (!activeImageCropId) {
+        return;
+      }
+
+      const target = objectsMap.get(activeImageCropId);
+      if (!target || target.type !== 'image' || !selectedIds.includes(activeImageCropId) || !canEdit) {
+        setActiveImageCropId(null);
+      }
+    }, [activeImageCropId, canEdit, objectsMap, selectedIds]);
+
     const handleTextToolbarStateChange = useCallback(
       (objectId: string, node: ReactNode | null) => {
         setActiveTextToolbar(prev => {
           if (node) {
+            if (prev?.id === objectId && prev.node === node) {
+              return prev;
+            }
             return { id: objectId, node };
           }
+
           if (prev?.id === objectId) {
             return null;
           }
+
           return prev;
         });
       },
@@ -2396,6 +2883,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               showOutline: nextState.showOutline,
               headers: nextState.headers,
               styleId: nextState.styleId,
+              columnWidths: nextState.columnWidths,
+              rowHeights: nextState.rowHeights,
             },
           },
         });
@@ -2525,6 +3014,92 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [mutateTableState],
     );
 
+    const updateTableColumnWidth = useCallback(
+      (objectId: string, colIndex: number, width: number) => {
+        mutateTableState(objectId, state => {
+          if (colIndex < 0 || colIndex >= state.cols) {
+            return state;
+          }
+
+          const numericWidth = Number(width);
+          const roundedWidth = Number.isFinite(numericWidth)
+            ? Math.round(numericWidth)
+            : DEFAULT_TABLE_COLUMN_WIDTH;
+          const clampedWidth = Math.min(
+            Math.max(roundedWidth, MIN_TABLE_COLUMN_WIDTH),
+            MAX_TABLE_COLUMN_WIDTH,
+          );
+
+          const nextColumnWidths = Array.from({ length: state.cols }, (_, index) => {
+            const existing = state.columnWidths[index];
+            if (!Number.isFinite(existing)) {
+              return DEFAULT_TABLE_COLUMN_WIDTH;
+            }
+            const rounded = Math.round(existing);
+            if (!Number.isFinite(rounded)) {
+              return DEFAULT_TABLE_COLUMN_WIDTH;
+            }
+            return Math.min(Math.max(rounded, MIN_TABLE_COLUMN_WIDTH), MAX_TABLE_COLUMN_WIDTH);
+          });
+
+          if (nextColumnWidths[colIndex] === clampedWidth) {
+            return state;
+          }
+
+          nextColumnWidths[colIndex] = clampedWidth;
+
+          return {
+            ...state,
+            columnWidths: nextColumnWidths,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
+    const updateTableRowHeight = useCallback(
+      (objectId: string, rowIndex: number, height: number) => {
+        mutateTableState(objectId, state => {
+          if (rowIndex < 0 || rowIndex >= state.rows) {
+            return state;
+          }
+
+          const numericHeight = Number(height);
+          const roundedHeight = Number.isFinite(numericHeight)
+            ? Math.round(numericHeight)
+            : DEFAULT_TABLE_ROW_HEIGHT;
+          const clampedHeight = Math.min(
+            Math.max(roundedHeight, MIN_TABLE_ROW_HEIGHT),
+            MAX_TABLE_ROW_HEIGHT,
+          );
+
+          const nextRowHeights = Array.from({ length: state.rows }, (_, index) => {
+            const existing = state.rowHeights[index];
+            if (!Number.isFinite(existing)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            const rounded = Math.round(existing);
+            if (!Number.isFinite(rounded)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            return Math.min(Math.max(rounded, MIN_TABLE_ROW_HEIGHT), MAX_TABLE_ROW_HEIGHT);
+          });
+
+          if (nextRowHeights[rowIndex] === clampedHeight) {
+            return state;
+          }
+
+          nextRowHeights[rowIndex] = clampedHeight;
+
+          return {
+            ...state,
+            rowHeights: nextRowHeights,
+          };
+        });
+      },
+      [mutateTableState],
+    );
+
     const toggleTableLock = useCallback(
       (objectId: string) => {
         mutateTableState(objectId, state => ({
@@ -2564,20 +3139,49 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     );
 
     const addRowsToTable = useCallback(
-      (objectId: string, count: number) => {
+      (objectId: string, startIndex: number, count: number) => {
         if (count <= 0) {
           return;
         }
 
         mutateTableState(objectId, state => {
           const columnCount = Math.max(state.cols, 1);
+          const safeStart = Number.isFinite(startIndex)
+            ? Math.min(Math.max(Math.floor(startIndex), 0), state.rows)
+            : state.rows;
           const additions = Array.from({ length: count }, () => createEmptyTableRow(columnCount));
-          const nextData = [...state.data, ...additions];
+          const nextData = [
+            ...state.data.slice(0, safeStart),
+            ...additions,
+            ...state.data.slice(safeStart),
+          ];
+          const normalisedRowHeights = Array.from({ length: state.rows }, (_, index) => {
+            const existing = state.rowHeights[index];
+            if (!Number.isFinite(existing)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            const rounded = Math.round(existing);
+            if (!Number.isFinite(rounded)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            return Math.min(Math.max(rounded, MIN_TABLE_ROW_HEIGHT), MAX_TABLE_ROW_HEIGHT);
+          });
+          const heightInsertion = Math.min(
+            Math.max(safeStart, 0),
+            normalisedRowHeights.length,
+          );
+          const heightAdditions = Array.from({ length: count }, () => DEFAULT_TABLE_ROW_HEIGHT);
+          const nextRowHeights = [
+            ...normalisedRowHeights.slice(0, heightInsertion),
+            ...heightAdditions,
+            ...normalisedRowHeights.slice(heightInsertion),
+          ];
 
           return {
             ...state,
             data: nextData,
             rows: nextData.length,
+            rowHeights: nextRowHeights,
           };
         });
       },
@@ -2585,32 +3189,117 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     );
 
     const addColumnsToTable = useCallback(
-      (objectId: string, count: number) => {
+      (objectId: string, startIndex: number, count: number) => {
         if (count <= 0) {
           return;
         }
 
+        const object = objectsMap.get(objectId);
+        const targetWidth =
+          typeof object?.width === 'number' && Number.isFinite(object.width) && object.width > 0
+            ? Math.round(object.width)
+            : null;
+
         mutateTableState(objectId, state => {
-          const nextData = state.data.map(row => [
-            ...row,
-            ...Array.from({ length: count }, () => createEmptyCell()),
-          ]);
+          const safeStart = Number.isFinite(startIndex)
+            ? Math.min(Math.max(Math.floor(startIndex), 0), state.cols)
+            : state.cols;
+          const nextData = state.data.map(row => {
+            const before = row.slice(0, safeStart);
+            const after = row.slice(safeStart);
+            const additions = Array.from({ length: count }, () => createEmptyCell());
+            return [...before, ...additions, ...after];
+          });
           const existingHeaders = cloneTableHeaders(state.headers);
+          const headerInsertion = Math.min(Math.max(safeStart, 0), existingHeaders.length);
           const headerAdditions = Array.from({ length: count }, (_, additionIndex) =>
-            createDefaultHeaderCell(existingHeaders.length + additionIndex),
+            createDefaultHeaderCell(headerInsertion + additionIndex),
           );
-          const nextHeaders = [...existingHeaders, ...headerAdditions];
-          const nextCols = nextHeaders.length;
+          const nextHeaders = [
+            ...existingHeaders.slice(0, headerInsertion),
+            ...headerAdditions,
+            ...existingHeaders.slice(headerInsertion),
+          ];
+          const renumberedHeaders = renumberDefaultTableHeaders(nextHeaders);
+          const nextCols = renumberedHeaders.length;
+          const widthInsertion = Math.min(Math.max(safeStart, 0), state.columnWidths.length);
+          const widthAdditions = Array.from({ length: count }, () => DEFAULT_TABLE_COLUMN_WIDTH);
+          let nextColumnWidths = [
+            ...state.columnWidths.slice(0, widthInsertion),
+            ...widthAdditions,
+            ...state.columnWidths.slice(widthInsertion),
+          ];
+
+          const clampWidth = (value: number) => {
+            if (!Number.isFinite(value)) {
+              return DEFAULT_TABLE_COLUMN_WIDTH;
+            }
+            if (value < MIN_TABLE_COLUMN_WIDTH) {
+              return MIN_TABLE_COLUMN_WIDTH;
+            }
+            if (value > MAX_TABLE_COLUMN_WIDTH) {
+              return MAX_TABLE_COLUMN_WIDTH;
+            }
+            return Math.round(value);
+          };
+
+          const desiredTotalWidth = (() => {
+            if (targetWidth && targetWidth > 0) {
+              return targetWidth;
+            }
+            const existingTotal = state.columnWidths.reduce((sum, width) => sum + width, 0);
+            return existingTotal > 0 ? existingTotal : null;
+          })();
+
+          if (desiredTotalWidth && nextColumnWidths.length > 0) {
+            const currentTotal = nextColumnWidths.reduce((sum, width) => sum + width, 0);
+
+            if (currentTotal > 0) {
+              const scale = desiredTotalWidth / currentTotal;
+              nextColumnWidths = nextColumnWidths.map(width => clampWidth(Math.round(width * scale)));
+
+              let adjustedTotal = nextColumnWidths.reduce((sum, width) => sum + width, 0);
+              const desiredTotal = Math.round(desiredTotalWidth);
+
+              if (adjustedTotal !== desiredTotal && nextColumnWidths.length > 0) {
+                let difference = desiredTotal - adjustedTotal;
+                const step = difference > 0 ? 1 : -1;
+                let index = 0;
+                const maxIterations = nextColumnWidths.length * Math.abs(difference);
+                let iterations = 0;
+
+                while (difference !== 0 && iterations < maxIterations) {
+                  const candidate = nextColumnWidths[index] + step;
+                  if (candidate >= MIN_TABLE_COLUMN_WIDTH && candidate <= MAX_TABLE_COLUMN_WIDTH) {
+                    nextColumnWidths[index] = candidate;
+                    difference -= step;
+                    adjustedTotal += step;
+                  }
+                  index = (index + 1) % nextColumnWidths.length;
+                  iterations += 1;
+                  if (index === 0) {
+                    const canAdjust = nextColumnWidths.some(width => {
+                      return step > 0 ? width < MAX_TABLE_COLUMN_WIDTH : width > MIN_TABLE_COLUMN_WIDTH;
+                    });
+                    if (!canAdjust) {
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+          }
 
           return {
             ...state,
             data: nextData,
             cols: nextCols,
-            headers: nextHeaders,
+            headers: renumberedHeaders,
+            columnWidths: nextColumnWidths,
           };
         });
       },
-      [mutateTableState],
+      [mutateTableState, objectsMap],
     );
 
     const removeRowsFromTable = useCallback(
@@ -2633,11 +3322,26 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           const nextData = state.data.filter((_, index) => index < safeStart || index >= safeStart + actualCount);
+          const normalisedRowHeights = Array.from({ length: state.rows }, (_, index) => {
+            const existing = state.rowHeights[index];
+            if (!Number.isFinite(existing)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            const rounded = Math.round(existing);
+            if (!Number.isFinite(rounded)) {
+              return DEFAULT_TABLE_ROW_HEIGHT;
+            }
+            return Math.min(Math.max(rounded, MIN_TABLE_ROW_HEIGHT), MAX_TABLE_ROW_HEIGHT);
+          });
+          const nextRowHeights = normalisedRowHeights.filter(
+            (_, index) => index < safeStart || index >= safeStart + actualCount,
+          );
 
           return {
             ...state,
             data: nextData,
             rows: nextData.length,
+            rowHeights: nextRowHeights,
           };
         });
       },
@@ -2671,13 +3375,18 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           const nextHeaders = remainingHeaders.filter(
             (_, index) => index < safeStart || index >= safeStart + actualCount,
           );
-          const nextCols = nextHeaders.length;
+          const nextColumnWidths = state.columnWidths.filter(
+            (_, index) => index < safeStart || index >= safeStart + actualCount,
+          );
+          const renumberedHeaders = renumberDefaultTableHeaders(nextHeaders);
+          const nextCols = renumberedHeaders.length;
 
           return {
             ...state,
             data: nextData,
             cols: nextCols,
-            headers: nextHeaders,
+            headers: renumberedHeaders,
+            columnWidths: nextColumnWidths,
           };
         });
       },
@@ -2767,7 +3476,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
     const handleEditingValueChange = useCallback(
       (value: string) => {
         setEditingTextState(prev => {
-          if (!prev || prev.value === value) {
+          if (!prev || prev.type !== 'text-box' || prev.value === value) {
             return prev;
           }
           onInteract();
@@ -2775,6 +3484,74 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         });
       },
       [onInteract],
+    );
+
+    const beginEditingTableCell = useCallback(
+      (objectId: string, target: TableCellEditTarget) => {
+        if (!canEdit) {
+          return;
+        }
+
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'table') {
+          return;
+        }
+
+        onInteract();
+        setSelectedIds(prev => {
+          if (prev.length === 1 && prev[0] === objectId) {
+            return prev;
+          }
+          return [objectId];
+        });
+
+        setEditingTextState(prev => {
+          if (
+            prev &&
+            prev.type === 'table-cell' &&
+            prev.id === objectId &&
+            prev.region === target.region &&
+            prev.row === target.row &&
+            prev.col === target.col
+          ) {
+            return prev;
+          }
+
+          return {
+            id: objectId,
+            type: 'table-cell',
+            region: target.region,
+            row: target.row,
+            col: target.col,
+          };
+        });
+      },
+      [canEdit, objectsMap, onInteract],
+    );
+
+    const endEditingTableCell = useCallback(
+      (objectId: string, target: TableCellEditTarget) => {
+        setEditingTextState(prev => {
+          if (!prev || prev.type !== 'table-cell') {
+            return prev;
+          }
+
+          if (prev.id !== objectId) {
+            return prev;
+          }
+
+          if (
+            prev.region !== target.region ||
+            prev.row !== target.row ||
+            prev.col !== target.col
+          ) {
+            return prev;
+          }
+
+          return null;
+        });
+      },
+      [],
     );
 
     const handleObjectDoubleClick = useCallback(
@@ -3172,12 +3949,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         const targetElement = event.target instanceof Element ? event.target : null;
         const editableTableCell = targetElement?.closest('[data-exhibition-table-cell-content="true"]');
+        const tableCellContainer = targetElement?.closest('[data-exhibition-table-cell-region]');
+        const cellRegionAttr = tableCellContainer?.getAttribute('data-exhibition-table-cell-region');
+        const cellRowAttr = tableCellContainer?.getAttribute('data-exhibition-table-cell-row');
+        const cellColAttr = tableCellContainer?.getAttribute('data-exhibition-table-cell-col');
+        const parsedRow = typeof cellRowAttr === 'string' ? Number(cellRowAttr) : null;
+        const parsedCol = typeof cellColAttr === 'string' ? Number(cellColAttr) : null;
+        const hasValidRow = parsedRow !== null && !Number.isNaN(parsedRow);
+        const hasValidCol = parsedCol !== null && !Number.isNaN(parsedCol);
+        const parsedRegion = cellRegionAttr === 'header' || cellRegionAttr === 'body' ? cellRegionAttr : null;
 
         const targetObject = objectsMap.get(objectId);
         const isLocked = isSlideObjectLocked(targetObject);
 
         const isMulti = event.shiftKey || event.metaKey || event.ctrlKey;
-        const resolveSelection = () => {
+        const resolveSelection = (): string[] => {
           const baseSelection = isMulti
             ? selectedIds.includes(objectId)
               ? selectedIds
@@ -3188,7 +3974,15 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         if (editableTableCell) {
           event.stopPropagation();
-          if (editingTextState) {
+          const isEditingSameCell =
+            editingTextState?.type === 'table-cell' &&
+            editingTextState.id === objectId &&
+            parsedRegion === editingTextState.region &&
+            hasValidRow &&
+            hasValidCol &&
+            editingTextState.row === parsedRow &&
+            editingTextState.col === parsedCol;
+          if (editingTextState && !isEditingSameCell) {
             commitEditingText();
           }
           onInteract();
@@ -3715,10 +4509,31 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const isTableObject = object.type === 'table';
             const isChartObject = object.type === 'chart';
             const isShapeObject = object.type === 'shape';
+            const isFullBleedImage = isImageObject
+              ? Boolean((object.props as Record<string, unknown>)?.fullBleed)
+              : false;
+            const rawImageProps = (object.props ?? {}) as Record<string, unknown>;
+            const imageFitMode =
+              isImageObject && typeof rawImageProps.fit === 'string' && rawImageProps.fit.toLowerCase() === 'contain'
+                ? 'contain'
+                : 'cover';
+            const imageFlipHorizontal =
+              isImageObject && (rawImageProps.flipX === true || rawImageProps.flipHorizontal === true);
+            const imageFlipVertical =
+              isImageObject && (rawImageProps.flipY === true || rawImageProps.flipVertical === true);
+            const imageOpacity = isImageObject && typeof rawImageProps.opacity === 'number'
+              ? Math.min(Math.max(rawImageProps.opacity, 0), 1)
+              : 1;
+            const imageCropInsets = isImageObject
+              ? sanitizeImageCrop((rawImageProps as { crop?: unknown }).crop)
+              : sanitizeImageCrop(null);
+            const isImageAnimated = isImageObject && rawImageProps.animate === true;
+            const isCroppingImage = isImageObject && activeImageCropId === object.id;
             const isEditingTextBox =
               isTextBoxObject &&
               editingTextState?.id === object.id &&
               editingTextState.type === 'text-box';
+            const objectLocked = isSlideObjectLocked(object);
             const shouldElevate =
               isSelected ||
               isEditingTextBox ||
@@ -3734,6 +4549,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? extractTextBoxFormatting(object.props as Record<string, unknown> | undefined)
               : null;
             const tableState = isTableObject ? readTableState(object) : null;
+            const editingTableCell =
+              isTableObject &&
+              editingTextState?.type === 'table-cell' &&
+              editingTextState.id === object.id
+                ? {
+                    region: editingTextState.region,
+                    row: editingTextState.row,
+                    col: editingTextState.col,
+                  }
+                : null;
             const chartProps = isChartObject
               ? parseChartObjectProps(object.props as Record<string, unknown> | undefined)
               : null;
@@ -3753,6 +4578,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               isTextBoxObject ||
               isTableObject ||
               isChartObject ||
+              isFullBleedImage ||
               (isFeatureOverviewAtom && featureOverviewTransparentBackground);
             const isChartMakerAtom = atomId === 'chart-maker';
             const isEvaluateModelsFeatureAtom = atomId === 'evaluate-models-feature';
@@ -3790,6 +4616,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                   isShapeObject && 'border-none bg-transparent shadow-none overflow-visible',
                   (isTextBoxObject || isTableObject || isChartObject) &&
                     'overflow-hidden border-transparent bg-transparent shadow-none',
+                  isFullBleedImage && 'rounded-none border-0 bg-transparent shadow-none',
                   (() => {
                     const shouldShowCardChrome =
                       !suppressCardChrome &&
@@ -3869,6 +4696,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       data={tableState.data}
                       rows={tableState.rows}
                       cols={tableState.cols}
+                      columnWidths={tableState.columnWidths}
+                      rowHeights={tableState.rowHeights}
                       locked={tableState.locked}
                       showOutline={tableState.showOutline}
                       styleId={tableState.styleId}
@@ -3883,6 +4712,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onUpdateHeaderFormatting={(col, updates) =>
                         updateTableHeaderFormatting(object.id, col, updates)
                       }
+                      onUpdateColumnWidth={(col, width) =>
+                        updateTableColumnWidth(object.id, col, width)
+                      }
+                      onUpdateRowHeight={(row, height) =>
+                        updateTableRowHeight(object.id, row, height)
+                      }
                       onToggleLock={() => toggleTableLock(object.id)}
                       onToggleOutline={() => toggleTableOutline(object.id)}
                       onStyleChange={nextStyleId => setTableStyle(object.id, nextStyleId)}
@@ -3891,16 +4726,19 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onDelete2Columns={(startIndex, count) => removeColumnsFromTable(object.id, startIndex, count)}
                       onDeleteRow={(startIndex, count) => removeRowsFromTable(object.id, startIndex, count)}
                       onDelete2Rows={(startIndex, count) => removeRowsFromTable(object.id, startIndex, count)}
-                      onAddColumn={() => addColumnsToTable(object.id, 1)}
-                      onAdd2Columns={() => addColumnsToTable(object.id, 2)}
-                      onAddRow={() => addRowsToTable(object.id, 1)}
-                      onAdd2Rows={() => addRowsToTable(object.id, 2)}
+                      onAddColumn={(startIndex, count) => addColumnsToTable(object.id, startIndex, count)}
+                      onAdd2Columns={(startIndex, count) => addColumnsToTable(object.id, startIndex, count)}
+                      onAddRow={(startIndex, count) => addRowsToTable(object.id, startIndex, count)}
+                      onAdd2Rows={(startIndex, count) => addRowsToTable(object.id, startIndex, count)}
                       onToolbarStateChange={node => handleTextToolbarStateChange(object.id, node)}
                       onInteract={onInteract}
                       onBringToFront={() => handleLayerAction('front', [object.id])}
                       onBringForward={() => handleLayerAction('forward', [object.id])}
                       onSendBackward={() => handleLayerAction('backward', [object.id])}
                       onSendToBack={() => handleLayerAction('back', [object.id])}
+                      onBeginCellTextEdit={target => beginEditingTableCell(object.id, target)}
+                      onEndCellTextEdit={target => endEditingTableCell(object.id, target)}
+                      editingCell={editingTableCell}
                       className="h-full w-full"
                     />
                   ) : isShapeObject ? (
@@ -3916,15 +4754,69 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                         onRequestPositionPanel ? () => onRequestPositionPanel(object.id) : undefined
                       }
                       onBringToFront={() => onBringToFront([object.id])}
+                      onBringForward={() => handleLayerAction('forward', [object.id])}
+                      onSendBackward={() => handleLayerAction('backward', [object.id])}
                       onSendToBack={() => onSendToBack([object.id])}
                       onInteract={onInteract}
                     />
+                  ) : isImageObject ? (
+                    <SlideImageObject
+                      id={object.id}
+                      canEdit={canEdit}
+                      isSelected={isSelected}
+                      src={typeof object.props?.src === 'string' ? object.props.src : null}
+                      name={
+                        typeof object.props?.name === 'string' && object.props.name.trim().length > 0
+                          ? object.props.name
+                          : null
+                      }
+                      fullBleed={isFullBleedImage}
+                      fitMode={imageFitMode}
+                      isCropping={isCroppingImage}
+                      flipHorizontal={imageFlipHorizontal}
+                      flipVertical={imageFlipVertical}
+                      isAnimated={isImageAnimated}
+                      opacity={imageOpacity}
+                      cropInsets={imageCropInsets}
+                      onInteract={onInteract}
+                      onToolbarStateChange={handleTextToolbarStateChange}
+                      onToggleFit={handleToggleImageFit}
+                      onToggleCrop={handleToggleImageCrop}
+                      onFlipHorizontal={handleFlipImageHorizontal}
+                      onFlipVertical={handleFlipImageVertical}
+                      onToggleAnimate={handleToggleImageAnimation}
+                      onRequestPositionPanel={onRequestPositionPanel}
+                      onOpacityChange={handleSetImageOpacity}
+                      onCropChange={handleSetImageCrop}
+                      onResetCrop={handleResetImageCrop}
+                      onDelete={onRemoveObject}
+                    />
                   ) : isChartObject && chartProps ? (
-                    <SlideChart
+                    <SlideChartObject
+                      id={object.id}
+                      canEdit={canEdit}
+                      isSelected={isSelected}
                       data={chartProps.chartData}
                       config={chartProps.chartConfig}
-                      className="h-full w-full"
                       captureId={object.id}
+                      onToolbarStateChange={handleTextToolbarStateChange}
+                      onBringForward={() => handleLayerAction('forward', [object.id])}
+                      onSendBackward={() => handleLayerAction('backward', [object.id])}
+                      onBringToFront={() => handleLayerAction('front', [object.id])}
+                      onSendToBack={() => handleLayerAction('back', [object.id])}
+                      onRequestEdit={
+                        canEdit
+                          ? () => {
+                              onInteract();
+                              setChartEditorTarget({
+                                objectId: object.id,
+                                data: chartProps.chartData,
+                                config: chartProps.chartConfig,
+                              });
+                            }
+                          : undefined
+                      }
+                      onInteract={onInteract}
                     />
                   ) : (
                     <div
@@ -3969,7 +4861,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 )}
               </div>
 
-              {canEdit && isSelected && !isEditingTextBox && !isSlideObjectLocked(object) &&
+              {canEdit &&
+                isSelected &&
+                !isEditingTextBox &&
+                !objectLocked &&
+                !(isImageObject && activeImageCropId === object.id) &&
                 handleDefinitions.map(definition => (
                   <span
                     key={definition.handle}
@@ -3995,13 +4891,125 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const target = objectsMap.get(id);
             return target ? !isSlideObjectLocked(target) : false;
           });
+          const contextTargets = contextTargetIds
+            .map(id => objectsMap.get(id))
+            .filter((target): target is SlideObject => Boolean(target));
+          const contextSupportsImageFullBleed =
+            contextTargets.length > 0 && contextTargets.every(target => target.type === 'image');
+          const contextAllImagesFullBleed =
+            contextSupportsImageFullBleed &&
+            contextTargets.every(target => Boolean((target.props as Record<string, unknown>).fullBleed));
+          const renderPostLockContent = contextSupportsImageFullBleed
+            ? (closeMenu: () => void) => (
+                <ContextMenuCheckboxItem
+                  checked={contextAllImagesFullBleed}
+                  disabled={!canEdit || !contextHasUnlocked}
+                  onCheckedChange={value => {
+                    const resolved = value === true;
+                    closeMenu();
+                    if (resolved === contextAllImagesFullBleed) {
+                      return;
+                    }
+                    handleToggleImageFullBleed(contextTargetIds, resolved);
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Maximize2 className="h-4 w-4" />
+                    <span>Full bleed card</span>
+                  </div>
+                </ContextMenuCheckboxItem>
+              )
+            : undefined;
+
+          const additionalMenuItems: Array<{ key: string; render: (closeMenu: () => void) => React.ReactNode }> = [];
+
+          if (isImageObject) {
+            additionalMenuItems.push({
+              key: 'replace-image',
+              render: closeMenu => (
+                <ContextMenuItem
+                  disabled={!canEdit || objectLocked}
+                  onSelect={event => {
+                    event.preventDefault();
+                    closeMenu();
+                    if (!canEdit || objectLocked) {
+                      return;
+                    }
+                    handleReplaceImage(object.id);
+                  }}
+                  className="gap-3"
+                >
+                  <ImagePlus className="h-4 w-4" />
+                  Replace image
+                </ContextMenuItem>
+              ),
+            });
+
+            additionalMenuItems.push({
+              key: 'toggle-crop',
+              render: closeMenu => (
+                <ContextMenuItem
+                  disabled={!canEdit || objectLocked}
+                  onSelect={event => {
+                    event.preventDefault();
+                    closeMenu();
+                    handleToggleImageCrop(object.id);
+                  }}
+                  className="gap-3"
+                >
+                  <Crop className="h-4 w-4" />
+                  {isCroppingImage ? 'Exit crop mode' : 'Crop image'}
+                </ContextMenuItem>
+              ),
+            });
+          }
+
+          if (isChartObject) {
+            additionalMenuItems.push({
+              key: 'edit-chart',
+              render: closeMenu => (
+                <ContextMenuItem
+                  disabled={
+                    !canEdit ||
+                    !chartProps ||
+                    !isEditableChartType(chartProps.chartConfig.type)
+                  }
+                  onSelect={event => {
+                    event.preventDefault();
+                    const isValidTarget =
+                      canEdit &&
+                      chartProps &&
+                      isEditableChartType(chartProps.chartConfig.type);
+                    const payload = isValidTarget
+                      ? {
+                          objectId: object.id,
+                          data: chartProps.chartData,
+                          config: chartProps.chartConfig,
+                        }
+                      : null;
+                    closeMenu();
+                    if (!payload) {
+                      return;
+                    }
+                    setTimeout(() => {
+                      setChartEditorTarget(payload);
+                    }, 0);
+                  }}
+                  className="gap-3"
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Edit chart data
+                </ContextMenuItem>
+              ),
+            });
+          }
 
           return (
             <SlideObjectContextMenu
               key={object.id}
               canEdit={canEdit}
               canAlign={hasSelection && !selectionLocked}
-              canLayer={hasSelection && !selectionLocked}
+              canLayer={contextHasUnlocked}
               canApplyColors={canApplyColorsGlobally}
               canAddAltText={selectedSupportsAltText}
               hasClipboard={hasClipboardItems}
@@ -4034,43 +5042,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               disableComment={selectionLocked}
               disableApplyColors={!canApplyColorsGlobally}
               renderAdditionalContent={
-                isChartObject
-                  ? closeMenu => (
-                      <ContextMenuItem
-                        disabled={
-                          !canEdit ||
-                          !chartProps ||
-                          !isEditableChartType(chartProps.chartConfig.type)
-                        }
-                        onSelect={event => {
-                          event.preventDefault();
-                          const isValidTarget =
-                            canEdit &&
-                            chartProps &&
-                            isEditableChartType(chartProps.chartConfig.type);
-                          const payload = isValidTarget
-                            ? {
-                                objectId: object.id,
-                                data: chartProps.chartData,
-                                config: chartProps.chartConfig,
-                              }
-                            : null;
-                          closeMenu();
-                          if (!payload) {
-                            return;
-                          }
-                          setTimeout(() => {
-                            setChartEditorTarget(payload);
-                          }, 0);
-                        }}
-                        className="gap-3"
-                      >
-                        <Edit3 className="h-4 w-4" />
-                        Edit chart data
-                      </ContextMenuItem>
-                    )
+                additionalMenuItems.length > 0
+                  ? closeMenu =>
+                      additionalMenuItems.map(item => (
+                        <React.Fragment key={item.key}>{item.render(closeMenu)}</React.Fragment>
+                      ))
                   : undefined
               }
+              renderPostLockContent={renderPostLockContent}
             >
               {renderObject()}
             </SlideObjectContextMenu>

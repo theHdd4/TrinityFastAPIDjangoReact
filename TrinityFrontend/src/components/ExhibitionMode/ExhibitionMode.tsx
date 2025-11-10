@@ -1,6 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronRight, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
+import { ChevronRight, Database, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
 import {
   useExhibitionStore,
@@ -58,6 +58,7 @@ import {
   buildTableDataFromManifest,
   clonePlain,
 } from '@/components/AtomList/atoms/feature-overview/utils/exhibitionManifest';
+import SavedDataFramesPanel from '@/components/LaboratoryMode/components/SavedDataFramesPanel';
 
 const NOTES_STORAGE_KEY = 'exhibition-notes';
 const DEFAULT_TRANSITION_DURATION = 450;
@@ -165,6 +166,7 @@ const ExhibitionMode = () => {
     updateCard,
     addBlankSlide,
     setCards,
+    reorderSlides,
     lastLoadedContext,
     addSlideObject,
     bulkUpdateSlideObjects,
@@ -199,6 +201,7 @@ const ExhibitionMode = () => {
   >(null);
   const [showThumbnails, setShowThumbnails] = useState(false);
   const [showGridView, setShowGridView] = useState(false);
+  const [showSavedDataframesPanel, setShowSavedDataframesPanel] = useState(false);
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'horizontal' | 'vertical'>('horizontal');
   const [isSaving, setIsSaving] = useState(false);
@@ -241,6 +244,39 @@ const ExhibitionMode = () => {
   const lastSerializedSnapshotRef = useRef<string | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const hasRequestedInitialLoadRef = useRef(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement && isPresentationView) {
+        setIsPresentationView(false);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    if (isPresentationView) {
+      if (container.requestFullscreen) {
+        container.requestFullscreen().catch(err => {
+          console.warn('Failed to enter fullscreen:', err);
+        });
+      }
+    } else {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(err => {
+          console.warn('Failed to exit fullscreen:', err);
+        });
+      }
+    }
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, [isPresentationView]);
 
   const generateTextBoxId = useCallback(() => {
     if (typeof crypto !== 'undefined' && typeof (crypto as Crypto).randomUUID === 'function') {
@@ -419,6 +455,43 @@ const ExhibitionMode = () => {
       goToSlide(index, direction);
     },
     [currentSlide, goToSlide, handleStopSlideshow, isSlideshowActive],
+  );
+
+  const handleReorderSlides = useCallback(
+    (fromIndex: number, toIndex: number) => {
+      if (fromIndex === toIndex || exhibitedCards.length === 0) {
+        return;
+      }
+
+      const safeStart = Math.max(0, Math.min(fromIndex, exhibitedCards.length - 1));
+      const safeEnd = Math.max(0, Math.min(toIndex, exhibitedCards.length - 1));
+
+      if (safeStart === safeEnd) {
+        return;
+      }
+
+      const currentCardId = exhibitedCards[currentSlide]?.id;
+
+      const reorderedPreview = (() => {
+        const next = [...exhibitedCards];
+        const [moved] = next.splice(safeStart, 1);
+        next.splice(safeEnd, 0, moved);
+        return next;
+      })();
+
+      reorderSlides(safeStart, safeEnd);
+
+      if (!currentCardId) {
+        setCurrentSlide(previous => Math.max(0, Math.min(previous, reorderedPreview.length - 1)));
+        return;
+      }
+
+      const nextIndex = reorderedPreview.findIndex(card => card.id === currentCardId);
+      if (nextIndex !== -1) {
+        setCurrentSlide(nextIndex);
+      }
+    },
+    [currentSlide, exhibitedCards, reorderSlides],
   );
 
   const handleStartSlideshow = useCallback(() => {
@@ -1457,22 +1530,23 @@ const ExhibitionMode = () => {
 
       const slideObjects = slideObjectsByCardId[targetCard.id] ?? [];
       const nextZIndex = slideObjects.reduce((max, object) => {
-        const value = typeof object.zIndex === 'number' ? object.zIndex : 1;
+        const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
         return value > max ? value : max;
-      }, 1);
+      }, 0);
 
-      const baseZIndex = nextZIndex + 1;
+      const baseZIndex = Math.round(nextZIndex) + 1;
 
       selections.forEach((selection, index) => {
         const imageObject = createImageSlideObject(
           generateImageObjectId(),
           selection.imageUrl,
           {
+            existingObjects: slideObjects,
             name: selection.metadata.title ?? null,
             source: selection.metadata.source,
-          },
-          {
-            zIndex: baseZIndex + index,
+            overrides: {
+              zIndex: baseZIndex + index,
+            },
           },
         );
 
@@ -1651,8 +1725,11 @@ const ExhibitionMode = () => {
     addSlideObject(
       targetCard.id,
       createTextBoxSlideObject(generateTextBoxId(), {
-        x: 120 + offset,
-        y: 120 + offset,
+        existingObjects,
+        overrides: {
+          x: 120 + offset,
+          y: 120 + offset,
+        },
       }),
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTextBoxId, slideObjectsByCardId]);
@@ -1670,8 +1747,11 @@ const ExhibitionMode = () => {
     addSlideObject(
       targetCard.id,
       createTableSlideObject(generateTableId(), {
-        x: 144 + offset,
-        y: 144 + offset,
+        existingObjects,
+        overrides: {
+          x: 144 + offset,
+          y: 144 + offset,
+        },
       }),
     );
   }, [addSlideObject, currentSlide, exhibitedCards, generateTableId, slideObjectsByCardId]);
@@ -1690,15 +1770,12 @@ const ExhibitionMode = () => {
       const existingObjects = slideObjectsByCardId[targetCard.id] ?? [];
       const existingCharts = existingObjects.filter(object => object.type === 'chart').length;
       const offset = existingCharts * 32;
-      const nextZIndex = existingObjects.reduce((max, object) => {
-        const value = typeof object.zIndex === 'number' ? object.zIndex : 1;
-        return value > max ? value : max;
-      }, 1) + 1;
-
       const chartObject = createChartSlideObject(generateChartId(), data, chartConfig, {
-        x: 184 + offset,
-        y: 184 + offset,
-        zIndex: nextZIndex,
+        existingObjects,
+        overrides: {
+          x: 184 + offset,
+          y: 184 + offset,
+        },
       });
 
       addSlideObject(targetCard.id, chartObject);
@@ -1733,8 +1810,11 @@ const ExhibitionMode = () => {
       addSlideObject(
         targetCard.id,
         createShapeSlideObject(generateShapeId(), shape, {
-          x: 160 + offset,
-          y: 160 + offset,
+          existingObjects,
+          overrides: {
+            x: 160 + offset,
+            y: 160 + offset,
+          },
         }),
       );
     },
@@ -1828,6 +1908,12 @@ const ExhibitionMode = () => {
             ? textBoxes.filter(textBox => textBox !== titleTextBox)
             : textBoxes;
 
+        const templateBaseObjects = slideObjectsByCardId[newCard.id] ?? [];
+        let templateLayerCursor = templateBaseObjects.reduce((max, object) => {
+          const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+          return value > max ? value : max;
+        }, 0);
+
         supportingTextBoxes
           .filter(textBox => textBox.text.trim().length > 0)
           .forEach(textBox => {
@@ -1857,18 +1943,21 @@ const ExhibitionMode = () => {
               formatting.underline = textBox.underline;
             }
 
+            templateLayerCursor += 1;
+
             addSlideObject(
               newCard.id,
-              createTextBoxSlideObject(
-                generateTextBoxId(),
-                {
+              createTextBoxSlideObject(generateTextBoxId(), {
+                existingObjects: templateBaseObjects,
+                overrides: {
                   x: textBox.position.x,
                   y: textBox.position.y,
                   width: textBox.size.width,
                   height: textBox.size.height,
+                  zIndex: templateLayerCursor,
                 },
-                formatting,
-              ),
+                formattingOverrides: formatting,
+              }),
             );
           });
 
@@ -1892,54 +1981,57 @@ const ExhibitionMode = () => {
             shapeProps.opacity = Math.max(0, Math.min(1, shape.opacity));
           }
 
+          templateLayerCursor += 1;
+
           addSlideObject(
             newCard.id,
-            createShapeSlideObject(
-              generateShapeId(),
-              definition,
-              {
+            createShapeSlideObject(generateShapeId(), definition, {
+              existingObjects: templateBaseObjects,
+              overrides: {
                 x: shape.position.x,
                 y: shape.position.y,
                 width: shape.size.width,
                 height: shape.size.height,
                 rotation: typeof shape.rotation === 'number' ? shape.rotation : 0,
+                zIndex: templateLayerCursor,
               },
-              shapeProps,
-            ),
+              propsOverrides: shapeProps,
+            }),
           );
         });
 
         slide.content?.charts?.forEach(chart => {
-          const chartObject = createChartSlideObject(
-            generateChartId(),
-            chart.data,
-            chart.config,
-            {
+          templateLayerCursor += 1;
+
+          const chartObject = createChartSlideObject(generateChartId(), chart.data, chart.config, {
+            existingObjects: templateBaseObjects,
+            overrides: {
               x: chart.position.x,
               y: chart.position.y,
               width: chart.size.width,
               height: chart.size.height,
+              zIndex: templateLayerCursor,
             },
-          );
+          });
 
           addSlideObject(newCard.id, chartObject);
         });
 
         slide.content?.images?.forEach(image => {
-          const imageObject = createImageSlideObject(
-            generateImageObjectId(),
-            image.src,
-            {
-              name: image.name ?? image.description ?? null,
-              source: image.source ?? 'Template placeholder image',
-            },
-            {
+          templateLayerCursor += 1;
+
+          const imageObject = createImageSlideObject(generateImageObjectId(), image.src, {
+            existingObjects: templateBaseObjects,
+            name: image.name ?? image.description ?? null,
+            source: image.source ?? 'Template placeholder image',
+            overrides: {
               x: image.position.x,
               y: image.position.y,
               width: image.size.width,
               height: image.size.height,
+              zIndex: templateLayerCursor,
             },
-          );
+          });
 
           addSlideObject(newCard.id, imageObject);
         });
@@ -1969,8 +2061,10 @@ const ExhibitionMode = () => {
       bulkUpdateSlideObjects,
       canEdit,
       exhibitedCards.length,
+      generateChartId,
       generateShapeId,
       generateTextBoxId,
+      slideObjectsByCardId,
       setCurrentSlide,
       setOperationsPanelState,
       toast,
@@ -2177,7 +2271,29 @@ const ExhibitionMode = () => {
                   <Grid3x3 className="h-4 w-4" />
                 </button>
               </div>
+              <div className="p-3 border-b border-border flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => setShowSavedDataframesPanel(current => !current)}
+                  className={cn(
+                    'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
+                    showSavedDataframesPanel ? 'text-foreground' : 'text-muted-foreground'
+                  )}
+                  title="Saved DataFrames"
+                  aria-label="Saved DataFrames"
+                  data-saved-dataframes="true"
+                >
+                  <Database className="h-4 w-4" />
+                </button>
+              </div>
             </div>
+
+            {showSavedDataframesPanel && (
+              <SavedDataFramesPanel
+                isOpen={true}
+                onToggle={() => setShowSavedDataframesPanel(false)}
+              />
+            )}
 
             {!isCatalogueCollapsed && !showThumbnails && (
               <ExhibitionCatalogue
@@ -2198,9 +2314,9 @@ const ExhibitionMode = () => {
                 currentSlide={currentSlide}
                 onSlideSelect={index => {
                   handleSlideSelection(index);
-                  setShowThumbnails(false);
                 }}
                 onClose={() => setShowThumbnails(false)}
+                onReorder={handleReorderSlides}
               />
             )}
           </div>
@@ -2386,6 +2502,7 @@ const ExhibitionMode = () => {
             setShowGridView(false);
           }}
           onClose={() => setShowGridView(false)}
+          onReorder={handleReorderSlides}
         />
       )}
 

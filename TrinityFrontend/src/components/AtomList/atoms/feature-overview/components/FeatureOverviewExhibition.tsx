@@ -143,6 +143,7 @@ const normaliseSelectionForExhibition = ({
             baseChartState?.sortOrder === 'asc' || baseChartState?.sortOrder === 'desc'
               ? baseChartState.sortOrder
               : null,
+          seriesSettings: baseChartState?.seriesSettings || {},
         }
       : undefined;
 

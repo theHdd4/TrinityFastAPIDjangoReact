@@ -3,6 +3,8 @@ import {
   DEFAULT_TABLE_ROWS,
   normaliseTableData,
   normaliseTableHeaders,
+  normaliseTableColumnWidths,
+  normaliseTableRowHeights,
   ensureTableStyleId,
   type TableCellData,
   type TableCellFormatting,
@@ -17,6 +19,8 @@ export type TableState = {
   showOutline: boolean;
   headers: TableCellData[];
   styleId: string;
+  columnWidths: number[];
+  rowHeights: number[];
 };
 
 const coercePositiveInteger = (value: unknown, fallback: number): number => {
@@ -41,6 +45,8 @@ export const readTableState = (object: SlideObject): TableState => {
   const colCount = data[0]?.length ?? 0;
   const headers = extractTableHeaders(props?.headers, colCount);
   const styleId = ensureTableStyleId(props?.styleId);
+  const columnWidths = normaliseTableColumnWidths(props?.columnWidths, colCount);
+  const rowHeights = normaliseTableRowHeights(props?.rowHeights, data.length);
 
   return {
     data,
@@ -50,7 +56,19 @@ export const readTableState = (object: SlideObject): TableState => {
     showOutline: props?.showOutline !== false,
     headers,
     styleId,
+    columnWidths,
+    rowHeights,
   };
+};
+
+const numericArraysEqual = (a: number[], b: number[]) => {
+  if (a === b) {
+    return true;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((value, index) => value === b[index]);
 };
 
 export const tableStatesEqual = (a: TableState, b: TableState) => {
@@ -61,7 +79,9 @@ export const tableStatesEqual = (a: TableState, b: TableState) => {
     a.locked === b.locked &&
     a.showOutline === b.showOutline &&
     a.headers === b.headers &&
-    a.styleId === b.styleId
+    a.styleId === b.styleId &&
+    numericArraysEqual(a.columnWidths, b.columnWidths) &&
+    numericArraysEqual(a.rowHeights, b.rowHeights)
   );
 };
 

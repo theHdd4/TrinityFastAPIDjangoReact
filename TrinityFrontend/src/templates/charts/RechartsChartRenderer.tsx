@@ -137,6 +137,28 @@ import {
 } from 'recharts';
 import * as d3 from 'd3';
 
+const RADIAN = Math.PI / 180;
+
+const renderPiePercentageLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+  if (percent === undefined || percent <= 0.02) return null;
+  const radius = innerRadius + (outerRadius - innerRadius) / 2;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="#ffffff"
+      textAnchor={x > cx ? 'start' : 'end'}
+      dominantBaseline="central"
+      fontSize={11}
+      fontWeight={600}
+    >
+      {(percent * 100).toFixed(0)}%
+    </text>
+  );
+};
+
 interface Props {
   type: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart';
   data: any[];
@@ -514,22 +536,65 @@ const RechartsChartRenderer: React.FC<Props> = ({
   onSeriesSettingsChange, // Callback to update series settings
 }) => {
 
+  // Create storage key for theme based on data fields (not chart type) to persist across chart type changes
+  const getThemeStorageKey = useCallback(() => {
+    const fieldsKey = `${yField || ''}_${yFields?.join(',') || ''}_${legendField || ''}_${xField || ''}`;
+    return `chart_theme_${fieldsKey}`;
+  }, [yField, yFields, legendField, xField]);
+  
+  // Load theme from localStorage and cache in state - this will be merged with props
+  const [storedTheme, setStoredTheme] = useState<string | null>(() => {
+    try {
+      const fieldsKey = `${yField || ''}_${yFields?.join(',') || ''}_${legendField || ''}_${xField || ''}`;
+      const storageKey = `chart_theme_${fieldsKey}`;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        return stored;
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+    return null;
+  });
+  
+  // Reload theme from localStorage when storage key changes (fields change)
+  useEffect(() => {
+    try {
+      const fieldsKey = `${yField || ''}_${yFields?.join(',') || ''}_${legendField || ''}_${xField || ''}`;
+      const storageKey = `chart_theme_${fieldsKey}`;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        setStoredTheme(stored);
+      } else {
+        setStoredTheme(null);
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [yField, yFields, legendField, xField]);
+  
   // State for color theme - track if user has made a selection
   const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
-  // Use selectedTheme if user has made a choice, otherwise use propTheme
-  const currentTheme = selectedTheme !== null ? selectedTheme : (propTheme || 'default');
+  
+  // Merge localStorage with props - localStorage provides base, props override
+  // Priority: selectedTheme > storedTheme > propTheme > 'default'
+  const currentTheme = selectedTheme !== null 
+    ? selectedTheme 
+    : (storedTheme !== null 
+      ? storedTheme 
+      : (propTheme || 'default'));
   
   // DEBUG: Log theme changes
   useEffect(() => {
-    console.log('🎨 Theme changed:', { selectedTheme, propTheme, currentTheme });
-  }, [selectedTheme, propTheme, currentTheme]);
+    console.log('🎨 Theme changed:', { selectedTheme, storedTheme, propTheme, currentTheme });
+  }, [selectedTheme, storedTheme, propTheme, currentTheme]);
   
   // Update selectedTheme when propTheme changes (but only if user hasn't made a selection)
   useEffect(() => {
-    if (propTheme && selectedTheme === null) {
+    if (propTheme && selectedTheme === null && storedTheme === null) {
       setSelectedTheme(propTheme);
     }
-  }, [propTheme, selectedTheme]);
+  }, [propTheme, selectedTheme, storedTheme]);
 
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
@@ -608,25 +673,86 @@ const RechartsChartRenderer: React.FC<Props> = ({
     color?: string;
     showDataLabels?: boolean;
   }
-  // Use prop seriesSettings if provided, otherwise use local state
-  const [localSeriesSettings, setLocalSeriesSettings] = useState<Record<string, SeriesSettings>>({});
-  const seriesSettings = propSeriesSettings !== undefined ? propSeriesSettings : localSeriesSettings;
   
-  // Update series settings - use callback if provided, otherwise update local state
+  // Create storage key for seriesSettings based on data fields (not chart type) to persist across chart type changes
+  const getSeriesSettingsStorageKey = useCallback(() => {
+    const fieldsKey = `${yField || ''}_${yFields?.join(',') || ''}_${legendField || ''}_${xField || ''}`;
+    return `chart_series_settings_${fieldsKey}`;
+  }, [yField, yFields, legendField, xField]);
+  
+  // Load from localStorage and cache in state - this will be merged with props
+  const [storedSeriesSettings, setStoredSeriesSettings] = useState<Record<string, SeriesSettings>>(() => {
+    try {
+      const fieldsKey = `${yField || ''}_${yFields?.join(',') || ''}_${legendField || ''}_${xField || ''}`;
+      const storageKey = `chart_series_settings_${fieldsKey}`;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+    return {};
+  });
+  
+  // Reload from localStorage when storage key changes (fields change)
+  useEffect(() => {
+    try {
+      const fieldsKey = `${yField || ''}_${yFields?.join(',') || ''}_${legendField || ''}_${xField || ''}`;
+      const storageKey = `chart_series_settings_${fieldsKey}`;
+      const stored = localStorage.getItem(storageKey);
+      if (stored) {
+        setStoredSeriesSettings(JSON.parse(stored));
+      } else {
+        setStoredSeriesSettings({});
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [yField, yFields, legendField, xField]);
+  
+  // Use prop seriesSettings if provided, otherwise use local state (initialized from localStorage)
+  const [localSeriesSettings, setLocalSeriesSettings] = useState<Record<string, SeriesSettings>>({});
+  
+  // Merge localStorage with props - localStorage provides base, props override specific keys
+  // This ensures localStorage values persist even when parent passes empty object
+  const seriesSettings = useMemo(() => {
+    if (propSeriesSettings !== undefined) {
+      // Merge: stored settings as base, prop settings override
+      // If propSettings is empty {}, this will still return storedSettings
+      return { ...storedSeriesSettings, ...propSeriesSettings };
+    }
+    // If no props, use local state (which should be synced with localStorage)
+    return Object.keys(localSeriesSettings).length > 0 ? localSeriesSettings : storedSeriesSettings;
+  }, [propSeriesSettings, localSeriesSettings, storedSeriesSettings]);
+  
+  // Update series settings - use callback if provided, otherwise update local state and localStorage
   // Use useCallback to prevent recreating the function and causing render loops
   const updateSeriesSettings = useCallback((newSettings: Record<string, SeriesSettings> | ((prev: Record<string, SeriesSettings>) => Record<string, SeriesSettings>)) => {
+    // Get current merged settings (includes localStorage)
+    const currentMergedSettings = propSeriesSettings !== undefined 
+      ? { ...storedSeriesSettings, ...propSeriesSettings }
+      : (Object.keys(localSeriesSettings).length > 0 ? localSeriesSettings : storedSeriesSettings);
+    
+    const updated = typeof newSettings === 'function' ? newSettings(currentMergedSettings) : newSettings;
+    
+    // Always update storedSeriesSettings state and localStorage
+    setStoredSeriesSettings(updated);
+    try {
+      localStorage.setItem(getSeriesSettingsStorageKey(), JSON.stringify(updated));
+    } catch {
+      // Ignore localStorage errors
+    }
+    
     if (onSeriesSettingsChange) {
-      // Get current settings from props (or local state if props not provided)
-      const currentSettings = propSeriesSettings !== undefined ? propSeriesSettings : localSeriesSettings;
-      const updated = typeof newSettings === 'function' ? newSettings(currentSettings) : newSettings;
       // Use requestAnimationFrame to defer state update to avoid updating during render
       requestAnimationFrame(() => {
         onSeriesSettingsChange(updated);
       });
     } else {
-      setLocalSeriesSettings(newSettings);
+      setLocalSeriesSettings(updated);
     }
-  }, [propSeriesSettings, localSeriesSettings, onSeriesSettingsChange]);
+  }, [propSeriesSettings, localSeriesSettings, storedSeriesSettings, onSeriesSettingsChange, getSeriesSettingsStorageKey]);
   
   // Handle Series Settings click from context menu
   const handleSeriesSettingsClick = (e: React.MouseEvent) => {
@@ -1229,6 +1355,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
     return { pivoted: [], uniqueValues: [], actualXKey: xField };
   }, [type, chartDataForRendering, xField, yField, legendField, sortOrder, sortColumn]);
 
+  useEffect(() => {
+    if (type === 'pie_chart' && legendField && legendValues.length > 0) {
+      onChartTypeChange?.('line_chart');
+    }
+  }, [type, legendField, legendValues, onChartTypeChange]);
+
   // Calculate if all series have data labels enabled (for "select all" behavior)
   const allSeriesDataLabelsEnabled = useMemo(() => {
     // Collect all available series keys
@@ -1327,6 +1459,14 @@ const RechartsChartRenderer: React.FC<Props> = ({
     // Always update the internal theme when a theme change is requested
     // This allows dynamic theme changes even when a prop theme is provided
     setSelectedTheme(themeName);
+    
+    // Save theme to localStorage for persistence
+    setStoredTheme(themeName);
+    try {
+      localStorage.setItem(getThemeStorageKey(), themeName);
+    } catch {
+      // Ignore localStorage errors
+    }
     
     // Close the menus
     setShowContextMenu(false);
@@ -1433,8 +1573,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const handleXAxisLabelsToggle = () => {
     const newXAxisLabelsState = !showXAxisLabels;
     setShowXAxisLabels(newXAxisLabelsState);
-    setShowContextMenu(false);
-    setShowColorSubmenu(false);
     if (onXAxisLabelsToggle) {
       onXAxisLabelsToggle(newXAxisLabelsState);
     }
@@ -1444,8 +1582,6 @@ const RechartsChartRenderer: React.FC<Props> = ({
   const handleYAxisLabelsToggle = () => {
     const newYAxisLabelsState = !showYAxisLabels;
     setShowYAxisLabels(newYAxisLabelsState);
-    setShowContextMenu(false);
-    setShowColorSubmenu(false);
     if (onYAxisLabelsToggle) {
       onYAxisLabelsToggle(newYAxisLabelsState);
     }
@@ -1523,6 +1659,18 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const handleClickOutside = (e: MouseEvent) => {
       // Check if the click is outside all menus
       const target = e.target as Element;
+      
+      // Ignore clicks on color inputs - the native color picker should not close the menu
+      if (target instanceof HTMLInputElement && target.type === 'color') {
+        return;
+      }
+      
+      // Check if any color input is currently focused (picker is open)
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLInputElement && activeElement.type === 'color') {
+        return;
+      }
+      
       const isOutsideMainMenu = !target.closest('.context-menu');
       const isOutsideColorSubmenu = !target.closest('.color-submenu');
       const isOutsideSortSubmenu = !target.closest('.sort-submenu');
@@ -1952,15 +2100,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
     if (!showChartTypeSubmenu) return null;
 
     const chartTypes = [
-      { 
-        key: 'pie_chart', 
-        label: 'Pie Chart', 
+      ...(!(legendField && legendValues.length > 0) ? [{
+        key: 'pie_chart',
+        label: 'Pie Chart',
         icon: (
           <svg className="w-5 h-5 text-gray-800" fill="currentColor" viewBox="0 0 24 24">
             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
           </svg>
         )
-      },
+      }] : []),
       { 
         key: 'bar_chart', 
         label: 'Bar Chart', 
@@ -2184,7 +2332,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
       const globalDataLabelsValue = currentShowDataLabels;
       
       // Check if we actually need to update anything before calling updateSeriesSettings
-      const currentSettings = propSeriesSettings !== undefined ? propSeriesSettings : localSeriesSettings;
+      // Use merged settings (storedSeriesSettings as base, props override) to preserve persisted colors
+      const currentSettings = propSeriesSettings !== undefined 
+        ? { ...storedSeriesSettings, ...propSeriesSettings }
+        : (Object.keys(localSeriesSettings).length > 0 ? localSeriesSettings : storedSeriesSettings);
       let needsUpdate = false;
       const updated = { ...currentSettings };
       
@@ -2259,8 +2410,80 @@ const RechartsChartRenderer: React.FC<Props> = ({
   }, [selectedSeriesTab, showSeriesSettingsSubmenu, legendField, legendValues, yFields, yField]);
 
 
-  // Series Settings Submenu component
-  const SeriesSettingsSubmenu = () => {
+    // Memoized color picker component to prevent re-renders while picker is open
+    const ColorPickerInput = React.memo(({ 
+      initialColor, 
+      seriesKey, 
+      onColorChange 
+    }: { 
+      initialColor: string; 
+      seriesKey: string; 
+      onColorChange: (color: string) => void;
+    }) => {
+      const inputRef = useRef<HTMLInputElement>(null);
+      const isPickerOpenRef = useRef(false);
+      const [localColor, setLocalColor] = useState(initialColor);
+      const [showApply, setShowApply] = useState(false);
+      
+      // Update local color only when initialColor changes AND picker is not open
+      useEffect(() => {
+        if (!isPickerOpenRef.current) {
+          setLocalColor(initialColor);
+          if (inputRef.current) {
+            inputRef.current.value = initialColor;
+          }
+        }
+      }, [initialColor]);
+      
+      const handleApply = () => {
+        isPickerOpenRef.current = false;
+        setShowApply(false);
+        onColorChange(localColor);
+        inputRef.current?.blur();
+      };
+      
+      return (
+        <div className="flex items-center gap-2">
+          <input
+            ref={inputRef}
+            type="color"
+            value={localColor}
+            onChange={(e) => {
+              setLocalColor(e.target.value);
+            }}
+            onFocus={() => {
+              isPickerOpenRef.current = true;
+              setShowApply(true);
+            }}
+            onBlur={(e) => {
+              // Delay to allow Apply button click to register
+              setTimeout(() => {
+                if (isPickerOpenRef.current) {
+                  isPickerOpenRef.current = false;
+                  setShowApply(false);
+                  onColorChange(e.target.value);
+                }
+              }, 150);
+            }}
+            className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
+          />
+          {showApply && (
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleApply();
+              }}
+              className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            >
+              Apply
+            </button>
+          )}
+        </div>
+      );
+    });
+
+    // Series Settings Submenu component
+    const SeriesSettingsSubmenu = () => {
     if (!showSeriesSettingsSubmenu) return null;
 
     // Use LOCAL STATE for search query (like AxisLabelEditor uses local state)
@@ -2480,40 +2703,20 @@ const RechartsChartRenderer: React.FC<Props> = ({
                   {/* Color Picker */}
                   <div className="mb-2">
                     <label className="block text-xs text-gray-700 mb-1">Color</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={seriesColor}
-                        onChange={(e) => {
-                          updateSeriesSettings(prev => ({
-                            ...prev,
-                            [selectedSeries.dataKey]: {
-                              ...prev[selectedSeries.dataKey],
-                              color: e.target.value
-                            }
-                          }));
-                        }}
-                        className="w-12 h-8 border border-gray-300 rounded cursor-pointer"
-                      />
-                      <input
-                        type="text"
-                        value={seriesColor}
-                        onChange={(e) => {
-                          const color = e.target.value;
-                          if (/^#[0-9A-Fa-f]{6}$/.test(color) || /^#[0-9A-Fa-f]{3}$/.test(color)) {
-                            updateSeriesSettings(prev => ({
-                              ...prev,
-                              [selectedSeries.dataKey]: {
-                                ...prev[selectedSeries.dataKey],
-                                color: color
-                              }
-                            }));
+                    <ColorPickerInput
+                      key={`color-picker-${selectedSeries.dataKey}`}
+                      initialColor={seriesColor}
+                      seriesKey={selectedSeries.dataKey}
+                      onColorChange={(color) => {
+                        updateSeriesSettings(prev => ({
+                          ...prev,
+                          [selectedSeries.dataKey]: {
+                            ...prev[selectedSeries.dataKey],
+                            color: color
                           }
-                        }}
-                        className="flex-1 px-2 py-1 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                        placeholder={seriesColor}
-                      />
-                    </div>
+                        }));
+                      }}
+                    />
                   </div>
 
                   {/* Data Labels Toggle */}
@@ -3820,13 +4023,63 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 tickFormatter={formatLargeNumber}
               />
             )}
-            <Tooltip formatter={(v: number) => formatTooltipNumber(v)} />
+            <Tooltip 
+              content={({ active, payload, label }) => {
+                if (active && payload && payload.length) {
+                  return (
+                    <div className="explore-chart-tooltip">
+                      <p className="font-semibold text-gray-900 mb-2 text-sm">{label}</p>
+                      {payload.map((entry: any, index: number) => {
+                        // Use the actual Y-axis label instead of the dataKey
+                        let displayName = entry.dataKey;
+                        if (entry.dataKey === yKey) {
+                          displayName = effectiveYAxisLabel || effectiveYAxisLabels?.[0] || 'Value';
+                        } else if (entry.dataKey === yKeys[1] || entry.dataKey === yFields?.[1]) {
+                          displayName = effectiveYAxisLabels?.[1] || yFields?.[1] || 'Value';
+                        }
+                        
+                        return (
+                          <div key={index} className="flex items-center gap-2 mb-1">
+                            <div 
+                              className="w-3 h-3 rounded-full" 
+                              style={{ backgroundColor: entry.color }}
+                            />
+                            <span className="text-sm font-medium text-gray-700">
+                              {displayName}: 
+                            </span>
+                            <span className="text-sm font-semibold text-gray-700">
+                              {typeof entry.value === 'number' ? formatTooltipNumber(entry.value) : entry.value}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                }
+                return null;
+              }}
+              cursor={{ stroke: renderPalette[0], strokeWidth: 1, strokeOpacity: 0.4 }}
+            />
             {currentShowLegend && (
               <Legend
                 layout="horizontal"
                 verticalAlign="bottom"
                 align="center"
                 wrapperStyle={{ bottom: 20, fontSize: '11px' }}
+                formatter={(value, entry) => {
+                  // Format legend labels for dual y-axes
+                  if (yFields && yFields.length > 1) {
+                    const fieldIndex = entry.dataKey === yKey ? 0 : 1;
+                    const fieldName = yFields[fieldIndex];
+                    const label = effectiveYAxisLabels && effectiveYAxisLabels[fieldIndex] ? effectiveYAxisLabels[fieldIndex] : fieldName;
+                    return capitalizeWords(label);
+                  }
+                  // For single Y-axis, use the actual Y-axis label instead of generic "Value"
+                  if (entry.dataKey === yKey) {
+                    return capitalizeWords(effectiveYAxisLabel || effectiveYAxisLabels?.[0] || 'Value');
+                  }
+                  return capitalizeWords(value);
+                }}
               />
             )}
             {(() => {
@@ -3978,9 +4231,13 @@ const RechartsChartRenderer: React.FC<Props> = ({
             {legendField && legendValues.length > 0 && pivotedLineData.length > 0 ? (
               legendValues.map((seriesKey, idx) => {
                 const seriesData = pivotedLineData.filter(d => d[seriesKey] !== undefined && d[seriesKey] !== null);
+                const seriesColor = seriesSettings[seriesKey]?.color || renderPalette[idx % renderPalette.length];
+                const seriesShowDataLabels = seriesSettings[seriesKey]?.showDataLabels !== undefined 
+                  ? seriesSettings[seriesKey]?.showDataLabels 
+                  : currentShowDataLabels;
                 return (
-                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={renderPalette[idx % renderPalette.length]}>
-                    {currentShowDataLabels && (
+                  <Scatter key={seriesKey} data={seriesData} dataKey={seriesKey} name={seriesKey} fill={seriesColor}>
+                    {seriesShowDataLabels && (
                       <LabelList 
                         dataKey={seriesKey} 
                         position="top" 
@@ -3993,28 +4250,43 @@ const RechartsChartRenderer: React.FC<Props> = ({
               })
             ) : (
               <>
-                <Scatter data={transformedChartData} dataKey={yKey} fill={renderPalette[0]} yAxisId={0}>
-                  {currentShowDataLabels && (
-                    <LabelList 
-                      dataKey={yKey} 
-                      position="top" 
-                      formatter={(value) => formatLargeNumber(value)}
-                      style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                    />
-                  )}
-                </Scatter>
-                {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (
-                  <Scatter data={transformedChartData} dataKey={yKeys[1] || yFields[1]} fill={renderPalette[1]} yAxisId={forceSingleAxis ? 0 : 1}>
-                    {currentShowDataLabels && (
-                      <LabelList 
-                        dataKey={yKeys[1] || yFields[1]} 
-                        position="top" 
-                        formatter={(value) => formatLargeNumber(value)}
-                        style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
-                      />
-                    )}
-                  </Scatter>
-                )}
+                {(() => {
+                  const seriesColor = seriesSettings[yKey]?.color || renderPalette[0];
+                  const seriesShowDataLabels = seriesSettings[yKey]?.showDataLabels !== undefined 
+                    ? seriesSettings[yKey]?.showDataLabels 
+                    : currentShowDataLabels;
+                  return (
+                    <Scatter data={transformedChartData} dataKey={yKey} fill={seriesColor} yAxisId={0}>
+                      {seriesShowDataLabels && (
+                        <LabelList 
+                          dataKey={yKey} 
+                          position="top" 
+                          formatter={(value) => formatLargeNumber(value)}
+                          style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                        />
+                      )}
+                    </Scatter>
+                  );
+                })()}
+                {(yKeys.length > 1 || (yFields && yFields.length > 1)) && (() => {
+                  const secondKey = yKeys[1] || yFields[1];
+                  const seriesColor = seriesSettings[secondKey]?.color || renderPalette[1];
+                  const seriesShowDataLabels = seriesSettings[secondKey]?.showDataLabels !== undefined 
+                    ? seriesSettings[secondKey]?.showDataLabels 
+                    : currentShowDataLabels;
+                  return (
+                    <Scatter data={transformedChartData} dataKey={secondKey} fill={seriesColor} yAxisId={forceSingleAxis ? 0 : 1}>
+                      {seriesShowDataLabels && (
+                        <LabelList 
+                          dataKey={secondKey} 
+                          position="top" 
+                          formatter={(value) => formatLargeNumber(value)}
+                          style={{ fontSize: '11px', fontWeight: '500', fill: '#374151' }}
+                        />
+                      )}
+                    </Scatter>
+                  );
+                })()}
               </>
             )}
           </ScatterChart>
@@ -4069,7 +4341,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                       stroke="white"
                       strokeWidth={3}
                       filter="url(#pieShadow)"
-                      label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                      label={currentShowDataLabels ? renderPiePercentageLabel : undefined}
                       labelLine={false}
                       style={{ fontSize: '11px', fontWeight: 500 }}
                     >
@@ -4122,7 +4394,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 stroke="white"
                 strokeWidth={3}
                 filter="url(#pieShadow)"
-                label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                label={currentShowDataLabels ? renderPiePercentageLabel : undefined}
                 labelLine={false}
                 dataKey={primaryYKey}
                 nameKey={xKey}
@@ -4225,7 +4497,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
                 stroke="white"
                 strokeWidth={3}
                 filter="url(#pieShadow)"
-                label={currentShowDataLabels ? (({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : '') : undefined}
+                label={currentShowDataLabels ? renderPiePercentageLabel : undefined}
                 labelLine={false}
                 dataKey={yKey}
                 nameKey={xKey}

@@ -24,6 +24,7 @@ export interface ChartRendererConfig {
   showDataLabels?: boolean;
   showGrid?: boolean;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 const DEFAULT_TREND_ANALYSIS_DATA: Array<{ date: string; salesvalue: number; series: string }> = [
@@ -270,6 +271,11 @@ const normaliseChartState = (value: unknown) => {
     chartState.sortOrder = sortOrder;
   } else if (value.sortOrder === null || value['sort_order'] === null) {
     chartState.sortOrder = null;
+  }
+
+  const seriesSettings = value.seriesSettings ?? value['series_settings'];
+  if (isRecord(seriesSettings)) {
+    chartState.seriesSettings = seriesSettings as Record<string, { color?: string; showDataLabels?: boolean }>;
   }
 
   return Object.keys(chartState).length > 0 ? chartState : undefined;
@@ -846,6 +852,11 @@ const parseDirectChartRendererConfig = (
     config.sortOrder = sortOrder;
   }
 
+  const seriesSettings = candidate.seriesSettings ?? candidate['series_settings'];
+  if (isRecord(seriesSettings)) {
+    config.seriesSettings = seriesSettings as Record<string, { color?: string; showDataLabels?: boolean }>;
+  }
+
   return config;
 };
 
@@ -885,6 +896,7 @@ const createChartRendererConfig = (
     showDataLabels: chartState.showDataLabels,
     showGrid: chartState.showGrid,
     sortOrder: chartState.sortOrder ?? null,
+    seriesSettings: chartState.seriesSettings || {},
   };
 };
 
@@ -896,9 +908,29 @@ export const deriveChartConfig = (
   const createdConfig = createChartRendererConfig(metadata, variant);
   const defaultConfig = buildDefaultTrendChartConfig(variant);
   
-  return ensureRenderableChartConfig(
+  const finalConfig = ensureRenderableChartConfig(
     directConfig ?? createdConfig ?? defaultConfig,
   );
+  
+  // Debug: Log seriesSettings to verify they're being passed through
+  if (finalConfig && (directConfig || createdConfig)) {
+    const seriesSettingsObj = finalConfig.seriesSettings || {};
+    const seriesSettingsEntries = Object.entries(seriesSettingsObj);
+    console.log('🔍 deriveChartConfig - seriesSettings:', {
+      hasSeriesSettings: !!finalConfig.seriesSettings,
+      seriesSettingsKeys: Object.keys(seriesSettingsObj),
+      seriesSettingsEntries: seriesSettingsEntries.map(([key, value]) => ({ key, value })),
+      source: directConfig ? 'directConfig' : 'createdConfig',
+      chartStateHasSeriesSettings: !!metadata.chartState?.seriesSettings,
+      chartRendererPropsHasSeriesSettings: metadata.chartRendererProps && isRecord(metadata.chartRendererProps) ? !!(metadata.chartRendererProps as any).seriesSettings : false,
+      yField: finalConfig.yField,
+      legendField: finalConfig.legendField,
+      yFields: finalConfig.yFields,
+      firstDataRow: finalConfig.data && finalConfig.data.length > 0 ? finalConfig.data[0] : null,
+    });
+  }
+  
+  return finalConfig;
 };
 
 export const extractSummaryEntries = (stats: FeatureOverviewStatistics | undefined): Array<[string, unknown]> => {

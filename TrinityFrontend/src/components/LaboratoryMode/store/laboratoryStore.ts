@@ -187,6 +187,7 @@ export interface FeatureOverviewVisualizationManifestChart {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewVisualizationManifestTable {
@@ -233,6 +234,7 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewExhibitionSelectionContext {
@@ -1693,6 +1695,70 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
     columns: [],
     unsaved_data: []
   }
+};
+
+export interface PivotTableSettings {
+  dataSource?: string;
+  dataSourceColumns?: string[];
+  fields: string[];
+  selectedFields: string[];
+  rowFields: string[];
+  columnFields: string[];
+  valueFields: { field: string; aggregation: string }[];
+  filterFields: string[];
+  pivotResults: any[];
+  pivotStatus?: 'idle' | 'pending' | 'success' | 'failed';
+  pivotError?: string | null;
+  pivotUpdatedAt?: string;
+  pivotRowCount?: number;
+  pivotLastSavedPath?: string | null;
+  pivotLastSavedAt?: string | null;
+  pivotFilterOptions?: Record<string, string[]>;
+  pivotFilterSelections?: Record<string, string[]>;
+  grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
+  subtotalsMode?: 'off' | 'top' | 'bottom';
+  pivotStyleId?: string;
+  pivotStyleOptions?: {
+    rowHeaders: boolean;
+    columnHeaders: boolean;
+    bandedRows: boolean;
+  };
+  pivotHierarchy?: any[];
+  pivotColumnHierarchy?: any[];
+  reportLayout?: 'compact' | 'outline' | 'tabular';
+  collapsedKeys?: string[];
+}
+
+export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
+  dataSource: '',
+  dataSourceColumns: [],
+  fields: [],
+  selectedFields: [],
+  rowFields: [],
+  columnFields: [],
+  valueFields: [],
+  filterFields: [],
+  pivotResults: [],
+  pivotStatus: 'idle',
+  pivotError: null,
+  pivotUpdatedAt: undefined,
+  pivotRowCount: 0,
+  pivotLastSavedPath: null,
+  pivotLastSavedAt: null,
+  pivotFilterOptions: {},
+  pivotFilterSelections: {},
+  grandTotalsMode: 'off',
+  subtotalsMode: 'off',
+  pivotStyleId: 'light-slate',
+  pivotStyleOptions: {
+    rowHeaders: true,
+    columnHeaders: true,
+    bandedRows: false,
+  },
+  pivotHierarchy: [],
+  pivotColumnHierarchy: [],
+  reportLayout: 'compact',
+  collapsedKeys: [],
 };
 
 interface LaboratoryStore {
