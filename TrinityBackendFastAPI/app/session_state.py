@@ -1,20 +1,27 @@
-import hashlib
-import json
-import io
-from datetime import datetime
-from typing import Dict, Optional
+from __future__ import annotations
 
-from app.core.redis import get_sync_redis
-from .DataStorageRetrieval.db import upsert_project_state, fetch_project_state
-from .DataStorageRetrieval.minio_utils import get_client, MINIO_BUCKET
+import hashlib
+import io
+import json
+from datetime import datetime
+from typing import Dict, Optional, Tuple
+
 from app.core.cache_events import emit_cache_invalidation
+from app.core.feature_cache import feature_cache
+from .DataStorageRetrieval.db import fetch_project_state, upsert_project_state
+from .DataStorageRetrieval.minio_utils import MINIO_BUCKET, get_client
 
 TTL = 3600
 NAMESPACE = "projstate"
 VERSION_SUFFIX = ":version"
 
 
-redis_client = get_sync_redis()
+state_cache = feature_cache.session_state("project_state")
+version_cache = feature_cache.session_state("project_state_version")
+
+
+def _cache_parts(client_id: str, app_id: str, project_id: str) -> Tuple[str, str, str]:
+    return client_id, app_id, project_id
 
 
 def _redis_key(client_id: str, app_id: str, project_id: str) -> str:
@@ -60,10 +67,10 @@ def _load_latest_snapshot(client_id: str, app_id: str, project_id: str) -> Optio
 
 async def save_state(client_id: str, app_id: str, project_id: str, state: Dict) -> None:
     key = _redis_key(client_id, app_id, project_id)
-    version_key = _redis_version_key(client_id, app_id, project_id)
     version = _state_version(state)
-    redis_client.setex(key, TTL, json.dumps(state, default=str))
-    redis_client.setex(version_key, TTL, version)
+    parts = _cache_parts(client_id, app_id, project_id)
+    state_cache.set_json(parts, state, ttl=TTL)
+    version_cache.set(parts, version, ttl=TTL)
     await upsert_project_state(client_id, app_id, project_id, state)
     _save_snapshot(client_id, app_id, project_id, state)
     emit_cache_invalidation(
@@ -82,25 +89,27 @@ async def save_state(client_id: str, app_id: str, project_id: str, state: Dict) 
 
 
 async def load_state(client_id: str, app_id: str, project_id: str) -> Optional[Dict]:
-    key = _redis_key(client_id, app_id, project_id)
-    cached = redis_client.get(key)
-    if cached:
-        try:
-            return json.loads(cached)
-        except Exception:
-            pass
+    parts = _cache_parts(client_id, app_id, project_id)
+    cached = state_cache.get_json(parts)
+    if cached is not None:
+        return cached
     db_state = await fetch_project_state(project_id)
     if db_state is not None:
-        redis_client.setex(key, TTL, json.dumps(db_state, default=str))
-        redis_client.setex(_redis_version_key(client_id, app_id, project_id), TTL, _state_version(db_state))
+        state_cache.set_json(parts, db_state, ttl=TTL)
+        version_cache.set(parts, _state_version(db_state), ttl=TTL)
         return db_state
-    return _load_latest_snapshot(client_id, app_id, project_id)
+    snapshot = _load_latest_snapshot(client_id, app_id, project_id)
+    if snapshot is not None:
+        state_cache.set_json(parts, snapshot, ttl=TTL)
+        version_cache.set(parts, _state_version(snapshot), ttl=TTL)
+    return snapshot
 
 
 async def delete_state(client_id: str, app_id: str, project_id: str) -> None:
     key = _redis_key(client_id, app_id, project_id)
-    redis_client.delete(key)
-    redis_client.delete(_redis_version_key(client_id, app_id, project_id))
+    parts = _cache_parts(client_id, app_id, project_id)
+    state_cache.delete(parts)
+    version_cache.delete(parts)
     emit_cache_invalidation(
         "session",
         {

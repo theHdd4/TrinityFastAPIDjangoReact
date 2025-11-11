@@ -1,8 +1,12 @@
 # routes.py - Molecule API Routes
-from fastapi import APIRouter, HTTPException
+import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from app.core.observability import timing_dependency_factory
 
 from .database import (
     save_molecule_to_mongo,
@@ -15,7 +19,11 @@ from .database import (
 from .config import settings
 
 # Create router instance
-router = APIRouter()
+logger = logging.getLogger(__name__)
+
+timing_dependency = timing_dependency_factory("app.features.molecule")
+
+router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 # =============================================================================
 # PYDANTIC MODELS
@@ -73,6 +81,7 @@ class GetWorkflowRequest(BaseModel):
 @router.get("/health")
 async def health_check():
     """Health check endpoint for the molecule service"""
+    logger.info("molecule.health_check")
     return {
         "status": "healthy",
         "service": "Molecule API",
@@ -90,6 +99,7 @@ async def health_check():
 async def check_mongodb_collections():
     """Debug: Check MongoDB connection and collections"""
     try:
+        logger.info("molecule.debug.mongodb")
         # Test basic connection
         if not check_mongodb_connection():
             return {
@@ -131,6 +141,14 @@ async def check_mongodb_collections():
 async def save_molecule(request: SaveMoleculeRequest):
     """Save a molecule to MongoDB"""
     try:
+        logger.info(
+            "molecule.save id=%s user=%s client=%s app=%s project=%s",
+            request.molecule.id,
+            request.user_id,
+            request.client_id,
+            request.app_id,
+            request.project_id,
+        )
         # Convert Pydantic model to dict
         molecule_dict = request.molecule.dict()
         
@@ -146,13 +164,19 @@ async def save_molecule(request: SaveMoleculeRequest):
         if result.get("status") != "success":
             raise HTTPException(status_code=500, detail=result.get("error", "Failed to save molecule"))
         
-        return {
+        response = {
             "status": "success",
             "message": "Molecule saved successfully",
             "molecule_id": result.get("molecule_id"),
             "operation": result.get("operation"),
             "timestamp": datetime.now().isoformat()
         }
+        logger.info(
+            "molecule.save.completed id=%s operation=%s",
+            response["molecule_id"],
+            response.get("operation"),
+        )
+        return response
         
     except HTTPException:
         raise
@@ -163,20 +187,33 @@ async def save_molecule(request: SaveMoleculeRequest):
 async def get_molecules(request: GetMoleculesRequest):
     """Get molecules from MongoDB with optional filtering"""
     try:
+        logger.info(
+            "molecule.list user=%s client=%s project=%s type=%s",
+            request.user_id,
+            request.client_id,
+            request.project_id,
+            request.molecule_type,
+        )
         molecules = get_molecules_from_mongo(
             user_id=request.user_id,
             client_id=request.client_id,
             project_id=request.project_id,
             molecule_type=request.molecule_type
         )
-        
-        return {
+
+        response = {
             "status": "success",
             "message": f"Retrieved {len(molecules)} molecules",
             "molecules": molecules,
             "count": len(molecules),
             "timestamp": datetime.now().isoformat()
         }
+        logger.info(
+            "molecule.list.completed count=%s type=%s",
+            response["count"],
+            request.molecule_type,
+        )
+        return response
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -185,17 +222,20 @@ async def get_molecules(request: GetMoleculesRequest):
 async def get_molecule(molecule_id: str):
     """Get a specific molecule by ID"""
     try:
+        logger.info("molecule.get id=%s", molecule_id)
         molecule = get_molecule_by_id(molecule_id)
         
         if not molecule:
             raise HTTPException(status_code=404, detail="Molecule not found")
         
-        return {
+        response = {
             "status": "success",
             "message": "Molecule retrieved successfully",
             "molecule": molecule,
             "timestamp": datetime.now().isoformat()
         }
+        logger.info("molecule.get.completed id=%s", molecule_id)
+        return response
         
     except HTTPException:
         raise
@@ -206,17 +246,20 @@ async def get_molecule(molecule_id: str):
 async def delete_molecule(molecule_id: str):
     """Delete a molecule from MongoDB"""
     try:
+        logger.info("molecule.delete id=%s", molecule_id)
         result = delete_molecule_from_mongo(molecule_id)
         
         if result.get("status") != "success":
             raise HTTPException(status_code=404, detail=result.get("error", "Molecule not found"))
         
-        return {
+        response = {
             "status": "success",
             "message": "Molecule deleted successfully",
             "molecule_id": molecule_id,
             "timestamp": datetime.now().isoformat()
         }
+        logger.info("molecule.delete.completed id=%s", molecule_id)
+        return response
         
     except HTTPException:
         raise
@@ -235,20 +278,31 @@ async def get_client_molecules(
 ):
     """Get client molecules (convenience endpoint)"""
     try:
+        logger.info(
+            "molecule.client_molecules user=%s client=%s project=%s",
+            user_id,
+            client_id,
+            project_id,
+        )
         molecules = get_molecules_from_mongo(
             user_id=user_id,
             client_id=client_id,
             project_id=project_id,
             molecule_type="client_molecule"
         )
-        
-        return {
+
+        response = {
             "status": "success",
             "message": f"Retrieved {len(molecules)} client molecules",
             "molecules": molecules,
             "count": len(molecules),
             "timestamp": datetime.now().isoformat()
         }
+        logger.info(
+            "molecule.client_molecules.completed count=%s",
+            response["count"],
+        )
+        return response
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -257,15 +311,18 @@ async def get_client_molecules(
 async def get_qm_molecules():
     """Get QM molecules (convenience endpoint for predefined molecules)"""
     try:
+        logger.info("molecule.qm_molecules")
         molecules = get_molecules_from_mongo(molecule_type="qm_molecule")
-        
-        return {
+
+        response = {
             "status": "success",
             "message": f"Retrieved {len(molecules)} QM molecules",
             "molecules": molecules,
             "count": len(molecules),
             "timestamp": datetime.now().isoformat()
         }
+        logger.info("molecule.qm_molecules.completed count=%s", response["count"])
+        return response
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -278,6 +335,7 @@ async def get_qm_molecules():
 async def save_multiple_molecules(request: List[SaveMoleculeRequest]):
     """Save multiple molecules to MongoDB"""
     try:
+        logger.info("molecule.save_multiple count=%s", len(request))
         results = []
         errors = []
         
@@ -305,7 +363,7 @@ async def save_multiple_molecules(request: List[SaveMoleculeRequest]):
                     "error": str(e)
                 })
         
-        return {
+        response = {
             "status": "success",
             "message": f"Processed {len(request)} molecules",
             "saved": len(results),
@@ -314,6 +372,12 @@ async def save_multiple_molecules(request: List[SaveMoleculeRequest]):
             "errors": errors,
             "timestamp": datetime.now().isoformat()
         }
+        logger.info(
+            "molecule.save_multiple.completed saved=%s errors=%s",
+            response["saved"],
+            response["errors"],
+        )
+        return response
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -326,6 +390,14 @@ async def save_multiple_molecules(request: List[SaveMoleculeRequest]):
 async def save_workflow_configuration(request: SaveWorkflowRequest):
     """Save workflow mode configuration to MongoDB"""
     try:
+        logger.info(
+            "molecule.workflow.save name=%s user=%s client=%s app=%s project=%s",
+            request.workflow_name,
+            request.user_id,
+            request.client_name,
+            request.app_name,
+            request.project_name,
+        )
         # Import the workflow save function
         from .database import save_workflow_to_mongo
         
@@ -343,13 +415,17 @@ async def save_workflow_configuration(request: SaveWorkflowRequest):
         if result.get("status") != "success":
             raise HTTPException(status_code=500, detail=result.get("error", "Failed to save workflow configuration"))
         
-        return {
+        response = {
             "status": "success",
             "message": "Workflow configuration saved successfully",
             "workflow_id": result.get("workflow_id"),
             "operation": result.get("operation"),
             "timestamp": datetime.now().isoformat()
         }
+        logger.info(
+            "molecule.workflow.save.completed workflow_id=%s", response["workflow_id"]
+        )
+        return response
         
     except HTTPException:
         raise
@@ -360,22 +436,31 @@ async def save_workflow_configuration(request: SaveWorkflowRequest):
 async def get_workflow_configuration(request: GetWorkflowRequest):
     """Get workflow mode configuration from MongoDB"""
     try:
+        logger.info(
+            "molecule.workflow.get user=%s client=%s app=%s project=%s",
+            request.user_id,
+            request.client_name,
+            request.app_name,
+            request.project_name,
+        )
         # Import the workflow get function
         from .database import get_workflow_from_mongo
-        
+
         workflow_data = get_workflow_from_mongo(
             user_id=request.user_id,
             client_name=request.client_name,
             app_name=request.app_name,
             project_name=request.project_name
         )
-        
-        return {
+
+        response = {
             "status": "success",
             "message": "Workflow configuration retrieved successfully",
             "workflow_data": workflow_data,
             "timestamp": datetime.now().isoformat()
         }
+        logger.info("molecule.workflow.get.completed has_data=%s", bool(workflow_data))
+        return response
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -384,20 +469,23 @@ async def get_workflow_configuration(request: GetWorkflowRequest):
 async def get_workflow_by_id(workflow_id: str):
     """Get a specific workflow configuration by ID"""
     try:
+        logger.info("molecule.workflow.get_by_id workflow_id=%s", workflow_id)
         # Import the workflow get by id function
         from .database import get_workflow_by_id_from_mongo
-        
+
         workflow_data = get_workflow_by_id_from_mongo(workflow_id)
-        
+
         if not workflow_data:
             raise HTTPException(status_code=404, detail="Workflow configuration not found")
-        
-        return {
+
+        response = {
             "status": "success",
             "message": "Workflow configuration retrieved successfully",
             "workflow_data": workflow_data,
             "timestamp": datetime.now().isoformat()
         }
+        logger.info("molecule.workflow.get_by_id.completed workflow_id=%s", workflow_id)
+        return response
         
     except HTTPException:
         raise
@@ -408,6 +496,7 @@ async def get_workflow_by_id(workflow_id: str):
 async def debug_all_workflows():
     """Debug endpoint to see all workflow configurations in MongoDB"""
     try:
+        logger.info("molecule.workflow.debug_all")
         from .database import workflow_collection
         
         # Get all workflow documents
