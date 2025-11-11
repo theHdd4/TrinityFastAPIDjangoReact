@@ -174,7 +174,7 @@ async def health_check():
 
 from minio import Minio
 from minio.error import S3Error
-from app.core.redis import get_sync_redis
+from app.core.feature_cache import feature_cache
 from app.DataStorageRetrieval.db import (
     fetch_client_app_project,
     record_arrow_dataset,
@@ -208,7 +208,7 @@ import asyncio
 import os
 
 
-redis_client = get_sync_redis()
+redis_client = feature_cache.router("data_upload_validate")
 
 # ✅ MINIO CONFIGURATION - values come from docker-compose/.env
 # Default to the development MinIO service if not explicitly configured

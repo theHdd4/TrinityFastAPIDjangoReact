@@ -1,9 +1,9 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 
+from app.core.feature_cache import feature_cache
 from app.core.redis import (
     get_async_redis,
-    get_sync_redis,
     get_redis_settings,
 )
 
@@ -15,8 +15,8 @@ MONGO_URI = os.getenv(
 client = AsyncIOMotorClient(MONGO_URI)
 db = client["feature_overview_db"]
 
-redis_client = get_sync_redis()
-redis_text_client = get_sync_redis(decode_responses=True)
+redis_client = feature_cache.router("feature_overview")
+redis_text_client = redis_client
 redis_async_client = get_async_redis()
 redis_settings = get_redis_settings()
 

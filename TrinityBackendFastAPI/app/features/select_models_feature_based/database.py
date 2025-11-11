@@ -7,8 +7,9 @@ import pandas as pd
 from minio import Minio
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from app.core.feature_cache import feature_cache
 from app.core.mongo import build_host_mongo_uri
-from app.core.redis import get_redis_settings, get_sync_redis
+from app.core.redis import get_redis_settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,8 +44,9 @@ PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 # Redis config
 _redis_settings = get_redis_settings()
 try:
-    redis_client = get_sync_redis()
-    redis_client.ping()
+    redis_client = feature_cache.router("select_models_feature_based")
+    if not redis_client.ping():
+        raise RuntimeError("Redis ping failed")
     logger.info(
         "✅ Connected to Redis at %s:%s (DB: %s)",
         _redis_settings.host,

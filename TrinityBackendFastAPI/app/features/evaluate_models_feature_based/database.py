@@ -7,7 +7,8 @@ from urllib.parse import urlparse
 from motor.motor_asyncio import AsyncIOMotorClient
 from minio import Minio
 
-from app.core.redis import get_redis_settings, get_sync_redis
+from app.core.feature_cache import feature_cache
+from app.core.redis import get_redis_settings
 
 from .config import settings
 
@@ -116,8 +117,9 @@ def get_redis():
     """Return a configured Redis client consistent with other atoms."""
     settings = get_redis_settings()
     try:
-        client = get_sync_redis()
-        client.ping()
+        client = feature_cache.router("evaluate_models_feature_based")
+        if not client.ping():
+            raise RuntimeError("Redis ping failed")
         logger.info(
             "Connected to Redis at %s:%s (DB: %s)",
             settings.host,

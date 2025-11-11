@@ -9,7 +9,8 @@ from typing import Optional
 
 from redis.exceptions import RedisError
 
-from app.core.redis import get_redis_settings, get_sync_redis
+from app.core.feature_cache import feature_cache
+from app.core.redis import get_redis_settings
 
 _settings = get_redis_settings()
 
@@ -28,8 +29,9 @@ def _display_endpoint() -> str:
 def get_redis_client():
     """Return the shared Redis client, ensuring the connection is healthy."""
     try:
-        client = get_sync_redis()
-        client.ping()
+        client = feature_cache.router("explore")
+        if not client.ping():  # Warm connection and ensure availability
+            raise RedisError("ping failed")
         return client
     except RedisError as exc:
         print(f"Redis connection failed: {exc}")
