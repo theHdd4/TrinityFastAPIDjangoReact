@@ -19,6 +19,13 @@ x-redis-env: &redis-env
   REDIS_SOCKET_CONNECT_TIMEOUT: ${REDIS_SOCKET_CONNECT_TIMEOUT:-5}
   REDIS_HEALTH_CHECK_INTERVAL: ${REDIS_HEALTH_CHECK_INTERVAL:-15}
 
+x-celery-env: &celery-env
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL:-redis://redis:6379/0}}
+  CELERY_TASK_DEFAULT_QUEUE: ${CELERY_TASK_DEFAULT_QUEUE:-trinity.tasks}
+  CELERY_BEAT_QUEUE: ${CELERY_BEAT_QUEUE:-trinity.tasks.beat}
+  CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-4}
+
 x-redis-healthcheck: &redis-healthcheck
   test:
     - CMD-SHELL
@@ -219,6 +226,7 @@ services:
       - "8000:8000"
     environment:
       <<: *redis-env
+      <<: *celery-env
       DEBUG: "False"
       DJANGO_LOG_LEVEL: "WARNING"
       HOST_IP: ${HOST_IP:-10.2.4.48}
@@ -264,6 +272,7 @@ services:
       - trinity-net
     environment:
       <<: *redis-env
+      <<: *celery-env
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
@@ -285,6 +294,7 @@ services:
       - ./TrinityBackendDjango/.env
     environment:
       <<: *redis-env
+      <<: *celery-env
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
