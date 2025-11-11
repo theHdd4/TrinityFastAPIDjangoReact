@@ -2257,6 +2257,7 @@ const ExhibitionMode = () => {
                 <button
                   type="button"
                   onClick={() => {
+                    setShowSavedDataframesPanel(false);
                     setShowGridView(false);
                     setShowThumbnails(current => !current);
                   }}
@@ -2274,7 +2275,10 @@ const ExhibitionMode = () => {
               <div className="p-3 border-b border-border flex items-center justify-center">
                 <button
                   type="button"
-                  onClick={() => setShowSavedDataframesPanel(current => !current)}
+                  onClick={() => {
+                    setShowThumbnails(false);
+                    setShowSavedDataframesPanel(current => !current);
+                  }}
                   className={cn(
                     'inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted',
                     showSavedDataframesPanel ? 'text-foreground' : 'text-muted-foreground'
@@ -2292,6 +2296,7 @@ const ExhibitionMode = () => {
               <SavedDataFramesPanel
                 isOpen={true}
                 onToggle={() => setShowSavedDataframesPanel(false)}
+                collapseDirection="left"
               />
             )}
 
@@ -2310,13 +2315,14 @@ const ExhibitionMode = () => {
 
             {showThumbnails && (
               <SlideThumbnails
-                cards={exhibitedCards}
+                cards={cards}
                 currentSlide={currentSlide}
                 onSlideSelect={index => {
                   handleSlideSelection(index);
                 }}
                 onClose={() => setShowThumbnails(false)}
                 onReorder={handleReorderSlides}
+                onOpenSettings={handleOpenSettingsPanel}
               />
             )}
           </div>
@@ -2495,7 +2501,7 @@ const ExhibitionMode = () => {
 
       {showGridView && (
         <GridView
-          cards={exhibitedCards}
+          cards={cards}
           currentSlide={currentSlide}
           onSlideSelect={index => {
             handleSlideSelection(index);
@@ -2503,6 +2509,7 @@ const ExhibitionMode = () => {
           }}
           onClose={() => setShowGridView(false)}
           onReorder={handleReorderSlides}
+          onOpenSettings={handleOpenSettingsPanel}
         />
       )}
 

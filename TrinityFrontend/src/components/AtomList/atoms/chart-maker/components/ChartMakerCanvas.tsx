@@ -830,6 +830,14 @@ const renderChart = (
       );
       updateSettings(atomId, { charts: updatedCharts });
     },
+    onTitleChange: (newTitle: string) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, title: newTitle }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
     forceSingleAxis: chart.dualAxisMode === 'single',
   } as const;
 
