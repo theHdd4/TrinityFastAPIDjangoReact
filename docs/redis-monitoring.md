@@ -91,11 +91,61 @@ Alertmanager, and Grafana (available on `http://localhost:3001`). Data persists 
 restarts because Prometheus and Grafana share named volumes (`prometheus_data`,
 `grafana_data`).
 
+> **Does this replace the normal dev stack?** No. When you pass `--profile` to Docker
+> Compose it loads every service without a profile **plus** any services belonging to the
+> specified profile. Running the command above therefore boots the usual development
+> stack (Postgres, Mongo, Redis, backend services, etc.) together with the monitoring
+> components.
+
+### Step-by-step: enable monitoring for the dev stack
+
+1. Copy `docker-compose-dev.example.yml` to `docker-compose-dev.yml` (or export
+   `COMPOSE_FILE` if you prefer to keep the example name) and adjust any secrets or port
+   mappings as needed.
+2. Ensure your `.env` or shell exports contain the desired `REDIS_*` and Grafana admin
+   credentials. Defaults (`admin` / `admin`) work for local testing.
+3. Start the complete stack, including monitoring, with:
+
+   ```bash
+   docker compose -f docker-compose-dev.yml --profile cache-monitoring up -d
+   ```
+
+4. Browse to Grafana on `http://localhost:3001`, open the **Redis Cache Overview**
+   dashboard, and confirm panels populate within ~15 seconds.
+5. Hit `http://localhost:8000/health/redis/` (Django) or
+   `http://localhost:8001/api/health/redis` (FastAPI) to verify the services report Redis
+   stats while monitoring is enabled.
+
 To mimic production port assignments run the production compose file:
 
 ```bash
 docker compose -f docker-compose.example.yml up redis redis-exporter prometheus grafana
 ```
+
+### Step-by-step: enable monitoring for the production stack
+
+1. Copy `docker-compose.example.yml` to `docker-compose.yml` in your deployment repo or
+   CI/CD pipeline and substitute production secrets (`REDIS_PASSWORD`, Grafana admin
+   credentials, etc.).
+2. Provision persistent volumes (or bind mounts) for Redis, Prometheus, and Grafana so
+   metrics and cache data survive restarts.
+3. Launch the stack in detached mode:
+
+   ```bash
+   docker compose up -d
+   ```
+
+   The production file already includes the monitoring services by default, so no
+   additional profile flags are required.
+4. If you need to roll monitoring out gradually, you can start just the monitoring
+   containers alongside your running application with:
+
+   ```bash
+   docker compose up -d redis-exporter prometheus alertmanager grafana
+   ```
+
+5. Configure Grafana ingress or networking as appropriate for your environment and wire
+   Alertmanager to your paging/notification channels.
 
 ## Accessing the Dashboard and Validating Data
 
