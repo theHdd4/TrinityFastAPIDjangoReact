@@ -1,14 +1,15 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import JSONResponse
+from fastapi import Depends
 from typing import List, Dict, Optional
 import json
 import io
 
 from .service import chart_service
 from .schemas import (
-    ColumnResponse, 
-    UniqueValuesResponse, 
-    AllColumnsResponse, 
+    ColumnResponse,
+    UniqueValuesResponse,
+    AllColumnsResponse,
     CSVUploadResponse,
     LoadSavedDataframeRequest,
     FilterResponse,
@@ -16,7 +17,11 @@ from .schemas import (
     ChartResponse
 )
 
-router = APIRouter(prefix="/chart-maker", tags=["chart-maker"])
+from app.core.observability import timing_dependency_factory
+
+timing_dependency = timing_dependency_factory("app.features.chart_maker")
+
+router = APIRouter(prefix="/chart-maker", tags=["chart-maker"], dependencies=[Depends(timing_dependency)])
 
 
 def get_dataframe_with_reload(file_id: str):

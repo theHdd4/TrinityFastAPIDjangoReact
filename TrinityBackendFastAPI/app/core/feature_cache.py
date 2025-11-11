@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 
 from redis import Redis
 
+from app.core.binary_cache import CacheScope, binary_cache
 from app.core.redis import get_sync_redis
 
 
@@ -273,8 +274,57 @@ class FeatureCacheRouter:
         namespace = self._resolve_namespace(key)
         return self._proxy_for(namespace)
 
+    # Binary cache helpers -----------------------------------------------
+    @staticmethod
+    def _flatten_key(key: Any | Sequence[Any]) -> Any:
+        if isinstance(key, (list, tuple)) and len(key) == 1:
+            return key[0]
+        return key
+
+    def _should_use_binary_cache(self, key: Any | Sequence[Any], value: Any = None) -> bool:
+        flattened = self._flatten_key(key)
+        if isinstance(flattened, bytes):
+            flattened = flattened.decode("utf-8", "ignore")
+        if isinstance(flattened, (list, tuple)):
+            flattened = "/".join(str(part) for part in flattened)
+        if not isinstance(flattened, str):
+            return bool(value and isinstance(value, (bytes, bytearray, memoryview)))
+        lowered = flattened.lower()
+        binary_endings = (".arrow", ".feather", ".parquet", ".ipc", ".csv", ".json", ".xlsx", ".xls")
+        if "/" in flattened or lowered.endswith(binary_endings):
+            return True
+        if value is not None and isinstance(value, (bytes, bytearray, memoryview)):
+            return True
+        return False
+
+    def _binary_target(self, key: Any | Sequence[Any]) -> CacheScope | str:
+        flattened = self._flatten_key(key)
+        if isinstance(flattened, bytes):
+            flattened = flattened.decode("utf-8", "ignore")
+        if isinstance(flattened, str):
+            lowered = flattened.lower()
+            binary_endings = (".arrow", ".feather", ".parquet", ".ipc", ".csv", ".json", ".xlsx", ".xls")
+            if "/" in flattened or lowered.endswith(binary_endings):
+                return flattened
+            return CacheScope(client=self._feature, project=self._feature, artifact=flattened)
+        return CacheScope(client=self._feature, project=self._feature, artifact=str(flattened))
+
+    @staticmethod
+    def _ensure_bytes(value: Any) -> bytes:
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, memoryview):
+            return value.tobytes()
+        return str(value).encode("utf-8")
+
     # Redis-like API -------------------------------------------------------
     def get(self, key: Any | Sequence[Any]) -> Optional[bytes]:
+        if self._should_use_binary_cache(key):
+            target = self._binary_target(key)
+            fetch = binary_cache.get(target)
+            return fetch.payload
         return self._proxy(key).get(key)
 
     def set(
@@ -318,12 +368,26 @@ class FeatureCacheRouter:
                 )
             effective_ttl = px_seconds
 
+        if self._should_use_binary_cache(key, value):
+            target = self._binary_target(key)
+            payload = self._ensure_bytes(value)
+            binary_cache.set(target, payload, ttl=effective_ttl)
+            return
+
         self._proxy(key).set(key, value, ttl=effective_ttl)
 
     def setex(self, key: Any | Sequence[Any], ttl: int, value: bytes | str) -> None:
+        if self._should_use_binary_cache(key, value):
+            target = self._binary_target(key)
+            payload = self._ensure_bytes(value)
+            binary_cache.set(target, payload, ttl=ttl)
+            return
         self._proxy(key).setex(key, ttl, value)
 
     def delete(self, key: Any | Sequence[Any]) -> None:
+        if self._should_use_binary_cache(key):
+            target = self._binary_target(key)
+            binary_cache.delete(target)
         self._proxy(key).delete(key)
 
     def invalidate_all(self) -> int:

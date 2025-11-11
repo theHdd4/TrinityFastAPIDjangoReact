@@ -1,6 +1,6 @@
 # app/routes.py
 
-from fastapi import APIRouter, HTTPException, Query, Path, Form, BackgroundTasks, Body, Request
+from fastapi import APIRouter, HTTPException, Query, Path, Form, BackgroundTasks, Body, Request, Depends
 import logging
 import asyncio
 import multiprocessing
@@ -38,6 +38,7 @@ from .schemas import (
     AutoregressiveTrainingResponse,
     AutoregressiveModelConfig
 )
+from app.core.observability import timing_dependency_factory
 
 # Legacy imports for backward compatibility
 from .deps import get_minio_df, fetch_measures_list, get_column_classifications_collection, get_autoreg_identifiers_list, fetch_autoreg_identifiers_list
@@ -77,7 +78,9 @@ PERFORMANCE_CONFIG = {
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+timing_dependency = timing_dependency_factory("app.features.build_autoregressive")
+
+router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 # Test endpoint to verify router is working
 @router.get("/test")
