@@ -2,16 +2,42 @@ from typing import Dict, Tuple
 import json
 import os
 import logging
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 try:
-    import redis  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover
-    redis = None
+    from app.core.redis import get_sync_redis
+except ModuleNotFoundError:  # pragma: no cover - fallback for AI worker image
+    try:
+        from TrinityBackendFastAPI.app.core.redis import get_sync_redis  # type: ignore
+    except ModuleNotFoundError:  # pragma: no cover - Docker image without backend package
+        _fallback_redis_factory = None
+        try:
+            from TrinityAI.redis_client import (  # type: ignore
+                get_redis_client as _fallback_redis_factory,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - alternate image layout
+            try:
+                from redis_client import (  # type: ignore
+                    get_redis_client as _fallback_redis_factory,
+                )
+            except ModuleNotFoundError:  # pragma: no cover - redis optional in tooling
+                _fallback_redis_factory = None
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-_redis = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True) if redis else None
+        if _fallback_redis_factory is not None:
+
+            def get_sync_redis(*, decode_responses: bool = True):  # type: ignore
+                return _fallback_redis_factory(decode_responses=decode_responses)
+
+        else:
+            get_sync_redis = None  # type: ignore
+
+try:
+    if get_sync_redis is None:  # type: ignore
+        raise RuntimeError("redis helper unavailable")
+    _redis = get_sync_redis(decode_responses=True)  # type: ignore[misc]
+except Exception:  # pragma: no cover - offline tools may skip redis
+    _redis = None
 
 REGISTRY_PATH = Path(os.getenv("FLIGHT_REGISTRY_FILE", "arrow_data/flight_registry.json"))
 

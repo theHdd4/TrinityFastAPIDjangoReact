@@ -3,7 +3,7 @@ available_minio_files.py - File Handler for Trinity AI
 ======================================================
 
 Handles file loading from MinIO, @filename mention parsing, and context enrichment for LLM prompts.
-This module integrates with Superagent and Workflow AI to provide file-aware context.
+This module integrates with the Trinity AI streaming workflow to provide file-aware context.
 
 Author: Quant Matrix AI Solutions
 """

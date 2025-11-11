@@ -1,6 +1,7 @@
-import redis
-import motor.motor_asyncio
 import logging
+
+import motor.motor_asyncio
+
 from ..config import *
 
 logger = logging.getLogger(__name__)

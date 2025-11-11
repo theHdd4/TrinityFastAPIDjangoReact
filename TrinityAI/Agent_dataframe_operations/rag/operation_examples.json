@@ -1,0 +1,478 @@
+{
+  "description": "DataFrame Operations Examples - Complete workflows showing step-by-step operation sequences that LLM should generate",
+  "examples": {
+    "minimal_load_file": {
+      "description": "Minimal example: Load a single file",
+      "user_request": "Load the file_name ",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "operation_name": "load_cached",
+              "description": "Load cached Arrow file into session",
+              "parameters": {
+                "object_name": "user_filename_from_available_files.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "Loading your data file for processing."
+      }
+    },
+    "load_and_filter": {
+      "description": "Load file and apply filter",
+      "user_request": "Load sales data and filter for USA",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "operation_name": "load_cached",
+              "description": "Load data file",
+              "parameters": {
+                "object_name": "sales_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/filter_rows",
+              "operation_name": "filter_rows",
+              "description": "Filter for USA records",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "column": "Country",
+                "value": "USA"
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "I'll load your sales data file and filter it to show only USA records."
+      }
+    },
+    "load_filter_sort": {
+      "description": "Load file, filter, and sort",
+      "user_request": "Load customer data, filter for active customers, and sort by revenue descending",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "parameters": {
+                "object_name": "customer_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/filter_rows",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "column": "Status",
+                "value": "Active"
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            },
+            {
+              "operation_id": "3",
+              "api_endpoint": "/sort",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "column": "Revenue",
+                "direction": "desc"
+              },
+              "execute_order": 3,
+              "depends_on": ["2"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "I'll load your customer data, filter for active customers, and sort by revenue in descending order."
+      }
+    },
+    "insert_column": {
+      "description": "Load file and insert a new column",
+      "user_request": "Load sales data and add a new column called Total at position 5",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "parameters": {
+                "object_name": "sales_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/insert_column",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "index": 5,
+                "name": "Total",
+                "default": ""
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "I'll load your sales data and insert a new column called 'Total' at position 5."
+      }
+    },
+    "apply_formula_sum": {
+      "description": "Load file and apply formula to create calculated column",
+      "user_request": "Load order data and create a Total column that sums Price and Tax",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "parameters": {
+                "object_name": "order_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/apply_formula",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "target_column": "Total",
+                "formula": "=SUM(Price,Tax)"
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "I'll load your order data and create a Total column by summing Price and Tax."
+      }
+    },
+    "apply_formula_conditional": {
+      "description": "Apply conditional formula",
+      "user_request": "Load inventory data and add a Status column: if Quantity > 100 then 'High Stock' else 'Low Stock'",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "parameters": {
+                "object_name": "inventory_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/apply_formula",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "target_column": "Status",
+                "formula": "=IF(Quantity>100,'High Stock','Low Stock')"
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "I'll load your inventory data and create a Status column based on quantity levels."
+      }
+    },
+    "normalize_column": {
+      "description": "Apply Z-score normalization",
+      "user_request": "Load sales data and normalize the Revenue column using Z-score",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "parameters": {
+                "object_name": "sales_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/apply_formula",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "target_column": "Revenue_Normalized",
+                "formula": "=ZSCORE(Revenue)"
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "I'll load your sales data and create a normalized Revenue column using Z-score standardization."
+      }
+    },
+    "rename_and_retype": {
+      "description": "Rename column and change its type",
+      "user_request": "Load customer data, rename 'cust_id' to 'CustomerID', and convert it to text",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "parameters": {
+                "object_name": "customer_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/rename_column",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "old_name": "cust_id",
+                "new_name": "CustomerID"
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            },
+            {
+              "operation_id": "3",
+              "api_endpoint": "/retype_column",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "name": "CustomerID",
+                "new_type": "string"
+              },
+              "execute_order": 3,
+              "depends_on": ["2"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "I'll load your customer data, rename 'cust_id' to 'CustomerID', and convert it to text format."
+      }
+    },
+    "delete_and_insert_row": {
+      "description": "Delete specific row and insert new one",
+      "user_request": "Load employee data, delete row 5, and insert a new row at position 3",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "parameters": {
+                "object_name": "employee_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/delete_row",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "index": 5
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            },
+            {
+              "operation_id": "3",
+              "api_endpoint": "/insert_row",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "index": 3,
+                "direction": "below"
+              },
+              "execute_order": 3,
+              "depends_on": ["2"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error"
+        },
+        "smart_response": "I'll load your employee data, delete row 5, and insert a new row at position 3."
+      }
+    },
+    "comprehensive_pipeline": {
+      "description": "Complete data processing pipeline with multiple operations",
+      "user_request": "Load sales data, filter for 2023, sort by revenue descending, add a Profit column (Revenue - Cost), and save the result",
+      "json_response": {
+        "success": true,
+        "dataframe_config": {
+          "operations": [
+            {
+              "operation_id": "1",
+              "api_endpoint": "/load_cached",
+              "parameters": {
+                "object_name": "sales_data.arrow"
+              },
+              "execute_order": 1,
+              "depends_on": []
+            },
+            {
+              "operation_id": "2",
+              "api_endpoint": "/filter_rows",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "column": "Year",
+                "value": 2023
+              },
+              "execute_order": 2,
+              "depends_on": ["1"]
+            },
+            {
+              "operation_id": "3",
+              "api_endpoint": "/sort",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "column": "Revenue",
+                "direction": "desc"
+              },
+              "execute_order": 3,
+              "depends_on": ["2"]
+            },
+            {
+              "operation_id": "4",
+              "api_endpoint": "/apply_formula",
+              "parameters": {
+                "df_id": "auto_from_previous",
+                "target_column": "Profit",
+                "formula": "=SUM(Revenue,-Cost)"
+              },
+              "execute_order": 4,
+              "depends_on": ["3"]
+            },
+            {
+              "operation_id": "5",
+              "api_endpoint": "/save",
+              "parameters": {
+                "csv_data": "auto_generated_csv",
+                "filename": "sales_2023_processed.arrow"
+              },
+              "execute_order": 5,
+              "depends_on": ["4"]
+            }
+          ]
+        },
+        "execution_plan": {
+          "auto_execute": true,
+          "execution_mode": "sequential",
+          "error_handling": "stop_on_error",
+          "final_save": true
+        },
+        "smart_response": "I'll process your sales data: filter for 2023, sort by revenue, calculate profit, and save the results."
+      }
+    }
+  },
+  "operation_patterns": {
+    "always_load_first": {
+      "rule": "EVERY operation sequence MUST start with /load_cached as operation_id '1'",
+      "correct_example": ["load_cached", "filter_rows", "sort"],
+      "wrong_example": ["filter_rows", "sort"]
+    },
+    "chain_operations": {
+      "rule": "Use 'auto_from_previous' for df_id to chain operations",
+      "example": {
+        "operation_1": {"df_id": "from /load_cached response"},
+        "operation_2": {"df_id": "auto_from_previous"},
+        "operation_3": {"df_id": "auto_from_previous"}
+      }
+    },
+    "dependencies": {
+      "rule": "Each operation depends_on previous operation IDs",
+      "example": {
+        "operation_1": {"depends_on": []},
+        "operation_2": {"depends_on": ["1"]},
+        "operation_3": {"depends_on": ["2"]},
+        "operation_4": {"depends_on": ["3"]}
+      }
+    },
+    "no_random_operations": {
+      "rule": "NEVER add operations user didn't request",
+      "correct": "User: 'Load sales data' → Only generate load operation",
+      "wrong": "User: 'Load sales data' → Generate load + random filter operation"
+    }
+  },
+  "common_user_requests": {
+    "load_file": "Load [filename]",
+    "filter_data": "Filter for [value] in [column]",
+    "sort_data": "Sort by [column] ascending/descending",
+    "add_column": "Add/Insert new column [name]",
+    "calculate_column": "Calculate [column] as [formula]",
+    "rename_column": "Rename [old_name] to [new_name]",
+    "delete_column": "Delete/Remove column [name]",
+    "delete_row": "Delete row [index]",
+    "normalize_data": "Normalize [column]",
+    "fill_blanks": "Fill blank cells in [column] with [value]"
+  }
+}
+

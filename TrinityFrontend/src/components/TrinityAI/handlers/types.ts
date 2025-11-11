@@ -12,6 +12,8 @@ export interface AtomHandlerContext {
   sessionId: string;
   updateAtomSettings: (atomId: string, settings: any) => void;
   setMessages: (updater: (prev: Message[]) => Message[]) => void;
+  isStreamMode?: boolean; // true = Trinity AI streaming mode (don't duplicate chat bubbles), false = Individual AI (show messages)
+  stepAlias?: string;
 }
 
 export interface AtomHandlerResponse {

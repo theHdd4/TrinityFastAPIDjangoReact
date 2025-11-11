@@ -644,9 +644,10 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         variables: filteredVariables,
         selectedVar1: null,
         selectedVar2: null,
+        filteredFilePath: result.filtered_file_path ?? undefined,
         fileData: {
           ...(data.fileData || {}),
-          fileName: data.selectedFile,
+          fileName: result.filtered_file_path || data.selectedFile,
           rawData: result.preview_data || [],
           numericColumns: filteredVariables,
           dateColumns:
@@ -675,6 +676,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     onDataChange({
       settings: { ...data.settings, filterDimensions: resetFilters },
     });
+    onDataChange({ filteredFilePath: undefined });
     await handleApplyFilters(resetFilters);
   };
 
@@ -747,7 +749,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   // Handle variable selection change for time series
   const handleVariableSelectionChange = async (var1: string, var2: string) => {
     // Get file path from selectedFile or fileData as fallback
-    const filePath = data.selectedFile || data.fileData?.fileName;
+    const filePath =
+      data.filteredFilePath || data.selectedFile || data.fileData?.fileName;
 
     if (!filePath || !var1 || !var2) {
       onDataChange({
@@ -1569,10 +1572,11 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
               customHeader={{
                 title: "Cardinality View",
                 subtitle: "Click Here to View Data",
-                subtitleClickable: !!data.selectedFile,
+                subtitleClickable: !!(data.filteredFilePath || data.selectedFile),
                 onSubtitleClick: () => {
-                  if (data.selectedFile) {
-                    window.open(`/dataframe?name=${encodeURIComponent(data.selectedFile)}`, '_blank');
+                  const datasetPath = data.filteredFilePath || data.selectedFile;
+                  if (datasetPath) {
+                    window.open(`/dataframe?name=${encodeURIComponent(datasetPath)}`, '_blank');
                   }
                 }
               }}

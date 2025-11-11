@@ -18,9 +18,25 @@ PARENT_DIR = Path(__file__).resolve().parent.parent
 if str(PARENT_DIR) not in sys.path:
     sys.path.append(str(PARENT_DIR))
 
-from main_api import get_llm_config
 from workflow_mode.llm_workflow_agent import get_workflow_composition_agent
 from workflow_mode.workflow_agent import get_workflow_agent
+
+
+def get_llm_config() -> Dict[str, str]:
+    """Return LLM configuration using environment variables.
+
+    Duplicated here to avoid importing from main_api, which would create a
+    circular dependency when main_api wants to include this router.
+    """
+
+    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
+    llm_port = os.getenv("OLLAMA_PORT", "11434")
+    api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
+    return {
+        "api_url": api_url,
+        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
+        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
+    }
 
 logger = logging.getLogger("trinity.workflow_api")
 

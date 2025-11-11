@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { 
@@ -52,6 +52,12 @@ interface AtomCategory {
 
 type PanelType = 'trinityAI' | 'atoms' | 'custom' | null;
 
+type TrinityBackgroundStatus = {
+  isProcessing: boolean;
+  isCollapsed: boolean;
+  hasSuggestedMolecules: boolean;
+};
+
 const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({ 
   molecules,
   onAtomAssignToMolecule,
@@ -73,6 +79,11 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [trinityBackgroundStatus, setTrinityBackgroundStatus] = useState<TrinityBackgroundStatus>({
+    isProcessing: false,
+    isCollapsed: true,
+    hasSuggestedMolecules: false
+  });
 
   // Fetch atoms from API
   useEffect(() => {
@@ -219,8 +230,14 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
     }
   };
 
+  const handleTrinityBackgroundStatus = useCallback((status: TrinityBackgroundStatus) => {
+    setTrinityBackgroundStatus(status);
+  }, []);
+
+  const showTrinityBackgroundBanner = trinityBackgroundStatus.isProcessing && trinityBackgroundStatus.isCollapsed;
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full relative">
       {/* Panel Area - Always mounted to preserve state */}
       <div className={`h-full flex flex-col bg-white border-r border-gray-200 ${activePanel === 'trinityAI' ? '' : 'hidden'}`}>
         <WorkflowAIPanel 
@@ -237,8 +254,38 @@ const WorkflowRightPanel: React.FC<WorkflowRightPanelProps> = ({
           onGetAICreatedMolecules={onGetAICreatedMolecules}
           onClearAIMolecules={onClearAIMolecules}
           onGetRightmostPosition={onGetRightmostPosition}
+          onBackgroundStatusChange={handleTrinityBackgroundStatus}
         />
       </div>
+
+      {showTrinityBackgroundBanner && (
+        <div className="absolute right-16 bottom-8 z-40 pointer-events-none">
+          <div className="pointer-events-auto flex items-center gap-3 bg-white/95 border-2 border-[#458EE2]/30 rounded-2xl shadow-xl px-4 py-3 backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <div className="w-2.5 h-2.5 rounded-full bg-[#41C185] animate-pulse" />
+                <div className="absolute inset-0 rounded-full bg-[#41C185]/40 animate-ping" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-gray-800 font-inter">
+                  Trinity AI is running in background
+                </span>
+                {trinityBackgroundStatus.hasSuggestedMolecules && (
+                  <span className="text-xs text-gray-500 font-inter">
+                    Suggestions ready to review
+                  </span>
+                )}
+              </div>
+            </div>
+            <Button
+              onClick={() => setActivePanel('trinityAI')}
+              className="h-9 bg-[#458EE2] hover:bg-[#376fba] text-white font-semibold px-4 rounded-xl transition-all duration-200"
+            >
+              Reopen
+            </Button>
+          </div>
+        </div>
+      )}
       
       {activePanel === 'atoms' && (
         <div className="w-80 bg-white border-r border-gray-200 flex flex-col">

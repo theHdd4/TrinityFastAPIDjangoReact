@@ -2,6 +2,7 @@ fastapi
 uvicorn
 pymongo
 redis
+lz4
 boto3
 pandas
 numpy

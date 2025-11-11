@@ -181,6 +181,9 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           tableData: newData,
           selectedColumns: resp.headers,
           fileId: resp.df_id,
+          operationCompleted: true,
+          hasData: true,
+          dataLoaded: true,
         });
       })
       .catch(err => console.error('[DataFrameOperations] auto-load failed', err))

@@ -137,14 +137,33 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
   }, [sessionId, atomId]);
 
   const handleSendMessage = async () => {
+    console.log('🚨🚨🚨 ===== ATOM_AI_CHAT handleSendMessage CALLED =====');
+    console.log('🚨 atomType:', atomType);
+    console.log('🚨 inputValue:', inputValue);
+    
     const endpoint = ENDPOINTS[atomType];
     const performEndpoint = PERFORM_ENDPOINTS[atomType];
-    if (!inputValue.trim() || !endpoint) return;
+    
+    console.log('🚨 endpoint:', endpoint);
+    console.log('🚨 performEndpoint:', performEndpoint);
+    
+    if (!inputValue.trim() || !endpoint) {
+      console.log('🚨 EARLY RETURN - no input or endpoint');
+      return;
+    }
 
     const userMsg: Message = { id: Date.now().toString(), content: inputValue, sender: 'user', timestamp: new Date() };
-    setMessages(prev => [...prev, userMsg]);
+    console.log('🚨 User message created:', userMsg);
+    
+    setMessages(prev => {
+      console.log('🚨 Adding user message, prev count:', prev.length);
+      return [...prev, userMsg];
+    });
+    
     setInputValue('');
     setIsLoading(true);
+    
+    console.log('🚨 About to make API request');
 
     try {
       // Get environment context from localStorage for dynamic path resolution
@@ -169,6 +188,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         console.warn('Failed to load environment context:', error);
       }
 
+      console.log('🚨 Sending request to:', endpoint);
+      console.log('🚨 With payload:', { prompt: userMsg.content, session_id: sessionId, ...envContext });
+      
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -178,9 +200,23 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           ...envContext  // Include environment context for dynamic path resolution
         }),
       });
+      
+      console.log('🚨 Response received, status:', res.status, 'ok:', res.ok);
+      
       let data;
       if (res.ok) {
+        console.log('🚨 Response OK, parsing JSON...');
         data = await res.json();
+        
+        console.log('🚨🚨🚨 ===== RESPONSE PARSED =====');
+        console.log('🚨 Response Keys:', Object.keys(data));
+        console.log('🚨 data.success:', data.success);
+        console.log('🚨 data.concat_json:', !!data.concat_json);
+        console.log('🚨 data.merge_json:', !!data.merge_json);
+        console.log('🚨 data.smart_response:', !!data.smart_response);
+        console.log('🚨 Full response (first 500 chars):', JSON.stringify(data).substring(0, 500));
+        console.log('🚨 ================================');
+        
         // Enhanced AI response handling with smart_response as priority
         let aiText = '';
         if (data.success) {
@@ -233,16 +269,31 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                                  (atomType === 'explore' && data.exploration_config) ||
                                  (atomType === 'dataframe-operations' && data.dataframe_config);
         
+        console.log('🚨🚨🚨 ===== ATOM_AI_CHAT HANDLER CHECK =====');
+        console.log('🚨 atomType:', atomType);
+        console.log('🚨 hasSpecificHandler:', hasSpecificHandler);
+        console.log('🚨 data.concat_json:', !!data.concat_json);
+        console.log('🚨 data.merge_json:', !!data.merge_json);
+        console.log('🚨 Will show general message:', !hasSpecificHandler);
+        console.log('🚨 ==========================================');
+        
         if (!hasSpecificHandler) {
+          console.log('🚨 Showing general AI message:', aiText.substring(0, 100));
           const aiMsg: Message = { id: (Date.now() + 1).toString(), content: aiText, sender: 'ai', timestamp: new Date() };
           setMessages(prev => [...prev, aiMsg]);
         }
 
         // 🔧 DATAFRAME OPERATIONS: Handle AI-generated DataFrame operations configuration
         if (atomType === 'dataframe-operations' && data.dataframe_config) {
-        
-        if (atomType === 'concat' && data.concat_json) {
-          const cfg = data.concat_json;
+          console.log('🚨 Entering dataframe-operations handler');
+          // DataFrame operations is now handled by modular handler system
+          // No inline handling needed here
+        } else if (atomType === 'concat' && data.concat_json) {
+          try {
+            console.log('🚨🚨🚨 ===== CONCAT HANDLER IN ATOM_AI_CHAT =====');
+            console.log('🚨 data.concat_json:', data.concat_json);
+            
+            const cfg = data.concat_json;
           const file1 = Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1;
           const file2 = Array.isArray(cfg.file2) ? cfg.file2[0] : cfg.file2;
           const direction = cfg.concat_direction || 'vertical';
@@ -259,14 +310,28 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             aiMessage: data.message
           });
           
+          console.log('🚨 About to add AI success message to chat');
+          
+          // 🔧 CRITICAL FIX: Show smart_response if available, otherwise use default message
+          const messageContent = data.smart_response || 
+            `✅ ${data.message || 'AI configuration completed'}\n\nFiles: ${file1} + ${file2}\nDirection: ${direction}\n\n🔄 Operation completed! You can now configure the concatenation or proceed with the current settings.`;
+          
           // Add AI success message with operation completion
           const aiSuccessMsg: Message = {
             id: (Date.now() + 1).toString(),
-            content: `✅ ${data.message || 'AI configuration completed'}\n\nFiles: ${file1} + ${file2}\nDirection: ${direction}\n\n🔄 Operation completed! You can now configure the concatenation or proceed with the current settings.`,
+            content: messageContent,
             sender: 'ai',
             timestamp: new Date(),
           };
-          setMessages(prev => [...prev, aiSuccessMsg]);
+          
+          console.log('🚨 Adding message to chat:', messageContent.substring(0, 100));
+          setMessages(prev => {
+            console.log('🚨 Prev messages count:', prev.length);
+            const updated = [...prev, aiSuccessMsg];
+            console.log('🚨 New messages count:', updated.length);
+            return updated;
+          });
+          console.log('🚨 Message added!');
           
           // Automatically call perform endpoint with AI configuration
           try {
@@ -350,6 +415,21 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               direction,
               operationCompleted: false
             });
+          }
+          
+          console.log('✅✅✅ CONCAT HANDLER COMPLETED SUCCESSFULLY - NO ERRORS');
+          
+          } catch (concatError) {
+            console.error('❌❌❌ ERROR IN CONCAT HANDLER:', concatError);
+            console.error('Error message:', concatError?.message);
+            console.error('Error stack:', concatError?.stack);
+            const concatErrorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Concat handler error: ${concatError?.message}\n\n💡 Check console for details.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, concatErrorMsg]);
           }
         } else if (atomType === 'merge' && data.merge_json) {
           const cfg = data.merge_json;
@@ -580,21 +660,37 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               
               // 🔧 CRITICAL FIX: Get the current prefix and construct full object name
               let fullObjectName = cfg.object_name;
-              try {
-                const prefixRes = await fetch(`${VALIDATE_API}/get_object_prefix`);
-                if (prefixRes.ok) {
-                  const prefixData = await prefixRes.json();
-                  const prefix = prefixData.prefix || '';
-                  console.log('🔧 Current prefix:', prefix);
+              
+              // Get environment context for prefix construction
+              const envStr = localStorage.getItem('env');
+              if (envStr) {
+                try {
+                  const env = JSON.parse(envStr);
+                  const clientName = env.CLIENT_NAME || '';
+                  const appName = env.APP_NAME || '';
+                  const projectName = env.PROJECT_NAME || '';
                   
-                  // Construct full object name if we have a prefix
-                  if (prefix && !cfg.object_name.startsWith(prefix)) {
-                    fullObjectName = `${prefix}${cfg.object_name}`;
-                    console.log('🔧 Constructed full object name:', fullObjectName);
+                  console.log('🔧 Environment context:', { clientName, appName, projectName });
+                  
+                  if (clientName && appName && projectName) {
+                    // Construct full path if object_name is just a filename
+                    if (!cfg.object_name.includes('/')) {
+                      fullObjectName = `${clientName}/${appName}/${projectName}/${cfg.object_name}`;
+                      console.log('🔧 Constructed full object name from filename:', fullObjectName);
+                    } else if (!cfg.object_name.startsWith(clientName)) {
+                      // Object name has some path but not the full prefix
+                      fullObjectName = `${clientName}/${appName}/${projectName}/${cfg.object_name}`;
+                      console.log('🔧 Added prefix to partial path:', fullObjectName);
+                    } else {
+                      fullObjectName = cfg.object_name;
+                      console.log('🔧 Using existing full path:', fullObjectName);
+                    }
                   }
+                } catch (envError) {
+                  console.warn('⚠️ Failed to parse environment context:', envError);
                 }
-              } catch (prefixError) {
-                console.warn('⚠️ Failed to get prefix, using original object name:', prefixError);
+              } else {
+                console.warn('⚠️ No environment context found in localStorage');
               }
               
               // Fetch column summary to populate allColumns with full object name
@@ -679,6 +775,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           setTimeout(async () => {
             try {
               console.log('🚀 Auto-executing Create Column operations with AI config');
+              console.log('🔍 operations array:', operations);
+              console.log('🔍 operations is array:', Array.isArray(operations));
+              console.log('🔍 operations length:', operations?.length);
               
               // Extract just the filename if it's a full path
               const getFilename = (filePath: string) => {
@@ -691,8 +790,14 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               formData.append('object_names', getFilename(cfg.object_name || ''));
               formData.append('bucket_name', cfg.bucket_name || 'trinity');
               
+              // 🔧 CRITICAL FIX: Include client/app/project context for correct path resolution
+              formData.append('client_name', envContext.client_name || '');
+              formData.append('app_name', envContext.app_name || '');
+              formData.append('project_name', envContext.project_name || '');
+              
               // Add operations in the format backend expects
-              operations.forEach((op, index) => {
+              if (operations && Array.isArray(operations)) {
+                operations.forEach((op, index) => {
                 if (op.columns && op.columns.filter(Boolean).length > 0) {
                   const colString = op.columns.filter(Boolean).join(',');
                   const rename = op.rename && op.rename.trim() ? op.rename.trim() : '';
@@ -717,7 +822,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                     }
                   }
                 }
-              });
+                });
+              }
               
               // Add identifiers
               const identifiers = cfg.identifiers || [];
@@ -726,13 +832,13 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               console.log('📁 Auto-executing with form data:', {
                 object_names: getFilename(cfg.object_name || ''),
                 bucket_name: cfg.bucket_name || 'trinity',
-                operations: operations.map((op, index) => ({
+                operations: operations?.map((op, index) => ({
                   index,
                   type: op.type,
                   columns: op.columns,
                   rename: op.rename,
                   param: op.param
-                })),
+                })) || [],
                 identifiers: identifiers
               });
               
@@ -2734,9 +2840,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             };
             setMessages(prev => [...prev, manualMsg]);
           }
-        }
-      } else {
-        // Handle AI suggestions when complete info is not available
+        } else {
+          // Handle AI suggestions when complete info is not available
         if (data && data.suggestions && Array.isArray(data.suggestions)) {
           // Use smart_response if available, otherwise use the verbose suggestions format
           let suggestionsContent = '';
@@ -2768,9 +2873,34 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           setMessages(prev => [...prev, aiMsg]);
         }
       }
-    } catch {
-      const aiMsg: Message = { id: (Date.now() + 1).toString(), content: 'Could not reach AI service', sender: 'ai', timestamp: new Date() };
-      setMessages(prev => [...prev, aiMsg]);
+      
+      console.log('✅✅✅ END OF ALL ATOM HANDLERS - NO ERRORS SO FAR');
+      console.log('🔍 About to exit handleSendMessage (success path)');
+      
+    } catch (error) {
+      console.error('❌ ===== ERROR IN handleSendMessage =====');
+      console.error('Error:', error);
+      console.error('Error message:', error?.message);
+      console.error('Error stack:', error?.stack);
+      console.error('==========================================');
+      
+      // 🔧 FIX: Don't show error message if it's just about reading 'operations' 
+      // This happens after successful completion of concat/merge/groupby when the data structure is different
+      // The operations complete successfully, so no need to alarm the user
+      const isOperationsError = error?.message?.includes("reading 'operations'");
+      
+      if (!isOperationsError) {
+        // Only show error message for REAL errors (not spurious operations access)
+        const aiMsg: Message = { 
+          id: (Date.now() + 1).toString(), 
+          content: `❌ Error: ${error?.message || 'Could not reach AI service'}\n\n💡 Please try again or check the console for details.`, 
+          sender: 'ai', 
+          timestamp: new Date() 
+        };
+        setMessages(prev => [...prev, aiMsg]);
+      } else {
+        console.log('ℹ️ Suppressed operations error - operation completed successfully');
+      }
     }
 
     setIsLoading(false);

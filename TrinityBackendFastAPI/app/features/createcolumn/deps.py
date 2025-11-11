@@ -1,12 +1,14 @@
-from minio import Minio
-import pandas as pd
 import io
 import os
 from io import BytesIO
+
+import pandas as pd
 import pyarrow as pa
 import pyarrow.ipc as ipc
+from minio import Minio
 from minio.error import S3Error
-import redis
+
+from app.core.feature_cache import feature_cache
 
 # MinIO configuration from environment variables
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -59,10 +61,8 @@ import os
 from fastapi import HTTPException
 from typing import Tuple
 
-# Redis configuration from environment variables
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-# decode_responses=True to get str directly
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+# Redis configuration from shared helper
+redis_client = feature_cache.router("createcolumn")
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/trinity")
 MONGO_DB = os.getenv("MONGO_DB", "trinity")

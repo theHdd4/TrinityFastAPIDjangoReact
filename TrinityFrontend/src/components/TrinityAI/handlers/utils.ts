@@ -1,4 +1,6 @@
 import { Message, EnvironmentContext } from './types';
+import { MERGE_API, CONCAT_API, GROUPBY_API, CREATECOLUMN_API } from '@/lib/api';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 /**
  * Enhanced utility functions for Trinity AI handlers
@@ -258,4 +260,223 @@ export const createProgressTracker = (total: number, operation: string) => {
       }
     }
   };
+};
+
+const sanitizeFileName = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_\-]+/g, '_');
+
+interface AutoSaveParams {
+  atomType: string;
+  atomId: string;
+  stepAlias?: string;
+  result: any;
+  updateAtomSettings: (atomId: string, settings: any) => void;
+  setMessages: (updater: (prev: Message[]) => Message[]) => void;
+  isStreamMode?: boolean;
+}
+
+export const autoSaveStepResult = async ({
+  atomType,
+  atomId,
+  stepAlias,
+  result,
+  updateAtomSettings,
+  setMessages,
+  isStreamMode
+}: AutoSaveParams): Promise<void> => {
+  const store = useLaboratoryStore.getState();
+  const currentAtom = store.getAtom(atomId);
+  const currentSettings = currentAtom?.settings || {};
+  const aliasKey = stepAlias || `${atomType}_step`;
+
+  if (currentSettings.lastAutoSavedAlias === aliasKey) {
+    return;
+  }
+
+  const timestamp = Date.now();
+  const baseName = sanitizeFileName(aliasKey || atomType);
+  const filename = baseName.endsWith('.arrow') ? `${baseName}_${timestamp}` : `${baseName}_${timestamp}.arrow`;
+
+  const notify = !isStreamMode;
+
+  const sendMessage = (content: string) => {
+    if (!notify) return;
+    setMessages(prev => [...prev, createMessage(content)]);
+  };
+
+  try {
+    if (atomType === 'merge') {
+      const csvData = result?.data;
+      if (!csvData) {
+        return;
+      }
+
+      const response = await fetch(`${MERGE_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv_data: csvData, filename })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Merge save failed');
+      }
+
+      const payload = await response.json();
+      const savedPath = payload?.result_file || payload?.object_name || filename;
+
+      updateAtomSettings(atomId, {
+        mergeResults: {
+          ...(currentSettings.mergeResults || {}),
+          result_file: savedPath,
+          unsaved_data: null,
+        },
+        lastAutoSavedAlias: aliasKey,
+      });
+
+      sendMessage(`💾 Merge output saved automatically as ${savedPath}`);
+      return;
+    }
+
+    if (atomType === 'concat') {
+      const csvData = result?.data;
+      if (!csvData) {
+        return;
+      }
+
+      const response = await fetch(`${CONCAT_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv_data: csvData, filename })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Concat save failed');
+      }
+
+      const payload = await response.json();
+      const savedPath = payload?.result_file || payload?.object_name || filename;
+
+      updateAtomSettings(atomId, {
+        concatResults: {
+          ...(currentSettings.concatResults || {}),
+          result_file: savedPath,
+          unsaved_data: null,
+        },
+        lastAutoSavedAlias: aliasKey,
+      });
+
+      sendMessage(`💾 Concat output saved automatically as ${savedPath}`);
+      return;
+    }
+
+    if (atomType === 'groupby-wtg-avg' || atomType === 'groupby') {
+      let csvData: string | null = null;
+
+      if (Array.isArray(result?.unsaved_data)) {
+        csvData = convertRowsToCsv(result.unsaved_data);
+      } else if (typeof result?.data === 'string') {
+        csvData = result.data;
+      } else if (Array.isArray(result?.results)) {
+        csvData = convertRowsToCsv(result.results);
+      }
+
+      if (!csvData) {
+        return;
+      }
+
+      const response = await fetch(`${GROUPBY_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv_data: csvData, filename })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'GroupBy save failed');
+      }
+
+      const payload = await response.json();
+      const savedPath = payload?.filename || payload?.result_file || filename;
+
+      updateAtomSettings(atomId, {
+        groupbyResults: {
+          ...(currentSettings.groupbyResults || {}),
+          result_file: savedPath,
+          unsaved_data: null,
+        },
+        lastAutoSavedAlias: aliasKey,
+      });
+
+      sendMessage(`💾 GroupBy output saved automatically as ${savedPath}`);
+      return;
+    }
+
+    if (atomType === 'create-column' || atomType === 'create-transform') {
+      let csvData: string | null = null;
+
+      if (typeof result?.data === 'string') {
+        csvData = result.data;
+      } else if (Array.isArray(result?.unsaved_data)) {
+        csvData = convertRowsToCsv(result.unsaved_data);
+      }
+
+      if (!csvData) {
+        return;
+      }
+
+      const response = await fetch(`${CREATECOLUMN_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv_data: csvData, filename })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Create Column save failed');
+      }
+
+      const payload = await response.json();
+      const savedPath = payload?.result_file || payload?.filename || filename;
+
+      updateAtomSettings(atomId, {
+        createColumnResults: {
+          ...(currentSettings.createColumnResults || {}),
+          result_file: savedPath,
+          unsaved_data: null,
+        },
+        lastAutoSavedAlias: aliasKey,
+      });
+
+      sendMessage(`💾 Create Column output saved automatically as ${savedPath}`);
+      return;
+    }
+  } catch (error) {
+    console.error(`Auto-save failed for ${atomType}:`, error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    sendMessage(`⚠️ Auto-save skipped: ${message}`);
+  }
+};
+
+const convertRowsToCsv = (rows: any[]): string => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return '';
+  }
+
+  const headers = Object.keys(rows[0]);
+  const headerRow = headers.join(',');
+  const valueRows = rows.map((row) =>
+    headers
+      .map((key) => {
+        const value = row[key] ?? '';
+        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+          return `"${value.replace(/"/g, '""')}"`;
+        }
+        return value;
+      })
+      .join(',')
+  );
+
+  return [headerRow, ...valueRows].join('\n');
 };

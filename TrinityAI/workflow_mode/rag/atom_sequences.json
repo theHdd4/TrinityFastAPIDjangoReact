@@ -1,0 +1,265 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Common atom sequences and dependency patterns for Stream AI",
+    "last_updated": "2025-11-05"
+  },
+  "sequences": {
+    "basic_data_analysis": {
+      "name": "Basic Data Analysis",
+      "atoms": ["data-upload-validate", "feature-overview", "dataframe-operations", "chart-maker"],
+      "description": "Basic data loading, exploration, transformation, and visualization",
+      "use_cases": ["exploratory data analysis", "quick data insights", "initial data review"],
+      "estimated_duration": "30-45 seconds"
+    },
+    "data_merge_and_analyze": {
+      "name": "Data Merge and Analysis",
+      "atoms": ["data-upload-validate", "merge", "groupby-wtg-avg", "chart-maker"],
+      "description": "Merge multiple datasets, aggregate, and visualize",
+      "use_cases": ["combining datasets", "multi-source analysis", "join and analyze"],
+      "estimated_duration": "40-60 seconds"
+    },
+    "data_cleaning_workflow": {
+      "name": "Data Cleaning Workflow",
+      "atoms": ["data-upload-validate", "feature-overview", "dataframe-operations", "create-column"],
+      "description": "Load data, explore quality, clean, and create features",
+      "use_cases": ["data preparation", "feature engineering", "data quality improvement"],
+      "estimated_duration": "35-50 seconds"
+    },
+    "correlation_analysis": {
+      "name": "Correlation Analysis",
+      "atoms": ["data-upload-validate", "feature-overview", "correlation", "chart-maker"],
+      "description": "Load data, explore features, analyze correlations, and visualize",
+      "use_cases": ["relationship analysis", "feature selection", "correlation studies"],
+      "estimated_duration": "30-40 seconds"
+    },
+    "groupby_and_visualize": {
+      "name": "GroupBy and Visualize",
+      "atoms": ["data-upload-validate", "groupby-wtg-avg", "chart-maker"],
+      "description": "Load data, aggregate by groups, and create visualizations",
+      "use_cases": ["aggregation analysis", "summary statistics", "grouped insights"],
+      "estimated_duration": "25-35 seconds"
+    },
+    "filter_and_analyze": {
+      "name": "Filter and Analyze",
+      "atoms": ["data-upload-validate", "dataframe-operations", "feature-overview", "chart-maker"],
+      "description": "Load data, filter rows/columns, explore, and visualize",
+      "use_cases": ["subset analysis", "filtered insights", "conditional analysis"],
+      "estimated_duration": "30-45 seconds"
+    },
+    "concat_and_analyze": {
+      "name": "Concatenate and Analyze",
+      "atoms": ["data-upload-validate", "concat", "feature-overview", "chart-maker"],
+      "description": "Load and concatenate datasets, explore, and visualize",
+      "use_cases": ["combining similar datasets", "time series concatenation", "append data"],
+      "estimated_duration": "30-40 seconds"
+    },
+    "comprehensive_eda": {
+      "name": "Comprehensive EDA",
+      "atoms": ["data-upload-validate", "feature-overview", "column-classifier", "correlation", "dataframe-operations", "chart-maker"],
+      "description": "Complete exploratory data analysis with multiple insights",
+      "use_cases": ["full data exploration", "comprehensive analysis", "data discovery"],
+      "estimated_duration": "60-90 seconds"
+    }
+  },
+  "dependency_rules": {
+    "data-upload-validate": {
+      "requires": [],
+      "provides": ["DataFrame"],
+      "must_be_first": true,
+      "description": "Always the first atom - loads data"
+    },
+    "merge": {
+      "requires": ["multiple_DataFrames"],
+      "provides": ["merged_DataFrame"],
+      "min_inputs": 2,
+      "description": "Requires at least 2 DataFrames to merge"
+    },
+    "concat": {
+      "requires": ["multiple_DataFrames"],
+      "provides": ["concatenated_DataFrame"],
+      "min_inputs": 2,
+      "description": "Requires at least 2 DataFrames to concatenate"
+    },
+    "groupby-wtg-avg": {
+      "requires": ["DataFrame_with_columns"],
+      "provides": ["aggregated_DataFrame"],
+      "description": "Requires DataFrame with columns for grouping"
+    },
+    "dataframe-operations": {
+      "requires": ["DataFrame"],
+      "provides": ["transformed_DataFrame"],
+      "description": "Requires DataFrame for filtering/sorting/transforming"
+    },
+    "create-column": {
+      "requires": ["DataFrame"],
+      "provides": ["DataFrame_with_new_columns"],
+      "description": "Requires DataFrame to add/transform columns"
+    },
+    "feature-overview": {
+      "requires": ["DataFrame"],
+      "provides": ["statistical_summary"],
+      "description": "Requires DataFrame for profiling"
+    },
+    "column-classifier": {
+      "requires": ["DataFrame"],
+      "provides": ["column_type_info"],
+      "description": "Requires DataFrame for column classification"
+    },
+    "correlation": {
+      "requires": ["DataFrame_with_numeric_columns"],
+      "provides": ["correlation_matrix"],
+      "description": "Requires DataFrame with numeric columns"
+    },
+    "explore": {
+      "requires": ["DataFrame"],
+      "provides": ["exploration_insights"],
+      "description": "Requires DataFrame for exploration"
+    },
+    "chart-maker": {
+      "requires": ["processed_data"],
+      "provides": ["visualization"],
+      "description": "Requires processed data for visualization"
+    },
+    "scope-selector": {
+      "requires": ["DataFrame"],
+      "provides": ["scoped_DataFrame"],
+      "description": "Requires DataFrame for scope selection"
+    }
+  },
+  "sequencing_rules": {
+    "general_principles": [
+      "Always start with data-upload-validate unless data is already loaded",
+      "Feature-overview should come early to understand data structure",
+      "Data transformation atoms (filter, group, merge) before visualization",
+      "Chart-maker typically comes last in sequence",
+      "Correlation requires numeric data - ensure after feature-overview",
+      "Merge/concat require multiple DataFrames - ensure multiple uploads or data sources"
+    ],
+    "typical_patterns": {
+      "load_first": ["data-upload-validate"],
+      "explore_early": ["feature-overview", "column-classifier", "explore"],
+      "transform_middle": ["dataframe-operations", "create-column", "groupby-wtg-avg", "merge", "concat"],
+      "analyze_middle": ["correlation", "scope-selector"],
+      "visualize_last": ["chart-maker"]
+    },
+    "incompatible_sequences": [
+      {
+        "atoms": ["merge", "concat"],
+        "reason": "Typically don't merge and concat in same sequence - choose one",
+        "exception": "Unless explicitly requested"
+      }
+    ]
+  },
+  "atom_metadata_enhancements": {
+    "data-upload-validate": {
+      "input_types": ["file_path", "file_upload"],
+      "output_types": ["DataFrame"],
+      "required_inputs": ["file"],
+      "provides_outputs": ["validated_DataFrame", "schema_info"],
+      "can_follow": [],
+      "should_precede": ["feature-overview", "column-classifier", "dataframe-operations", "explore"],
+      "typical_position": "first"
+    },
+    "feature-overview": {
+      "input_types": ["DataFrame"],
+      "output_types": ["statistical_summary", "dict"],
+      "required_inputs": ["DataFrame"],
+      "provides_outputs": ["statistics", "summary_report"],
+      "can_follow": ["data-upload-validate", "dataframe-operations", "merge", "concat"],
+      "should_precede": ["correlation", "chart-maker", "column-classifier"],
+      "typical_position": "early"
+    },
+    "column-classifier": {
+      "input_types": ["DataFrame"],
+      "output_types": ["classification_dict"],
+      "required_inputs": ["DataFrame"],
+      "provides_outputs": ["column_types", "classification_info"],
+      "can_follow": ["data-upload-validate", "feature-overview"],
+      "should_precede": ["dataframe-operations", "create-column"],
+      "typical_position": "early"
+    },
+    "dataframe-operations": {
+      "input_types": ["DataFrame"],
+      "output_types": ["DataFrame"],
+      "required_inputs": ["DataFrame"],
+      "provides_outputs": ["filtered_DataFrame", "sorted_DataFrame", "transformed_DataFrame"],
+      "can_follow": ["data-upload-validate", "feature-overview", "merge", "concat"],
+      "should_precede": ["groupby-wtg-avg", "chart-maker", "correlation"],
+      "typical_position": "middle"
+    },
+    "create-column": {
+      "input_types": ["DataFrame"],
+      "output_types": ["DataFrame"],
+      "required_inputs": ["DataFrame"],
+      "provides_outputs": ["DataFrame_with_new_columns"],
+      "can_follow": ["data-upload-validate", "dataframe-operations", "feature-overview"],
+      "should_precede": ["groupby-wtg-avg", "chart-maker", "correlation"],
+      "typical_position": "middle"
+    },
+    "groupby-wtg-avg": {
+      "input_types": ["DataFrame"],
+      "output_types": ["DataFrame", "aggregated_data"],
+      "required_inputs": ["DataFrame", "group_columns"],
+      "provides_outputs": ["grouped_DataFrame", "aggregation_result"],
+      "can_follow": ["data-upload-validate", "dataframe-operations", "create-column", "merge"],
+      "should_precede": ["chart-maker"],
+      "typical_position": "middle-late"
+    },
+    "merge": {
+      "input_types": ["multiple_DataFrames"],
+      "output_types": ["DataFrame"],
+      "required_inputs": ["DataFrame_left", "DataFrame_right"],
+      "provides_outputs": ["merged_DataFrame"],
+      "can_follow": ["data-upload-validate"],
+      "should_precede": ["feature-overview", "dataframe-operations", "groupby-wtg-avg", "chart-maker"],
+      "typical_position": "early-middle"
+    },
+    "concat": {
+      "input_types": ["multiple_DataFrames"],
+      "output_types": ["DataFrame"],
+      "required_inputs": ["DataFrame_list"],
+      "provides_outputs": ["concatenated_DataFrame"],
+      "can_follow": ["data-upload-validate"],
+      "should_precede": ["feature-overview", "dataframe-operations", "groupby-wtg-avg", "chart-maker"],
+      "typical_position": "early-middle"
+    },
+    "correlation": {
+      "input_types": ["DataFrame"],
+      "output_types": ["correlation_matrix", "dict"],
+      "required_inputs": ["DataFrame_with_numeric_columns"],
+      "provides_outputs": ["correlation_matrix", "correlation_insights"],
+      "can_follow": ["data-upload-validate", "feature-overview", "dataframe-operations"],
+      "should_precede": ["chart-maker"],
+      "typical_position": "middle-late"
+    },
+    "explore": {
+      "input_types": ["DataFrame"],
+      "output_types": ["exploration_report", "dict"],
+      "required_inputs": ["DataFrame"],
+      "provides_outputs": ["exploration_insights", "analysis_report"],
+      "can_follow": ["data-upload-validate", "dataframe-operations", "merge", "concat"],
+      "should_precede": ["chart-maker"],
+      "typical_position": "early-middle"
+    },
+    "chart-maker": {
+      "input_types": ["DataFrame", "processed_data"],
+      "output_types": ["visualization", "chart"],
+      "required_inputs": ["data_for_visualization"],
+      "provides_outputs": ["chart", "visualization"],
+      "can_follow": ["feature-overview", "dataframe-operations", "groupby-wtg-avg", "correlation", "explore"],
+      "should_precede": [],
+      "typical_position": "last"
+    },
+    "scope-selector": {
+      "input_types": ["DataFrame"],
+      "output_types": ["DataFrame"],
+      "required_inputs": ["DataFrame"],
+      "provides_outputs": ["scoped_DataFrame"],
+      "can_follow": ["data-upload-validate", "feature-overview"],
+      "should_precede": ["dataframe-operations", "groupby-wtg-avg", "chart-maker"],
+      "typical_position": "early-middle"
+    }
+  }
+}
+

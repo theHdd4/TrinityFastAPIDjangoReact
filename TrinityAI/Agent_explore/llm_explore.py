@@ -70,14 +70,13 @@ class ExploreAgent:
             # Set environment context for dynamic path resolution (like merge agent)
             self.set_context(client_name, app_name, project_name)
             
-            # Get or create session
+            # Get or create session (in-memory only - no disk storage)
             if not session_id:
                 session_id = f"explore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             
-            # Try to load existing session from disk
+            # Initialize session if not exists
             if session_id not in self.sessions:
-                if not self._load_session_from_disk(session_id):
-                    self.sessions[session_id] = []
+                self.sessions[session_id] = []
             
             # Add user message to session
             self.sessions[session_id].append({
@@ -85,6 +84,10 @@ class ExploreAgent:
                 "content": user_prompt,
                 "timestamp": datetime.now().isoformat()
             })
+            
+            # Keep only recent messages to prevent memory bloat (last 50 messages)
+            if len(self.sessions[session_id]) > 50:
+                self.sessions[session_id] = self.sessions[session_id][-50:]
             
             # Load available files if not already loaded
             if not self.files_with_columns:
@@ -164,9 +167,6 @@ class ExploreAgent:
                     "full_result": error_result  # Store complete result
                 })
                 
-                # Save session to disk for persistence
-                self._save_session_to_disk(session_id)
-                
                 return error_result
             
             # Add session tracking
@@ -179,9 +179,6 @@ class ExploreAgent:
                 "timestamp": datetime.now().isoformat(),
                 "full_result": result  # Store complete result including exploration_config JSON
             })
-            
-            # Save session to disk for persistence
-            self._save_session_to_disk(session_id)
             
             logger.info(f"Successfully generated exploration config for session {session_id}")
             return result
@@ -204,9 +201,6 @@ class ExploreAgent:
                     "timestamp": datetime.now().isoformat(),
                     "full_result": error_result  # Store complete result
                 })
-                
-                # Save session to disk for persistence
-                self._save_session_to_disk(session_id)
             
             return error_result
     
@@ -489,37 +483,17 @@ class ExploreAgent:
         
         return "\n".join(context_parts)
     
-    def _save_session_to_disk(self, session_id: str):
-        """Save session to disk for persistence"""
-        try:
-            import os
-            sessions_dir = "sessions"
-            if not os.path.exists(sessions_dir):
-                os.makedirs(sessions_dir)
-            
-            session_file = os.path.join(sessions_dir, f"{session_id}.json")
-            with open(session_file, 'w') as f:
-                json.dump(self.sessions[session_id], f, indent=2)
-            
-            logger.info(f"Session {session_id} saved to disk")
-        except Exception as e:
-            logger.warning(f"Failed to save session {session_id} to disk: {e}")
-    
-    def _load_session_from_disk(self, session_id: str):
-        """Load session from disk if it exists"""
-        try:
-            import os
-            sessions_dir = "sessions"
-            session_file = os.path.join(sessions_dir, f"{session_id}.json")
-            
-            if os.path.exists(session_file):
-                with open(session_file, 'r') as f:
-                    self.sessions[session_id] = json.load(f)
-                logger.info(f"Session {session_id} loaded from disk with {len(self.sessions[session_id])} messages")
-                return True
-        except Exception as e:
-            logger.warning(f"Failed to load session {session_id} from disk: {e}")
+    def clear_session(self, session_id: str) -> bool:
+        """Clear a specific session from memory"""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            logger.info(f"Cleared session: {session_id}")
+            return True
         return False
+    
+    def get_all_sessions(self) -> List[str]:
+        """Get list of all active session IDs"""
+        return list(self.sessions.keys())
     
     # Backend integration methods removed - following chart maker pattern
     # The explore agent now only generates configuration, frontend handles execution
