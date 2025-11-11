@@ -1,5 +1,5 @@
 # app/routes.py - API Routes
-from fastapi import APIRouter, HTTPException, File, Form, UploadFile, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response
 from typing import List, Dict, Any
 import json
 import pandas as pd
@@ -8,6 +8,7 @@ import io
 import os
 import openpyxl
 import pyarrow as pa
+from time import perf_counter
 from app.core.utils import get_env_vars
 from pathlib import Path
 import fastexcel
@@ -61,6 +62,7 @@ from app.features.data_upload_validate.app.database import (
 )
 
 from app.redis_cache import cache_master_config
+from app.core.observability import timing_dependency_factory
 
 import re
 
@@ -82,7 +84,9 @@ from app.features.data_upload_validate.app.database import save_validator_atom_t
 
 
 # Initialize router
-router = APIRouter()
+timing_dependency = timing_dependency_factory("app.features.data_upload_validate")
+
+router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 logger = logging.getLogger(__name__)
 
@@ -500,6 +504,14 @@ async def upload_file(
     app_name: str = Form(""),
     project_name: str = Form("")
 ):
+    start_time = perf_counter()
+    logger.info(
+        "data_upload.temp_upload.start file=%s client_id=%s app_id=%s project_id=%s",
+        file.filename,
+        client_id or "",
+        app_id or "",
+        project_id or "",
+    )
     if client_id:
         os.environ["CLIENT_ID"] = client_id
     if app_id:
@@ -519,6 +531,12 @@ async def upload_file(
     # endpoint.
     tmp_prefix = prefix + "tmp/"
     content = await file.read()
+    logger.info(
+        "data_upload.temp_upload.read_bytes file=%s size=%s prefix=%s",
+        file.filename,
+        len(content),
+        tmp_prefix,
+    )
     
     try:
         if file.filename.lower().endswith(".csv"):
@@ -569,6 +587,7 @@ async def upload_file(
     except Exception as e:
         print(f"❌ Error parsing file {file.filename}: {str(e)}")
         print(f"📊 Error type: {type(e).__name__}")
+        logger.exception("data_upload.temp_upload.parse_failed file=%s", file.filename)
         raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
 
     print(f"🔄 Converting to Arrow format...")
@@ -586,6 +605,11 @@ async def upload_file(
     
     if result.get("status") != "success":
         print(f"❌ MinIO upload failed: {result.get('error_message')}")
+        logger.error(
+            "data_upload.temp_upload.minio_failed file=%s error=%s",
+            file.filename,
+            result.get("error_message"),
+        )
         raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
     
     print(f"✅ Upload successful: {result['object_name']}")
@@ -620,6 +644,13 @@ async def upload_file(
         response["message"] = "File uploaded successfully"
         response["has_data_quality_issues"] = False
     
+    duration_ms = (perf_counter() - start_time) * 1000
+    logger.info(
+        "data_upload.temp_upload.completed file=%s object=%s duration_ms=%.2f",
+        file.filename,
+        result.get("object_name"),
+        duration_ms,
+    )
     return response
 
 
@@ -630,6 +661,7 @@ async def clear_temp_uploads(
     project_name: str = "",
 ):
     """Remove any temporary uploads for the given environment."""
+    start_time = perf_counter()
     prefix, env, env_source = await get_object_prefix(
         client_name=client_name,
         app_name=app_name,
@@ -641,6 +673,13 @@ async def clear_temp_uploads(
         objects = list(
             minio_client.list_objects(MINIO_BUCKET, prefix=tmp_prefix, recursive=True)
         )
+        duration_ms = (perf_counter() - start_time) * 1000
+        logger.info(
+            "data_upload.temp_cleanup.completed prefix=%s deleted=%s duration_ms=%.2f",
+            tmp_prefix,
+            len(objects),
+            duration_ms,
+        )
         for obj in objects:
             minio_client.remove_object(MINIO_BUCKET, obj.object_name)
         return {
@@ -650,6 +689,11 @@ async def clear_temp_uploads(
             "env_source": env_source,
         }
     except S3Error as e:
+        logger.warning(
+            "data_upload.temp_cleanup.error prefix=%s error=%s",
+            tmp_prefix,
+            str(e),
+        )
         return {
             "deleted": 0,
             "error": str(e),
@@ -1677,12 +1721,20 @@ async def validate(
     """
     Enhanced validation: mandatory columns + type check + auto-correction + custom conditions + MongoDB logging
     """
+    start_time = perf_counter()
     try:
         keys = json.loads(file_keys)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
     if not isinstance(keys, list):
         raise HTTPException(status_code=400, detail="file_keys must be a JSON array")
+
+    logger.info(
+        "data_upload.validate.start validator=%s file_count=%s has_inline_files=%s",
+        validator_atom_id,
+        len(keys),
+        bool(files),
+    )
 
     try:
         paths = json.loads(file_paths) if file_paths else []
@@ -1829,6 +1881,15 @@ async def validate(
         validator_atom_id=validator_atom_id,
         operation="validate",
         details={"overall_status": validation_results["overall_status"]},
+    )
+
+    duration_ms = (perf_counter() - start_time) * 1000
+    logger.info(
+        "data_upload.validate.completed validator=%s status=%s files=%s duration_ms=%.2f",
+        validator_atom_id,
+        validation_results["overall_status"],
+        len(keys),
+        duration_ms,
     )
 
     return {
@@ -2913,11 +2974,11 @@ async def save_dataframes(
     user_name: str = Form(""),
 ):
     """Save validated dataframes as Arrow tables and upload via Flight."""
+    start_time = perf_counter()
     logger.info(
-        "save_dataframes invoked", extra={
-            "validator_atom_id": validator_atom_id,
-            "overwrite": overwrite,
-        }
+        "data_upload.save_dataframes.start validator=%s overwrite=%s",
+        validator_atom_id,
+        overwrite,
     )
     logger.debug("raw file_keys=%s", file_keys)
     logger.debug("raw file_paths=%s", file_paths)
@@ -3162,12 +3223,21 @@ async def save_dataframes(
         project_id=project_id,
         project_name=project_name,
     )
-    return {
+    response_payload = {
         "minio_uploads": uploads,
         "flight_uploads": flights,
         "prefix": prefix,
         "environment": env,
     }
+    duration_ms = (perf_counter() - start_time) * 1000
+    logger.info(
+        "data_upload.save_dataframes.completed validator=%s uploads=%s flights=%s duration_ms=%.2f",
+        validator_atom_id,
+        len(uploads),
+        len(flights),
+        duration_ms,
+    )
+    return response_payload
 
 
 @router.get("/upload-status/{validator_atom_id}/{file_key}")
@@ -3176,6 +3246,12 @@ async def get_upload_status(validator_atom_id: str, file_key: str) -> dict:
     status = redis_client.get(progress_key)
     if isinstance(status, bytes):
         status = status.decode()
+    logger.info(
+        "data_upload.upload_status validator=%s file_key=%s status=%s",
+        validator_atom_id,
+        file_key,
+        status or "unknown",
+    )
     return {"status": status}
 
 
