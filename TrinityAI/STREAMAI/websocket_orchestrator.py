@@ -28,6 +28,9 @@ except ImportError:  # pragma: no cover
             super().__init__(code, reason)
 
 from .atom_mapping import ATOM_MAPPING
+from .graphrag import GraphRAGWorkspaceConfig
+from .graphrag.client import GraphRAGQueryClient
+from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
 
 try:
     import aiohttp  # type: ignore
@@ -103,6 +106,12 @@ class StreamWebSocketOrchestrator:
         self.result_storage = result_storage
         self.rag_engine = rag_engine
 
+        # GraphRAG integration
+        self.graph_workspace_config = GraphRAGWorkspaceConfig()
+        self.graph_rag_client = GraphRAGQueryClient(self.graph_workspace_config)
+        self.graph_prompt_builder = GraphRAGPromptBuilder(self.graph_rag_client)
+        self._latest_graph_prompt: Optional[GraphRAGPhaseOnePrompt] = None
+
         # In-memory caches for step execution data and outputs
         self._step_execution_cache: Dict[str, Dict[int, Dict[str, Any]]] = {}
         self._step_output_files: Dict[str, Dict[int, str]] = {}
@@ -140,6 +149,62 @@ class StreamWebSocketOrchestrator:
             logger.error(f"❌ Failed to load atom mapping: {e}")
             self.atom_mapping = {}
     
+    def _build_legacy_prompt(
+        self,
+        user_prompt: str,
+        available_files: List[str],
+        files_exist: bool,
+        prompt_files: List[str],
+    ) -> str:
+        """Legacy Phase-1 prompt builder used as a fallback."""
+        atom_knowledge = self._get_atom_capabilities_for_llm()
+        files_str = "\n".join([f"  - {f}" for f in available_files]) if available_files else "  (No files available yet)"
+
+        file_instruction = ""
+        if files_exist and available_files:
+            file_instruction = f"""
+CRITICAL FILE INFORMATION:
+- The user mentioned files in their request: {', '.join(prompt_files)}
+- These files ALREADY EXIST in the system: {', '.join([f.split('/')[-1] for f in available_files[:3]])}
+- DO NOT include 'data-upload-validate' steps - files are already uploaded!
+- Start directly with the data processing step (merge, concat, etc.)
+"""
+
+        workflow_rule = (
+            "- ⚠️ CRITICAL: Files mentioned in user request already exist in available_files. DO NOT include 'data-upload-validate' steps. Start directly with data processing!"
+            if files_exist
+            else "- If files don't exist, include 'data-upload-validate' as the first step"
+        )
+
+        return f"""You are a data analysis workflow planner. Your task is to create a step-by-step workflow to accomplish the user's request.
+
+{atom_knowledge}
+
+USER REQUEST:
+"{user_prompt}"
+
+AVAILABLE FILES (already in system):
+{files_str}
+{file_instruction}
+
+TASK:
+Generate a workflow plan as a JSON array. Each step should have:
+- atom_id: The ID of the atom to use (from the list above)
+- description: Brief description of what this step does (one sentence)
+
+IMPORTANT RULES:
+{workflow_rule}
+- Keep workflow simple (2-4 steps)
+- Put transformations before visualizations
+- Each step should logically follow the previous one
+
+Respond ONLY with valid JSON array, no other text:
+[
+  {{"atom_id": "merge", "description": "Merge the two datasets"}},
+  {{"atom_id": "chart-maker", "description": "Visualize the merged data"}}
+]
+"""
+
     def _get_atom_capabilities_for_llm(self) -> str:
         """
         Get comprehensive atom capabilities and knowledge for LLM.
@@ -197,14 +262,7 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
    - Output: correlation configuration
    - Example: "Analyze correlation between price and sales"
 
-8. **explore** / **feature-overview** - Data Exploration
-   - Capability: Provides statistical overview and data profiling
-   - Use when: User wants to explore, understand, or get overview of data
-   - Keywords: explore, overview, summary, statistics, analyze, understand
-   - Output: exploration_config with analysis settings
-   - Example: "Explore the sales dataset and show statistics"
-
-9. **data-upload-validate** - Load Data
+8. **data-upload-validate** - Load Data
    - Capability: Loads and validates data files (CSV, Excel, Arrow)
    - Use when: Files don't exist yet and need to be uploaded
    - Keywords: load, upload, import, read
@@ -267,16 +325,17 @@ WORKFLOW PLANNING RULES:
             filename = af.split('/')[-1] if '/' in af else af
             available_normalized.append(filename.lower())
         
-        # Check for matches
+        # Check for matches (case-insensitive)
         matches = []
         for pf in prompt_files:
+            pf_key = pf.lower()
             # Check exact match
-            if pf in available_normalized:
+            if pf_key in available_normalized:
                 matches.append(pf)
             else:
                 # Check partial match (filename contains prompt file)
                 for af in available_normalized:
-                    if pf in af or af in pf:
+                    if pf_key in af or af in pf_key:
                         matches.append(pf)
                         break
         
@@ -297,6 +356,55 @@ WORKFLOW PLANNING RULES:
             key = display.lower()
             lookup.setdefault(key, []).append(file_path)
         return display_names, lookup
+
+    @staticmethod
+    def _display_file_name(path: str) -> str:
+        """Return a user-friendly file name from a stored path."""
+        if not path:
+            return ""
+        if "/" in path:
+            path = path.split("/")[-1]
+        if "\\" in path:
+            path = path.split("\\")[-1]
+        return path
+
+    @staticmethod
+    def _ensure_list_of_strings(candidate: Any) -> List[str]:
+        """Coerce planner-provided values (string/dict/list) into a list of strings."""
+        if candidate is None:
+            return []
+        if isinstance(candidate, list):
+            result: List[str] = []
+            for item in candidate:
+                if item is None:
+                    continue
+                if isinstance(item, (list, tuple, set)):
+                    result.extend(
+                        str(sub_item) for sub_item in item if sub_item is not None
+                    )
+                elif isinstance(item, dict):
+                    result.extend(
+                        str(value)
+                        for value in item.values()
+                        if value is not None and value != ""
+                    )
+                else:
+                    result.append(str(item))
+            return [value for value in result if value != ""]
+        if isinstance(candidate, (tuple, set)):
+            return [str(item) for item in candidate if item is not None and item != ""]
+        if isinstance(candidate, dict):
+            values = [
+                str(value)
+                for value in candidate.values()
+                if value is not None and value != ""
+            ]
+            if values:
+                return values
+            return [str(key) for key in candidate.keys()]
+        if isinstance(candidate, str):
+            return [candidate]
+        return [str(candidate)]
 
     def _match_prompt_files_to_available(
         self,
@@ -399,45 +507,71 @@ WORKFLOW PLANNING RULES:
         for idx, raw_step in enumerate(workflow_steps_raw, start_index):
             atom_id = raw_step.get("atom_id", "unknown")
             description = raw_step.get("description", "").strip()
-            output_alias = f"{atom_id.replace('-', '_')}_step_{idx}"
+            output_alias = raw_step.get("output_alias") or f"{atom_id.replace('-', '_')}_step_{idx}"
 
             guidance = {}
             if self.rag_engine:
                 guidance = self.rag_engine.get_atom_prompt_guidance(atom_id)
 
-            files_required = 0
-            if atom_id == "data-upload-validate":
-                files_required = 1
-            elif atom_id in {"merge", "concat"}:
-                files_required = 2
+            files_used_raw = raw_step.get("files_used") or []
+            files_used = self._ensure_list_of_strings(files_used_raw)
+            if not files_used:
+                files_required = 0
+                if atom_id == "data-upload-validate":
+                    files_required = 1
+                elif atom_id in {"merge", "concat"}:
+                    files_required = 2
 
-            files_used: List[str] = []
-            for _ in range(files_required):
-                if matched_queue:
+                for _ in range(files_required):
+                    if matched_queue:
+                        files_used.append(matched_queue.pop(0))
+                    elif remaining_available:
+                        files_used.append(remaining_available.pop(0))
+
+                if not files_used and matched_queue:
                     files_used.append(matched_queue.pop(0))
-                elif remaining_available:
-                    files_used.append(remaining_available.pop(0))
+                if not files_used and remaining_available:
+                    # For analysis atoms (groupby, chart-maker, etc.) default to first known dataset.
+                    files_used.append(remaining_available[0])
 
-            inputs: List[str] = []
-            if atom_id in {"merge", "concat"}:
-                inputs = files_used.copy()
-                if len(inputs) < files_required and previous_alias:
-                    inputs.append(previous_alias)
-            elif atom_id == "data-upload-validate":
-                inputs = []
-            else:
-                if previous_alias:
-                    inputs = [previous_alias]
-                elif files_used:
+            inputs_raw = raw_step.get("inputs") or []
+            inputs = self._ensure_list_of_strings(inputs_raw)
+            if not inputs:
+                if atom_id in {"merge", "concat"}:
                     inputs = files_used.copy()
+                    if previous_alias and previous_alias not in inputs:
+                        inputs.append(previous_alias)
+                elif atom_id == "data-upload-validate":
+                    inputs = []
+                else:
+                    if previous_alias:
+                        inputs = [previous_alias]
+                    elif files_used:
+                        inputs = files_used.copy()
+                    elif matched_queue:
+                        inputs = [matched_queue[0]]
+                    elif remaining_available:
+                        inputs = [remaining_available[0]]
 
-            prompt_text = self._compose_prompt(atom_id, description, guidance, files_used, inputs, output_alias)
+            prompt_text = raw_step.get("prompt")
+            if not prompt_text:
+                prompt_text = self._compose_prompt(atom_id, description, guidance, files_used, inputs, output_alias)
+
+            description_for_step = description or guidance.get("purpose", "")
+            display_files = [self._display_file_name(file_path) for file_path in files_used if file_path]
+            if display_files:
+                files_clause = ", ".join(display_files)
+                if description_for_step:
+                    if files_clause not in description_for_step:
+                        description_for_step = f"{description_for_step} (files: {files_clause})"
+                else:
+                    description_for_step = f"Files used: {files_clause}"
 
             enriched_steps.append(
                 WorkflowStepPlan(
                     step_number=idx,
                     atom_id=atom_id,
-                    description=description or guidance.get("purpose", ""),
+                    description=description_for_step,
                     prompt=prompt_text,
                     files_used=files_used,
                     inputs=inputs,
@@ -471,51 +605,32 @@ WORKFLOW PLANNING RULES:
         prompt_files = self._extract_file_names_from_prompt(user_prompt)
         files_exist = self._match_files_with_available(prompt_files, available_files) if available_files else False
         
-        # Get atom capabilities
-        atom_knowledge = self._get_atom_capabilities_for_llm()
-        
-        # Build LLM prompt
-        files_str = "\n".join([f"  - {f}" for f in available_files]) if available_files else "  (No files available yet)"
-        
-        # Enhanced prompt with file matching information
-        file_instruction = ""
-        if files_exist and available_files:
-            file_instruction = f"""
-CRITICAL FILE INFORMATION:
-- The user mentioned files in their request: {', '.join(prompt_files)}
-- These files ALREADY EXIST in the system: {', '.join([f.split('/')[-1] for f in available_files[:3]])}
-- DO NOT include 'data-upload-validate' steps - files are already uploaded!
-- Start directly with the data processing step (merge, concat, etc.)
-"""
-        
-        llm_prompt = f"""You are a data analysis workflow planner. Your task is to create a step-by-step workflow to accomplish the user's request.
-
-{atom_knowledge}
-
-USER REQUEST:
-"{user_prompt}"
-
-AVAILABLE FILES (already in system):
-{files_str}
-{file_instruction}
-
-TASK:
-Generate a workflow plan as a JSON array. Each step should have:
-- atom_id: The ID of the atom to use (from the list above)
-- description: Brief description of what this step does (one sentence)
-
-IMPORTANT RULES:
-{"- ⚠️ CRITICAL: Files mentioned in user request already exist in available_files. DO NOT include 'data-upload-validate' steps. Start directly with data processing!" if files_exist else "- If files don't exist, include 'data-upload-validate' as the first step"}
-- Keep workflow simple (2-4 steps)
-- Put transformations before visualizations
-- Each step should logically follow the previous one
-
-Respond ONLY with valid JSON array, no other text:
-[
-  {{"atom_id": "merge", "description": "Merge the two datasets"}},
-  {{"atom_id": "chart-maker", "description": "Visualize the merged data"}}
-]
-"""
+        graph_prompt: Optional[GraphRAGPhaseOnePrompt] = None
+        try:
+            graph_prompt = self.graph_prompt_builder.build_phase_one_prompt(
+                user_prompt=user_prompt,
+                available_files=available_files,
+                files_exist=files_exist,
+                prompt_files=prompt_files,
+                atom_reference=self._get_atom_capabilities_for_llm(),
+            )
+            llm_prompt = graph_prompt.prompt
+            logger.info(
+                "🧠 GraphRAG context sections: %s",
+                list(graph_prompt.context.keys()),
+            )
+            logger.debug("📎 GraphRAG context detail: %s", graph_prompt.context)
+            self._latest_graph_prompt = graph_prompt
+        except Exception as exc:
+            logger.exception("⚠️ Graph prompt builder failed; falling back to legacy prompt: %s", exc)
+            llm_prompt = self._build_legacy_prompt(
+                user_prompt=user_prompt,
+                available_files=available_files,
+                files_exist=files_exist,
+                prompt_files=prompt_files,
+            )
+            logger.info("🧠 Using legacy workflow prompt assembly")
+            self._latest_graph_prompt = None
         
         logger.info(f"🤖 Calling LLM for workflow generation...")
         logger.info(f"📝 Prompt length: {len(llm_prompt)} chars")
@@ -557,8 +672,41 @@ Respond ONLY with valid JSON array, no other text:
                     elif "```" in content:
                         content = content.split("```")[1].split("```")[0].strip()
                     
-                    workflow_steps = json.loads(content)
-                    
+                    workflow_payload = json.loads(content)
+
+                    if isinstance(workflow_payload, dict):
+                        if "steps" in workflow_payload and isinstance(workflow_payload["steps"], list):
+                            workflow_steps = workflow_payload["steps"]
+                        elif "workflow_steps" in workflow_payload and isinstance(workflow_payload["workflow_steps"], list):
+                            workflow_steps = workflow_payload["workflow_steps"]
+                        else:
+                            # Allow dict representing a single step
+                            workflow_steps = [workflow_payload]
+                    elif isinstance(workflow_payload, list):
+                        workflow_steps = workflow_payload
+                    else:
+                        raise ValueError("LLM response is not a list or object containing steps")
+
+                    normalized_steps: List[Dict[str, Any]] = []
+                    for entry in workflow_steps:
+                        if isinstance(entry, dict):
+                            normalized_steps.append(entry)
+                            continue
+                        if isinstance(entry, str):
+                            try:
+                                parsed_entry = json.loads(entry)
+                                if isinstance(parsed_entry, dict):
+                                    normalized_steps.append(parsed_entry)
+                                    continue
+                            except json.JSONDecodeError:
+                                logger.warning("⚠️ Unable to parse workflow step string into JSON: %s", entry[:200])
+                        logger.warning("⚠️ Skipping workflow step with unsupported type: %r", type(entry))
+
+                    if not normalized_steps:
+                        raise ValueError("No valid workflow steps extracted from LLM response")
+
+                    workflow_steps = normalized_steps
+
                     # Post-process: Remove data-upload-validate if files already exist
                     if files_exist:
                         original_count = len(workflow_steps)
@@ -579,7 +727,7 @@ Respond ONLY with valid JSON array, no other text:
             logger.error(f"❌ Failed to parse LLM response as JSON: {e}")
             logger.error(f"   Content: {content}")
             # Fallback to keyword-based
-            return self._fallback_to_keywords(user_prompt, available_files), prompt_files, files_exist
+            return self._fallback_to_keywords(user_prompt, available_files)
         except Exception as e:
             logger.error(f"❌ LLM workflow generation failed: {e}")
             import traceback
@@ -587,7 +735,11 @@ Respond ONLY with valid JSON array, no other text:
             # Fallback to keyword-based
             return self._fallback_to_keywords(user_prompt, available_files)
     
-    def _fallback_to_keywords(self, user_prompt: str, available_files: List[str]) -> List[Dict[str, Any]]:
+    def _fallback_to_keywords(
+        self,
+        user_prompt: str,
+        available_files: List[str]
+    ) -> Tuple[List[Dict[str, Any]], List[str], bool]:
         """Fallback to simple keyword-based workflow generation"""
         logger.info("⚠️ Falling back to keyword-based workflow generation")
         query_lower = user_prompt.lower()
@@ -619,10 +771,10 @@ Respond ONLY with valid JSON array, no other text:
             steps.append({"atom_id": "chart-maker", "description": "Create visualization"})
         
         if not steps:
-            # Default to explore if no keywords matched
-            steps.append({"atom_id": "explore", "description": "Explore the data"})
+            # Default to dataframe-operations if no keywords matched
+            steps.append({"atom_id": "dataframe-operations", "description": "Perform general dataframe operations"})
         
-        return steps
+        return steps, prompt_files, files_exist
     
     async def execute_workflow_with_websocket(
         self,
@@ -1037,13 +1189,21 @@ Respond ONLY with valid JSON array, no other text:
             
             # For now, use basic parameters from prompt
             # The atom handlers will process the results properly
-            parameters = await self._generate_simple_parameters(
-                atom_id=atom_id,
-                original_prompt=original_prompt,
-                available_files=available_files,
-                step_prompt=getattr(step, "prompt", None),
-                workflow_step=step
-            )
+            try:
+                parameters = await self._generate_simple_parameters(
+                    atom_id=atom_id,
+                    original_prompt=original_prompt,
+                    available_files=available_files,
+                    step_prompt=getattr(step, "prompt", None),
+                    workflow_step=step
+                )
+            except Exception as parameter_error:
+                logger.exception(
+                    "❌ Failed to generate parameters for step %s (%s)",
+                    step_number,
+                    atom_id,
+                )
+                raise
             
             logger.info(f"✅ Parameters: {json.dumps(parameters, indent=2)[:150]}...")
             
@@ -1617,6 +1777,9 @@ Respond ONLY with valid JSON array, no other text:
         inputs: List[str],
         output_alias: Optional[str]
     ) -> str:
+        files_used = self._ensure_list_of_strings(files_used)
+        inputs = self._ensure_list_of_strings(inputs)
+
         lines: List[str] = []
 
         def append_line(label: str, value: Optional[str]) -> None:
