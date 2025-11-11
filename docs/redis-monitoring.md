@@ -116,6 +116,17 @@ restarts because Prometheus and Grafana share named volumes (`prometheus_data`,
    `http://localhost:8001/api/health/redis` (FastAPI) to verify the services report Redis
    stats while monitoring is enabled.
 
+If Docker reports a port conflict (for example, `Bind for 0.0.0.0:8816 failed` from the
+Flight server), override the host binding before you start the stack:
+
+```bash
+export FLIGHT_HOST_PORT=18816
+docker compose -f docker-compose-dev.yml --profile cache-monitoring up -d
+```
+
+Any free host port works; containers still talk to `flight:8816` internally so no other
+configuration changes are required.
+
 To mimic production port assignments run the production compose file:
 
 ```bash
@@ -146,6 +157,10 @@ docker compose -f docker-compose.example.yml up redis redis-exporter prometheus 
 
 5. Configure Grafana ingress or networking as appropriate for your environment and wire
    Alertmanager to your paging/notification channels.
+
+> **Tip:** If your production hosts already use TCP port 8815, set `FLIGHT_HOST_PORT` to an
+> available port before running `docker compose up`. The container continues to listen on
+> `flight:8815` inside the compose network, so no application changes are necessary.
 
 ## Accessing the Dashboard and Validating Data
 

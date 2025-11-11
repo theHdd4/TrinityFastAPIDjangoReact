@@ -293,7 +293,7 @@ services:
     labels:
       - "environment=prod"
     ports:
-      - "8815:8815"
+      - "${FLIGHT_HOST_PORT:-8815}:8815"
     networks:
       - trinity-net
     restart: always
