@@ -277,8 +277,48 @@ class FeatureCacheRouter:
     def get(self, key: Any | Sequence[Any]) -> Optional[bytes]:
         return self._proxy(key).get(key)
 
-    def set(self, key: Any | Sequence[Any], value: bytes | str, *, ttl: Optional[int] = None) -> None:
-        self._proxy(key).set(key, value, ttl=ttl)
+    def set(
+        self,
+        key: Any | Sequence[Any],
+        value: bytes | str,
+        *,
+        ttl: Optional[int] = None,
+        ex: Optional[int] = None,
+        px: Optional[int] = None,
+        keepttl: bool = False,
+        exat: Optional[int] = None,
+        pxat: Optional[int] = None,
+        **kwargs: Any,
+    ) -> None:
+        if keepttl:
+            logger.debug("Ignoring keepttl flag for feature cache set; namespace configuration controls TTLs")
+        if exat is not None or pxat is not None:
+            logger.debug(
+                "Ignoring absolute expiry provided to feature cache set (exat=%s pxat=%s); using namespace TTL",
+                exat,
+                pxat,
+            )
+        if kwargs:
+            logger.debug("Ignoring unsupported Redis SET options: %s", ", ".join(sorted(kwargs)))
+
+        effective_ttl: Optional[int] = ttl
+        if ex is not None:
+            if effective_ttl is not None and effective_ttl != ex:
+                logger.debug(
+                    "Conflicting TTL values provided to feature cache set (ttl=%s ex=%s); favouring ex", ttl, ex
+                )
+            effective_ttl = ex
+        if px is not None:
+            px_seconds = int(px / 1000) if px >= 0 else 0
+            if effective_ttl is not None and effective_ttl != px_seconds:
+                logger.debug(
+                    "Conflicting TTL values provided to feature cache set (current=%s px=%s); favouring px", 
+                    effective_ttl,
+                    px,
+                )
+            effective_ttl = px_seconds
+
+        self._proxy(key).set(key, value, ttl=effective_ttl)
 
     def setex(self, key: Any | Sequence[Any], ttl: int, value: bytes | str) -> None:
         self._proxy(key).setex(key, ttl, value)
