@@ -184,6 +184,7 @@ interface Props {
   onYAxisLabelsToggle?: (enabled: boolean) => void; // Callback for Y axis labels toggle
   onDataLabelsToggle?: (enabled: boolean) => void; // Callback for data labels toggle
   onSave?: () => void; // Callback for save action
+  onTitleChange?: (title: string) => void; // Callback for title changes
   sortOrder?: 'asc' | 'desc' | null; // Current sort order
   onSortChange?: (order: 'asc' | 'desc' | null) => void; // Callback when sorting changes
   sortColumn?: string; // Column to sort by
@@ -517,6 +518,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   onYAxisLabelsToggle,
   onDataLabelsToggle,
   onSave,
+  onTitleChange,
   sortOrder,
   onSortChange, // Callback when sorting changes
   sortColumn: propSortColumn, // Column to sort by
@@ -2219,6 +2221,10 @@ const RechartsChartRenderer: React.FC<Props> = ({
           setCustomYAxisLabel(y);
           setCustomTitle(t);
           setShowAxisLabelSubmenu(false);
+          // Call onTitleChange callback if title changed
+          if (onTitleChange && t !== customTitle) {
+            onTitleChange(t);
+          }
         }}
         onCancel={() => {
           setShowAxisLabelSubmenu(false);

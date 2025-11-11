@@ -211,7 +211,8 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
     if (value === null || value === undefined) return null;
     
     if (typeof value === 'number') {
-      return Number.isFinite(value) ? value : null;
+      const numericValue = value as number;
+      return Number.isFinite(numericValue) ? numericValue : null;
     }
 
     if (typeof value === 'string') {
@@ -233,9 +234,33 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
 
   const hasValidNumericValues = (column: string) => {
     if (!settings.uploadedData) return false;
-    const values = settings.uploadedData.rows.map(row => toNumericValue(row[column]));
-    if (values.length === 0) return false;
-    return values.some(value => value !== null && value !== 0);
+
+    const uniqueMap = (settings.uploadedData.uniqueValuesByColumn ||
+      settings.uploadedData.unique_values) as Record<string, unknown[]> | undefined;
+
+    if (uniqueMap && Array.isArray(uniqueMap[column])) {
+      const uniqueValues = (uniqueMap[column] as unknown[])
+        .map(value => toNumericValue(value))
+        .filter((value): value is number => value !== null);
+      if (uniqueValues.length > 0) {
+        return true;
+      }
+      return false;
+    }
+
+    if (Array.isArray(settings.uploadedData.rows) && settings.uploadedData.rows.length > 0) {
+      const values = settings.uploadedData.rows
+        .map(row => toNumericValue(row[column]))
+        .filter((value): value is number => value !== null);
+      if (values.length > 0) {
+        return true;
+      }
+    }
+
+    // Fall back to trusting backend classification when no data is available on the client
+    return Array.isArray(settings.uploadedData.numericColumns)
+      ? settings.uploadedData.numericColumns.includes(column)
+      : true;
   };
 
   const getNumericColumns = () => {
