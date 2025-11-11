@@ -63,6 +63,76 @@ services:
       - trinity-dev-net
     restart: always
 
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    profiles:
+      - cache-monitoring
+    environment:
+      REDIS_ADDR: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_USER: ${REDIS_USERNAME:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "9122:9121"
+    depends_on:
+      - redis
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    profiles:
+      - cache-monitoring
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - redis-exporter
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    profiles:
+      - cache-monitoring
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9094:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    depends_on:
+      - prometheus
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  grafana:
+    image: grafana/grafana:10.4.5
+    profiles:
+      - cache-monitoring
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - trinity-dev-net
+    restart: always
+
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     environment:
@@ -294,6 +364,8 @@ volumes:
   mongo_data:
   redis_data:
   minio_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   trinity-dev-net:
