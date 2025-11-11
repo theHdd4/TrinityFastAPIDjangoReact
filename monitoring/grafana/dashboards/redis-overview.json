@@ -25,7 +25,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "redis-metrics"
       },
       "fieldConfig": {
         "defaults": {
@@ -88,7 +88,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "redis-metrics"
       },
       "fieldConfig": {
         "defaults": {
@@ -154,7 +154,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "redis-metrics"
       },
       "fieldConfig": {
         "defaults": {
@@ -220,7 +220,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "Prometheus"
+        "uid": "redis-metrics"
       },
       "fieldConfig": {
         "defaults": {
@@ -278,6 +278,59 @@
       ],
       "title": "Connected Clients",
       "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "redis-logs"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "spanNulls": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "id": 5,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showCommonLabels": true,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending"
+      },
+      "pluginVersion": "10.4.5",
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "redis-logs"
+          },
+          "expr": "{compose_service=~\"web|fastapi|celery|trinity-ai\"} |= \"redis_cache_event\"",
+          "refId": "A"
+        }
+      ],
+      "title": "Redis Cache Activity Logs",
+      "type": "logs"
     }
   ],
   "refresh": "30s",

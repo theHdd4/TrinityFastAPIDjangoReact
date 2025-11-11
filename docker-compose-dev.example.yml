@@ -133,6 +133,36 @@ services:
       - trinity-dev-net
     restart: always
 
+  loki:
+    image: grafana/loki:2.9.4
+    profiles:
+      - cache-monitoring
+    command: -config.file=/etc/loki/config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+      - ./monitoring/loki/config.yml:/etc/loki/config.yml:ro
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    profiles:
+      - cache-monitoring
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - promtail_positions:/tmp
+    depends_on:
+      - loki
+    networks:
+      - trinity-dev-net
+    restart: always
+
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     environment:
@@ -197,6 +227,7 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
+      REDIS_LOG_SERVICE: django-web
     depends_on:
       - postgres
       - mongo
@@ -235,6 +266,7 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
+      REDIS_LOG_SERVICE: django-celery
     restart: always
 
   fastapi:
@@ -257,6 +289,7 @@ services:
       FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.4.48}:8081,http://172.17.48.1:8081,http://10.2.4.48:8081,https://trinity-dev.quantmatrixai.com,https://trinity.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+      REDIS_LOG_SERVICE: fastapi-api
     ports:
       - "8004:8001"
     depends_on:
@@ -303,6 +336,7 @@ services:
       OLLAMA_IP: 10.2.4.48
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+      REDIS_LOG_SERVICE: trinity-ai
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
     ports:
@@ -366,6 +400,8 @@ volumes:
   minio_data:
   prometheus_data:
   grafana_data:
+  loki_data:
+  promtail_positions:
 
 networks:
   trinity-dev-net:

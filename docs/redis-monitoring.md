@@ -10,10 +10,14 @@ production-like and local environments.
    same connection parameters exposed through `REDIS_*` environment variables.
 2. **Prometheus** scrapes the exporter every 15 seconds and evaluates alert rules in
    `monitoring/prometheus/alerts/redis.rules.yml`.
-3. **Grafana** is provisioned with the *Redis Cache Overview* dashboard that visualises
-   the key metrics required by support and engineering teams: cache hit rate, command
-   latency, memory fragmentation, memory usage, and client connections.
-4. **Alertmanager** receives critical alerts (connection exhaustion and high memory
+3. **Promtail + Loki** tail the Django, Celery, FastAPI, and Trinity AI containers for
+   structured `redis_cache_event` log lines and persist them for seven days so cache hit
+   behaviour can be audited in real time.
+4. **Grafana** is provisioned with the *Redis Cache Overview* dashboard that visualises
+   the key metrics required by support and engineering teams (hit rate, latency,
+   fragmentation, memory usage, connection counts) and now includes a live Redis activity
+   log panel sourced from Loki.
+5. **Alertmanager** receives critical alerts (connection exhaustion and high memory
    pressure) so downstream notification channels can be configured per environment.
 
 All services are available in both the production `docker-compose.example.yml` and the
@@ -87,9 +91,9 @@ docker compose -f docker-compose-dev.example.yml --profile cache-monitoring up
 ```
 
 This launches Redis with persistent storage (`redis_data`), the exporter, Prometheus,
-Alertmanager, and Grafana (available on `http://localhost:3001`). Data persists across
-restarts because Prometheus and Grafana share named volumes (`prometheus_data`,
-`grafana_data`).
+Alertmanager, Grafana (available on `http://localhost:3001`), Loki (`http://localhost:3100`),
+and Promtail. Data persists across restarts because Prometheus, Loki, and Grafana share
+named volumes (`prometheus_data`, `loki_data`, `grafana_data`).
 
 > **Does this replace the normal dev stack?** No. When you pass `--profile` to Docker
 > Compose it loads every service without a profile **plus** any services belonging to the
@@ -112,10 +116,15 @@ restarts because Prometheus and Grafana share named volumes (`prometheus_data`,
 
 4. Browse to Grafana on `http://localhost:3001`, open the **Redis Cache Overview**
    dashboard, and confirm panels populate within ~15 seconds.
-5. Hit `http://localhost:8000/health/redis/` (Django) or
+5. Scroll to the **Redis Cache Activity Logs** panel in the dashboard or click
+   **Explore → Loki** and run `{{compose_service="web"}} |= "redis_cache_event"` to verify
+   that cache hits and misses from Django, Celery, FastAPI, and Trinity AI are arriving in
+   real time. If you do not see events, trigger a read through the app (for example,
+   `GET /health/redis/`).
+6. Hit `http://localhost:8000/health/redis/` (Django) or
    `http://localhost:8001/api/health/redis` (FastAPI) to verify the services report Redis
    stats while monitoring is enabled.
-6. Create the default tenant and seed users once the containers are healthy:
+7. Create the default tenant and seed users once the containers are healthy:
 
    ```bash
    docker compose -f docker-compose-dev.yml exec web python create_tenant.py
@@ -165,7 +174,12 @@ docker compose -f docker-compose.example.yml up redis redis-exporter prometheus 
 
 5. Configure Grafana ingress or networking as appropriate for your environment and wire
    Alertmanager to your paging/notification channels.
-6. Execute the tenant bootstrap script from the Django container so the application has a
+6. Use Grafana → **Dashboards → Redis Cache Overview** to confirm both metrics panels and
+   the **Redis Cache Activity Logs** panel populate. For ad-hoc inspection, open
+   **Explore → Loki** and run
+   `{compose_service=~"web|fastapi|celery|trinity-ai"} |= "redis_cache_event"` to tail cache
+   hits and misses. These events are retained for seven days by Loki.
+7. Execute the tenant bootstrap script from the Django container so the application has a
    default tenant and superusers:
 
    ```bash
@@ -198,6 +212,20 @@ docker compose -f docker-compose.example.yml up redis redis-exporter prometheus 
    ensure reported values (hit/miss counts, fragmentation ratio, latency) match the
    dashboard panels. The endpoints are lightweight, so they can be polled manually or
    integrated into smoke tests.
+
+## Redis Activity Logging
+
+- Every Redis `GET`, `MGET`, and `HGETALL` call from Django, Celery, FastAPI, and Trinity
+  AI emits a `redis_cache_event` log line with the command, keys, hit/miss counts, and the
+  logical namespace derived from the key prefix. Logs are JSON payloads prefixed with the
+  marker `redis_cache_event` so Promtail can extract labels without interfering with other
+  application logs.
+- Logs are scraped by Promtail, stored in Loki for seven days, and visualised in Grafana
+  via the **Redis Cache Activity Logs** panel. Use Grafana Explore with the Loki datasource
+  for ad-hoc queries such as filtering by `namespace` or `service` label.
+- Set the `REDIS_LOG_SERVICE` environment variable (already applied in both compose files)
+  if you run the services outside Docker so logs continue to identify the source
+  component.
 
 ## Troubleshooting Data Gaps
 
