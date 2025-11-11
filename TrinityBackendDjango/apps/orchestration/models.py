@@ -38,6 +38,17 @@ class TaskRun(models.Model):
     input        = models.JSONField()
     output       = models.JSONField(blank=True, null=True)
     error        = models.TextField(blank=True)
+    tenant_schema = models.CharField(
+        max_length=63,
+        blank=True,
+        help_text="Schema used when dispatching this task run",
+    )
+    celery_task_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Last Celery task id responsible for executing this run",
+    )
+    retries      = models.PositiveIntegerField(default=0)
     created_at   = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)
 

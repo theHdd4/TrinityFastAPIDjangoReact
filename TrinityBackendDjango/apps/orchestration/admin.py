@@ -22,7 +22,9 @@ class TaskRunAdmin(admin.ModelAdmin):
         "atom_slug",
         "engine",
         "status",
+        "tenant_schema",
+        "retries",
         "created_at",
     )
-    list_filter = ("status", "engine")
-    search_fields = ("atom_slug", "workflow_run__id")
+    list_filter = ("status", "engine", "tenant_schema")
+    search_fields = ("atom_slug", "workflow_run__id", "tenant_schema", "celery_task_id")

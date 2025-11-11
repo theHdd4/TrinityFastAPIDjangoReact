@@ -14,29 +14,67 @@ class OrchestratorService:
         return engines.first()  # or implement round-robin / load-aware logic
 
     @staticmethod
-    def run_task(task_run: TaskRun):
-        engine = OrchestratorService.select_engine()
-        task_run.engine = engine
-        task_run.status = TaskRun.STATUS_RUNNING
-        task_run.save(update_fields=["engine", "status", "updated_at"])
-
-        url = f"{engine.base_url.rstrip('/')}{engine.run_endpoint}"
-        payload = {
+    def _build_payload(task_run: TaskRun) -> dict:
+        input_payload = task_run.input or {}
+        return {
             "atom_slug": task_run.atom_slug,
-            "config": task_run.input.get("config"),
-            "data": task_run.input.get("data"),
+            "config": input_payload.get("config"),
+            "data": input_payload.get("data"),
         }
 
+    @staticmethod
+    def run_task(
+        task_run: TaskRun,
+        *,
+        engine: EngineRegistry | None = None,
+        persist: bool = True,
+        timeout: int = 60,
+    ) -> dict:
+        """Dispatch a ``TaskRun`` to a compute engine.
+
+        When ``persist`` is ``False`` the database is not mutated and the caller
+        receives a dictionary describing the execution result so it can be
+        persisted asynchronously.
+        """
+
+        engine = engine or OrchestratorService.select_engine()
+        now = timezone.now()
+
+        if persist:
+            task_run.engine = engine
+            task_run.status = TaskRun.STATUS_RUNNING
+            task_run.error = ""
+            task_run.updated_at = now
+            task_run.save(update_fields=["engine", "status", "error", "updated_at"])
+
+        url = f"{engine.base_url.rstrip('/')}{engine.run_endpoint}"
+        payload = OrchestratorService._build_payload(task_run)
+
+        status = TaskRun.STATUS_RUNNING
+        output = task_run.output
+        error = ""
+
         try:
-            resp = requests.post(url, json=payload, timeout=60)
+            resp = requests.post(url, json=payload, timeout=timeout)
             resp.raise_for_status()
-            result = resp.json()
-            task_run.output = result
-            task_run.status = TaskRun.STATUS_SUCCESS
-        except Exception as e:
+            output = resp.json()
+            status = TaskRun.STATUS_SUCCESS
+        except Exception as exc:  # pragma: no cover - network failures are runtime dependant
             logger.exception("TaskRun %s failed", task_run.id)
-            task_run.error = str(e)
-            task_run.status = TaskRun.STATUS_FAILURE
+            error = str(exc)
+            status = TaskRun.STATUS_FAILURE
         finally:
-            task_run.updated_at = timezone.now()
-            task_run.save(update_fields=["output", "error", "status", "updated_at"])
+            if persist:
+                task_run.output = output
+                task_run.error = error
+                task_run.status = status
+                task_run.updated_at = timezone.now()
+                task_run.save(update_fields=["output", "error", "status", "updated_at"])
+
+        return {
+            "engine_id": engine.id if engine else None,
+            "status": status,
+            "output": output,
+            "error": error,
+            "dispatched_at": now.isoformat(),
+        }
