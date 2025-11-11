@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from kombu import Queue
 from corsheaders.defaults import default_headers, default_methods
 
 # ------------------------------------------------------------------
@@ -289,6 +290,17 @@ CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
+CELERY_TASK_DEFAULT_QUEUE = "orchestration.io"
+CELERY_TASK_QUEUES = (
+    Queue("orchestration.io", routing_key="orchestration.io"),
+    Queue("orchestration.cpu", routing_key="orchestration.cpu"),
+)
+CELERY_TASK_ROUTES = {
+    "apps.orchestration.tasks.prepare_task_run": {"queue": "orchestration.io"},
+    "apps.orchestration.tasks.dispatch_task_run": {"queue": "orchestration.io"},
+    "apps.orchestration.tasks.finalize_task_run": {"queue": "orchestration.io"},
+    "apps.orchestration.tasks.execute_task": {"queue": "orchestration.io"},
+}
 
 # ------------------------------------------------------------------
 # django-simple-history
