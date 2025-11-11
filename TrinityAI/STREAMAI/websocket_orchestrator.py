@@ -1041,7 +1041,8 @@ Respond ONLY with valid JSON array, no other text:
                 atom_id=atom_id,
                 original_prompt=original_prompt,
                 available_files=available_files,
-                step_prompt=getattr(step, "prompt", None)
+                step_prompt=getattr(step, "prompt", None),
+                workflow_step=step
             )
             
             logger.info(f"✅ Parameters: {json.dumps(parameters, indent=2)[:150]}...")
@@ -1556,15 +1557,406 @@ Respond ONLY with valid JSON array, no other text:
         atom_id: str,
         original_prompt: str,
         available_files: List[str],
-        step_prompt: Optional[str] = None
+        step_prompt: Optional[str] = None,
+        workflow_step: Optional[WorkflowStepPlan] = None
     ) -> Dict[str, Any]:
-        """Generate simple parameters from prompt"""
-        # For atoms, just pass the prompt
-        # The agent will use its own LLM to generate proper configuration
+        """
+        Generate an enriched natural-language prompt for downstream atom execution.
+        Ensures we pass explicit dataset references and slot details so the atom LLM
+        can produce a precise configuration without re-deriving context.
+        """
+        files_used: List[str] = []
+        inputs: List[str] = []
+        output_alias: Optional[str] = None
+        step_description: str = ""
+        planner_prompt = step_prompt or ""
+
+        if workflow_step:
+            files_used = workflow_step.files_used or []
+            inputs = workflow_step.inputs or []
+            output_alias = workflow_step.output_alias
+            step_description = workflow_step.description or ""
+            if not planner_prompt:
+                planner_prompt = workflow_step.prompt
+
+        user_summary = self._condense_text(original_prompt)
+        description_summary = self._condense_text(step_description)
+
+        header_lines: List[str] = [
+            f"You are configuring the `{atom_id}` atom inside Trinity Stream AI's automated workflow executor.",
+            f"User goal summary: {user_summary}"
+        ]
+        if description_summary:
+            header_lines.append(f"Planner step description: {description_summary}")
+
+        header_section = "\n".join(header_lines)
+        dataset_section = self._build_dataset_section(atom_id, files_used, inputs, output_alias)
+        atom_section = self._build_atom_instruction_section(atom_id, original_prompt, files_used, inputs)
+        available_section = self._build_available_files_section(available_files)
+        planner_section = self._build_planner_guidance_section(planner_prompt)
+
+        prompt_sections = [
+            header_section,
+            dataset_section,
+            atom_section,
+            available_section,
+            planner_section
+        ]
+
+        final_prompt = "\n\n".join(section for section in prompt_sections if section and section.strip())
+
         return {
-            "prompt": step_prompt or original_prompt,
+            "prompt": final_prompt,
             "available_files": available_files
         }
+
+    def _build_dataset_section(
+        self,
+        atom_id: str,
+        files_used: List[str],
+        inputs: List[str],
+        output_alias: Optional[str]
+    ) -> str:
+        lines: List[str] = []
+
+        def append_line(label: str, value: Optional[str]) -> None:
+            if value:
+                lines.append(f"- {label}: `{value}`")
+
+        if atom_id == "merge":
+            left = files_used[0] if len(files_used) > 0 else (inputs[0] if inputs else None)
+            right = files_used[1] if len(files_used) > 1 else (inputs[1] if len(inputs) > 1 else None)
+            append_line("Left source", left)
+            append_line("Right source", right)
+            if not left or not right:
+                lines.append("- Source datasets missing: identify both left and right inputs before executing the merge.")
+        elif atom_id == "concat":
+            if files_used:
+                for idx, source in enumerate(files_used, start=1):
+                    append_line(f"Source {idx}", source)
+            elif inputs:
+                append_line("Primary source", inputs[0])
+        else:
+            primary_input = inputs[0] if inputs else (files_used[0] if files_used else None)
+            append_line("Input dataset", primary_input)
+
+        if output_alias:
+            append_line("Output alias for downstream steps", output_alias)
+
+        if not lines:
+            lines.append("- Determine the correct input datasets using the workflow context.")
+
+        return "Datasets & dependencies:\n" + "\n".join(lines)
+
+    def _build_atom_instruction_section(
+        self,
+        atom_id: str,
+        original_prompt: str,
+        files_used: List[str],
+        inputs: List[str]
+    ) -> str:
+        if atom_id == "merge":
+            return self._build_merge_section(original_prompt, files_used)
+        if atom_id == "groupby-wtg-avg":
+            return self._build_groupby_section(original_prompt, inputs or files_used)
+        if atom_id == "concat":
+            return self._build_concat_section(original_prompt, files_used)
+        return self._build_generic_section(atom_id, original_prompt)
+
+    def _build_available_files_section(self, available_files: List[str]) -> str:
+        if not available_files:
+            return ""
+        max_files = 5
+        lines = [f"- {path}" for path in available_files[:max_files]]
+        if len(available_files) > max_files:
+            lines.append(f"- (+{len(available_files) - max_files} more)")
+        return "Workspace file inventory:\n" + "\n".join(lines)
+
+    def _build_planner_guidance_section(self, planner_prompt: str) -> str:
+        if not planner_prompt:
+            return ""
+        guidance_lines: List[str] = []
+        for raw_line in planner_prompt.strip().splitlines():
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(("-", "*")):
+                guidance_lines.append(stripped)
+            else:
+                guidance_lines.append(f"- {stripped}")
+        if not guidance_lines:
+            return ""
+        return "Planner guidance:\n" + "\n".join(guidance_lines)
+
+    def _build_merge_section(self, original_prompt: str, files_used: List[str]) -> str:
+        join_columns = self._extract_join_columns(original_prompt)
+        join_type = self._detect_join_type(original_prompt)
+        requires_common = "common column" in original_prompt.lower() or "common key" in original_prompt.lower()
+
+        lines: List[str] = ["Merge requirements:"]
+
+        if join_type:
+            lines.append(f"- Join type: {join_type}")
+        else:
+            lines.append("- Join type: Determine the most appropriate join type; default to `inner` if the user did not specify.")
+
+        if join_columns:
+            formatted = ", ".join(join_columns)
+            lines.append(f"- Join columns: {formatted}")
+        elif requires_common:
+            lines.append("- Join columns: Automatically detect the overlapping column names shared by both datasets (user requested common columns).")
+        else:
+            lines.append("- Join columns: Inspect both datasets and choose matching identifier columns (e.g., customer_id, order_id) when the user does not specify.")
+
+        if files_used and len(files_used) == 1:
+            lines.append("- Secondary dataset: Confirm the second dataset to merge since only one source was resolved.")
+
+        lines.append("- Preserve relevant columns and resolve duplicate suffixes according to user intent.")
+        return "\n".join(lines)
+
+    def _build_groupby_section(self, original_prompt: str, possible_inputs: List[str]) -> str:
+        group_columns = self._extract_group_columns(original_prompt)
+        aggregation_details = self._extract_aggregation_details(original_prompt)
+
+        lines: List[str] = ["Aggregation requirements:"]
+
+        if group_columns:
+            lines.append(f"- Group columns: {', '.join(group_columns)}")
+        else:
+            lines.append("- Group columns: Identify the categorical dimensions that best align with the user's request.")
+
+        if aggregation_details["metrics"]:
+            lines.append("- Metrics to compute:")
+            for metric in aggregation_details["metrics"]:
+                aggregation = metric["aggregation"]
+                column = metric["column"]
+                detail = f"{aggregation} of {column}"
+                if aggregation == "weighted_avg" and aggregation_details.get("weight_column"):
+                    detail += f" (weight column `{aggregation_details['weight_column']}`)"
+                lines.append(f"  * {detail}")
+        else:
+            lines.append("- Metrics to compute: Select meaningful numeric measures (sum, average, count) based on dataset profiling when none are specified.")
+
+        weight_column = aggregation_details.get("weight_column")
+        if weight_column and all(metric["aggregation"] != "weighted_avg" for metric in aggregation_details["metrics"]):
+            lines.append(f"- Weighting: The user referenced weights; consider `{weight_column}` for weighted averages.")
+        elif not weight_column and any("weight" in token.lower() for token in original_prompt.split()):
+            lines.append("- Weighting: User mentioned weights; detect the correct weight field before computing weighted metrics.")
+
+        if possible_inputs:
+            lines.append(f"- Use input dataset: `{possible_inputs[0]}`")
+
+        lines.append("- Ensure the output includes clear column names for each aggregation.")
+        return "\n".join(lines)
+
+    def _build_concat_section(self, original_prompt: str, files_used: List[str]) -> str:
+        direction = self._detect_concat_direction(original_prompt)
+
+        lines: List[str] = ["Concatenation requirements:"]
+
+        if direction:
+            lines.append(f"- Direction: {direction}")
+        else:
+            lines.append("- Direction: Infer whether to stack rows (vertical) or append columns (horizontal) based on the user's wording; default to vertical stacking.")
+
+        if files_used:
+            lines.append("- Maintain consistent column ordering across all sources before concatenation.")
+        else:
+            lines.append("- Confirm the ordered list of datasets to concatenate.")
+
+        if "duplicate" in original_prompt.lower():
+            lines.append("- Post-concat cleanup: Remove duplicate rows as requested by the user.")
+        else:
+            lines.append("- Post-concat cleanup: Harmonize schemas and remove obvious duplicates if they appear.")
+
+        return "\n".join(lines)
+
+    def _build_generic_section(self, atom_id: str, original_prompt: str) -> str:
+        lines = [
+            "Execution requirements:",
+            "- Translate the user's intent into concrete parameters for this atom.",
+            "- Reuse upstream datasets and maintain Quant Matrix AI styling and naming conventions.",
+            f"- Ensure the `{atom_id}` atom returns a result ready for the next workflow step."
+        ]
+        if "filter" in original_prompt.lower() and atom_id == "dataframe-operations":
+            lines.append("- Explicitly encode filter and sort logic mentioned by the user.")
+        return "\n".join(lines)
+
+    def _extract_join_columns(self, text: str) -> List[str]:
+        patterns = [
+            r"on\s+([A-Za-z0-9_\s,&/-]+?)(?=\s+(?:using|with|then|where|group|return|compute|calculate|to|for)\b|[.;]|$)",
+            r"using\s+(?:the\s+)?(?:same\s+)?(?:column[s]?|key[s]?)?\s*([A-Za-z0-9_\s,&/-]+?)(?=\s+(?:for|to|then|where|group|return|compute|calculate)\b|[.;]|$)",
+            r"matching\s+(?:on\s+)?([A-Za-z0-9_\s,&/-]+?)(?=\s+(?:with|and\sthen|then|group|where|return|to)\b|[.;]|$)"
+        ]
+        columns: List[str] = []
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                segment = match.group(1) or ""
+                segment = re.split(r"[.;\n]", segment)[0]
+                columns.extend(self._split_column_candidates(segment))
+        return self._dedupe_preserve_order(columns)
+
+    def _detect_join_type(self, text: str) -> Optional[str]:
+        lowered = text.lower()
+        mapping = [
+            ("full outer", "outer"),
+            ("outer join", "outer"),
+            ("left outer", "left"),
+            ("left join", "left"),
+            ("left merge", "left"),
+            ("right outer", "right"),
+            ("right join", "right"),
+            ("right merge", "right"),
+            ("inner join", "inner"),
+            ("inner merge", "inner")
+        ]
+        for phrase, join_type in mapping:
+            if phrase in lowered:
+                return join_type
+        return None
+
+    def _extract_group_columns(self, text: str) -> List[str]:
+        patterns = [
+            r"group\s+by\s+([A-Za-z0-9_\s,&/-]+?)(?=\s+(?:with|having|where|order|then|to|for|return|compute|calculate)\b|[.;]|$)",
+            r"aggregate(?:d)?\s+by\s+([A-Za-z0-9_\s,&/-]+?)(?=\s+(?:with|where|then|to|for|return|compute|calculate)\b|[.;]|$)",
+            r"by\s+([A-Za-z0-9_\s,&/-]+?)(?=\s+(?:to|for|and\s+compute|and\s+calculate|and\s+get|compute|calculate|return|with|where|then)\b|[.;]|$)"
+        ]
+        columns: List[str] = []
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                segment = match.group(1) or ""
+                segment = re.split(r"[.;\n]", segment)[0]
+                columns.extend(self._split_column_candidates(segment))
+        return self._dedupe_preserve_order(columns)
+
+    def _extract_aggregation_details(self, text: str) -> Dict[str, Any]:
+        metrics: List[Dict[str, str]] = []
+        lowered = text.lower()
+        weight_column = None
+
+        agg_pattern = re.compile(
+            r"(weighted\s+average|weighted\s+avg|average|avg|mean|sum|total|count|median|min|max|stddev|std|standard deviation)\s+(?:of\s+)?([A-Za-z0-9_\s,&/-]+?)(?=\s+(?:and|,|then|with|where|group|to|for|return|compute|calculate)\b|[.;]|$)",
+            re.IGNORECASE
+        )
+
+        for match in agg_pattern.finditer(text):
+            agg_keyword = match.group(1).lower()
+            segment = match.group(2) or ""
+            segment = re.split(r"[.;\n]", segment)[0]
+            columns = self._split_column_candidates(segment)
+            for column in columns:
+                aggregation = self._normalize_aggregation_keyword(agg_keyword)
+                if aggregation == "count" and "distinct" in column.lower():
+                    column = column.replace("distinct", "").replace("Distinct", "").strip()
+                    aggregation = "count_distinct"
+                if column:
+                    metrics.append({"column": column, "aggregation": aggregation})
+
+        weight_match = re.search(r"weighted\s+by\s+([A-Za-z0-9_]+)", text, flags=re.IGNORECASE)
+        if weight_match:
+            weight_column = weight_match.group(1).strip(" ,.;")
+        else:
+            via_match = re.search(r"use\s+([A-Za-z0-9_]+)\s+as\s+weight", text, flags=re.IGNORECASE)
+            if via_match:
+                weight_column = via_match.group(1).strip(" ,.;")
+
+        metrics = self._dedupe_metric_list(metrics)
+
+        return {
+            "metrics": metrics,
+            "weight_column": weight_column
+        }
+
+    def _detect_concat_direction(self, text: str) -> Optional[str]:
+        lowered = text.lower()
+        if any(keyword in lowered for keyword in ["horizontal", "side by side", "columns together"]):
+            return "horizontal"
+        if any(keyword in lowered for keyword in ["vertical", "stack", "append rows", "combine rows", "one below another"]):
+            return "vertical"
+        return None
+
+    def _normalize_aggregation_keyword(self, keyword: str) -> str:
+        normalized = keyword.strip().lower()
+        mapping = {
+            "average": "avg",
+            "avg": "avg",
+            "mean": "avg",
+            "sum": "sum",
+            "total": "sum",
+            "count": "count",
+            "median": "median",
+            "min": "min",
+            "max": "max",
+            "std": "std",
+            "stddev": "std",
+            "standard deviation": "std",
+            "weighted average": "weighted_avg",
+            "weighted avg": "weighted_avg"
+        }
+        return mapping.get(normalized, normalized.replace(" ", "_"))
+
+    def _split_column_candidates(self, raw: str) -> List[str]:
+        if not raw:
+            return []
+
+        tokens = re.split(r",|;|/|\band\b|&", raw, flags=re.IGNORECASE)
+        columns: List[str] = []
+        for token in tokens:
+            cleaned = token.strip(" .;:-_")
+            if not cleaned:
+                continue
+            cleaned = re.sub(r"\b(columns?|keys?|fields?)\b", "", cleaned, flags=re.IGNORECASE).strip()
+            cleaned = re.sub(r"\b(common|matching|the|their|all)\b", "", cleaned, flags=re.IGNORECASE).strip()
+            cleaned = re.sub(r"\b(to|get|calculate|compute|produce|generate)\b.*$", "", cleaned, flags=re.IGNORECASE).strip()
+            cleaned_lower = cleaned.lower()
+            aggregator_prefixes = [
+                "sum of ",
+                "average of ",
+                "avg of ",
+                "mean of ",
+                "count of ",
+                "total of ",
+                "median of ",
+                "min of ",
+                "max of ",
+                "std of ",
+                "stddev of ",
+                "standard deviation of "
+            ]
+            for prefix in aggregator_prefixes:
+                if cleaned_lower.startswith(prefix):
+                    cleaned = cleaned[len(prefix):].strip()
+                    cleaned_lower = cleaned.lower()
+                    break
+            if not cleaned:
+                continue
+            columns.append(cleaned)
+        return columns
+
+    def _dedupe_preserve_order(self, items: List[str]) -> List[str]:
+        seen = set()
+        ordered: List[str] = []
+        for item in items:
+            key = item.lower()
+            if key not in seen:
+                seen.add(key)
+                ordered.append(item)
+        return ordered
+
+    def _dedupe_metric_list(self, metrics: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        seen = set()
+        deduped: List[Dict[str, str]] = []
+        for metric in metrics:
+            key = (metric["column"].lower(), metric["aggregation"].lower())
+            if key not in seen:
+                seen.add(key)
+                deduped.append(metric)
+        return deduped
+
+    def _condense_text(self, text: str) -> str:
+        if not text:
+            return ""
+        return " ".join(text.split())
     
     async def _execute_atom_endpoint(
         self,

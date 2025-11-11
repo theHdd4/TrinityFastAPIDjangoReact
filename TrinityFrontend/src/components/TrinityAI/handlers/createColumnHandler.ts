@@ -168,6 +168,24 @@ export const createColumnHandler: AtomHandler = {
             matchedFrame = partialMatch;
             return partialMatch.object_name;
           }
+
+          // Try alias match by base name (handles timestamped auto-save filenames)
+          const aiBaseName = aiFileName ? aiFileName.replace(/\.[^.]+$/, '') : '';
+          if (aiBaseName) {
+            let aliasMatch = frames.find(f => {
+              const candidate =
+                (f.object_name?.split('/').pop() ||
+                  f.csv_name?.split('/').pop() ||
+                  '').replace(/\.[^.]+$/, '');
+              return candidate.startsWith(aiBaseName);
+            });
+
+            if (aliasMatch) {
+              console.log(`✅ Alias match found for create-column ${aiFilePath} -> ${aliasMatch.object_name}`);
+              matchedFrame = aliasMatch;
+              return aliasMatch.object_name;
+            }
+          }
           
           console.log(`⚠️ No match found for create-column ${aiFilePath}, using original value`);
           return aiFilePath;

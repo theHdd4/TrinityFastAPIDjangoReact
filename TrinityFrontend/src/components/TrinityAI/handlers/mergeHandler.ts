@@ -162,6 +162,23 @@ export const mergeHandler: AtomHandler = {
             console.log(`✅ Partial match found for merge ${aiFilePath} -> ${partialMatch.object_name}`);
             return partialMatch.object_name;
           }
+
+          // Try matching by base name (handling timestamped auto-save files)
+          const aiBaseName = aiFileName ? aiFileName.replace(/\.[^.]+$/, '') : '';
+          if (aiBaseName) {
+            let aliasMatch = frames.find(f => {
+              const candidate =
+                (f.object_name?.split('/').pop() ||
+                  f.csv_name?.split('/').pop() ||
+                  '').replace(/\.[^.]+$/, '');
+              return candidate.startsWith(aiBaseName);
+            });
+
+            if (aliasMatch) {
+              console.log(`✅ Alias match found for merge ${aiFilePath} -> ${aliasMatch.object_name}`);
+              return aliasMatch.object_name;
+            }
+          }
           
           console.log(`⚠️ No match found for merge ${aiFilePath}, using original value`);
           return aiFilePath;
