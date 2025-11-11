@@ -114,17 +114,28 @@ named volumes (`prometheus_data`, `loki_data`, `grafana_data`).
    docker compose -f docker-compose-dev.yml --profile cache-monitoring up -d
    ```
 
-4. Browse to Grafana on `http://localhost:3001`, open the **Redis Cache Overview**
+4. Confirm Grafana can resolve Loki by checking that both containers are running on the
+   shared network:
+
+   ```bash
+   docker compose -f docker-compose-dev.yml --profile cache-monitoring ps grafana loki
+   ```
+
+   Both services should report a `running` state. If Grafana logs show
+   `lookup loki: no such host`, restart the monitoring services with
+   `docker compose -f docker-compose-dev.yml --profile cache-monitoring restart grafana loki`
+   and re-run the command above.
+5. Browse to Grafana on `http://localhost:3001`, open the **Redis Cache Overview**
    dashboard, and confirm panels populate within ~15 seconds.
-5. Scroll to the **Redis Cache Activity Logs** panel in the dashboard or click
+6. Scroll to the **Redis Cache Activity Logs** panel in the dashboard or click
    **Explore → Loki** and run `{{compose_service="web"}} |= "redis_cache_event"` to verify
    that cache hits and misses from Django, Celery, FastAPI, and Trinity AI are arriving in
    real time. If you do not see events, trigger a read through the app (for example,
    `GET /health/redis/`).
-6. Hit `http://localhost:8000/health/redis/` (Django) or
+7. Hit `http://localhost:8000/health/redis/` (Django) or
    `http://localhost:8001/api/health/redis` (FastAPI) to verify the services report Redis
    stats while monitoring is enabled.
-7. Create the default tenant and seed users once the containers are healthy:
+8. Create the default tenant and seed users once the containers are healthy:
 
    ```bash
    docker compose -f docker-compose-dev.yml exec web python create_tenant.py
@@ -165,21 +176,30 @@ docker compose -f docker-compose.example.yml up redis redis-exporter prometheus 
 
    The production file already includes the monitoring services by default, so no
    additional profile flags are required.
-4. If you need to roll monitoring out gradually, you can start just the monitoring
+4. Verify Loki is discoverable from Grafana:
+
+   ```bash
+   docker compose ps grafana loki
+   ```
+
+   Both services must be `running`. If Grafana reports `lookup loki: no such host`, restart
+   them with `docker compose restart grafana loki` and rerun the check. Once Loki is up the
+   Grafana data source will automatically reconnect.
+5. If you need to roll monitoring out gradually, you can start just the monitoring
    containers alongside your running application with:
 
    ```bash
    docker compose up -d redis-exporter prometheus alertmanager grafana
    ```
 
-5. Configure Grafana ingress or networking as appropriate for your environment and wire
+6. Configure Grafana ingress or networking as appropriate for your environment and wire
    Alertmanager to your paging/notification channels.
-6. Use Grafana → **Dashboards → Redis Cache Overview** to confirm both metrics panels and
+7. Use Grafana → **Dashboards → Redis Cache Overview** to confirm both metrics panels and
    the **Redis Cache Activity Logs** panel populate. For ad-hoc inspection, open
    **Explore → Loki** and run
    `{compose_service=~"web|fastapi|celery|trinity-ai"} |= "redis_cache_event"` to tail cache
    hits and misses. These events are retained for seven days by Loki.
-7. Execute the tenant bootstrap script from the Django container so the application has a
+8. Execute the tenant bootstrap script from the Django container so the application has a
    default tenant and superusers:
 
    ```bash
