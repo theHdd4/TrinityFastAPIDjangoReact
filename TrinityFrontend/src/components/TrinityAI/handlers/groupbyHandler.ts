@@ -1,4 +1,4 @@
-import { GROUPBY_API } from '@/lib/api';
+import { GROUPBY_API, VALIDATE_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
@@ -10,12 +10,13 @@ import {
   processSmartResponse,
   executePerformOperation,
   validateFileInput,
-  createProgressTracker 
+  createProgressTracker,
+  autoSaveStepResult
 } from './utils';
 
 export const groupbyHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { atomId, updateAtomSettings, setMessages, sessionId, isStreamMode = false } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId, isStreamMode = false, stepAlias } = context;
     
     // 🔧 FIX: Show smart_response in handleSuccess for success cases
     // handleFailure will handle failure cases
@@ -75,6 +76,78 @@ export const groupbyHandler: AtomHandler = {
         console.log('🔧 Multiple files detected, using first file:', singleFileName);
       }
       console.log('🔧 Using file path from AI response:', singleFileName);
+    }
+
+    // Attempt to map AI-provided filename to latest saved object (handles timestamped auto-saves)
+    if (singleFileName) {
+      try {
+        const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+        if (framesResponse.ok) {
+          const framesData = await framesResponse.json();
+          const frames = Array.isArray(framesData.files) ? framesData.files : [];
+
+          const mapFilePathToObjectName = (aiFilePath: string) => {
+            if (!aiFilePath) return aiFilePath;
+
+            // Exact match
+            let exactMatch = frames.find(f => f.object_name === aiFilePath);
+            if (exactMatch) {
+              return exactMatch.object_name;
+            }
+
+            const aiFileName = aiFilePath.includes('/') ? aiFilePath.split('/').pop() : aiFilePath;
+            const aiFileNameLower = aiFileName?.toLowerCase() || '';
+
+            // Filename match
+            let filenameMatch = frames.find(f => {
+              const frameFileName = (f.object_name?.split('/').pop() || f.csv_name?.split('/').pop() || '').toLowerCase();
+              return frameFileName === aiFileNameLower;
+            });
+            if (filenameMatch) {
+              return filenameMatch.object_name;
+            }
+
+            // Partial match
+            let partialMatch = frames.find(f => {
+              const objectLower = (f.object_name || '').toLowerCase();
+              const csvLower = (f.csv_name || '').toLowerCase();
+              return objectLower.includes(aiFileNameLower) || csvLower.includes(aiFileNameLower);
+            });
+            if (partialMatch) {
+              return partialMatch.object_name;
+            }
+
+            // Alias match by base name (handle timestamp suffix)
+            const aiBaseName = aiFileName ? aiFileName.replace(/\.[^.]+$/, '') : '';
+            if (aiBaseName) {
+              let aliasMatch = frames.find(f => {
+                const candidate =
+                  (f.object_name?.split('/').pop() ||
+                    f.csv_name?.split('/').pop() ||
+                    '').replace(/\.[^.]+$/, '');
+                return candidate.startsWith(aiBaseName);
+              });
+
+              if (aliasMatch) {
+                return aliasMatch.object_name;
+              }
+            }
+
+            return aiFilePath;
+          };
+
+          const mapped = mapFilePathToObjectName(singleFileName);
+          if (mapped !== singleFileName) {
+            console.log('🔄 Mapped AI file path to available object for groupby:', {
+              original: singleFileName,
+              mapped
+            });
+            singleFileName = mapped;
+          }
+        }
+      } catch (fileMapError) {
+        console.warn('⚠️ Failed to map AI groupby file path to available files:', fileMapError);
+      }
     }
     
     // 🔧 CRITICAL FIX: If AI didn't provide a real file path, try to get it from atom settings
@@ -222,6 +295,11 @@ export const groupbyHandler: AtomHandler = {
     }
     
     // 🔧 CRITICAL FIX: Automatically call perform endpoint with AI configuration and validate real results
+    let performResult: any = null;
+    let parsedRows: any[] | null = null;
+    let parsedCsv: string | null = null;
+    let resultFilePath: string | null = null;
+
     try {
       if (GROUPBY_API) {
         const performEndpoint = `${GROUPBY_API}/run`;
@@ -280,6 +358,7 @@ export const groupbyHandler: AtomHandler = {
           method: 'POST',
           contentType: 'application/x-www-form-urlencoded'
         });
+        performResult = result;
         
         if (result.success && result.data) {
           console.log('✅ GroupBy operation successful:', result.data);
@@ -288,6 +367,7 @@ export const groupbyHandler: AtomHandler = {
           // Now we need to retrieve the actual results from the saved file
           if (result.data.status === 'SUCCESS' && result.data.result_file) {
             console.log('🔄 Backend operation completed, retrieving results from saved file:', result.data.result_file);
+            resultFilePath = result.data.result_file;
           
             // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
             try {
@@ -296,6 +376,7 @@ export const groupbyHandler: AtomHandler = {
                 const cachedJson = await cachedRes.json();
                 const csvText = cachedJson?.data ?? '';
                 console.log('📄 Retrieved CSV data from saved file, length:', csvText.length);
+                parsedCsv = csvText;
                 
                 // Parse CSV to get actual results
                 const lines = csvText.split('\n');
@@ -317,6 +398,8 @@ export const groupbyHandler: AtomHandler = {
                   });
                   
                   // ✅ REAL RESULTS AVAILABLE - Update atom settings with actual data
+                  parsedRows = rows;
+
                   updateAtomSettings(atomId, {
                     selectedIdentifiers: aiSelectedIdentifiers,
                     selectedMeasures: aiSelectedMeasures,
@@ -372,6 +455,7 @@ export const groupbyHandler: AtomHandler = {
               },
               operationCompleted: true
             });
+            resultFilePath = result.data.result_file || resultFilePath;
             
             if (!isStreamMode) {
               const warningDetails = {
@@ -426,7 +510,7 @@ export const groupbyHandler: AtomHandler = {
             setMessages(prev => [...prev, errorMsg]);
           }
           
-          updateAtomSettings(atomId, {
+            updateAtomSettings(atomId, {
             selectedIdentifiers: aiSelectedIdentifiers,
             selectedMeasures: aiSelectedMeasures,
             selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -460,6 +544,26 @@ export const groupbyHandler: AtomHandler = {
         operationCompleted: false,
         lastError: (error as Error).message
       });
+    }
+
+    try {
+      const autoSavePayload = {
+        unsaved_data: parsedRows ?? performResult?.data?.results ?? null,
+        data: parsedCsv ?? null,
+        result_file: resultFilePath ?? performResult?.data?.result_file ?? null,
+      };
+
+      await autoSaveStepResult({
+        atomType: 'groupby-wtg-avg',
+        atomId,
+        stepAlias,
+        result: autoSavePayload,
+        updateAtomSettings,
+        setMessages,
+        isStreamMode
+      });
+    } catch (autoSaveError) {
+      console.error('❌ GroupBy auto-save failed:', autoSaveError);
     }
 
     return { success: true };
