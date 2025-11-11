@@ -383,6 +383,7 @@ export interface CorrelationSettings {
   };
   isUsingFileData?: boolean;
   showAllColumns?: boolean;
+  filteredFilePath?: string;
   // Column values loading state
   columnValuesLoading?: boolean;
   columnValuesError?: string;
@@ -446,6 +447,7 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   fileData: undefined,
   isUsingFileData: true,  // Default to always using file data
   showAllColumns: false,
+  filteredFilePath: undefined,
   columnValuesLoading: false,
   columnValuesError: undefined
 };

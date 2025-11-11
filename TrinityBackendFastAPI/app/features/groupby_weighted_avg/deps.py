@@ -1,14 +1,16 @@
 import os
-from minio import Minio
+from io import BytesIO
+from typing import Tuple
+
 import pandas as pd
 import pyarrow as pa
 import pyarrow.ipc as ipc
-from minio.error import S3Error
-from io import BytesIO
-import redis
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from fastapi import HTTPException
-from typing import Tuple
+from minio import Minio
+from minio.error import S3Error
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
+
+from app.core.redis import get_sync_redis
 
 # MinIO configuration from environment variables
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -41,9 +43,7 @@ def _object_prefix() -> str:
 # ------------------------
 # Redis configuration
 # ------------------------
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-# decode_responses=True to get str directly
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+redis_client = get_sync_redis(decode_responses=True)
 
 # Helper: fetch column-classifier-config JSON from Redis
 

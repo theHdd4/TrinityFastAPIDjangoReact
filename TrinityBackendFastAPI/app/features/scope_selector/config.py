@@ -1,10 +1,13 @@
 # config.py - Updated with your actual infrastructure
-from pydantic_settings import BaseSettings
+import os
 from functools import lru_cache
 from typing import Optional
-import os
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 from app.core.mongo import build_host_mongo_uri
+from app.core.redis import get_redis_settings
 
 DEFAULT_SCOPE_SELECTOR_MONGO_URI = build_host_mongo_uri()
 
@@ -53,11 +56,11 @@ class Settings(BaseSettings):
     # =============================================================================
     # REDIS SETTINGS
     # =============================================================================
-    redis_host: str = os.getenv("REDIS_HOST", "redis")
-    redis_port: int = int(os.getenv("REDIS_PORT", "6379"))
-    redis_db: int = int(os.getenv("REDIS_DB", "0"))
-    redis_password: Optional[str] = os.getenv("REDIS_PASSWORD", "")
-    redis_decode_responses: bool = os.getenv("REDIS_DECODE_RESPONSES", "true").lower() == "true"
+    redis_host: str = Field(default_factory=lambda: get_redis_settings().host)
+    redis_port: int = Field(default_factory=lambda: get_redis_settings().port)
+    redis_db: int = Field(default_factory=lambda: get_redis_settings().db)
+    redis_password: Optional[str] = Field(default_factory=lambda: get_redis_settings().password or "")
+    redis_decode_responses: bool = Field(default=True)
     redis_max_connections: int = 20
     
     # Redis cache settings

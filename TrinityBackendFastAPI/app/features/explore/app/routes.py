@@ -18,7 +18,7 @@ from app.features.column_classifier.database import (
     get_classifier_config_from_mongo,
     save_classifier_config_to_mongo
 )
-from app.features.feature_overview.deps import redis_client
+from app.core.redis import get_sync_redis
 from app.core.utils import get_env_vars
 from app.features.chart_maker.service import chart_service
 # from app.features.column_classifier.database import get_all_classifier_configs_from_mongo
@@ -37,6 +37,9 @@ from minio import Minio
 from minio.error import S3Error
 from urllib.parse import unquote, quote
 import os
+
+
+redis_client = get_sync_redis()
 
 # Create router
 router = APIRouter()

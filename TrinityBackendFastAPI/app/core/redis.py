@@ -1,5 +1,11 @@
+"""Centralised Redis client configuration.
+
+This module exposes helper functions to build pooled Redis clients using the
+same environment-driven configuration across sync and async code paths.
+"""
 from __future__ import annotations
 
+import logging
 import os
 import ssl
 from dataclasses import dataclass
@@ -7,7 +13,18 @@ from functools import lru_cache
 from typing import Any, Dict, Optional
 
 from redis import Redis
-from redis.connection import BlockingConnectionPool, ConnectionPool
+from redis.asyncio import Redis as AsyncRedis
+from redis.asyncio.connection import (
+    BlockingConnectionPool as AsyncBlockingConnectionPool,
+    ConnectionPool as AsyncConnectionPool,
+)
+from redis.connection import (
+    BlockingConnectionPool as SyncBlockingConnectionPool,
+    ConnectionPool as SyncConnectionPool,
+)
+
+
+logger = logging.getLogger("app.core.redis")
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -109,7 +126,7 @@ def get_redis_settings() -> RedisSettings:
     )
 
 
-def _connection_kwargs(settings: RedisSettings, decode_responses: bool) -> Dict[str, Any]:
+def _shared_connection_kwargs(settings: RedisSettings, decode_responses: bool) -> Dict[str, Any]:
     kwargs: Dict[str, Any] = {
         "decode_responses": decode_responses,
     }
@@ -134,21 +151,24 @@ def _connection_kwargs(settings: RedisSettings, decode_responses: bool) -> Dict[
 
 
 @lru_cache(maxsize=None)
-def get_connection_pool(decode_responses: bool = True) -> ConnectionPool:
+def get_sync_pool(decode_responses: bool = False) -> SyncConnectionPool:
     settings = get_redis_settings()
-    connection_kwargs = _connection_kwargs(settings, decode_responses)
+    connection_kwargs = _shared_connection_kwargs(settings, decode_responses)
     pool_kwargs: Dict[str, Any] = {
         "max_connections": settings.max_connections,
         **connection_kwargs,
     }
-    pool_class: type[ConnectionPool]
+    pool_class: type[SyncConnectionPool]
     if settings.pool_timeout is not None:
-        pool_class = BlockingConnectionPool
+        pool_class = SyncBlockingConnectionPool
         pool_kwargs["timeout"] = settings.pool_timeout
     else:
-        pool_class = ConnectionPool
+        pool_class = SyncConnectionPool
     if settings.url:
-        return pool_class.from_url(settings.url, **pool_kwargs)
+        return pool_class.from_url(
+            settings.url,
+            **pool_kwargs,
+        )
     return pool_class(
         host=settings.host,
         port=settings.port,
@@ -159,21 +179,69 @@ def get_connection_pool(decode_responses: bool = True) -> ConnectionPool:
     )
 
 
-def get_sync_redis(decode_responses: bool = True) -> Redis:
+@lru_cache(maxsize=None)
+def get_async_pool(decode_responses: bool = False) -> AsyncConnectionPool:
+    settings = get_redis_settings()
+    connection_kwargs = _shared_connection_kwargs(settings, decode_responses)
+    pool_kwargs: Dict[str, Any] = {
+        "max_connections": settings.max_connections,
+        **connection_kwargs,
+    }
+    pool_class: type[AsyncConnectionPool]
+    if settings.pool_timeout is not None:
+        pool_class = AsyncBlockingConnectionPool
+        pool_kwargs["timeout"] = settings.pool_timeout
+    else:
+        pool_class = AsyncConnectionPool
+    if settings.url:
+        return pool_class.from_url(
+            settings.url,
+            **pool_kwargs,
+        )
+    return pool_class(
+        host=settings.host,
+        port=settings.port,
+        username=settings.username,
+        password=settings.password,
+        db=settings.db,
+        **pool_kwargs,
+    )
+
+
+def get_sync_redis(decode_responses: bool = False) -> Redis:
     settings = get_redis_settings()
     client_kwargs: Dict[str, Any] = {}
     if settings.client_name:
         client_kwargs["client_name"] = settings.client_name
-    return Redis(connection_pool=get_connection_pool(decode_responses), **client_kwargs)
+    return Redis(connection_pool=get_sync_pool(decode_responses), **client_kwargs)
 
 
-redis_client = get_sync_redis(decode_responses=True)
-redis_settings = get_redis_settings()
+def get_async_redis(decode_responses: bool = False) -> AsyncRedis:
+    settings = get_redis_settings()
+    client_kwargs: Dict[str, Any] = {}
+    if settings.client_name:
+        client_kwargs["client_name"] = settings.client_name
+    return AsyncRedis(connection_pool=get_async_pool(decode_responses), **client_kwargs)
+
+
+redis_sync_client = get_sync_redis()
+redis_async_client = get_async_redis()
+
+if os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "production")).lower() == "development":
+    dev_settings = get_redis_settings()
+    endpoint = dev_settings.url or f"{dev_settings.host}:{dev_settings.port}/{dev_settings.db}"
+    logger.info(
+        "Shared Redis configured for %s (client: %s)",
+        endpoint,
+        dev_settings.client_name or "-",
+    )
 
 __all__ = [
-    "redis_client",
-    "redis_settings",
-    "get_sync_redis",
-    "get_connection_pool",
+    "get_async_pool",
+    "get_async_redis",
     "get_redis_settings",
+    "get_sync_pool",
+    "get_sync_redis",
+    "redis_async_client",
+    "redis_sync_client",
 ]

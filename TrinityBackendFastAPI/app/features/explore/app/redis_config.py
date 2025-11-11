@@ -1,87 +1,55 @@
-# redis_config.py - Redis Configuration for Explore Atom
-import redis
+"""Redis helpers for the Explore atom.
+
+This module simply re-exports the shared Redis client so Explore specific
+components do not construct bespoke connections.
+"""
+from __future__ import annotations
+
 from typing import Optional
-import os
 
-# =============================================================================
-# REDIS CONFIGURATION
-# =============================================================================
+from redis.exceptions import RedisError
 
-# Your Redis configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")  # Use Docker service name
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))  # Use standard Redis port
-REDIS_DB = 0
-REDIS_PASSWORD = None  # Set if you have password authentication
+from app.core.redis import get_redis_settings, get_sync_redis
 
-class RedisConfig:
-    """Redis configuration and connection management"""
-    
-    @staticmethod
-    def create_connection_pool():
-        """Create Redis connection pool for better performance"""
-        try:
-            pool = redis.ConnectionPool(
-                host=REDIS_HOST,
-                port=REDIS_PORT,
-                db=REDIS_DB,
-                password=REDIS_PASSWORD,
-                decode_responses=False,  # Keep as bytes for file data
-                max_connections=20,
-                retry_on_timeout=True,
-                socket_connect_timeout=5,
-                socket_timeout=5
-            )
-            return pool
-        except Exception as e:
-            print(f"Failed to create Redis connection pool: {e}")
-            return None
+_settings = get_redis_settings()
 
-# Global connection pool
-redis_pool = RedisConfig.create_connection_pool()
+REDIS_HOST = _settings.host
+REDIS_PORT = _settings.port
+REDIS_DB = _settings.db
+REDIS_URL: Optional[str] = _settings.url
+
+
+def _display_endpoint() -> str:
+    if REDIS_URL:
+        return REDIS_URL
+    return f"{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+
 
 def get_redis_client():
-    """Get Redis client using connection pool"""
+    """Return the shared Redis client, ensuring the connection is healthy."""
     try:
-        if redis_pool:
-            client = redis.Redis(connection_pool=redis_pool)
-            # Test connection
-            client.ping()
-            return client
-        else:
-            # Fallback direct connection
-            client = redis.Redis(
-                host=REDIS_HOST,
-                port=REDIS_PORT,
-                db=REDIS_DB,
-                password=REDIS_PASSWORD,
-                decode_responses=False,
-                socket_timeout=5
-            )
-            client.ping()
-            return client
-    except redis.ConnectionError as e:
-        print(f"Redis connection failed: {e}")
-        return None
-    except Exception as e:
-        print(f"Redis client error: {e}")
+        client = get_sync_redis()
+        client.ping()
+        return client
+    except RedisError as exc:
+        print(f"Redis connection failed: {exc}")
         return None
 
+
 def test_redis_connection():
-    """Test Redis connection"""
+    """Test Redis connection using the shared client."""
+    client = get_redis_client()
+    if not client:
+        return {"status": "error", "message": "Failed to get Redis client"}
     try:
-        client = get_redis_client()
-        if client:
-            # Test basic operations
-            client.set("test_key", "test_value")
-            value = client.get("test_key")
-            client.delete("test_key")
-            
-            return {
-                "status": "success",
-                "message": f"Connected to Redis at {REDIS_HOST}:{REDIS_PORT}",
-                "test_result": value.decode() if value else None
-            }
-        else:
-            return {"status": "error", "message": "Failed to get Redis client"}
-    except Exception as e:
-        return {"status": "error", "message": f"Redis test failed: {str(e)}"}
+        client.set("test_key", "test_value")
+        value = client.get("test_key")
+        client.delete("test_key")
+        payload = value.decode() if isinstance(value, bytes) else value
+        return {
+            "status": "success",
+            "message": f"Connected to Redis at {_display_endpoint()}",
+            "test_result": payload,
+        }
+    except Exception as exc:  # noqa: BLE001 - surface connection issues to the caller
+        return {"status": "error", "message": f"Redis test failed: {exc}"}

@@ -1,3 +1,8 @@
+"""Redis client helpers for the Trinity AI worker.
+
+This mirrors the FastAPI backend configuration so that every service shares the
+same environment-driven Redis settings.
+"""
 from __future__ import annotations
 
 import os
@@ -83,7 +88,7 @@ def get_redis_settings() -> RedisSettings:
     tls_key_file = os.getenv("REDIS_TLS_KEY_FILE")
     tls_cert_reqs = _resolve_cert_reqs(os.getenv("REDIS_TLS_CERT_REQS"), use_tls)
     client_name = os.getenv("REDIS_CLIENT_NAME")
-    max_connections = _env_int("REDIS_POOL_MAX_CONNECTIONS", 50)
+    max_connections = _env_int("REDIS_POOL_MAX_CONNECTIONS", 20)
     pool_timeout = _env_float("REDIS_POOL_TIMEOUT", None)
     socket_timeout = _env_float("REDIS_SOCKET_TIMEOUT", None)
     socket_connect_timeout = _env_float("REDIS_SOCKET_CONNECT_TIMEOUT", None)
@@ -159,7 +164,7 @@ def get_connection_pool(decode_responses: bool = True) -> ConnectionPool:
     )
 
 
-def get_sync_redis(decode_responses: bool = True) -> Redis:
+def get_redis_client(decode_responses: bool = True) -> Redis:
     settings = get_redis_settings()
     client_kwargs: Dict[str, Any] = {}
     if settings.client_name:
@@ -167,13 +172,11 @@ def get_sync_redis(decode_responses: bool = True) -> Redis:
     return Redis(connection_pool=get_connection_pool(decode_responses), **client_kwargs)
 
 
-redis_client = get_sync_redis(decode_responses=True)
-redis_settings = get_redis_settings()
+redis_client = get_redis_client()
 
 __all__ = [
-    "redis_client",
-    "redis_settings",
-    "get_sync_redis",
     "get_connection_pool",
+    "get_redis_client",
     "get_redis_settings",
+    "redis_client",
 ]

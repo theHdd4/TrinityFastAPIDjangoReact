@@ -7,7 +7,7 @@ import io
 import os
 from minio.error import S3Error
 from .database import (
-    column_coll, 
+    column_coll,
     cluster_coll,
     save_clustering_data,
     get_clustering_data_from_mongo,
@@ -42,8 +42,11 @@ import uuid
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import json
+from app.core.redis import get_sync_redis
 
 router = APIRouter()
+
+redis_binary_client = get_sync_redis()
 
 @router.get("/")
 async def root():
@@ -693,9 +696,7 @@ async def export_csv(object_name: str):
     
     try:
         # Try Redis cache first
-        import redis
-        redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-        content = redis_client.get(object_name)
+        content = redis_binary_client.get(object_name)
         
         if content is None:
             # Fallback to MinIO
@@ -704,7 +705,7 @@ async def export_csv(object_name: str):
             response = minio_client.get_object(bucket_name, object_path)
             content = response.read()
             # Cache in Redis for 1 hour
-            redis_client.setex(object_name, 3600, content)
+            redis_binary_client.setex(object_name, 3600, content)
 
         # Convert Arrow to DataFrame
         if object_name.endswith(".arrow"):
@@ -731,8 +732,7 @@ async def export_csv(object_name: str):
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
-            if 'redis_client' in locals():
-                redis_client.delete(object_name)
+            redis_binary_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -753,9 +753,7 @@ async def export_excel(object_name: str):
     
     try:
         # Try Redis cache first
-        import redis
-        redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-        content = redis_client.get(object_name)
+        content = redis_binary_client.get(object_name)
         
         if content is None:
             # Fallback to MinIO
@@ -764,7 +762,7 @@ async def export_excel(object_name: str):
             response = minio_client.get_object(bucket_name, object_path)
             content = response.read()
             # Cache in Redis for 1 hour
-            redis_client.setex(object_name, 3600, content)
+            redis_binary_client.setex(object_name, 3600, content)
 
         # Convert Arrow to DataFrame
         if object_name.endswith(".arrow"):
@@ -794,8 +792,7 @@ async def export_excel(object_name: str):
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
-            if 'redis_client' in locals():
-                redis_client.delete(object_name)
+            redis_binary_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
@@ -888,14 +885,10 @@ async def rename_clustering_file(
             
             # 7. Update Redis cache if it exists
             try:
-                import redis
-                redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-                
-                # Get old data and cache with new key
-                old_data = redis_client.get(old_path)
+                old_data = redis_binary_client.get(old_path)
                 if old_data:
-                    redis_client.setex(new_path, 3600, old_data)
-                    redis_client.delete(old_path)
+                    redis_binary_client.setex(new_path, 3600, old_data)
+                    redis_binary_client.delete(old_path)
                     print(f"✅ Updated Redis cache: {old_path} -> {new_path}")
             except Exception as e:
                 print(f"⚠️ Redis cache update failed: {e}")
@@ -1012,9 +1005,7 @@ async def save_clustering_dataframe(
         
         # Cache in Redis for 1 hour
         try:
-            import redis
-            redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-            redis_client.setex(filename, 3600, arrow_bytes)
+            redis_binary_client.setex(filename, 3600, arrow_bytes)
             print(f"✅ Cached clustering data in Redis: {filename}")
         except Exception as e:
             print(f"⚠️ Redis caching failed: {e}")
@@ -1069,9 +1060,7 @@ async def save_clustering_config_endpoint(
         
         # Cache in Redis for 1 hour
         try:
-            import redis
-            redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-            redis_client.setex(filename, 3600, json_bytes)
+            redis_binary_client.setex(filename, 3600, json_bytes)
             print(f"✅ Cached clustering config in Redis: {filename}")
         except Exception as e:
             print(f"⚠️ Redis caching failed: {e}")
@@ -1124,9 +1113,7 @@ async def save_clustering_results_endpoint(
         
         # Cache in Redis for 1 hour
         try:
-            import redis
-            redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-            redis_client.setex(filename, 3600, json_bytes)
+            redis_binary_client.setex(filename, 3600, json_bytes)
             print(f"✅ Cached clustering results in Redis: {filename}")
         except Exception as e:
             print(f"⚠️ Redis caching failed: {e}")
@@ -1179,9 +1166,7 @@ async def save_clustering_metadata_endpoint(
         
         # Cache in Redis for 1 hour
         try:
-            import redis
-            redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=False)
-            redis_client.setex(filename, 3600, json_bytes)
+            redis_binary_client.setex(filename, 3600, json_bytes)
             print(f"✅ Cached clustering metadata in Redis: {filename}")
         except Exception as e:
             print(f"⚠️ Redis caching failed: {e}")

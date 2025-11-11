@@ -303,7 +303,8 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       timeSeriesData: null,
       timeSeriesIsDate: true,
       dateAnalysis: null,
-      isUsingFileData: true  // Always default to using uploaded data
+      isUsingFileData: true,  // Always default to using uploaded data
+      filteredFilePath: undefined
     });
     
     // Analyze dates first
@@ -460,9 +461,10 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         variables: transformedResult.variables,
         selectedVar1: null, // No default selection
         selectedVar2: null, // No default selection
+        filteredFilePath: result.filtered_file_path ?? undefined,
         fileData: {
           ...(data.fileData || {}),
-          fileName: filePath,
+          fileName: result.filtered_file_path || filePath,
           rawData: result.preview_data || [],
           numericColumns: filteredVariables, // Use filtered variables for numeric columns
           dateColumns:
@@ -496,7 +498,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
 
   // Handle variable selection change for time series
   const handleVariableSelectionChange = async (var1: string, var2: string) => {
-    if (!data.selectedFile || !var1 || !var2) return;
+    const resolvedFilePath =
+      data.filteredFilePath || data.selectedFile || data.fileData?.fileName;
+    if (!resolvedFilePath || !var1 || !var2) return;
     
     try {
 
@@ -508,7 +512,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
       
       // Fetch new time series data with specific columns
       const { data: enhancedTimeSeriesData, isDate } = await fetchEnhancedTimeSeriesData(
-        data.selectedFile,
+        resolvedFilePath,
         data.settings?.dateFrom,
         data.settings?.dateTo,
         { column1: var1, column2: var2 } // Force specific columns
@@ -536,7 +540,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
 
   // Refetch time series data when date filters change
   const refetchTimeSeriesWithDateFilter = async () => {
-    if (!data.selectedFile) return;
+    const resolvedFilePath =
+      data.filteredFilePath || data.selectedFile || data.fileData?.fileName;
+    if (!resolvedFilePath) return;
     
     try {
      
@@ -546,7 +552,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         : undefined;
       
       const { data: enhancedTimeSeriesData, isDate } = await fetchEnhancedTimeSeriesData(
-        data.selectedFile,
+        resolvedFilePath,
         data.settings?.dateFrom,
         data.settings?.dateTo,
         forceColumns

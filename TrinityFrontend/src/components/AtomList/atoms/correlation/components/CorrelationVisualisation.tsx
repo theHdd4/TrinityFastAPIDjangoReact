@@ -371,9 +371,10 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
         variables: resultVariables,
         selectedVar1: null,
         selectedVar2: null,
+        filteredFilePath: result.filtered_file_path ?? undefined,
         fileData: {
           ...(data.fileData || {}),
-          fileName: filePath,
+          fileName: result.filtered_file_path || filePath,
           rawData: result.preview_data || [],
           numericColumns: resultVariables,
           dateColumns:
@@ -417,7 +418,8 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
       timeSeriesData: [],
       timeSeriesIsDate: true,
       variables: [],
-      dateAnalysis: null
+      dateAnalysis: null,
+      filteredFilePath: undefined
     });
     setProcessingError(null);
   };

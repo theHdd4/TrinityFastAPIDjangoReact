@@ -1,13 +1,14 @@
-import os
-import pandas as pd
 import io
-from minio import Minio
-import redis
-from io import BytesIO
-from motor.motor_asyncio import AsyncIOMotorClient
 import logging
+import os
+from io import BytesIO
+
+import pandas as pd
+from minio import Minio
+from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.core.mongo import build_host_mongo_uri
+from app.core.redis import get_redis_settings, get_sync_redis
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,31 +41,23 @@ APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
 # Redis config
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-REDIS_DB = int(os.getenv("REDIS_DB", 0))
-REDIS_PASSWORD = os.getenv("REDIS_PASSWORD")
-
-# Initialize Redis client with connection pooling and timeouts
-redis_client = None
+_redis_settings = get_redis_settings()
 try:
-    redis_client = redis.Redis(
-        host=REDIS_HOST,
-        port=REDIS_PORT,
-        db=REDIS_DB,
-        password=REDIS_PASSWORD or None,
-        decode_responses=False,  # Keep as bytes for binary data
-        socket_timeout=5.0,      # 5 second timeout
-        socket_connect_timeout=5.0,
-        retry_on_timeout=True,
-        max_connections=100,
-        health_check_interval=30  # Check connection every 30 seconds
-    )
-    # Test the connection
+    redis_client = get_sync_redis()
     redis_client.ping()
-    logger.info(f"✅ Connected to Redis at {REDIS_HOST}:{REDIS_PORT} (DB: {REDIS_DB})")
+    logger.info(
+        "✅ Connected to Redis at %s:%s (DB: %s)",
+        _redis_settings.host,
+        _redis_settings.port,
+        _redis_settings.db,
+    )
 except Exception as e:
-    logger.warning(f"⚠️ Failed to connect to Redis at {REDIS_HOST}:{REDIS_PORT}: {e}")
+    logger.warning(
+        "⚠️ Failed to connect to Redis at %s:%s: %s",
+        _redis_settings.host,
+        _redis_settings.port,
+        e,
+    )
     logger.warning("⚠️ Some features may be limited without Redis.")
     redis_client = None
 
@@ -212,7 +205,10 @@ async def check_database_health():
     if redis_client:
         try:
             redis_client.ping()
-            health_status["redis"] = {"status": True, "details": f"Connected to {REDIS_HOST}:{REDIS_PORT}"}
+            health_status["redis"] = {
+                "status": True,
+                "details": f"Connected to {_redis_settings.host}:{_redis_settings.port}",
+            }
         except Exception as e:
             health_status["redis"] = {"status": False, "details": str(e)}
     

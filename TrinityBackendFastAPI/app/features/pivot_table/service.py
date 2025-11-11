@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from app.DataStorageRetrieval.arrow_client import download_dataframe
 from app.DataStorageRetrieval.minio_utils import ensure_minio_bucket, upload_to_minio
 from app.features.data_upload_validate.app.routes import get_object_prefix
-from app.features.feature_overview.deps import redis_client
+from app.core.redis import get_sync_redis
 
 from .schemas import (
     PivotComputeRequest,
@@ -23,6 +23,9 @@ from .schemas import (
     PivotSaveResponse,
     PivotStatusResponse,
 )
+
+
+redis_client = get_sync_redis()
 
 logger = logging.getLogger(__name__)
 
