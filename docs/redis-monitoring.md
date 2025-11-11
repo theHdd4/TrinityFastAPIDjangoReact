@@ -115,6 +115,14 @@ restarts because Prometheus and Grafana share named volumes (`prometheus_data`,
 5. Hit `http://localhost:8000/health/redis/` (Django) or
    `http://localhost:8001/api/health/redis` (FastAPI) to verify the services report Redis
    stats while monitoring is enabled.
+6. Create the default tenant and seed users once the containers are healthy:
+
+   ```bash
+   docker compose -f docker-compose-dev.yml exec web python create_tenant.py
+   ```
+
+   Re-run the command whenever you need to refresh seeded users or update tenant metadata
+   after editing `create_tenant.py`.
 
 If Docker reports a port conflict (for example, `Bind for 0.0.0.0:8816 failed` from the
 Flight server), override the host binding before you start the stack:
@@ -157,6 +165,15 @@ docker compose -f docker-compose.example.yml up redis redis-exporter prometheus 
 
 5. Configure Grafana ingress or networking as appropriate for your environment and wire
    Alertmanager to your paging/notification channels.
+6. Execute the tenant bootstrap script from the Django container so the application has a
+   default tenant and superusers:
+
+   ```bash
+   docker compose exec web python create_tenant.py
+   ```
+
+   Run this script again whenever you promote changes to `create_tenant.py` or need to
+   recreate the seeded data in a new environment.
 
 > **Tip:** If your production hosts already use TCP port 8815, set `FLIGHT_HOST_PORT` to an
 > available port before running `docker compose up`. The container continues to listen on
