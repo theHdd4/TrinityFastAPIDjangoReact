@@ -17,7 +17,7 @@ from typing import Any, AsyncGenerator, Optional
 
 from minio import Minio
 
-from app.core.feature_cache import feature_cache
+from app.core.feature_cache import FeatureCacheRouter, feature_cache
 from app.core.redis import get_redis_settings
 
 from .config import settings
@@ -34,7 +34,7 @@ mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client[settings.mongo_source_database]
 
 _redis_settings = get_redis_settings()
-redis_client = feature_cache.router("scope_selector")
+redis_client: FeatureCacheRouter = feature_cache.router("scope_selector")
 
 if os.getenv("ENVIRONMENT", "production").lower() == "development":
     logger.info(
@@ -74,7 +74,7 @@ def get_mongo_client() -> AsyncIOMotorClient:
     return mongo_client
 
 
-def get_redis_client() -> Redis:
+def get_redis_client() -> FeatureCacheRouter:
     """Get Redis client instance."""
     return redis_client
 
