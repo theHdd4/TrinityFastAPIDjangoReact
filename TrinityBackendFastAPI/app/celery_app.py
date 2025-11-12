@@ -8,7 +8,7 @@ try:  # pragma: no cover - import guard executed at module import time
         configure_celery_app,
     )
 except ModuleNotFoundError:  # pragma: no cover - fallback for FastAPI-only deploys
-    from app.core.celery_settings import configure_celery_app
+    from .core.celery_settings import configure_celery_app
 
 celery_app = Celery("TrinityBackendFastAPI")
 configure_celery_app(celery_app)
