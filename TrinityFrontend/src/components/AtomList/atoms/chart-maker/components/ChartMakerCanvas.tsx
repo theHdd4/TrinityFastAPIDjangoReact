@@ -734,12 +734,16 @@ const renderChart = (
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
     height: chartHeightValue,
-    sortOrder: chart.chartConfig?.sortOrder || chartSortOrder[chart.id] || null,
-    sortColumn: chart.chartConfig?.sortColumn,
+    sortOrder: (chart.sortOrder ?? chart.chartConfig?.sortOrder) || chartSortOrder[chart.id] || null,
+    sortColumn: chart.sortColumn ?? chart.chartConfig?.sortColumn,
     onSortColumnChange: (column: string) => {
       const updatedCharts = charts.map(c => 
         c.id === chart.id 
-          ? { ...c, chartConfig: { ...c.chartConfig, sortColumn: column } }
+          ? { 
+              ...c, 
+              sortColumn: column,
+              chartConfig: { ...c.chartConfig, sortColumn: column } 
+            }
           : c
       );
       updateSettings(atomId, { charts: updatedCharts });
@@ -753,7 +757,11 @@ const renderChart = (
       // Also save to chart config for persistence
       const updatedCharts = charts.map(c => 
         c.id === chart.id 
-          ? { ...c, chartConfig: { ...c.chartConfig, sortOrder: newSortOrder } }
+          ? { 
+              ...c, 
+              sortOrder: newSortOrder,
+              chartConfig: { ...c.chartConfig, sortOrder: newSortOrder } 
+            }
           : c
       );
       updateSettings(atomId, { charts: updatedCharts });

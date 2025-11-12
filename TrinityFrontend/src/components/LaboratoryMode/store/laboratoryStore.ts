@@ -560,6 +560,8 @@ export interface ChartMakerConfig {
   filters: Record<string, string[]>;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
   legendField?: string;
+  sortOrder?: 'asc' | 'desc' | null;
+  sortColumn?: string;
   chartConfig?: {
     theme?: string;
     showLegend?: boolean;
