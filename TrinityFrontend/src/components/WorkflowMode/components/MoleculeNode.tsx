@@ -111,8 +111,8 @@ export interface MoleculeNodeData {
   onAtomReorder: (moleculeId: string, newOrder: string[]) => void;
   onRemove: (moleculeId: string) => void;
   onClick: (moleculeId: string) => void;
-  onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string) => void;
-  onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string) => void;
+  onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string, atomIndex: number) => void;
+  onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string, atomIndex: number) => void;
   onRename?: (moleculeId: string, newName: string) => void;
   onAddToContainer?: (containerId: string, molecule: any) => void; // NEW: Add molecule to container
   onInsertMolecule?: (referenceMoleculeId: string, position: 'left' | 'right') => void; // NEW: Insert molecule before/after this one
@@ -125,8 +125,8 @@ interface SortableAtomItemProps {
   orderIndex: number;
   isSelected: boolean;
   onToggle: () => void;
-  onMoveAtomToMolecule?: (atomId: string, toMoleculeId: string) => void;
-  onMoveAtomToAtomList?: (atomId: string) => void;
+  onMoveAtomToMolecule?: (atomId: string, atomIndex: number, toMoleculeId: string) => void;
+  onMoveAtomToAtomList?: (atomId: string, atomIndex: number) => void;
   availableMolecules?: Array<{ id: string; title: string }>;
   currentMoleculeId: string;
 }
@@ -360,7 +360,7 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
           Move {atom} to
         </div>
         <ContextMenuItem
-          onClick={() => onMoveAtomToAtomList?.(atom, currentMoleculeId)}
+          onClick={() => onMoveAtomToAtomList?.(atom, orderIndex)}
           className="cursor-pointer"
         >
           Remove Atom
@@ -375,7 +375,7 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
               .map(molecule => (
                 <ContextMenuItem
                   key={molecule.id}
-                  onClick={() => onMoveAtomToMolecule?.(atom, currentMoleculeId, molecule.id)}
+                  onClick={() => onMoveAtomToMolecule?.(atom, orderIndex, molecule.id)}
                   className="cursor-pointer"
                 >
                   {molecule.title}
@@ -992,8 +992,12 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                         orderIndex={index}
                         isSelected={data.selectedAtoms[atom] || false}
                         onToggle={() => handleAtomToggle(atom, !data.selectedAtoms[atom])}
-                        onMoveAtomToMolecule={data.onMoveAtomToMolecule}
-                        onMoveAtomToAtomList={data.onMoveAtomToAtomList}
+                        onMoveAtomToMolecule={(atomId, atomIndex, toMoleculeId) =>
+                          data.onMoveAtomToMolecule?.(atomId, id, toMoleculeId, atomIndex)
+                        }
+                        onMoveAtomToAtomList={(atomId, atomIndex) =>
+                          data.onMoveAtomToAtomList?.(atomId, id, atomIndex)
+                        }
                         availableMolecules={data.availableMolecules}
                         currentMoleculeId={id}
                       />

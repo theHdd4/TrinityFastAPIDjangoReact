@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -700,6 +700,57 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     [canonicalizeKey, valueColumns],
   );
 
+  const hasAutoSwitchedLayoutRef = useRef(false);
+
+  useEffect(() => {
+    const hasMultipleValueColumns = valueColumns.length > 1;
+    if (!hasMultipleValueColumns) {
+      hasAutoSwitchedLayoutRef.current = false;
+      return;
+    }
+
+    if (
+      reportLayout !== 'tabular' &&
+      !hasAutoSwitchedLayoutRef.current
+    ) {
+      hasAutoSwitchedLayoutRef.current = true;
+      onReportLayoutChange('tabular');
+    }
+  }, [onReportLayoutChange, reportLayout, valueColumns.length]);
+
+  const findRowKeyForField = useCallback((row: Record<string, any>, field: string): string | undefined => {
+    if (!row || !field) {
+      return undefined;
+    }
+    if (Object.prototype.hasOwnProperty.call(row, field)) {
+      return field;
+    }
+    const target = field.toLowerCase();
+    return Object.keys(row).find((key) => key.toLowerCase() === target);
+  }, []);
+
+  const getRowFieldValue = useCallback(
+    (row: Record<string, any>, field: string): any => {
+      const key = findRowKeyForField(row, field);
+      if (!key) {
+        return undefined;
+      }
+      return row[key];
+    },
+    [findRowKeyForField],
+  );
+
+  const findLabelForField = useCallback(
+    (labels: Array<{ field: string; value: any }> | undefined, field: string) => {
+      if (!labels || !field) {
+        return undefined;
+      }
+      const target = field.toLowerCase();
+      return labels.find((item) => (item.field ?? '').toLowerCase() === target);
+    },
+    [],
+  );
+
   const pivotRowLookup = useMemo(() => {
     if (!rowFields.length || pivotRows.length === 0) {
       return new Map<string, Record<string, any>>();
@@ -709,7 +760,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
     pivotRows.forEach((row) => {
       const key = rowFields
-        .map((field) => canonicalizeKey(row?.[field]))
+        .map((field) => canonicalizeKey(getRowFieldValue(row, field)))
         .join('|');
       if (!map.has(key)) {
         map.set(key, row);
@@ -717,7 +768,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     });
 
     return map;
-  }, [canonicalizeKey, pivotRows, rowFields]);
+  }, [canonicalizeKey, getRowFieldValue, pivotRows, rowFields]);
 
   const findMatchingPivotRow = useCallback(
     (labels: Array<{ field: string; value: any }>) => {
@@ -727,7 +778,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
       const key = rowFields
         .map((field) => {
-          const label = labels.find((item) => item.field === field);
+          const label = findLabelForField(labels, field);
           return canonicalizeKey(label?.value);
         })
         .join('|');
@@ -740,8 +791,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       return pivotRows.find((row) =>
         rowFields.every((field, index) => {
           const label = labels?.[index];
-          const rowValKey = canonicalizeKey(row?.[field]);
-          if (label && label.field === field) {
+          const rowValue = getRowFieldValue(row, field);
+          const rowValKey = canonicalizeKey(rowValue);
+          if (label && (label.field ?? '').toLowerCase() === field.toLowerCase()) {
             const labelKey = canonicalizeKey(label.value);
             return rowValKey === labelKey;
           }
@@ -749,7 +801,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         }),
       );
     },
-    [canonicalizeKey, pivotRowLookup, pivotRows, rowFields],
+    [canonicalizeKey, findLabelForField, getRowFieldValue, pivotRowLookup, pivotRows, rowFields],
   );
 
   const buildRecordForNode = useCallback(

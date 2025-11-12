@@ -50,8 +50,8 @@ interface WorkflowCanvasProps {
     position?: number;
   }>;
   onStandaloneCardRemove?: (standaloneCardId: string) => void;
-  onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string) => void;
-  onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string) => void;
+  onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string, atomIndex: number) => void;
+  onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string, atomIndex: number) => void;
   onMoleculeRemove?: (moleculeId: string) => void;
   onMoleculeRename?: (moleculeId: string, newName: string) => void;
   onMoleculeAdd?: (molecule: any) => void;
