@@ -17,6 +17,13 @@ x-redis-env: &redis-env
   REDIS_SOCKET_CONNECT_TIMEOUT: ${REDIS_SOCKET_CONNECT_TIMEOUT:-5}
   REDIS_HEALTH_CHECK_INTERVAL: ${REDIS_HEALTH_CHECK_INTERVAL:-15}
 
+x-celery-env: &celery-env
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL:-redis://redis:6379/0}}
+  CELERY_TASK_DEFAULT_QUEUE: ${CELERY_TASK_DEFAULT_QUEUE:-trinity.tasks}
+  CELERY_BEAT_QUEUE: ${CELERY_BEAT_QUEUE:-trinity.tasks.beat}
+  CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
+
 x-redis-healthcheck: &redis-healthcheck
   test:
     - CMD-SHELL
@@ -59,6 +66,108 @@ services:
     healthcheck: *redis-healthcheck
     volumes:
       - redis_data:/data
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    profiles:
+      - cache-monitoring
+    environment:
+      REDIS_ADDR: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_USER: ${REDIS_USERNAME:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "9122:9121"
+    depends_on:
+      - redis
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    profiles:
+      - cache-monitoring
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - redis-exporter
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    profiles:
+      - cache-monitoring
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9094:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    depends_on:
+      - prometheus
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  grafana:
+    image: grafana/grafana:10.4.5
+    profiles:
+      - cache-monitoring
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  loki:
+    image: grafana/loki:2.9.4
+    profiles:
+      - cache-monitoring
+    hostname: loki
+    command: -config.file=/etc/loki/config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+      - ./monitoring/loki/config.yml:/etc/loki/config.yml:ro
+    networks:
+      - trinity-dev-net
+    restart: always
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    profiles:
+      - cache-monitoring
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - promtail_positions:/tmp
+    depends_on:
+      - loki
     networks:
       - trinity-dev-net
     restart: always
@@ -119,6 +228,7 @@ services:
       - "8003:8000"
     environment:
       <<: *redis-env
+      <<: *celery-env
       HOST_IP: ${HOST_IP:-10.2.4.48}
       FRONTEND_PORT: "8081"
       CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.4.48}:8081,http://172.17.48.1:8081,http://10.2.4.48:8081,https://trinity-dev.quantmatrixai.com"
@@ -127,6 +237,7 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
+      REDIS_LOG_SERVICE: django-web
     depends_on:
       - postgres
       - mongo
@@ -161,10 +272,12 @@ services:
       - trinity-dev-net
     environment:
       <<: *redis-env
+      <<: *celery-env
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
+      REDIS_LOG_SERVICE: django-celery
     restart: always
 
   fastapi:
@@ -177,6 +290,7 @@ services:
       - ./TrinityBackendDjango/.env
     environment:
       <<: *redis-env
+      <<: *celery-env
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
@@ -187,6 +301,7 @@ services:
       FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.4.48}:8081,http://172.17.48.1:8081,http://10.2.4.48:8081,https://trinity-dev.quantmatrixai.com,https://trinity.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+      REDIS_LOG_SERVICE: fastapi-api
     ports:
       - "8004:8001"
     depends_on:
@@ -217,7 +332,7 @@ services:
     environment:
       FLIGHT_PORT: 8816
     ports:
-      - "8816:8816"
+      - "${FLIGHT_HOST_PORT:-8816}:8816"
     networks:
       - trinity-dev-net
     restart: always
@@ -233,6 +348,7 @@ services:
       OLLAMA_IP: 10.2.4.48
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+      REDIS_LOG_SERVICE: trinity-ai
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
     ports:
@@ -294,6 +410,10 @@ volumes:
   mongo_data:
   redis_data:
   minio_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  promtail_positions:
 
 networks:
   trinity-dev-net:

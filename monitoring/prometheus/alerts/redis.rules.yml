@@ -1,0 +1,22 @@
+groups:
+  - name: redis-health
+    rules:
+      - alert: RedisConnectionExhaustion
+        expr: redis_connected_clients / redis_config_maxclients > 0.85
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis connections are close to exhaustion
+          description: |
+            Connected clients ({{ $value | humanizePercentage }}) is above 85%% of the configured max. Investigate connection leaks or scale the pool.
+      - alert: RedisHighMemoryUsage
+        expr: ((redis_memory_max_bytes > 0) and on(instance) (redis_memory_used_bytes / redis_memory_max_bytes > 0.9))
+          or ((redis_memory_max_bytes == 0) and on(instance) (redis_memory_fragmentation_ratio > 1.8))
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Redis is reporting critical memory pressure
+          description: |
+            Memory utilisation or fragmentation has exceeded safe thresholds. Consider cache eviction, memory tuning, or failover to a larger node.
