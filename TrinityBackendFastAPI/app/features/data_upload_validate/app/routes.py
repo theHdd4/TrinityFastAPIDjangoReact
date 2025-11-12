@@ -2731,14 +2731,16 @@ async def save_dataframes(
     except json.JSONDecodeError:
         logger.exception("Invalid JSON for file_paths")
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_paths")
-    if paths and (
-        not isinstance(paths, list)
-        or any(not isinstance(p, str) or not p for p in paths)
-    ):
-        logger.error("file_paths malformed: %s", paths)
-        raise HTTPException(
-            status_code=400, detail="file_paths must be a JSON array of non-empty strings"
-        )
+    if paths and not isinstance(paths, list):
+        logger.error("file_paths not list: %s", type(paths))
+        raise HTTPException(status_code=400, detail="file_paths must be a JSON array")
+    for idx, value in enumerate(paths or []):
+        if not isinstance(value, str):
+            logger.error("file_paths[%s] not string: %s (%s)", idx, value, type(value))
+            raise HTTPException(
+                status_code=400,
+                detail="file_paths must be a JSON array of strings",
+            )
 
     files_list = files or []
     source_count = len(files_list) if files_list else len(paths)
@@ -2750,7 +2752,7 @@ async def save_dataframes(
     fallback_names = (
         [f.filename for f in files_list]
         if files_list
-        else [Path(p).name for p in paths]
+        else [Path(p).name or f"source_{idx + 1}" for idx, p in enumerate(paths)]
     )
     if len(key_inputs) == 0:
         keys = fallback_names
