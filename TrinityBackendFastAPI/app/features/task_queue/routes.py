@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.core.task_queue import task_result_store
+from app.core.task_results import task_result_store
 
 router = APIRouter()
 
