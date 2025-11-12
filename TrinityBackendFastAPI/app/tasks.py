@@ -7,7 +7,8 @@ from celery import states
 from celery.signals import task_failure, task_postrun, task_prerun
 
 from app.celery_app import celery_app
-from app.core.task_queue import import_callable, task_result_store
+from app.core.importing import import_callable
+from app.core.task_queue import task_result_store
 
 
 @celery_app.task(name="app.tasks.execute_callable", bind=True)

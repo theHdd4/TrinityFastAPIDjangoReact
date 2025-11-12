@@ -5,13 +5,13 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from importlib import import_module
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
 from celery import Celery
 
 from app.celery_app import celery_app
+from app.core.importing import import_callable
 from app.core.redis import get_sync_redis
 
 
@@ -126,17 +126,6 @@ class TaskResultStore:
         if result is not None:
             data["result"] = result
         return self.update(task_id, **data)
-
-
-def import_callable(dotted_path: str):
-    module_path, _, attribute = dotted_path.rpartition(".")
-    if not module_path:
-        raise ImportError(f"Invalid callable path: {dotted_path}")
-    module = import_module(module_path)
-    try:
-        return getattr(module, attribute)
-    except AttributeError as exc:  # pragma: no cover - defensive
-        raise ImportError(f"Callable '{attribute}' not found in '{module_path}'") from exc
 
 
 @dataclass
