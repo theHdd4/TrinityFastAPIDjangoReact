@@ -3,7 +3,12 @@ from __future__ import annotations
 
 from celery import Celery
 
-from TrinityBackendDjango.config.celery_settings import configure_celery_app
+try:  # pragma: no cover - import guard executed at module import time
+    from TrinityBackendDjango.config.celery_settings import (  # type: ignore
+        configure_celery_app,
+    )
+except ModuleNotFoundError:  # pragma: no cover - fallback for FastAPI-only deploys
+    from app.core.celery_settings import configure_celery_app
 
 celery_app = Celery("TrinityBackendFastAPI")
 configure_celery_app(celery_app)
