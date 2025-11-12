@@ -5,12 +5,14 @@ same environment-driven configuration across sync and async code paths.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import ssl
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional, Union
 
 from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
@@ -25,6 +27,163 @@ from redis.connection import (
 
 
 logger = logging.getLogger("app.core.redis")
+activity_logger = logging.getLogger("redis.activity")
+if not activity_logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    activity_logger.addHandler(handler)
+activity_logger.setLevel(logging.INFO)
+activity_logger.propagate = False
+
+
+def _service_name() -> str:
+    return os.getenv("REDIS_LOG_SERVICE", "fastapi-backend")
+
+
+def _stringify_key(value: Union[str, bytes, None]) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    return str(value)
+
+
+def _log_cache_event(
+    *,
+    event: str,
+    command: str,
+    keys: Iterable[Union[str, bytes, None]],
+    hits: int,
+    misses: int,
+    namespace: Optional[str] = None,
+) -> None:
+    materialised_keys = []
+    for candidate in keys:
+        rendered = _stringify_key(candidate)
+        if rendered is not None:
+            materialised_keys.append(rendered)
+    if not materialised_keys:
+        return
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "command": command,
+        "keys": materialised_keys,
+        "hits": hits,
+        "misses": misses,
+        "service": _service_name(),
+    }
+    if namespace:
+        payload["namespace"] = namespace
+    activity_logger.info("redis_cache_event %s", json.dumps(payload, sort_keys=True))
+
+
+def _derive_namespace(key: Union[str, bytes, None]) -> Optional[str]:
+    rendered = _stringify_key(key)
+    if not rendered or ":" not in rendered:
+        return None
+    return rendered.split(":", 1)[0]
+
+
+class LoggingRedis(Redis):
+    def get(self, name, *args, **kwargs):  # type: ignore[override]
+        value = super().get(name, *args, **kwargs)
+        namespace = _derive_namespace(name)
+        hits = 1 if value is not None else 0
+        _log_cache_event(
+            event="cache_hit" if hits else "cache_miss",
+            command="GET",
+            keys=[name],
+            hits=hits,
+            misses=0 if hits else 1,
+            namespace=namespace,
+        )
+        return value
+
+    def mget(self, keys, *args, **kwargs):  # type: ignore[override]
+        values = super().mget(keys, *args, **kwargs)
+        if isinstance(keys, (list, tuple, set)):
+            materialised_keys = list(keys)
+        else:
+            materialised_keys = [keys]
+        hits = sum(1 for value in values if value is not None)
+        misses = len(materialised_keys) - hits
+        namespace = _derive_namespace(materialised_keys[0]) if materialised_keys else None
+        _log_cache_event(
+            event="bulk_cache_hit" if hits else "bulk_cache_miss",
+            command="MGET",
+            keys=materialised_keys,
+            hits=hits,
+            misses=misses,
+            namespace=namespace,
+        )
+        return values
+
+    def hgetall(self, name):  # type: ignore[override]
+        value = super().hgetall(name)
+        namespace = _derive_namespace(name)
+        hits = 1 if value else 0
+        _log_cache_event(
+            event="hash_cache_hit" if hits else "hash_cache_miss",
+            command="HGETALL",
+            keys=[name],
+            hits=hits,
+            misses=0 if hits else 1,
+            namespace=namespace,
+        )
+        return value
+
+
+class LoggingAsyncRedis(AsyncRedis):
+    async def get(self, name, *args, **kwargs):  # type: ignore[override]
+        value = await super().get(name, *args, **kwargs)
+        namespace = _derive_namespace(name)
+        hits = 1 if value is not None else 0
+        _log_cache_event(
+            event="cache_hit" if hits else "cache_miss",
+            command="GET",
+            keys=[name],
+            hits=hits,
+            misses=0 if hits else 1,
+            namespace=namespace,
+        )
+        return value
+
+    async def mget(self, keys, *args, **kwargs):  # type: ignore[override]
+        values = await super().mget(keys, *args, **kwargs)
+        if isinstance(keys, (list, tuple, set)):
+            materialised_keys = list(keys)
+        else:
+            materialised_keys = [keys]
+        hits = sum(1 for value in values if value is not None)
+        misses = len(materialised_keys) - hits
+        namespace = _derive_namespace(materialised_keys[0]) if materialised_keys else None
+        _log_cache_event(
+            event="bulk_cache_hit" if hits else "bulk_cache_miss",
+            command="MGET",
+            keys=materialised_keys,
+            hits=hits,
+            misses=misses,
+            namespace=namespace,
+        )
+        return values
+
+    async def hgetall(self, name):  # type: ignore[override]
+        value = await super().hgetall(name)
+        namespace = _derive_namespace(name)
+        hits = 1 if value else 0
+        _log_cache_event(
+            event="hash_cache_hit" if hits else "hash_cache_miss",
+            command="HGETALL",
+            keys=[name],
+            hits=hits,
+            misses=0 if hits else 1,
+            namespace=namespace,
+        )
+        return value
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -213,7 +372,10 @@ def get_sync_redis(decode_responses: bool = False) -> Redis:
     client_kwargs: Dict[str, Any] = {}
     if settings.client_name:
         client_kwargs["client_name"] = settings.client_name
-    return Redis(connection_pool=get_sync_pool(decode_responses), **client_kwargs)
+    return LoggingRedis(
+        connection_pool=get_sync_pool(decode_responses),
+        **client_kwargs,
+    )
 
 
 def get_async_redis(decode_responses: bool = False) -> AsyncRedis:
@@ -221,7 +383,10 @@ def get_async_redis(decode_responses: bool = False) -> AsyncRedis:
     client_kwargs: Dict[str, Any] = {}
     if settings.client_name:
         client_kwargs["client_name"] = settings.client_name
-    return AsyncRedis(connection_pool=get_async_pool(decode_responses), **client_kwargs)
+    return LoggingAsyncRedis(
+        connection_pool=get_async_pool(decode_responses),
+        **client_kwargs,
+    )
 
 
 redis_sync_client = get_sync_redis()

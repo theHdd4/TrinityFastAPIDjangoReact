@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Body, Request
+from fastapi import APIRouter, HTTPException, Query, Body, Request, Depends
 from typing import List, Optional
 import datetime
 import time
@@ -42,11 +42,14 @@ import uuid
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import json
-from app.core.redis import get_sync_redis
+from app.core.feature_cache import feature_cache
+from app.core.observability import timing_dependency_factory
 
-router = APIRouter()
+timing_dependency = timing_dependency_factory("app.features.clustering")
 
-redis_binary_client = get_sync_redis()
+router = APIRouter(dependencies=[Depends(timing_dependency)])
+
+redis_binary_client = feature_cache.router("clustering")
 
 @router.get("/")
 async def root():

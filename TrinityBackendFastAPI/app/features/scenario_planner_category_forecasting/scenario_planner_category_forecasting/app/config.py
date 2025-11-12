@@ -9,7 +9,8 @@ from dotenv import load_dotenv
 from minio import Minio
 
 from app.core.mongo import build_host_mongo_uri
-from app.core.redis import get_redis_settings, get_sync_redis
+from app.core.feature_cache import feature_cache
+from app.core.redis import get_redis_settings
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ minio_client = Minio(
 # --------------------------------------------------------------------------- #
 # Shared Redis configuration
 _redis_settings = get_redis_settings()
-cache = get_sync_redis()
+cache = feature_cache.router("scenario_planner_category_forecasting")
 
 if os.getenv("ENVIRONMENT", "production").lower() == "development":
     logger.info(

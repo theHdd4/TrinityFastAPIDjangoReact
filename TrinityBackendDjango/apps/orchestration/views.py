@@ -1,9 +1,10 @@
+from django.db import connection
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import EngineRegistry, TaskRun
 from .serializers import EngineRegistrySerializer, TaskRunSerializer
-from .tasks import execute_task
+from .tasks import enqueue_task_run
 
 class EngineRegistryViewSet(viewsets.ModelViewSet):
     queryset = EngineRegistry.objects.all()
@@ -25,8 +26,16 @@ class TaskRunViewSet(viewsets.ModelViewSet):
         # enqueue a new TaskRun
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        task_run = serializer.save()  # status="pending"
-        execute_task.delay(task_run.id)
+        schema_name = connection.schema_name
+        execution_profile = (
+            serializer.validated_data.get("execution_profile")
+            or TaskRun.EXECUTION_PROFILE_IO
+        )
+        task_run = serializer.save(
+            tenant_schema=schema_name,
+            execution_profile=execution_profile,
+        )  # status="pending"
+        enqueue_task_run(task_run)
         return Response(TaskRunSerializer(task_run).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], permission_classes=[permissions.IsAdminUser])
@@ -38,5 +47,5 @@ class TaskRunViewSet(viewsets.ModelViewSet):
         tr.error = ""
         tr.output = None
         tr.save(update_fields=["status","error","output","updated_at"])
-        execute_task.delay(tr.id)
+        enqueue_task_run(tr)
         return Response(TaskRunSerializer(tr).data)

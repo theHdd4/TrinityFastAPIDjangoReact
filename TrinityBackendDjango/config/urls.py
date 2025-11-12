@@ -1,11 +1,14 @@
 from django.contrib import admin
 from django.urls import path, include
 
+from redis_store.health import redis_health_view
+
 # Apply custom admin branding
 from . import admin as _admin_setup  # noqa: F401
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("health/redis/", redis_health_view, name="redis-health"),
 
     # REST API endpoints for each app
     path("api/accounts/", include("apps.accounts.urls")),

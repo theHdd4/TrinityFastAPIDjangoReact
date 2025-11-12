@@ -1,5 +1,6 @@
 from minio import Minio
 from minio.error import S3Error
+import logging
 import os
 from fastapi import APIRouter, Form, HTTPException
 from urllib.parse import unquote, quote
@@ -11,6 +12,7 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 import polars as pl
 from datetime import date, datetime
+from time import perf_counter
 from typing import Any, List
 from fastapi import Depends
 from pydantic import BaseModel
@@ -29,6 +31,7 @@ from .mongodb_saver import (
     fetch_dimensions_dict,
 )
 from app.features.data_upload_validate.app.routes import get_object_prefix
+from app.core.binary_cache import binary_cache
 
 from .feature_overview.base import (
     run_unique_count,
@@ -101,39 +104,21 @@ ensure_minio_bucket()
 
 router = APIRouter()
 
-
-def _redis_get_bytes(key: str) -> bytes | None:
-    """Fetch binary content from Redis without triggering UTF-8 decoding."""
-
-    try:
-        value = redis_client.get(key)
-    except Exception as exc:
-        print(f"⚠️ redis binary get error for {key}: {exc}")
-        return None
-    if value is None:
-        return None
-    if isinstance(value, (bytes, bytearray)):
-        return bytes(value)
-    if isinstance(value, memoryview):
-        return value.tobytes()
-    return str(value).encode("utf-8")
+logger = logging.getLogger("app.features.feature_overview.routes")
 
 
-def _redis_set_bytes(key: str, value: bytes | bytearray | str, ttl: int = 3600) -> None:
-    """Store binary content in Redis with a TTL, tolerating failures."""
-
-    try:
-        if isinstance(value, (bytes, bytearray)):
-            data = bytes(value)
-        elif isinstance(value, memoryview):
-            data = value.tobytes()
-        elif isinstance(value, str):
-            data = value.encode("utf-8")
-        else:
-            data = str(value).encode("utf-8")
-        redis_client.setex(key, ttl, data)
-    except Exception as exc:
-        print(f"⚠️ redis binary set error for {key}: {exc}")
+def _log_cache_lookup(fetch_result) -> None:
+    metadata = getattr(fetch_result, "metadata", None)
+    if not metadata:
+        return
+    logger.info(
+        "feature_overview.cache_lookup key=%s cache_hit=%s skip_reason=%s raw_size=%s extras=%s",
+        metadata.key,
+        metadata.cache_hit,
+        metadata.skip_reason,
+        metadata.raw_size,
+        metadata.extras,
+    )
 
 
 @router.get("/column_summary")
@@ -182,11 +167,26 @@ async def column_summary(object_name: str):
         if df is None:
             if not object_name.endswith(".arrow"):
                 raise ValueError("Unsupported file format")
-            content = _redis_get_bytes(object_name)
-            if content is None:
+
+            def _load_arrow() -> bytes:
                 response = minio_client.get_object(MINIO_BUCKET, object_name)
-                content = response.read()
-                _redis_set_bytes(object_name, content)
+                try:
+                    return response.read()
+                finally:
+                    response.close()
+
+            timer_start = perf_counter()
+            cache_fetch = binary_cache.get_or_set(object_name, _load_arrow)
+            duration_ms = (perf_counter() - timer_start) * 1000
+            content = cache_fetch.payload or b""
+            cache_hit = bool(cache_fetch.metadata and cache_fetch.metadata.cache_hit)
+            logger.info(
+                "feature_overview.column_summary cache_hit=%s key=%s duration_ms=%.2f",
+                cache_hit,
+                cache_fetch.metadata.key if cache_fetch.metadata else object_name,
+                duration_ms,
+            )
+            _log_cache_lookup(cache_fetch)
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
 
@@ -238,6 +238,7 @@ async def column_summary(object_name: str):
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
+            binary_cache.delete(object_name)
             redis_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
@@ -281,11 +282,25 @@ async def cached_dataframe(object_name: str):
         except Exception as exc:
             print(f"⚠️ flight dataframe error for {object_name}: {exc}")
 
-        content = _redis_get_bytes(object_name)
-        if content is None:
+        def _load_object() -> bytes:
             response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
-            _redis_set_bytes(object_name, content)
+            try:
+                return response.read()
+            finally:
+                response.close()
+
+        timer_start = perf_counter()
+        cache_fetch = binary_cache.get_or_set(object_name, _load_object)
+        duration_ms = (perf_counter() - timer_start) * 1000
+        content = cache_fetch.payload or b""
+        cache_hit = bool(cache_fetch.metadata and cache_fetch.metadata.cache_hit)
+        logger.info(
+            "feature_overview.cached_dataframe cache_hit=%s key=%s duration_ms=%.2f",
+            cache_hit,
+            cache_fetch.metadata.key if cache_fetch.metadata else object_name,
+            duration_ms,
+        )
+        _log_cache_lookup(cache_fetch)
 
         if object_name.endswith(".arrow"):
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
@@ -301,6 +316,7 @@ async def cached_dataframe(object_name: str):
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
+            binary_cache.delete(object_name)
             redis_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
@@ -428,11 +444,25 @@ def _load_polars_frame(object_name: str, flight_path: str | None = None) -> pl.D
     if not object_name.endswith(".arrow"):
         raise ValueError("Unsupported file format")
 
-    content = _redis_get_bytes(object_name)
-    if content is None:
+    def _load_bytes() -> bytes:
         response = minio_client.get_object(MINIO_BUCKET, object_name)
-        content = response.read()
-        _redis_set_bytes(object_name, content)
+        try:
+            return response.read()
+        finally:
+            response.close()
+
+    timer_start = perf_counter()
+    cache_fetch = binary_cache.get_or_set(object_name, _load_bytes)
+    duration_ms = (perf_counter() - timer_start) * 1000
+    content = cache_fetch.payload or b""
+    cache_hit = bool(cache_fetch.metadata and cache_fetch.metadata.cache_hit)
+    logger.info(
+        "feature_overview._load_polars_frame cache_hit=%s key=%s duration_ms=%.2f",
+        cache_hit,
+        cache_fetch.metadata.key if cache_fetch.metadata else object_name,
+        duration_ms,
+    )
+    _log_cache_lookup(cache_fetch)
 
     try:
         return pl.read_ipc(io.BytesIO(content))
@@ -661,6 +691,7 @@ async def sku_stats(
     except S3Error as e:
         error_code = getattr(e, "code", "")
         if error_code in {"NoSuchKey", "NoSuchBucket"}:
+            binary_cache.delete(object_name)
             redis_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))

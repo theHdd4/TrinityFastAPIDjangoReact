@@ -10,7 +10,7 @@ from minio import Minio
 from minio.error import S3Error
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 
-from app.core.redis import get_sync_redis
+from app.core.feature_cache import feature_cache
 
 # MinIO configuration from environment variables
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -43,7 +43,7 @@ def _object_prefix() -> str:
 # ------------------------
 # Redis configuration
 # ------------------------
-redis_client = get_sync_redis(decode_responses=True)
+redis_client = feature_cache.router("groupby_weighted_avg")
 
 # Helper: fetch column-classifier-config JSON from Redis
 

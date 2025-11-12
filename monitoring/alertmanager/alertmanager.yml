@@ -1,0 +1,9 @@
+route:
+  receiver: noop
+  group_by: ['alertname']
+  repeat_interval: 4h
+
+receivers:
+  - name: noop
+    # Configure real notification channels (Slack, PagerDuty, etc.) in deployments
+    webhook_configs: []
