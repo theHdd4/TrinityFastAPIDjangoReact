@@ -4,6 +4,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
+const normalizeColumnName = (value: string | undefined | null) => {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
+};
+
 interface Props {
   atomId: string;
 }
@@ -68,6 +73,31 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
   }, [settings.dataSource]);
 
   const handleFrameChange = async (val: string) => {
+    const storeState = useLaboratoryStore.getState();
+    const currentAtomSettings = storeState.getAtom(atomId)?.settings || {};
+    const existingSelectedMeasures = Array.isArray(currentAtomSettings.selectedMeasures)
+      ? currentAtomSettings.selectedMeasures.filter(Boolean)
+      : [];
+    const preserveSelectedMeasures = existingSelectedMeasures.length > 0;
+    const existingSelectedMeasureNames = Array.isArray(currentAtomSettings.selectedMeasureNames)
+      ? currentAtomSettings.selectedMeasureNames.filter(Boolean)
+      : [];
+    const normalizedExistingSelectedMeasures = existingSelectedMeasures.map((item: any) => {
+      if (typeof item === 'string') {
+        return normalizeColumnName(item);
+      }
+      if (item && typeof item === 'object') {
+        return {
+          ...item,
+          field: normalizeColumnName(item.field),
+          weight_by: normalizeColumnName(item.weight_by),
+          rename_to: item.rename_to || normalizeColumnName(item.field)
+        };
+      }
+      return item;
+    });
+    const normalizedExistingSelectedMeasureNames = existingSelectedMeasureNames.map(name => normalizeColumnName(name)).filter(Boolean);
+
     if (!val.endsWith('.arrow')) {
       val += '.arrow';
     }
@@ -123,24 +153,49 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     }
 
     // If backend provided nothing, keep previous state (empty arrays allowed)
-    const finalIdentifiers = fetchedIdentifiers.length ? fetchedIdentifiers : identifiers;
-    const finalMeasures = fetchedMeasures.length ? fetchedMeasures : measures;
+    const finalIdentifiers = (fetchedIdentifiers.length ? fetchedIdentifiers : identifiers).map(id => normalizeColumnName(id)).filter(Boolean);
+    const finalMeasures = (fetchedMeasures.length ? fetchedMeasures : measures).map(measure => normalizeColumnName(measure)).filter(Boolean);
 
     // Add exactly one measure configuration by default
-    let defaultSelectedMeasures = [];
-    const allMeasures = finalMeasures.length > 0 ? finalMeasures : summary.filter(c => c.data_type && (c.data_type.toLowerCase().includes('int') || c.data_type.toLowerCase().includes('float') || c.data_type.toLowerCase().includes('number'))).map(c => c.column);
+    const extractMeasureNames = (items: any[]): string[] =>
+      items
+        .map((item: any) => (typeof item === 'string' ? item : item?.field))
+        .filter((name: any): name is string => typeof name === 'string' && name.length > 0);
 
-    if (allMeasures.length > 0) {
-      // Use the first available measure and default aggregator
-      defaultSelectedMeasures = [{ field: allMeasures[0], aggregator: 'Sum', weight_by: '', rename_to: '' }];
+    let defaultSelectedMeasures: any[] = [];
+    if (!preserveSelectedMeasures) {
+      const allMeasures = finalMeasures.length > 0
+        ? finalMeasures
+        : summary
+            .filter(
+              c =>
+                c.data_type &&
+                (c.data_type.toLowerCase().includes('int') ||
+                  c.data_type.toLowerCase().includes('float') ||
+                  c.data_type.toLowerCase().includes('number'))
+            )
+            .map(c => normalizeColumnName(c.column));
+
+      if (allMeasures.length > 0) {
+        // Use the first available measure and default aggregator
+        defaultSelectedMeasures = [{ field: allMeasures[0], aggregator: 'Sum', weight_by: '', rename_to: '' }];
+      }
     }
+
+    const nextSelectedMeasures = preserveSelectedMeasures ? normalizedExistingSelectedMeasures : defaultSelectedMeasures;
+    const nextSelectedMeasureNames = preserveSelectedMeasures
+      ? (normalizedExistingSelectedMeasureNames.length > 0
+          ? normalizedExistingSelectedMeasureNames
+          : extractMeasureNames(normalizedExistingSelectedMeasures as any[]).map(name => normalizeColumnName(name)).filter(Boolean))
+      : extractMeasureNames(defaultSelectedMeasures).map(name => normalizeColumnName(name)).filter(Boolean);
 
     updateSettings(atomId, {
       dataSource: val,
       allColumns: summary,
       identifiers: finalIdentifiers,
       measures: finalMeasures,
-      selectedMeasures: defaultSelectedMeasures,
+      selectedMeasures: nextSelectedMeasures,
+      selectedMeasureNames: nextSelectedMeasureNames,
     });
   };
 

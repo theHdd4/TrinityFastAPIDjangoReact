@@ -14,6 +14,23 @@ import {
   autoSaveStepResult
 } from './utils';
 
+const normalizeColumnName = (value: string | undefined | null) => {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
+};
+
+const toBackendAggregation = (agg: string) => {
+  const key = (agg || '').toLowerCase();
+  switch (key) {
+    case 'weighted mean':
+      return 'weighted_mean';
+    case 'rank percentile':
+      return 'rank_pct';
+    default:
+      return key;
+  }
+};
+
 export const groupbyHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId, isStreamMode = false, stepAlias } = context;
@@ -54,7 +71,9 @@ export const groupbyHandler: AtomHandler = {
     });
     
     // 🔧 CRITICAL FIX: Automatically populate GroupBy settings with AI configuration
-    const aiSelectedIdentifiers = cfg.identifiers || [];
+    const aiSelectedIdentifiers = Array.isArray(cfg.identifiers)
+      ? cfg.identifiers.map((id: string) => normalizeColumnName(id)).filter(Boolean)
+      : [];
     const aiSelectedMeasures: any[] = [];
     
     // 🔧 FIX: Ensure we have a single file, not multiple files
@@ -192,26 +211,32 @@ export const groupbyHandler: AtomHandler = {
     // Convert AI aggregations to selectedMeasures format
     if (cfg.aggregations && typeof cfg.aggregations === 'object') {
       Object.entries(cfg.aggregations).forEach(([field, aggConfig]: [string, any]) => {
+        const normalizedField = normalizeColumnName(field);
+        if (!normalizedField) {
+          return;
+        }
+
         if (typeof aggConfig === 'object' && aggConfig !== null) {
           const agg = aggConfig.agg;
           if (agg) {
+            const normalizedWeight = aggConfig.weight_by ? normalizeColumnName(aggConfig.weight_by) : '';
             aiSelectedMeasures.push({
-              field: field,
-              aggregator: agg === 'sum' ? 'Sum' : 
-                          agg === 'mean' ? 'Mean' : 
-                          agg === 'min' ? 'Min' : 
-                          agg === 'max' ? 'Max' : 
-                          agg === 'count' ? 'Count' : 
-                          agg === 'median' ? 'Median' : 
-                          agg === 'weighted_mean' ? 'Weighted Mean' : 
-                          agg === 'rank_pct' ? 'Rank Percentile' : 'Sum',
-              weight_by: aggConfig.weight_by || '',
-              rename_to: aggConfig.rename_to || field
+              field: normalizedField,
+          aggregator: agg === 'sum' ? 'Sum' : 
+                      agg === 'mean' ? 'Mean' : 
+                      agg === 'min' ? 'Min' : 
+                      agg === 'max' ? 'Max' : 
+                      agg === 'count' ? 'Count' : 
+                      agg === 'median' ? 'Median' : 
+                      agg === 'weighted_mean' ? 'Weighted Mean' : 
+                      agg === 'rank_pct' ? 'Rank Percentile' : 'Sum',
+              weight_by: normalizedWeight,
+              rename_to: aggConfig.rename_to || normalizedField
             });
           }
         } else if (typeof aggConfig === 'string') {
           aiSelectedMeasures.push({
-            field: field,
+            field: normalizedField,
             aggregator: aggConfig === 'sum' ? 'Sum' : 
                         aggConfig === 'mean' ? 'Mean' : 
                         aggConfig === 'min' ? 'Min' : 
@@ -221,7 +246,7 @@ export const groupbyHandler: AtomHandler = {
                         aggConfig === 'weighted_mean' ? 'Weighted Mean' : 
                         aggConfig === 'rank_pct' ? 'Rank Percentile' : 'Sum',
             weight_by: '',
-            rename_to: field
+            rename_to: normalizedField
           });
         }
       });
@@ -322,10 +347,14 @@ export const groupbyHandler: AtomHandler = {
           aggregations: JSON.stringify(aiSelectedMeasures.reduce((acc, m) => {
             // 🔧 CRITICAL FIX: Convert to backend-expected format
             // Backend expects: { "field_name": { "agg": "sum", "weight_by": "", "rename_to": "" } }
-            acc[m.field] = {
-              agg: m.aggregator.toLowerCase(),
-              weight_by: m.weight_by || '',
-              rename_to: m.rename_to || m.field
+            const fieldKey = normalizeColumnName(m.field);
+            if (!fieldKey) {
+              return acc;
+            }
+            acc[fieldKey] = {
+              agg: toBackendAggregation(m.aggregator),
+              weight_by: normalizeColumnName(m.weight_by),
+              rename_to: m.rename_to || fieldKey
             };
             return acc;
           }, {})),
@@ -345,8 +374,8 @@ export const groupbyHandler: AtomHandler = {
           identifiers: aiSelectedIdentifiers,
           aggregations: aiSelectedMeasures.reduce((acc, m) => {
             acc[m.field] = {
-              agg: m.aggregator.toLowerCase(),
-              weight_by: m.weight_by || '',
+              agg: toBackendAggregation(m.aggregator),
+              weight_by: normalizeColumnName(m.weight_by),
               rename_to: m.rename_to || m.field
             };
             return acc;
@@ -371,7 +400,12 @@ export const groupbyHandler: AtomHandler = {
           
             // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
             try {
-              const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(result.data.result_file)}`);
+              const totalRows = typeof result.data.row_count === 'number' ? result.data.row_count : 1000;
+              const pageSize = Math.min(Math.max(totalRows, 50), 1000);
+              const cachedUrl = `${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(
+                result.data.result_file
+              )}&page=1&page_size=${pageSize}`;
+              const cachedRes = await fetch(cachedUrl);
               if (cachedRes.ok) {
                 const cachedJson = await cachedRes.json();
                 const csvText = cachedJson?.data ?? '';

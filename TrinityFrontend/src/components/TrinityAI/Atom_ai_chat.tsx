@@ -1096,20 +1096,41 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 return filePath.includes("/") ? filePath.split("/").pop() || filePath : filePath;
               };
               
+              const normalizeForBackend = (col: string | undefined | null) => {
+                if (!col || typeof col !== 'string') return '';
+                return col.trim().toLowerCase();
+              };
+
+              const toBackendAggregation = (agg: string) => {
+                const key = (agg || '').toLowerCase();
+                switch (key) {
+                  case 'weighted mean':
+                    return 'weighted_mean';
+                  case 'rank percentile':
+                    return 'rank_pct';
+                  default:
+                    return key;
+                }
+              };
+
               // Convert to FormData format that GroupBy backend expects
               const formData = new URLSearchParams({
                 validator_atom_id: atomId, // 🔧 CRITICAL: Add required validator_atom_id
                 file_key: getFilename(singleFileName), // 🔧 CRITICAL: Add required file_key
                 object_names: getFilename(singleFileName),
                 bucket_name: cfg.bucket_name || 'trinity',
-                identifiers: JSON.stringify(aiSelectedIdentifiers),
+                identifiers: JSON.stringify(aiSelectedIdentifiers.map(id => normalizeForBackend(id))),
                 aggregations: JSON.stringify(aiSelectedMeasures.reduce((acc, m) => {
                   // 🔧 CRITICAL FIX: Convert to backend-expected format
                   // Backend expects: { "field_name": { "agg": "sum", "weight_by": "", "rename_to": "" } }
-                  acc[m.field] = {
-                    agg: m.aggregator.toLowerCase(),
-                    weight_by: m.weight_by || '',
-                    rename_to: m.rename_to || m.field
+                  const fieldKey = normalizeForBackend(m.field);
+                  if (!fieldKey) {
+                    return acc;
+                  }
+                  acc[fieldKey] = {
+                    agg: toBackendAggregation(m.aggregator),
+                    weight_by: normalizeForBackend(m.weight_by),
+                    rename_to: m.rename_to || fieldKey
                   };
                   return acc;
                 }, {}))
@@ -1120,12 +1141,16 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 file_key: getFilename(singleFileName),
                 object_names: getFilename(singleFileName),
                 bucket_name: cfg.bucket_name || 'trinity',
-                identifiers: aiSelectedIdentifiers,
+                identifiers: aiSelectedIdentifiers.map(id => normalizeForBackend(id)),
                 aggregations: aiSelectedMeasures.reduce((acc, m) => {
-                  acc[m.field] = {
-                    agg: m.aggregator.toLowerCase(),
-                    weight_by: m.weight_by || '',
-                    rename_to: m.rename_to || m.field
+                  const fieldKey = normalizeForBackend(m.field);
+                  if (!fieldKey) {
+                    return acc;
+                  }
+                  acc[fieldKey] = {
+                    agg: toBackendAggregation(m.aggregator),
+                    weight_by: normalizeForBackend(m.weight_by),
+                    rename_to: m.rename_to || fieldKey
                   };
                   return acc;
                 }, {})
@@ -1148,9 +1173,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   
                   // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
                   try {
-                    const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(result.result_file)}`);
+                    const totalRows = typeof result.row_count === 'number' ? result.row_count : 1000;
+                    const pageSize = Math.min(Math.max(totalRows, 50), 1000);
+                    const cachedUrl = `${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(
+                      result.result_file
+                    )}&page=1&page_size=${pageSize}`;
+                    const cachedRes = await fetch(cachedUrl);
                     if (cachedRes.ok) {
-                      const csvText = await cachedRes.text();
+                      const cachedJson = await cachedRes.json();
+                      const csvText = cachedJson?.data ?? '';
                       console.log('📄 Retrieved CSV data from saved file, length:', csvText.length);
                       
                       // Parse CSV to get actual results
