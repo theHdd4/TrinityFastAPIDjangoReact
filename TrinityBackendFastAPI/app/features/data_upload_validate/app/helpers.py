@@ -159,4 +159,9 @@ async def get_object_prefix(
     return prefix
 
 
-__all__ = ["CSV_READ_KWARGS", "_smart_csv_parse", "get_object_prefix"]
+__all__ = [
+    "CSV_READ_KWARGS",
+    "_smart_csv_parse",
+    "get_object_prefix",
+    "_parse_numeric_id",
+]
