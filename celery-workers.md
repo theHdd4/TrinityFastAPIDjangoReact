@@ -27,8 +27,8 @@
 - Recommendation: offload expensive file parsing and aggregation (especially for large Arrow uploads) to Celery tasks.
 
 ### Pivot Table
-- The `/pivot/{config_id}/compute` flow awaits the local `compute_pivot` coroutine, which reads Arrow data, builds pandas pivots, and writes cache state synchronously.【F:TrinityBackendFastAPI/app/features/pivot_table/routes.py†L37-L106】【F:TrinityBackendFastAPI/app/features/pivot_table/service.py†L1-L188】
-- Recommendation: submit pivot computation and cache refresh to Celery so HTTP workers only orchestrate status polling.
+- The compute, refresh, and save endpoints now push work to Celery via the shared task client, returning task identifiers while the worker reconstructs the original `PivotComputeRequest` payload and persists results through the adapter tasks.【F:TrinityBackendFastAPI/app/features/pivot_table/routes.py†L34-L94】【F:TrinityBackendFastAPI/app/features/pivot_table/service.py†L752-L820】
+- Remaining read endpoints such as `/pivot/{config_id}/data` and `/status` continue to serve cached payloads synchronously and do not require Celery delegation.
 
 ### Select Models (Feature-Based)
 - Model selection endpoints read large result files from MinIO, parse them with pandas, and compute filters inline, with no Celery usage.【F:TrinityBackendFastAPI/app/features/select_models_feature_based/routes.py†L1-L200】
