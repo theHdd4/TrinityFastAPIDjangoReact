@@ -18,6 +18,19 @@ from app.celery_app import celery_app
 from app.core.task_tracking import record_task_enqueued
 
 
+def _extract_feature_name(callable_path: str) -> str:
+    if not callable_path.startswith("app.features."):
+        raise ValueError(
+            "Feature callable paths must begin with 'app.features.'"
+        )
+    parts = callable_path.split(".")
+    if len(parts) < 4:
+        raise ValueError(
+            "Feature callable paths must include the feature and target name"
+        )
+    return parts[2]
+
+
 @dataclass(frozen=True)
 class SubmittedTask:
     """Lightweight value object describing a submitted Celery task."""
@@ -88,4 +101,40 @@ def submit_bound_task(
     return SubmittedTask(id=async_result.id, name=task.name)
 
 
-__all__ = ["SubmittedTask", "submit_task", "submit_bound_task"]
+def submit_feature_task(
+    callable_path: str,
+    *,
+    args: Optional[Iterable[Any]] = None,
+    kwargs: Optional[Mapping[str, Any]] = None,
+    meta: Optional[Dict[str, Any]] = None,
+    queue: Optional[str] = None,
+    countdown: Optional[int] = None,
+    priority: Optional[int] = None,
+) -> SubmittedTask:
+    """Submit a feature callable to Celery using the generic dispatcher."""
+
+    feature_name = _extract_feature_name(callable_path)
+    task_meta: Dict[str, Any] = {"feature": feature_name, "callable": callable_path}
+    if meta:
+        task_meta.update(meta)
+    return submit_task(
+        "features.execute_callable",
+        args=None,
+        kwargs={
+            "callable_path": callable_path,
+            "args": list(args or ()),
+            "kwargs": dict(kwargs or {}),
+        },
+        meta=task_meta,
+        queue=queue,
+        countdown=countdown,
+        priority=priority,
+    )
+
+
+__all__ = [
+    "SubmittedTask",
+    "submit_task",
+    "submit_bound_task",
+    "submit_feature_task",
+]
