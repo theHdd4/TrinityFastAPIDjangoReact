@@ -19,7 +19,11 @@ from app.core.task_tracking import (
     record_task_success,
 )
 from app.DataStorageRetrieval.minio_utils import ensure_minio_bucket, upload_to_minio
-from app.features.data_upload_validate.app.routes import CSV_READ_KWARGS, _smart_csv_parse, get_object_prefix
+from app.features.data_upload_validate.app.helpers import (
+    CSV_READ_KWARGS,
+    _smart_csv_parse,
+    get_object_prefix,
+)
 
 logger = logging.getLogger("app.features.data_upload_validate.tasks")
 
