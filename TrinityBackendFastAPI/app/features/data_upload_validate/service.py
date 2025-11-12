@@ -24,7 +24,6 @@ from app.DataStorageRetrieval.minio_utils import (
 )
 from app.features.data_upload_validate.app.database import (
     get_validator_atom_from_mongo,
-    load_all_non_validation_data,
     log_operation_to_mongo,
     save_validation_log_to_mongo,
 )
