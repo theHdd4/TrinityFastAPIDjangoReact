@@ -2687,7 +2687,13 @@ load_existing_configs()
 
 # Upload task resolution helpers -------------------------------------------------
 UPLOAD_TASK_PREFIX = "task:"
-UPLOAD_TASK_WAIT_SECONDS = 30.0
+# Allow deployments to configure how long the API waits for staged upload
+# tasks to finish before surfacing a retryable error. Large CSV/XLSX uploads
+# routinely need longer than the original 30s window to parse and stream into
+# MinIO, so we extend the default to five minutes while keeping the value
+# overridable via environment variable for operators who want a different
+# balance.
+UPLOAD_TASK_WAIT_SECONDS = float(os.getenv("DATA_UPLOAD_TASK_TIMEOUT", "300"))
 UPLOAD_TASK_POLL_INTERVAL = 0.5
 
 
