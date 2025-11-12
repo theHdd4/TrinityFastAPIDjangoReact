@@ -1,6 +1,6 @@
 # app/routes.py - API Routes
-from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response
-from typing import List, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response, status
+from typing import List, Dict, Any, Sequence
 import json
 import pandas as pd
 import polars as pl
@@ -61,6 +61,16 @@ from app.features.data_upload_validate.app.database import (
     get_validation_units_from_mongo,
 )
 
+from celery import states as celery_states
+from celery.result import AsyncResult
+
+from app.celery_app import celery_app
+from app.core.celery_client import submit_task
+from app.core.task_tracking import (
+    get_task_metadata,
+    record_task_failure,
+    record_task_success,
+)
 from app.redis_cache import cache_master_config
 from app.core.observability import timing_dependency_factory
 
@@ -81,6 +91,12 @@ from app.features.data_upload_validate.app.database import (
 
 # Add this import
 from app.features.data_upload_validate.app.database import save_validator_atom_to_mongo
+from app.features.data_upload_validate.app.helpers import (
+    CSV_READ_KWARGS,
+    _smart_csv_parse,
+    get_object_prefix,
+    _parse_numeric_id,
+)
 
 
 # Initialize router
@@ -102,72 +118,6 @@ CUSTOM_CONFIG_DIR.mkdir(exist_ok=True)
 
 # In-memory storage
 extraction_results = {}
-
-# Common Polars CSV options to improve schema inference on large files
-CSV_READ_KWARGS = {
-    "low_memory": True, 
-    "infer_schema_length": 10_000,
-    "encoding": "utf8-lossy"  # Handle all encodings gracefully (UTF-8, Latin-1, Windows-1252, etc.)
-}
-
-def _smart_csv_parse(content: bytes, csv_kwargs: dict) -> tuple[pl.DataFrame, list[str], dict]:
-    """
-    Smart CSV parsing that automatically detects and handles mixed data types.
-    Returns DataFrame, list of warnings, and detailed metadata about data quality issues.
-    """
-    warnings = []
-    metadata = {
-        "mixed_dtype_columns": [],
-        "encoding_used": "utf8-lossy",
-        "parsing_method": "standard"
-    }
-    
-    # Step 1: Try normal parsing first (FAST PATH)
-    try:
-        df = pl.read_csv(io.BytesIO(content), **csv_kwargs)
-        return df, warnings, metadata
-    except Exception as e1:
-        error_msg = str(e1).lower()
-        
-        # Step 2: Quick check - if it's a mixed data type error, jump directly to ignore_errors
-        if "could not parse" in error_msg and "as dtype" in error_msg:
-            print(f"🔄 Mixed data type detected, using ignore_errors for fast handling...")
-            try:
-                kwargs_ignore = csv_kwargs.copy()
-                kwargs_ignore["ignore_errors"] = True
-                df = pl.read_csv(io.BytesIO(content), **kwargs_ignore)
-                metadata["parsing_method"] = "ignore_errors"
-                
-                # Extract problematic column name from error message
-                try:
-                    import re
-                    match = re.search(r"at column '([^']+)'", str(e1))
-                    if match:
-                        problematic_col = match.group(1)
-                        metadata["mixed_dtype_columns"] = [problematic_col]
-                        warnings.append(f"Detected mixed data types in column: {problematic_col}")
-                        warnings.append("File may contain mixed numeric and text values - converted problematic data to preserve integrity")
-                except:
-                    warnings.append("Detected mixed data types - some problematic data was handled")
-                
-                return df, warnings, metadata
-            except Exception as e2:
-                print(f"❌ ignore_errors failed: {e2}")
-        
-        # Step 3: Final fallback - everything as strings (GUARANTEED TO WORK)
-        try:
-            print(f"🔄 Final fallback: Reading all columns as strings")
-            kwargs_strings = {k: v for k, v in csv_kwargs.items() if k not in ["infer_schema_length"]}
-            df = pl.read_csv(io.BytesIO(content), dtypes=pl.Utf8, **kwargs_strings)
-            metadata["parsing_method"] = "all_strings"
-            metadata["mixed_dtype_columns"] = []  # Can't determine specific columns
-            warnings.append("All columns read as strings to handle data type conflicts")
-            warnings.append("Please use Dataframe Operations atom to fix column data types if needed")
-            return df, warnings, metadata
-        except Exception as e3:
-            print(f"❌ All parsing methods failed: {e3}")
-            raise e1  # Re-raise original error
-
 
 # Health check
 @router.get("/health")
@@ -220,97 +170,6 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
-
-
-def _parse_numeric_id(value: str | int | None) -> int:
-    """Return the numeric component of an ID string like "name_123"."""
-    if value is None:
-        return 0
-    try:
-        return int(str(value).split("_")[-1])
-    except Exception:
-        return 0
-
-async def get_object_prefix(
-    client_id: str = "",
-    app_id: str = "",
-    project_id: str = "",
-    *,
-    client_name: str = "",
-    app_name: str = "",
-    project_name: str = "",
-    include_env: bool = False,
-) -> str | tuple[str, dict[str, str], str]:
-    """Return the MinIO prefix for the current client/app/project.
-
-    When ``include_env`` is True a tuple of ``(prefix, env, source)`` is
-    returned where ``source`` describes where the environment variables were
-    loaded from.
-    """
-    USER_ID = _parse_numeric_id(os.getenv("USER_ID"))
-    PROJECT_ID = _parse_numeric_id(project_id or os.getenv("PROJECT_ID", "0"))
-    # If explicit names are provided, avoid using potentially stale identifier
-    # values from ``os.environ``. This ensures that when the frontend sends the
-    # current ``client_name/app_name/project_name`` combo, we resolve the
-    # environment for that namespace rather than whatever IDs may have been set
-    # previously.
-    if client_name or app_name or project_name:
-        client_id_env = client_id or ""
-        app_id_env = app_id or ""
-        project_id_env = project_id or ""
-    else:
-        client_id_env = client_id or os.getenv("CLIENT_ID", "")
-        app_id_env = app_id or os.getenv("APP_ID", "")
-        project_id_env = project_id or os.getenv("PROJECT_ID", "")
-
-    # Resolve environment variables using ``get_env_vars`` which consults the
-    # Redis cache keyed by ``<client>/<app>/<project>`` and falls back to
-    # Postgres when missing.  This ensures we always load the latest names for
-    # the currently selected namespace instead of defaulting to
-    # ``default_client/default_app/default_project``.
-    env: dict[str, str] = {}
-    env_source = "unknown"
-    fresh = await get_env_vars(
-        client_id_env,
-        app_id_env,
-        project_id_env,
-        client_name=client_name or os.getenv("CLIENT_NAME", ""),
-        app_name=app_name or os.getenv("APP_NAME", ""),
-        project_name=project_name or os.getenv("PROJECT_NAME", ""),
-        use_cache=True,
-        return_source=True,
-    )
-    if isinstance(fresh, tuple):
-        env, env_source = fresh
-    else:
-        env, env_source = fresh, "unknown"
-
-    print(f"🔧 fetched env {env} (source={env_source})")
-    client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
-    app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
-    project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
-
-    if PROJECT_ID and (client == "default_client" or app == "default_app" or project == "default_project"):
-        try:
-            client_db, app_db, project_db = await fetch_client_app_project(
-                USER_ID if USER_ID else None, PROJECT_ID
-            )
-            client = client_db or client
-            app = app_db or app
-            project = project_db or project
-        except Exception as exc:  # pragma: no cover - database unreachable
-            print(f"⚠️ Failed to load names from DB: {exc}")
-
-    os.environ["CLIENT_NAME"] = client
-    os.environ["APP_NAME"] = app
-    os.environ["PROJECT_NAME"] = project
-    prefix = f"{client}/{app}/{project}/"
-    print(
-        f"📦 prefix {prefix} (CLIENT_ID={client_id or os.getenv('CLIENT_ID','')} APP_ID={app_id or os.getenv('APP_ID','')} PROJECT_ID={PROJECT_ID})"
-    )
-    if include_env:
-        return prefix, env, env_source
-    return prefix
 
 
 def read_minio_object(object_name: str) -> bytes:
@@ -494,7 +353,7 @@ def load_existing_configs():
 
 
 # Upload arbitrary file to MinIO and return its path
-@router.post("/upload-file")
+@router.post("/upload-file", status_code=status.HTTP_202_ACCEPTED)
 async def upload_file(
     file: UploadFile = File(...),
     client_id: str = Form(""),
@@ -504,154 +363,41 @@ async def upload_file(
     app_name: str = Form(""),
     project_name: str = Form("")
 ):
-    start_time = perf_counter()
+    content = await file.read()
     logger.info(
-        "data_upload.temp_upload.start file=%s client_id=%s app_id=%s project_id=%s",
+        "data_upload.temp_upload.enqueue file=%s client_id=%s app_id=%s project_id=%s",
         file.filename,
         client_id or "",
         app_id or "",
         project_id or "",
     )
-    if client_id:
-        os.environ["CLIENT_ID"] = client_id
-    if app_id:
-        os.environ["APP_ID"] = app_id
-    if project_id:
-        os.environ["PROJECT_ID"] = project_id
-    if client_name:
-        os.environ["CLIENT_NAME"] = client_name
-    if app_name:
-        os.environ["APP_NAME"] = app_name
-    if project_name:
-        os.environ["PROJECT_NAME"] = project_name
-    prefix = await get_object_prefix()
-    ensure_minio_bucket()
-    # Upload initial file to a temporary subfolder so it isn't exposed as a
-    # saved dataframe until explicitly persisted via the save_dataframes
-    # endpoint.
-    tmp_prefix = prefix + "tmp/"
-    content = await file.read()
-    logger.info(
-        "data_upload.temp_upload.read_bytes file=%s size=%s prefix=%s",
-        file.filename,
-        len(content),
-        tmp_prefix,
-    )
-    
-    try:
-        if file.filename.lower().endswith(".csv"):
-            print(f"🔄 Processing CSV file: {file.filename}")
-            print(f"📊 File size: {len(content)} bytes")
-            print(f"📊 CSV_READ_KWARGS: {CSV_READ_KWARGS}")
-            
-            # Smart CSV parsing with automatic mixed data type detection
-            df_pl, parsing_warnings, parsing_metadata = _smart_csv_parse(content, CSV_READ_KWARGS)
-            
-            # Report any warnings about data quality issues
-            if parsing_warnings:
-                print(f"⚠️ Data Quality Warnings:")
-                for warning in parsing_warnings:
-                    print(f"  - {warning}")
-                    
-            if parsing_metadata.get("mixed_dtype_columns"):
-                print(f"🔍 Columns with mixed data types: {', '.join(parsing_metadata['mixed_dtype_columns'])}")
-                    
-            print(f"📊 DataFrame shape: {df_pl.shape}")
-            print(f"📊 Sample data: {df_pl.head(2).to_dicts()}")
-            
-        elif file.filename.lower().endswith((".xls", ".xlsx")):
-            print(f"🔄 Processing Excel file: {file.filename}")
-            try:
-                # First try with pandas, then convert to polars
-                df_pandas = pd.read_excel(io.BytesIO(content))
-                print(f"📊 Pandas DataFrame shape: {df_pandas.shape}")
-                print(f"📊 Sample data types: {df_pandas.dtypes.to_dict()}")
-                
-                # Convert to polars with better type handling
-                df_pl = pl.from_pandas(df_pandas)
-                print(f"✅ Excel parsed successfully - Shape: {df_pl.shape}")
-            except Exception as e1:
-                print(f"❌ Standard Excel parsing failed: {e1}")
-                try:
-                    # Try with different pandas options
-                    df_pandas = pd.read_excel(io.BytesIO(content), dtype=str)
-                    print(f"📊 Reading as string types - Shape: {df_pandas.shape}")
-                    df_pl = pl.from_pandas(df_pandas)
-                    print(f"✅ Excel parsed as strings - Shape: {df_pl.shape}")
-                except Exception as e2:
-                    print(f"❌ String parsing also failed: {e2}")
-                    raise e1  # Re-raise original error
-        else:
-            print(f"❌ Unsupported file type: {file.filename}")
-            raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-    except Exception as e:
-        print(f"❌ Error parsing file {file.filename}: {str(e)}")
-        print(f"📊 Error type: {type(e).__name__}")
-        logger.exception("data_upload.temp_upload.parse_failed file=%s", file.filename)
-        raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
-
-    print(f"🔄 Converting to Arrow format...")
-    arrow_buf = io.BytesIO()
-    df_pl.write_ipc(arrow_buf)
-    arrow_name = Path(file.filename).stem + ".arrow"
-    print(f"📊 Arrow file: {arrow_name}")
-    print(f"📊 Arrow buffer size: {len(arrow_buf.getvalue())} bytes")
-    
-    # Store under temporary prefix to hide from list_saved_dataframes
-    print(f"📤 Uploading to MinIO...")
-    print(f"📊 MinIO prefix: {tmp_prefix}")
-    result = upload_to_minio(arrow_buf.getvalue(), arrow_name, tmp_prefix)
-    print(f"📊 MinIO result: {result}")
-    
-    if result.get("status") != "success":
-        print(f"❌ MinIO upload failed: {result.get('error_message')}")
-        logger.error(
-            "data_upload.temp_upload.minio_failed file=%s error=%s",
-            file.filename,
-            result.get("error_message"),
-        )
-        raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
-    
-    print(f"✅ Upload successful: {result['object_name']}")
-    
-    # Prepare response with warnings and metadata if any
-    response = {
-        "file_path": result["object_name"],
-        "file_name": file.filename
+    context = {
+        "client_id": client_id,
+        "app_id": app_id,
+        "project_id": project_id,
+        "client_name": client_name,
+        "app_name": app_name,
+        "project_name": project_name,
     }
-    
-    if 'parsing_warnings' in locals() and parsing_warnings:
-        response["warnings"] = parsing_warnings
-        response["has_data_quality_issues"] = True
-        
-        if 'parsing_metadata' in locals() and parsing_metadata.get("mixed_dtype_columns"):
-            mixed_cols = parsing_metadata["mixed_dtype_columns"]
-            response["mixed_dtype_columns"] = mixed_cols
-            response["mixed_dtype_count"] = len(mixed_cols)
-            
-            # Create user-friendly message
-            if len(mixed_cols) > 0:
-                col_list = ", ".join(mixed_cols[:5])  # Show first 5 columns
-                if len(mixed_cols) > 5:
-                    col_list += f" and {len(mixed_cols) - 5} more"
-                    
-                response["message"] = f"File '{file.filename}' has mixed data types in columns: {col_list}. This may lead to unstable results. Please use Dataframe Operations atom to fix column data types."
-            else:
-                response["message"] = "File uploaded successfully with data quality warnings. Some atoms may need data type conversion."
-        else:
-            response["message"] = "File uploaded successfully with data quality warnings. Some atoms may need data type conversion."
-    else:
-        response["message"] = "File uploaded successfully"
-        response["has_data_quality_issues"] = False
-    
-    duration_ms = (perf_counter() - start_time) * 1000
-    logger.info(
-        "data_upload.temp_upload.completed file=%s object=%s duration_ms=%.2f",
-        file.filename,
-        result.get("object_name"),
-        duration_ms,
+    submission = submit_task(
+        "data_upload.process_temp_upload",
+        kwargs={
+            "file_bytes": content,
+            "file_name": file.filename,
+            "context": context,
+        },
+        meta={"filename": file.filename, **{k: v for k, v in context.items() if v}},
     )
-    return response
+    status_url = f"/tasks/{submission.id}"
+    return {
+        "task_id": submission.id,
+        "task_name": submission.name,
+        "status_url": status_url,
+        "message": "Upload queued for background processing",
+        "file_path": f"task:{submission.id}",
+        "file_name": file.filename,
+        "has_data_quality_issues": False,
+    }
 
 
 @router.delete("/temp-uploads")
@@ -2947,6 +2693,132 @@ async def validate_promo_endpoint(
 load_existing_configs()
 
 
+# Upload task resolution helpers -------------------------------------------------
+UPLOAD_TASK_PREFIX = "task:"
+# Allow deployments to configure how long the API waits for staged upload
+# tasks to finish before surfacing a retryable error. Large CSV/XLSX uploads
+# routinely need longer than the original 30s window to parse and stream into
+# MinIO, so we extend the default to five minutes while keeping the value
+# overridable via environment variable for operators who want a different
+# balance.
+UPLOAD_TASK_WAIT_SECONDS = float(os.getenv("DATA_UPLOAD_TASK_TIMEOUT", "300"))
+UPLOAD_TASK_POLL_INTERVAL = 0.5
+
+
+async def _await_upload_result(
+    task_id: str,
+    *,
+    timeout: float = UPLOAD_TASK_WAIT_SECONDS,
+    poll_interval: float = UPLOAD_TASK_POLL_INTERVAL,
+) -> str:
+    """Wait for a staged upload task to expose its MinIO object path."""
+
+    deadline = perf_counter() + timeout
+    while True:
+        metadata = get_task_metadata(task_id)
+        if metadata:
+            status = (metadata.get("status") or "").upper()
+            if status == "SUCCESS":
+                result = metadata.get("result") or {}
+                file_path = result.get("file_path") or ""
+                if file_path:
+                    return file_path
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Upload task {task_id} completed without a file_path",
+                )
+            if status == "FAILURE":
+                error_message = metadata.get("error") or "Upload failed"
+                raise HTTPException(status_code=422, detail=error_message)
+
+        # Fallback to the Celery result backend when our task metadata cache is
+        # unavailable (for example, when a worker processed the job before it
+        # could persist bookkeeping data or Redis is temporarily unreachable).
+        async_result = None
+        try:
+            candidate = AsyncResult(task_id, app=celery_app)
+            # Accessing ``state`` performs the backend lookup; wrap it so any
+            # transient broker/backend issues do not bubble up to the request.
+            state = candidate.state or celery_states.PENDING
+            async_result = candidate
+        except Exception as exc:  # pragma: no cover - defensive logging only
+            logger.debug("AsyncResult lookup failed for %s: %s", task_id, exc)
+            state = celery_states.PENDING
+
+        if async_result is not None:
+            if state == celery_states.SUCCESS:
+                payload = async_result.result
+                file_path: str | None = None
+                if isinstance(payload, dict):
+                    file_path = payload.get("file_path")
+                    if not file_path:
+                        nested = payload.get("result")
+                        if isinstance(nested, str):
+                            try:
+                                nested = json.loads(nested)
+                            except json.JSONDecodeError:
+                                nested = {}
+                        if isinstance(nested, dict):
+                            file_path = nested.get("file_path")
+                if file_path:
+                    if not metadata or (metadata.get("status") or "").upper() != "SUCCESS":
+                        try:
+                            record_task_success(task_id, result={"file_path": file_path})
+                        except Exception:  # pragma: no cover - cache best effort
+                            logger.debug("Failed to backfill task metadata for %s", task_id)
+                    return file_path
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Upload task {task_id} completed without a file_path",
+                )
+            if state == celery_states.FAILURE:
+                reason = async_result.result
+                if isinstance(reason, Exception):
+                    error_message = str(reason)
+                else:
+                    error_message = str(reason) if reason else "Upload failed"
+                if not metadata or (metadata.get("status") or "").upper() != "FAILURE":
+                    try:
+                        record_task_failure(task_id, error=error_message)
+                    except Exception:  # pragma: no cover - cache best effort
+                        logger.debug("Failed to backfill failure metadata for %s", task_id)
+                raise HTTPException(status_code=422, detail=error_message)
+
+        if perf_counter() >= deadline:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Upload task {task_id} is still processing. Please retry in a moment.",
+            )
+
+        await asyncio.sleep(poll_interval)
+
+
+async def _resolve_uploaded_paths(raw_paths: Sequence[str | None]) -> List[str]:
+    """Resolve staged upload references (task:<id>) into concrete MinIO object paths."""
+
+    resolved: List[str] = []
+    for idx, raw in enumerate(raw_paths):
+        if raw is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing file path for staged upload at index {idx + 1}",
+            )
+        if not isinstance(raw, str):
+            raise HTTPException(status_code=400, detail="file_paths must be a JSON array of strings")
+
+        if raw.startswith(UPLOAD_TASK_PREFIX):
+            task_id = raw[len(UPLOAD_TASK_PREFIX) :].strip()
+            if not task_id:
+                raise HTTPException(status_code=400, detail="Invalid upload task reference")
+            logger.debug("Waiting for staged upload task %s to finish", task_id)
+            resolved_path = await _await_upload_result(task_id)
+            logger.debug("Resolved staged upload task %s to object %s", task_id, resolved_path)
+            resolved.append(resolved_path)
+        else:
+            resolved.append(raw)
+    return resolved
+
+
 # --- New endpoints for saving and listing validated dataframes ---
 # Accept both trailing and non-trailing slash variants and explicitly
 # handle CORS preflight OPTIONS requests so browsers or proxies never
@@ -2994,21 +2866,29 @@ async def save_dataframes(
         raise HTTPException(status_code=400, detail="file_keys must be a JSON array")
 
     try:
-        paths = json.loads(file_paths) if file_paths else []
+        raw_paths_input = json.loads(file_paths) if file_paths else []
     except json.JSONDecodeError:
         logger.exception("Invalid JSON for file_paths")
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_paths")
-    if paths and (
-        not isinstance(paths, list)
-        or any(not isinstance(p, str) or not p for p in paths)
-    ):
-        logger.error("file_paths malformed: %s", paths)
-        raise HTTPException(
-            status_code=400, detail="file_paths must be a JSON array of non-empty strings"
-        )
+    if raw_paths_input and not isinstance(raw_paths_input, list):
+        logger.error("file_paths not list: %s", type(raw_paths_input))
+        raise HTTPException(status_code=400, detail="file_paths must be a JSON array")
+
+    raw_paths: List[str | None] = []
+    for idx, value in enumerate(raw_paths_input or []):
+        if value is None:
+            raw_paths.append(None)
+            continue
+        if not isinstance(value, str):
+            logger.error("file_paths[%s] not string: %s (%s)", idx, value, type(value))
+            raise HTTPException(
+                status_code=400,
+                detail="file_paths must be a JSON array of strings",
+            )
+        raw_paths.append(value)
 
     files_list = files or []
-    source_count = len(files_list) if files_list else len(paths)
+    source_count = len(files_list) if files_list else len(raw_paths)
     if source_count == 0:
         logger.error("No files or file paths provided")
         raise HTTPException(status_code=400, detail="No files or file paths provided")
@@ -3017,7 +2897,10 @@ async def save_dataframes(
     fallback_names = (
         [f.filename for f in files_list]
         if files_list
-        else [Path(p).name for p in paths]
+        else [
+            Path(p).name if isinstance(p, str) and p else f"source_{idx + 1}"
+            for idx, p in enumerate(raw_paths)
+        ]
     )
     if len(key_inputs) == 0:
         keys = fallback_names
@@ -3074,10 +2957,26 @@ async def save_dataframes(
         iter_sources = [
             (k, f.filename, f.file, None) for k, f in zip(keys, files_list)
         ]
+        resolved_paths: List[str] = []
     else:
+        resolved_paths = await _resolve_uploaded_paths(raw_paths)
         iter_sources = []
-        for k, p in zip(keys, paths):
-            data = read_minio_object(p)
+        for k, p in zip(keys, resolved_paths):
+            if not p:
+                logger.error("No staged upload available for key %s", k)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No staged upload available for {k}",
+                )
+            try:
+                data = read_minio_object(p)
+            except S3Error as exc:
+                logger.exception("Failed to read staged object %s for key %s", p, k)
+                error_detail = getattr(exc, "message", str(exc))
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to read staged upload for {k}: {error_detail}",
+                ) from exc
             iter_sources.append((k, Path(p).name, io.BytesIO(data), p))
 
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
