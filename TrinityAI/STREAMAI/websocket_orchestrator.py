@@ -1355,6 +1355,12 @@ WORKFLOW PLANNING RULES:
                 execution_result=execution_result,
                 step_cache=step_cache
             )
+        elif atom_id in ["create-column", "create-transform"]:
+            saved_path, auto_save_response = await self._auto_save_create_transform(
+                workflow_step=workflow_step,
+                execution_result=execution_result,
+                step_cache=step_cache
+            )
         else:
             logger.info(f"ℹ️ Auto-save skipped for atom '{atom_id}' (no auto-save logic implemented)")
             return
@@ -1559,6 +1565,93 @@ WORKFLOW PLANNING RULES:
             step_cache["perform_response"] = perform_response
 
         return saved_path, response
+
+    async def _auto_save_create_transform(
+        self,
+        workflow_step: WorkflowStepPlan,
+        execution_result: Dict[str, Any],
+        step_cache: Dict[str, Any]
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Auto-save helper for create-transform atom outputs."""
+        # Get result file from execution result (perform endpoint already saved it)
+        result_file = (
+            execution_result.get("result_file") 
+            or execution_result.get("createResults", {}).get("result_file")
+            or execution_result.get("createColumnResults", {}).get("result_file")
+        )
+        
+        if result_file:
+            # File already saved by perform endpoint, just return the path
+            logger.info(f"✅ Create-transform result already saved by perform endpoint: {result_file}")
+            return result_file, {"result_file": result_file, "status": "already_saved"}
+        
+        # If no result_file, the perform endpoint didn't save it, so we need to save it
+        # This should rarely happen, but handle it gracefully
+        logger.warning(f"⚠️ Create-transform perform endpoint did not return result_file, attempting to save manually")
+        
+        csv_data = execution_result.get("data") or execution_result.get("csv_data")
+        
+        if not csv_data:
+            # Try to get results from cached_dataframe endpoint if we have a file reference
+            file_ref = execution_result.get("file") or execution_result.get("object_name")
+            if file_ref:
+                try:
+                    cached_url = f"{self.fastapi_base_url}/api/create-column/cached_dataframe?object_name={file_ref}"
+                    response = await self._get_json(cached_url)
+                    csv_data = response.get("data")
+                    logger.info(f"✅ Retrieved CSV data from cached_dataframe endpoint")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not fetch cached results: {e}")
+
+        if not csv_data:
+            # If we still don't have CSV data, log warning but don't fail
+            # The file might already be saved by the perform endpoint
+            logger.warning(f"⚠️ Create-transform auto-save: No CSV data available and no result_file found")
+            logger.warning(f"⚠️ Execution result keys: {list(execution_result.keys())}")
+            # Return a placeholder path - the file should already be saved
+            filename = self._build_auto_save_filename(workflow_step, default_prefix="create_transform")
+            return filename, {"result_file": filename, "status": "skipped_no_data"}
+
+        filename = self._build_auto_save_filename(workflow_step, default_prefix="create_transform")
+        payload = {
+            "csv_data": csv_data,
+            "filename": filename
+        }
+
+        create_save_endpoint = f"{self.fastapi_base_url}/api/create-column/save"
+        response = await self._post_json(create_save_endpoint, payload)
+        saved_path = (
+            response.get("result_file")
+            or response.get("object_name")
+            or response.get("path")
+            or response.get("filename")
+            or filename
+        )
+
+        return saved_path, response
+
+    async def _get_json(self, url: str) -> Dict[str, Any]:
+        """Send GET request and return JSON payload."""
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for auto-save HTTP calls but is not installed")
+
+        logger.info(f"🌐 GET {url}")
+        timeout = aiohttp.ClientTimeout(total=180)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                text_body = await response.text()
+                if response.status >= 400:
+                    raise RuntimeError(f"{url} returned {response.status}: {text_body}")
+
+                if not text_body:
+                    return {}
+
+                try:
+                    return json.loads(text_body)
+                except json.JSONDecodeError:
+                    logger.warning(f"⚠️ Non-JSON response from {url}: {text_body[:200]}")
+                    return {}
 
     async def _post_json(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Send POST request and return JSON payload."""

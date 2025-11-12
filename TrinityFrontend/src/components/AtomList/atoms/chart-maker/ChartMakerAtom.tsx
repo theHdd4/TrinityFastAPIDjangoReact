@@ -28,6 +28,16 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
   const { toast } = useToast();
+  
+  // 🔧 CRITICAL FIX: Log atom state for debugging
+  console.log('🔍 ChartMakerAtom render:', {
+    atomId,
+    atomExists: !!atom,
+    hasFileId: !!settings.fileId,
+    hasUploadedData: !!settings.uploadedData,
+    chartsCount: settings.charts?.length || 0,
+    chartRendered: settings.chartRendered
+  });
 
   // Store per-chart loading timers
   const chartLoadingTimers = useRef<Record<string, NodeJS.Timeout | number | null>>({});
@@ -471,6 +481,41 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
 
   // Only show rendered charts if they've been marked as rendered
   const chartsToShow = settings.charts;
+
+  // 🔧 CRITICAL FIX: Show loading state instead of white screen when data is not ready
+  // This prevents white screen when called from central AI
+  if (!settings.fileId || !settings.uploadedData) {
+    console.log('⏳ ChartMakerAtom: Waiting for file data...', {
+      fileId: settings.fileId,
+      hasUploadedData: !!settings.uploadedData,
+      chartsCount: settings.charts?.length || 0
+    });
+    
+    // If we have charts configured but no data yet, show loading
+    if (settings.charts && settings.charts.length > 0) {
+      return (
+        <div className="w-full h-full min-h-[28rem] flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading chart data...</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              {settings.charts.length} chart{settings.charts.length > 1 ? 's' : ''} configured
+            </p>
+          </div>
+        </div>
+      );
+    }
+    
+    // If no charts configured yet, show empty state
+    return (
+      <div className="w-full h-full min-h-[28rem] flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-muted-foreground">Chart Maker</p>
+          <p className="text-sm text-muted-foreground mt-2">Waiting for configuration...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full h-full min-h-[28rem]">

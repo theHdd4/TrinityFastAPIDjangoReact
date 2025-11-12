@@ -414,18 +414,34 @@ export const autoSaveStepResult = async ({
     }
 
     if (atomType === 'create-column' || atomType === 'create-transform') {
+      // 🔧 CRITICAL FIX: Always save as Arrow file (perform endpoint saves CSV, we need Arrow)
+      // Get CSV data from result or convert from unsaved_data
       let csvData: string | null = null;
 
       if (typeof result?.data === 'string') {
         csvData = result.data;
       } else if (Array.isArray(result?.unsaved_data)) {
         csvData = convertRowsToCsv(result.unsaved_data);
+      } else if (result?.result_file) {
+        // If we have result_file but no CSV data, try to fetch it from cached_dataframe
+        try {
+          const cachedRes = await fetch(`${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(result.result_file)}`);
+          if (cachedRes.ok) {
+            const cachedJson = await cachedRes.json();
+            csvData = cachedJson?.data ?? null;
+            console.log(`✅ Retrieved CSV data from cached_dataframe for auto-save`);
+          }
+        } catch (fetchError) {
+          console.warn(`⚠️ Could not fetch CSV data from cached_dataframe:`, fetchError);
+        }
       }
 
       if (!csvData) {
+        console.warn(`⚠️ Create-transform auto-save: No CSV data available`);
         return;
       }
 
+      // Always save as Arrow file with proper filename in create-data folder
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -445,6 +461,10 @@ export const autoSaveStepResult = async ({
           ...(currentSettings.createColumnResults || {}),
           result_file: savedPath,
           unsaved_data: null,
+        },
+        createResults: {
+          ...(currentSettings.createResults || {}),
+          result_file: savedPath,
         },
         lastAutoSavedAlias: aliasKey,
       });

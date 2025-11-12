@@ -129,3 +129,4 @@ class GraphRAGQueryClient:
         return None
 
 
+

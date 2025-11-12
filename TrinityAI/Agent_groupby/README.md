@@ -89,3 +89,4 @@ Representative success response:
 - **CSV parsing issues** – Verify `${GROUPBY_API}/cached_dataframe` returns valid CSV text; the handler expects headers on the first line and comma separation.
 
 
+

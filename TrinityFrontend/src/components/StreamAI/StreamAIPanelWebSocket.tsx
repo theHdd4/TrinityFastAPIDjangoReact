@@ -847,7 +847,31 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                   stepAlias,
                 };
                   
-                  await handler.handleSuccess(data.result, handlerContext);
+                  // 🔧 CRITICAL FIX: Handle different response structures
+                  // Chart-maker agent returns response directly, not wrapped in 'result' field
+                  // Other agents may wrap in 'result' field
+                  const handlerData = data.result || data.data || data;
+                  console.log('🔍 Handler data structure:', {
+                    hasResult: !!data.result,
+                    hasData: !!data.data,
+                    usingData: handlerData === data.result ? 'result' : handlerData === data.data ? 'data' : 'direct'
+                  });
+                  
+                  // 🔧 CRITICAL FIX: Await handler completion and ensure state is updated
+                  await handler.handleSuccess(handlerData, handlerContext);
+                  
+                  console.log('✅ Handler completed, verifying atom state...');
+                  
+                  // 🔧 CRITICAL FIX: Verify atom exists and has settings
+                  const verifyAtom = useLaboratoryStore.getState().getAtom(atomInstanceId);
+                  console.log('🔍 Atom verification:', {
+                    atomExists: !!verifyAtom,
+                    hasSettings: !!verifyAtom?.settings,
+                    settingsKeys: verifyAtom?.settings ? Object.keys(verifyAtom.settings) : [],
+                    hasFileId: !!(verifyAtom?.settings as any)?.fileId,
+                    hasUploadedData: !!(verifyAtom?.settings as any)?.uploadedData,
+                    chartsCount: (verifyAtom?.settings as any)?.charts?.length || 0
+                  });
 
                   try {
                     await autoSaveStepResult({
@@ -863,10 +887,26 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                     console.error('❌ Auto-save error:', autoSaveError);
                   }
                   
-                  // Save to localStorage
+                  // 🔧 CRITICAL FIX: Force React to re-render by updating cards state
+                  // This ensures the UI updates even when called from central AI
                   const cards = useLaboratoryStore.getState().cards;
                   localStorage.setItem('laboratory-layout', JSON.stringify(cards));
-                  setCards([...cards]);  // Force refresh
+                  
+                  // Force multiple state updates to ensure React detects changes
+                  setCards([...cards]);
+                  
+                  // 🔧 CRITICAL FIX: Force re-render after a short delay to ensure async operations complete
+                  setTimeout(() => {
+                    const updatedCards = useLaboratoryStore.getState().cards;
+                    setCards([...updatedCards]);
+                    
+                    // Force another update to trigger component re-render
+                    setTimeout(() => {
+                      const finalCards = useLaboratoryStore.getState().cards;
+                      setCards([...finalCards]);
+                      console.log('🔄 Final React re-render triggered for chart-maker atom');
+                    }, 200);
+                  }, 100);
                   
                   console.log('✅ Handler processed results - card updated!');
                   updateProgress('\n   ✅ Results ready in Laboratory Mode');

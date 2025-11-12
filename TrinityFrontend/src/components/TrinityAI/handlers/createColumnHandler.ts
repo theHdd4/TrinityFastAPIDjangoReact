@@ -8,7 +8,8 @@ import {
   processSmartResponse,
   executePerformOperation,
   validateFileInput,
-  constructFullPath
+  constructFullPath,
+  autoSaveStepResult
 } from './utils';
 
 export const createColumnHandler: AtomHandler = {
@@ -545,22 +546,161 @@ export const createColumnHandler: AtomHandler = {
         const result = await res2.json();
         console.log('✅ Auto-execution successful:', result);
         
-        // 🔧 CRITICAL FIX: Update atom settings with results
+        // 🔧 CRITICAL FIX: Extract result data and file path (like groupby)
+        let parsedRows: any[] | null = null;
+        let parsedCsv: string | null = null;
+        let resultFilePath: string | null = null;
+        
+        if (result.status === 'SUCCESS' && result.result_file) {
+          resultFilePath = result.result_file;
+          console.log('🔄 Backend operation completed, retrieving results from saved file:', result.result_file);
+          
+          // Extract results from response if available
+          if (result.results && Array.isArray(result.results)) {
+            parsedRows = result.results;
+            console.log('✅ Results extracted from perform response:', {
+              rowCount: parsedRows.length,
+              columns: result.columns?.length || 0
+            });
+          }
+          
+          // Try to get CSV data from cached_dataframe endpoint (like groupby)
+          try {
+            const cachedRes = await fetch(`${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(result.result_file)}`);
+            if (cachedRes.ok) {
+              const cachedJson = await cachedRes.json();
+              parsedCsv = cachedJson?.data ?? '';
+              console.log('📄 Retrieved CSV data from saved file, length:', parsedCsv.length);
+              
+              // Parse CSV to get actual results if not already available
+              if (!parsedRows && parsedCsv) {
+                const lines = parsedCsv.split('\n');
+                if (lines.length > 1) {
+                  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                  parsedRows = lines.slice(1).filter(line => line.trim()).map(line => {
+                    const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+                    const row: any = {};
+                    headers.forEach((header, index) => {
+                      row[header] = values[index] || '';
+                    });
+                    return row;
+                  });
+                }
+              }
+            }
+          } catch (fetchError) {
+            console.warn('⚠️ Could not fetch cached results, using perform response data:', fetchError);
+          }
+        }
+        
+        // 🔧 CRITICAL FIX: Update atom settings with results (like groupby)
+        // Use 'createResults' (not 'createColumnResults') to match CreateColumnCanvas expectations
+        const finalResultFile = resultFilePath || result.result_file;
+        const finalResults = parsedRows || result.results || [];
+        
         updateAtomSettings(atomId, {
           operationCompleted: true,
-          createColumnResults: result,
+          createResults: {
+            ...(result.createResults || {}),
+            result_file: finalResultFile,
+            results: finalResults, // 🔧 CRITICAL: Set 'results' array for UI display
+            row_count: result.row_count || finalResults.length || 0,
+            columns: result.columns || [],
+            new_columns: result.new_columns || []
+          },
+          // Also set previewFile so UI can display paginated results
+          previewFile: finalResultFile,
+          // Also keep createColumnResults for backward compatibility
+          createColumnResults: {
+            ...result,
+            unsaved_data: finalResults,
+            result_file: finalResultFile,
+            row_count: result.row_count || finalResults.length || 0,
+            columns: result.columns || []
+          },
           lastUpdateTime: Date.now()
         });
         
-        // Add success message
-        const completionDetails = {
-          'File': resolvedDataSource || 'N/A',
-          'Operations': operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', '),
-          'Result': 'New columns created successfully'
-        };
-        const completionMsg = createSuccessMessage('Create Column operations', completionDetails);
-        completionMsg.content += '\n\n📊 Results are ready! New columns have been created.\n\n💡 You can now view the results in the Create Column interface.';
-        setMessages(prev => [...prev, completionMsg]);
+        console.log('✅ Updated atom settings with results:', {
+          result_file: finalResultFile,
+          results_count: finalResults.length,
+          columns: result.columns?.length || 0,
+          new_columns: result.new_columns?.length || 0
+        });
+        
+        // 🔧 CRITICAL FIX: Auto-save the result (like groupby)
+        // Always save as Arrow file - perform endpoint saves CSV, we need to convert to Arrow
+        try {
+          // Ensure we have CSV data for auto-save
+          let csvDataForSave = parsedCsv;
+          if (!csvDataForSave && parsedRows && parsedRows.length > 0) {
+            // Convert parsedRows to CSV if we don't have CSV data
+            const headers = Object.keys(parsedRows[0]);
+            const csvLines = [
+              headers.join(','),
+              ...parsedRows.map(row => headers.map(h => {
+                const val = row[h];
+                return val !== null && val !== undefined ? String(val).replace(/"/g, '""') : '';
+              }).join(','))
+            ];
+            csvDataForSave = csvLines.join('\n');
+            console.log('✅ Converted parsedRows to CSV for auto-save');
+          }
+          
+          // If still no CSV data, try fetching from cached_dataframe
+          if (!csvDataForSave && resultFilePath) {
+            try {
+              const cachedRes = await fetch(`${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(resultFilePath)}`);
+              if (cachedRes.ok) {
+                const cachedJson = await cachedRes.json();
+                csvDataForSave = cachedJson?.data ?? null;
+                console.log('✅ Retrieved CSV data from cached_dataframe for auto-save');
+              }
+            } catch (fetchError) {
+              console.warn('⚠️ Could not fetch CSV from cached_dataframe:', fetchError);
+            }
+          }
+
+          const autoSavePayload = {
+            unsaved_data: parsedRows || result.results || null,
+            data: csvDataForSave || parsedCsv || null, // 🔧 CRITICAL: Ensure CSV data is available
+            result_file: resultFilePath || result.result_file || null,
+          };
+
+          console.log('💾 Calling autoSaveStepResult with:', {
+            hasUnsavedData: !!autoSavePayload.unsaved_data,
+            hasCsvData: !!autoSavePayload.data,
+            resultFile: autoSavePayload.result_file
+          });
+
+          await autoSaveStepResult({
+            atomType: 'create-column',
+            atomId,
+            stepAlias: `create_transform`, // 🔧 FIX: Use simple alias without atomId/timestamp to avoid duplication (timestamp added in utils)
+            result: autoSavePayload,
+            updateAtomSettings,
+            setMessages,
+            isStreamMode: context.isStreamMode || false
+          });
+          
+          console.log('✅ Auto-save completed successfully');
+        } catch (autoSaveError) {
+          console.error('❌ Create Column auto-save failed:', autoSaveError);
+          // Don't fail the whole operation if auto-save fails
+        }
+        
+        // Add success message (only in Individual AI mode, not Stream mode)
+        if (!context.isStreamMode) {
+          const completionDetails = {
+            'Result File': resultFilePath || result.result_file || 'N/A',
+            'Rows': (parsedRows?.length || result.row_count || 0).toLocaleString(),
+            'Columns': (result.columns?.length || 0).toLocaleString(),
+            'New Columns': result.new_columns?.length || 0
+          };
+          const completionMsg = createSuccessMessage('Create Column operations', completionDetails);
+          completionMsg.content += '\n\n📊 Results are ready! New columns have been created and saved.\n\n💡 You can now view the results in the Create Column interface - no need to click Perform again!';
+          setMessages(prev => [...prev, completionMsg]);
+        }
         
       } else {
         console.error('❌ Auto-execution failed:', res2.status, res2.statusText);

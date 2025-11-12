@@ -380,6 +380,209 @@ class ChartMakerAgent:
         
         return context
 
+    def _coerce_to_list_of_strings(self, value: Any) -> List[str]:
+        """
+        Normalize filter values into a clean list of non-empty strings.
+        Accepts comma-separated strings, single values, or iterables.
+        """
+        if value is None:
+            return []
+
+        # If already an iterable (list/tuple/set), convert items to strings
+        if isinstance(value, (list, tuple, set)):
+            normalized = [str(item).strip() for item in value if str(item).strip()]
+            return normalized
+
+        # If provided as a comma separated string, split and trim
+        if isinstance(value, str):
+            # Some models return the literal string "[]" – treat as empty list
+            if value.strip() in {"", "[]", "{}"}:
+                return []
+            parts = [part.strip() for part in value.split(",")]
+            return [part for part in parts if part]
+
+        # Fallback: coerce scalar to string
+        value_str = str(value).strip()
+        return [value_str] if value_str else []
+
+    def _normalize_filters(self, raw_filters: Any) -> Dict[str, List[str]]:
+        """
+        Ensure filter payloads are always Dict[str, List[str]].
+        Supports dicts, list[dict], and comma-separated strings.
+        """
+        normalized: Dict[str, List[str]] = {}
+
+        if not raw_filters:
+            return normalized
+
+        if isinstance(raw_filters, dict):
+            iterator = raw_filters.items()
+        elif isinstance(raw_filters, list):
+            # Sometimes models return [{"column": ["A","B"]}]
+            flattened: Dict[str, Any] = {}
+            for item in raw_filters:
+                if isinstance(item, dict):
+                    for key, value in item.items():
+                        flattened.setdefault(key, value)
+            iterator = flattened.items()
+        else:
+            # Unsupported type – best effort conversion
+            return normalized
+
+        for key, value in iterator:
+            key_str = str(key).strip()
+            if not key_str:
+                continue
+            values = self._coerce_to_list_of_strings(value)
+            normalized[key_str] = values
+
+        return normalized
+
+    def _normalize_chart_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalise chart_json so the frontend always receives a predictable structure.
+        Guards against occasional LLM deviations (e.g. dict, stringified JSON, or missing fields).
+        """
+        if not isinstance(result, dict):
+            logger.error("❌ Chart result is not a dict – returning failure payload")
+            return {
+                "success": False,
+                "message": "Invalid chart result format",
+                "chart_json": [],
+                "smart_response": "I could not understand the response. Please try asking for the chart again."
+            }
+
+        raw_chart_json = result.get("chart_json")
+        charts_source: List[Dict[str, Any]] = []
+
+        try:
+            if raw_chart_json is None:
+                charts_source = []
+            elif isinstance(raw_chart_json, list):
+                charts_source = [chart for chart in raw_chart_json if isinstance(chart, dict)]
+            elif isinstance(raw_chart_json, dict):
+                charts_source = [raw_chart_json]
+            elif isinstance(raw_chart_json, str):
+                parsed = json.loads(raw_chart_json)
+                if isinstance(parsed, list):
+                    charts_source = [chart for chart in parsed if isinstance(chart, dict)]
+                elif isinstance(parsed, dict):
+                    charts_source = [parsed]
+                else:
+                    logger.warning("⚠️ Parsed string chart_json but result was not dict/list")
+                    charts_source = []
+            else:
+                logger.warning(f"⚠️ Unsupported chart_json type: {type(raw_chart_json)}")
+        except Exception as exc:
+            logger.error(f"❌ Failed to parse chart_json field: {exc}")
+            charts_source = []
+
+        normalized_charts: List[Dict[str, Any]] = []
+
+        for index, chart in enumerate(charts_source):
+            try:
+                chart_id = str(chart.get("chart_id", index + 1))
+                chart_type = chart.get("chart_type") or chart.get("type") or "bar"
+                if isinstance(chart_type, str):
+                    chart_type = chart_type.lower().strip()
+                if chart_type not in {"bar", "line", "area", "pie", "scatter"}:
+                    logger.warning(f"⚠️ Invalid chart_type '{chart_type}' – defaulting to 'bar'")
+                    chart_type = "bar"
+
+                title = chart.get("title") or f"Chart {index + 1}"
+
+                raw_traces = chart.get("traces") or []
+                traces: List[Dict[str, Any]] = []
+
+                if isinstance(raw_traces, dict):
+                    raw_traces = [raw_traces]
+                elif not isinstance(raw_traces, list):
+                    raw_traces = []
+
+                for trace_index, trace in enumerate(raw_traces):
+                    if not isinstance(trace, dict):
+                        continue
+
+                    x_column = trace.get("x_column") or trace.get("xAxis") or trace.get("x_axis") or trace.get("x")
+                    y_column = trace.get("y_column") or trace.get("yAxis") or trace.get("y_axis") or trace.get("y")
+
+                    # Guard against arrays for column names
+                    if isinstance(x_column, list):
+                        x_column = next((str(val).strip() for val in x_column if str(val).strip()), "")
+                    if isinstance(y_column, list):
+                        y_column = next((str(val).strip() for val in y_column if str(val).strip()), "")
+
+                    x_column = str(x_column).strip() if x_column else ""
+                    y_column = str(y_column).strip() if y_column else ""
+
+                    name = trace.get("name") or f"Trace {trace_index + 1}"
+                    aggregation = trace.get("aggregation") or "sum"
+                    trace_chart_type = trace.get("chart_type") or chart_type
+                    if isinstance(trace_chart_type, str):
+                        trace_chart_type = trace_chart_type.lower().strip()
+                    if trace_chart_type not in {"bar", "line", "area", "pie", "scatter"}:
+                        trace_chart_type = chart_type
+
+                    filters = self._normalize_filters(trace.get("filters"))
+
+                    traces.append({
+                        "id": trace.get("id", f"trace_{trace_index}"),
+                        "x_column": x_column,
+                        "y_column": y_column,
+                        "name": str(name),
+                        "aggregation": aggregation,
+                        "chart_type": trace_chart_type,
+                        "color": trace.get("color"),
+                        "filters": filters
+                    })
+
+                normalized_chart = {
+                    "chart_id": chart_id,
+                    "chart_type": chart_type,
+                    "title": str(title),
+                    "traces": traces,
+                    "filters": self._normalize_filters(chart.get("filters"))
+                }
+
+                # Preserve optional fields when already in correct format
+                for optional_key in ["description", "insights", "notes"]:
+                    if optional_key in chart:
+                        normalized_chart[optional_key] = chart[optional_key]
+
+                normalized_charts.append(normalized_chart)
+
+            except Exception as chart_exc:
+                logger.error(f"❌ Failed to normalize chart index {index}: {chart_exc}", exc_info=True)
+
+        # Update result payload
+        result["chart_json"] = normalized_charts
+
+        if result.get("success") and not normalized_charts:
+            # If we expected success but have no charts, downgrade the response
+            logger.warning("⚠️ Response flagged success but no valid chart configurations were produced.")
+            result["success"] = False
+            result["message"] = result.get("message") or "Chart generation failed – no valid chart configuration found."
+            result.setdefault(
+                "smart_response",
+                "I could not create a chart because the configuration looked incomplete. Please specify the file and the columns for the x- and y-axis."
+            )
+
+        # Normalise file_name to plain string (no lists/objects)
+        # 🔧 CRITICAL FIX: Also check for data_source field (LLM sometimes returns this instead)
+        file_name = result.get("file_name") or result.get("data_source")
+        if isinstance(file_name, (list, dict)):
+            result["file_name"] = None
+        elif file_name is not None:
+            result["file_name"] = str(file_name).strip() or None
+        
+        # 🔧 CRITICAL FIX: Ensure data_source is also set for backward compatibility
+        if result.get("file_name") and not result.get("data_source"):
+            result["data_source"] = result["file_name"]
+        elif result.get("data_source") and not result.get("file_name"):
+            result["file_name"] = result["data_source"]
+
+        return result
+
     def list_available_files(self) -> Dict[str, Any]:
         """🔧 ENHANCED: Get available files from MinIO like Merge agent"""
         try:
@@ -837,6 +1040,13 @@ class ChartMakerAgent:
             logger.info("🔍 ===== EXTRACTED JSON FROM LLM =====")
             logger.info(f"📊 Extracted JSON:\n{json.dumps(result, indent=2)}")
             logger.info(f"🔍 ===== END EXTRACTED JSON =====")
+
+            # 🔧 Ensure consistent payload before returning to frontend
+            result = self._normalize_chart_result(result)
+
+            logger.info("🔍 ===== NORMALISED CHART JSON =====")
+            logger.info(f"📊 Normalised JSON:\n{json.dumps(result, indent=2)}")
+            logger.info(f"🔍 ===== END NORMALISED JSON =====")
             
             # 🔍 DEBUG: Check if smart_response is present
             if "smart_response" in result:

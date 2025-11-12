@@ -1,6 +1,7 @@
 # ai_logic_create_transform.py
 import json
 import re
+import os
 import requests
 import logging
 from typing import Optional, Dict, Union, List
@@ -17,97 +18,80 @@ def build_prompt_create_transform(
     history_string: str
 ) -> str:
     """
-    Build an intelligent prompt for the create/transform agent with enhanced context awareness.
+    Build a clean, focused prompt for the create/transform agent.
     """
     
-    # Build intelligent suggestions based on available data
-    intelligent_suggestions = _build_intelligent_suggestions(files_with_columns)
+    # Build file information section
+    file_info_section = _build_file_info_section(files_with_columns)
     
-    return f"""
-You are an expert AI data transformation specialist that converts natural language into simple, executable JSON configurations.
+    # Build history context if available
+    history_section = ""
+    if history_string and history_string.strip() != "No history.":
+        history_section = f"\n## Previous Conversation:\n{history_string}\n"
+    
+    return f"""You are a data transformation specialist. Convert the user's request into a JSON configuration for creating or transforming columns in data files.
 
-## 🎯 YOUR ROLE
-- Convert natural language requests into precise data transformation configurations
-- Use the EXACT format specified below
-- Provide helpful suggestions when information is incomplete
+## Available Files and Columns:
+{file_info_section}
 
-## 📋 RESPONSE FORMAT REQUIREMENTS
+## Supported Operations:
+{supported_ops_detailed}
 
-### SUCCESS RESPONSE (when request is clear and executable):
+{history_section}
+## User Request:
+"{user_prompt}"
+
+## Task:
+Analyze the user's request and generate a JSON configuration. Match file names and column names from the available files list above.
+
+## Response Format:
+
+**If the request is clear and executable, return:**
 ```json
 {{
   "success": true,
   "json": [
     {{
       "bucket_name": "trinity",
-      "object_name": "exact_file_name.extension",
+      "object_name": "filename.arrow",
       "add_0": "column1,column2",
       "add_0_rename": "new_column_name",
       "multiply_0": "column3,column4",
       "multiply_0_rename": "product_column"
     }}
   ],
-  "message": "Create/Transform configuration completed successfully",
-  "smart_response": "I've configured the data transformation for you. The specified operations will be applied to create new columns. You can now proceed with the transformation or make adjustments as needed.",
+  "message": "Configuration generated successfully",
+  "smart_response": "Brief explanation of what was configured",
   "session_id": "{session_id}"
 }}
 ```
 
-**⚠️ IMPORTANT: The `object_name` should be just the filename (e.g., "20250813_094555_D0_KHC_UK_Mayo.arrow"). The backend will automatically resolve the full MinIO path.**
-
-### GUIDANCE RESPONSE (when request needs clarification):
+**If the request needs clarification, return:**
 ```json
 {{
   "success": false,
-  "message": "I need more information to complete your request",
-  "smart_response": "I'd be happy to help you with Create/Transform operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you create new columns and transform your data. What specific transformations would you like to perform?",
-  "suggestions": [
-    "Specific suggestion 1",
-    "Specific suggestion 2"
-  ],
+  "message": "What information is needed",
+  "smart_response": "Helpful response listing available files and columns",
+  "suggestions": ["Suggestion 1", "Suggestion 2"],
   "session_id": "{session_id}"
 }}
 ```
 
-## ⚠️ CRITICAL SUCCESS RULES
-**ONLY return success=true when ALL of these are present and valid:**
-- ✅ `bucket_name`: Must be "trinity"
-- ✅ `object_name`: Must be exact file name from available files (e.g., "20250813_094555_D0_KHC_UK_Mayo.arrow")
-- ✅ At least one operation with format: `{{operation_type}}_{{index}}` and `{{operation_type}}_{{index}}_rename` (use 0-based indexing)
-- ✅ Operation columns must exist in the selected file
+## Important Rules:
+1. Use only the filename (not full path) for `object_name` - e.g., "20250813_094555_D0_KHC_UK_Mayo.arrow"
+2. Match file names and column names exactly as they appear in the Available Files section
+3. Use 0-based indexing for operations: `add_0`, `add_0_rename`, `multiply_1`, `multiply_1_rename`, etc.
+4. Column names in operations should be comma-separated: "column1,column2"
+5. Each operation must have a corresponding rename field
+6. Only return success=true when you have a valid file name, valid column names, and at least one operation
 
-**📝 Note: Use only the filename for `object_name`. The backend will automatically resolve the full MinIO path with client/app/project prefix.**
+## Operation Format Examples:
+- Add columns: `"add_0": "volume,salesvalue"` with `"add_0_rename": "total"`
+- Multiply columns: `"multiply_0": "price,quantity"` with `"multiply_0_rename": "revenue"`
+- Subtract columns: `"subtract_0": "revenue,cost"` with `"subtract_0_rename": "profit"`
+- Divide columns: `"divide_0": "revenue,volume"` with `"divide_0_rename": "price_per_unit"`
 
-**If ANY required field is missing or invalid, return success=false with specific guidance.**
-
-### FILE DISPLAY RULES:
-When user asks to "show files", "show all files", "show file names", "show columns", or similar:
-- ALWAYS use GUIDANCE RESPONSE format (success: false)
-- Include detailed file information in smart_response
-- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
-- List ALL available files with their column counts and sample columns
-
-## 🔍 SUPPORTED OPERATIONS
-{supported_ops_detailed}
-
-## 📚 SESSION HISTORY & CONTEXT
-{history_string}
-
-## 🎯 CURRENT USER REQUEST
-"{user_prompt}"
-
-## 💡 INTELLIGENT SUGGESTIONS & CONTEXT
-{intelligent_suggestions}
-
-## 💬 RESPONSE INSTRUCTIONS
-1. **ANALYZE** the user request carefully
-2. **MATCH** files and columns intelligently
-3. **VALIDATE** all components before proceeding
-4. **GENERATE** precise, executable configuration using the EXACT format above
-5. **EXPLAIN** your reasoning clearly
-6. **SUGGEST** alternatives if needed
-
-Respond ONLY with the JSON object. Be precise, intelligent, and helpful.
+Respond with ONLY the JSON object, no additional text.
 """
 
 def _analyze_files_for_context(files_with_columns: dict) -> str:
@@ -173,53 +157,32 @@ def _build_operation_suggestions(files_with_columns: dict) -> str:
     
     return "\n".join(suggestions)
 
-def _build_intelligent_suggestions(files_with_columns: dict) -> str:
-    """Build intelligent suggestions and context based on available data."""
+def _build_file_info_section(files_with_columns: dict) -> str:
+    """Build a clean file information section for the prompt."""
     if not files_with_columns:
-        return "❌ No files available for analysis."
+        return "No files available."
     
-    suggestions = []
-    suggestions.append("💡 **INTELLIGENT SUGGESTIONS & CONTEXT:**")
-    
-    # File analysis - Use same format as DataFrame Operations
-    suggestions.append(f"\n📁 **Available Files ({len(files_with_columns)}):**")
-    for filename, file_data in files_with_columns.items():
+    file_info = []
+    for file_path, file_data in files_with_columns.items():
+        # Handle both dict and list formats
         if isinstance(file_data, dict):
             columns = file_data.get('columns', [])
+            file_name = file_data.get('file_name', os.path.basename(file_path))
         elif isinstance(file_data, list):
             columns = file_data
+            file_name = os.path.basename(file_path)
         else:
             columns = []
+            file_name = os.path.basename(file_path)
         
-        display_name = filename.split('/')[-1] if '/' in filename else filename
-        column_list = ', '.join(columns[:8])  # Show first 8 columns
-        if len(columns) > 8:
-            column_list += f" ... (+{len(columns) - 8} more)"
-        suggestions.append(f"  • **{display_name}** ({len(columns)} columns): {column_list}")
+        # Use just the filename (not full path)
+        display_name = file_name.split('/')[-1] if '/' in file_name else file_name
+        
+        # Show all columns for better matching
+        column_list = ', '.join(columns)
+        file_info.append(f"- {display_name} ({len(columns)} columns): {column_list}")
     
-    # Operation suggestions
-    suggestions.append(f"\n🚀 **Operation Suggestions:**")
-    for filename, file_data in files_with_columns.items():
-        if isinstance(file_data, dict):
-            columns = file_data.get('columns', [])
-        elif isinstance(file_data, list):
-            columns = file_data
-        else:
-            columns = []
-            
-        numeric_cols = [col for col in columns if _is_numeric_column(col)]
-        if len(numeric_cols) >= 2:
-            display_name = filename.split('/')[-1] if '/' in filename else filename
-            suggestions.append(f"  📊 **{display_name}**: Add {', '.join(numeric_cols[:3])} → 'total_sum'")
-            suggestions.append(f"  📊 **{display_name}**: Multiply {', '.join(numeric_cols[:2])} → 'product'")
-    
-    # Examples
-    suggestions.append(f"\n📝 **Example Requests:**")
-    suggestions.append(f"  • \"Add volume and salesvalue from mayo file\"")
-    suggestions.append(f"  • \"Multiply price and quantity from beans file\"")
-    suggestions.append(f"  • \"Create dummy variables for market column\"")
-    
-    return "\n".join(suggestions)
+    return "\n".join(file_info)
 
 def _categorize_file(filename: str, columns: List[str]) -> str:
     """Categorize file based on name and content."""
@@ -270,7 +233,7 @@ def call_llm_create_transform(
     payload = {
         "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": 0.1, "top_p": 0.9},
+        "options": {"temperature": 0.2, "top_p": 0.95},
         "stream": False
     }
     
