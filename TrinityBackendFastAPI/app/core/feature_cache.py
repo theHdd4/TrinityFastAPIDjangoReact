@@ -267,6 +267,12 @@ class FeatureCacheRouter:
                 return rule.namespace
         return self._default_namespace
 
+    @staticmethod
+    def _ensure_parts(key: Any | Sequence[Any]) -> Sequence[Any]:
+        if isinstance(key, (list, tuple)):
+            return list(key)
+        return (key,)
+
     def _proxy_for(self, namespace: FeatureCacheNamespace) -> FeatureCacheProxy:
         if namespace not in self._proxy_cache:
             self._proxy_cache[namespace] = self._client.for_feature(namespace, self._feature)
@@ -329,6 +335,10 @@ class FeatureCacheRouter:
             return fetch.payload
         return self._proxy(key).get(key)
 
+    def get_json(self, key: Any | Sequence[Any]) -> Optional[Any]:
+        parts = self._ensure_parts(key)
+        return self._proxy(key).get_json(parts)
+
     def set(
         self,
         key: Any | Sequence[Any],
@@ -385,6 +395,17 @@ class FeatureCacheRouter:
             binary_cache.set(target, payload, ttl=ttl)
             return
         self._proxy(key).setex(key, ttl, value)
+
+    def set_json(
+        self,
+        key: Any | Sequence[Any],
+        payload: Any,
+        *,
+        ttl: Optional[int] = None,
+        json_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        parts = self._ensure_parts(key)
+        self._proxy(key).set_json(parts, payload, ttl=ttl, json_kwargs=json_kwargs)
 
     def delete(self, key: Any | Sequence[Any]) -> None:
         if self._should_use_binary_cache(key):
