@@ -9,12 +9,15 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ChevronDown, GripVertical } from 'lucide-react';
 import { PivotTableSettings as PivotTableSettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
 
-const AGGREGATION_OPTIONS = ['sum', 'average', 'count', 'max', 'min'];
+const AGGREGATION_OPTIONS = ['sum', 'average', 'count', 'max', 'min', 'weighted_average'];
 
 interface PivotTableSettingsProps {
   data: PivotTableSettingsType;
@@ -225,9 +228,30 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
   };
 
   const updateAggregation = (field: string, aggregation: string) => {
-    const valueFields = data.valueFields.map(v =>
-      v.field === field ? { ...v, aggregation } : v,
-    );
+    const valueFields = data.valueFields.map((v) => {
+      if (v.field !== field) {
+        return v;
+      }
+      if (aggregation === 'weighted_average') {
+        return { ...v, aggregation };
+      }
+      const { weightColumn, ...rest } = v as typeof v & { weightColumn?: string };
+      return { ...rest, aggregation };
+    });
+    onDataChange({ valueFields });
+  };
+
+  const updateWeightColumn = (field: string, weightColumn: string) => {
+    const valueFields = data.valueFields.map((v) => {
+      if (v.field !== field) {
+        return v;
+      }
+      return {
+        ...v,
+        aggregation: v.aggregation === 'weighted_average' ? v.aggregation : 'weighted_average',
+        weightColumn,
+      };
+    });
     onDataChange({ valueFields });
   };
 
@@ -261,6 +285,7 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
               {items.map(item => {
                 const field = isValues ? (item as { field: string }).field : (item as string);
                 const aggregation = isValues ? (item as { field: string; aggregation: string }).aggregation : undefined;
+                const weightColumn = isValues ? (item as { field: string; aggregation: string; weightColumn?: string }).weightColumn : undefined;
 
                 return (
                   <DropdownMenu key={`${area}-${field}`}>
@@ -277,7 +302,7 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
                         <ChevronDown className="h-3 w-3 text-muted-foreground" />
                       </div>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuContent align="end" className="w-48">
                       {isValues ? (
                         <>
                           <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">
@@ -294,7 +319,57 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
                                 ? 'Count'
                                 : option === 'min'
                                 ? 'Min'
-                                : 'Max';
+                                : option === 'max'
+                                ? 'Max'
+                                : 'Weighted Average';
+                            
+
+                            if (option === 'weighted_average') {
+                              return (
+                                <DropdownMenuSub
+                                  key={option}
+                                  onOpenChange={(open) => {
+                                    if (open) {
+                                      updateAggregation(field, option);
+                                    }
+                                  }}
+                                >
+                                  <DropdownMenuSubTrigger
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      updateAggregation(field, option);
+                                    }}
+                                    className={cn(
+                                      'text-xs',
+                                      isActive ? 'font-semibold text-primary' : '',
+                                    )}
+                                  >
+                                    {label}
+                                  </DropdownMenuSubTrigger>
+                                  <DropdownMenuSubContent side="right" align="start" className="w-40">
+                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-wide">
+                                      Weight Column
+                                    </DropdownMenuLabel>
+                                    {fieldOptions.map((col) => (
+                                      <DropdownMenuItem
+                                        key={col}
+                                        onSelect={(event) => {
+                                          event.preventDefault();
+                                          updateWeightColumn(field, col);
+                                        }}
+                                        className={cn(
+                                          'text-xs',
+                                          weightColumn === col ? 'font-semibold text-primary' : '',
+                                        )}
+                                      >
+                                        {col}
+                                      </DropdownMenuItem>
+                                    ))}
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuSub>
+                              );
+                            }
+
                             return (
                               <DropdownMenuItem
                                 key={option}

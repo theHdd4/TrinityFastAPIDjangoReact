@@ -7,6 +7,9 @@ import {
   DEFAULT_PIVOT_TABLE_SETTINGS,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { PIVOT_API } from '@/lib/api';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 interface PivotTableAtomProps {
   atomId: string;
@@ -26,6 +29,8 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
   const [isSaving, setIsSaving] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [saveMessage, setSaveMessage] = React.useState<string | null>(null);
+  const [showSaveAsModal, setShowSaveAsModal] = React.useState(false);
+  const [saveAsFileName, setSaveAsFileName] = React.useState('');
 
   React.useEffect(() => {
     const optionsMap = settings.pivotFilterOptions ?? {};
@@ -149,6 +154,7 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
             .map((item) => ({
               field: item.field,
               aggregation: item.aggregation || 'sum',
+              weight_column: item.weightColumn || undefined,
             })),
           filters: settings.filterFields.filter(Boolean).map((field) => {
             const key = field.toLowerCase();
@@ -237,10 +243,13 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     setSaveError(null);
     setSaveMessage(null);
     try {
+      // Save without filename to overwrite existing file
       const response = await fetch(
         `${PIVOT_API}/${encodeURIComponent(atomId)}/save`,
         {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
         }
       );
       if (!response.ok) {
@@ -264,6 +273,57 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
       setIsSaving(false);
     }
   }, [atomId, settings.dataSource, settings.pivotResults, updateSettings]);
+
+  const handleSaveAs = React.useCallback(() => {
+    // Generate default filename based on config_id and timestamp
+    const defaultFilename = `pivot_${atomId}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
+    setSaveAsFileName(defaultFilename);
+    setShowSaveAsModal(true);
+  }, [atomId]);
+
+  const confirmSaveAs = React.useCallback(async () => {
+    if (!settings.dataSource || !(settings.pivotResults?.length ?? 0)) {
+      return;
+    }
+    if (!saveAsFileName.trim()) {
+      setSaveError('Please enter a filename');
+      return;
+    }
+    setIsSaving(true);
+    setSaveError(null);
+    setSaveMessage(null);
+    try {
+      const response = await fetch(
+        `${PIVOT_API}/${encodeURIComponent(atomId)}/save`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: saveAsFileName.trim() }),
+        }
+      );
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Pivot save failed (${response.status})`);
+      }
+      const result = await response.json();
+      const message = result?.object_name
+        ? `Saved pivot as ${result.object_name}`
+        : 'Pivot table saved successfully';
+      setSaveMessage(message);
+      setShowSaveAsModal(false);
+      setSaveAsFileName('');
+      updateSettings(atomId, {
+        pivotLastSavedPath: result?.object_name ?? null,
+        pivotLastSavedAt: result?.updated_at ?? null,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to save pivot table. Please try again.';
+      setSaveError(message);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [atomId, settings.dataSource, settings.pivotResults, saveAsFileName, updateSettings]);
 
   const readinessMessage = React.useMemo(() => {
     if (!settings.dataSource) {
@@ -313,6 +373,7 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
         }
         onRefresh={handleRefresh}
         onSave={handleSave}
+        onSaveAs={handleSaveAs}
         filterOptions={settings.pivotFilterOptions ?? {}}
         filterSelections={settings.pivotFilterSelections ?? {}}
         onGrandTotalsChange={(mode) =>
@@ -332,6 +393,53 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
         collapsedKeys={settings.collapsedKeys ?? []}
         onToggleCollapse={handleToggleCollapse}
       />
+
+      {/* Save As Modal */}
+      <Dialog open={showSaveAsModal} onOpenChange={setShowSaveAsModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save Pivot Table As</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={saveAsFileName}
+              onChange={(e) => setSaveAsFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && saveAsFileName.trim()) {
+                  confirmSaveAs();
+                }
+              }}
+            />
+            <p className="text-xs text-muted-foreground mt-2">
+              The file will be saved as an Arrow (.arrow) file.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowSaveAsModal(false);
+                setSaveAsFileName('');
+              }}
+              disabled={isSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSaveAs}
+              disabled={isSaving || !saveAsFileName.trim()}
+              className="bg-[#1A73E8] hover:bg-[#1455ad] text-white"
+            >
+              {isSaving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

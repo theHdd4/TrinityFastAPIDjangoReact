@@ -1704,7 +1704,7 @@ export interface PivotTableSettings {
   selectedFields: string[];
   rowFields: string[];
   columnFields: string[];
-  valueFields: { field: string; aggregation: string }[];
+  valueFields: { field: string; aggregation: string; weightColumn?: string }[];
   filterFields: string[];
   pivotResults: any[];
   pivotStatus?: 'idle' | 'pending' | 'success' | 'failed';
@@ -1717,6 +1717,8 @@ export interface PivotTableSettings {
   pivotFilterSelections?: Record<string, string[]>;
   grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
   subtotalsMode?: 'off' | 'top' | 'bottom';
+  percentageMode?: 'off' | 'row' | 'column' | 'grand_total';
+  percentageDecimals?: number;
   pivotStyleId?: string;
   pivotStyleOptions?: {
     rowHeaders: boolean;
@@ -1749,6 +1751,8 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   pivotFilterSelections: {},
   grandTotalsMode: 'off',
   subtotalsMode: 'off',
+  percentageMode: 'off',
+  percentageDecimals: 2,
   pivotStyleId: 'light-slate',
   pivotStyleOptions: {
     rowHeaders: true,

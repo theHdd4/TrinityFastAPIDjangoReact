@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -20,6 +21,7 @@ from .schemas import (
     PivotComputeRequest,
     PivotComputeResponse,
     PivotRefreshResponse,
+    PivotSaveRequest,
     PivotSaveResponse,
     PivotStatusResponse,
 )
@@ -38,6 +40,7 @@ AGGREGATION_MAP: Dict[str, str] = {
     "min": "min",
     "max": "max",
     "median": "median",
+    "weighted_average": "weighted_average",
 }
 
 
@@ -613,13 +616,66 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
 
     value_columns = _resolve_columns(filtered_df, [value.field for value in payload.values])
 
+    # Validate weighted average configurations
+    weight_column_map = {}
+    for value_cfg, col in zip(payload.values, value_columns):
+        if value_cfg.aggregation.lower() == "weighted_average":
+            if not value_cfg.weight_column:
+                message = f"Weight column is required for weighted_average aggregation on field '{col}'"
+                _store_status(config_id, "failed", message, None)
+                raise HTTPException(status_code=400, detail=message)
+            
+            weight_col_resolved = _resolve_columns(filtered_df, [value_cfg.weight_column])
+            if not weight_col_resolved:
+                message = f"Weight column '{value_cfg.weight_column}' not found in dataset"
+                _store_status(config_id, "failed", message, None)
+                raise HTTPException(status_code=404, detail=message)
+            
+            weight_col = weight_col_resolved[0]
+            
+            # Validate weight column is numeric
+            if not pd.api.types.is_numeric_dtype(filtered_df[weight_col]):
+                message = f"Weight column '{weight_col}' must contain numeric values"
+                _store_status(config_id, "failed", message, None)
+                raise HTTPException(status_code=400, detail=message)
+            
+            weight_column_map[col] = weight_col
+
+    def make_weighted_avg_func(weight_column_name: str, df: pd.DataFrame):
+        """Factory function to create weighted average aggregator with proper closure."""
+        def weighted_avg(values):
+            # Get the corresponding weights for these values
+            # In pandas groupby context, values is a Series with an index
+            try:
+                weights = df.loc[values.index, weight_column_name]
+            except KeyError:
+                return np.nan
+            
+            # Filter out null/nan values and non-positive weights
+            mask = values.notna() & weights.notna() & (weights > 0)
+            valid_values = values[mask]
+            valid_weights = weights[mask]
+            
+            if len(valid_values) == 0 or valid_weights.sum() == 0:
+                return np.nan
+            
+            return (valid_values * valid_weights).sum() / valid_weights.sum()
+        
+        return weighted_avg
+
     agg_map = {}
     for value_cfg, col in zip(payload.values, value_columns):
         agg_name = AGGREGATION_MAP.get(value_cfg.aggregation.lower())
         if not agg_name:
             _store_status(config_id, "failed", f"Unsupported aggregation {value_cfg.aggregation}", None)
             raise HTTPException(status_code=400, detail=f"Unsupported aggregation '{value_cfg.aggregation}'")
-        agg_map[col] = agg_name
+        
+        if agg_name == "weighted_average":
+            # Create custom weighted average function for this column
+            weight_col = weight_column_map[col]
+            agg_map[col] = make_weighted_avg_func(weight_col, filtered_df)
+        else:
+            agg_map[col] = agg_name
 
     try:
         include_margins = payload.grand_totals != "off"
@@ -651,12 +707,31 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         pivot_df = pivot_df.to_frame(name=list(agg_map.keys())[0])
         series_converted = True
 
+    # Add column grand totals when requested and there are no column fields
+    include_column_totals = include_margins and payload.grand_totals in ("columns", "both")
+    value_columns_list = list(agg_map.keys())
+    
+    if include_column_totals and not column_fields:
+        # Sum across all value columns to create Grand Total column
+        # Only sum columns that use sum aggregation or are numeric
+        sum_columns = []
+        for col in value_columns_list:
+            if col in pivot_df.columns:
+                # Check if this column uses sum aggregation or is numeric
+                agg_func = agg_map.get(col)
+                if agg_func == "sum" or (isinstance(agg_func, str) and agg_func in ["sum", "mean", "count"]):
+                    sum_columns.append(col)
+        
+        if sum_columns:
+            pivot_df["Grand Total"] = pivot_df[sum_columns].sum(axis=1, numeric_only=True)
+            value_columns_list.append("Grand Total")
+
     (
         column_hierarchy_nodes,
         column_leaf_columns,
         column_leaf_meta,
     ) = _build_column_hierarchy_nodes(
-        pivot_df, column_fields, list(agg_map.keys())
+        pivot_df, column_fields, value_columns_list
     )
 
     if row_fields:
@@ -688,7 +763,7 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
                     order_counter += 1
 
     effective_leaf_columns = (
-        column_leaf_columns if column_leaf_columns else list(agg_map.keys())
+        column_leaf_columns if column_leaf_columns else value_columns_list
     )
 
     include_grand_total_row = include_margins and payload.grand_totals in ("rows", "both")
@@ -768,7 +843,7 @@ def get_pivot_status(config_id: str) -> PivotStatusResponse:
     return _load_status(config_id)
 
 
-async def save_pivot(config_id: str) -> PivotSaveResponse:
+async def save_pivot(config_id: str, payload: Optional[PivotSaveRequest] = None) -> PivotSaveResponse:
     cached = _load_data(config_id)
     if not cached:
         raise HTTPException(status_code=404, detail="No pivot data available to save")
@@ -787,7 +862,19 @@ async def save_pivot(config_id: str) -> PivotSaveResponse:
         prefix = f"{prefix}/"
     object_prefix = f"{prefix}pivot/"
 
-    file_name = f"{config_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.arrow"
+    # Determine filename: use provided filename for save_as, or standard filename for save (always overwrites)
+    config = _load_config(config_id) or {}
+    
+    if payload and payload.filename:
+        # Save As: create new file with provided filename
+        file_name = payload.filename.strip()
+        if not file_name.endswith('.arrow'):
+            file_name = f"{file_name}.arrow"
+    else:
+        # Save: always use the same filename (creates or overwrites)
+        # Remove numbers from config_id for cleaner filename
+        clean_config_id = re.sub(r'\d+', '', config_id).strip('-').strip('_')
+        file_name = f"{clean_config_id}.arrow" if clean_config_id else f"pivot_{config_id}.arrow"
 
     table = pa.Table.from_pandas(df)
     sink = pa.BufferOutputStream()
@@ -805,9 +892,16 @@ async def save_pivot(config_id: str) -> PivotSaveResponse:
 
     object_name = upload_result["object_name"]
 
-    config = _load_config(config_id) or {}
+    # Update config with saved path
+    # Always update last_saved_path
     config["pivot_last_saved_path"] = object_name
     config["pivot_last_saved_at"] = timestamp.isoformat()
+    
+    # Update first_saved_path only if this is a Save operation (not Save As)
+    if not (payload and payload.filename):
+        config["pivot_first_saved_path"] = object_name
+        config["pivot_first_saved_at"] = timestamp.isoformat()
+    
     _store_config(config_id, config)
 
     rows = cached.get("rows") or len(records)
