@@ -33,6 +33,7 @@ class FeatureCacheNamespace(str, Enum):
     WORKFLOW = "workflow"
     MOLECULE = "molecule"
     EXHIBITION = "exhibition"
+    TASK = "task"
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ def _default_namespace_config(base_channel: str) -> Mapping[FeatureCacheNamespac
         FeatureCacheNamespace.WORKFLOW: _cfg(FeatureCacheNamespace.WORKFLOW, 3600),
         FeatureCacheNamespace.MOLECULE: _cfg(FeatureCacheNamespace.MOLECULE, 3600),
         FeatureCacheNamespace.EXHIBITION: _cfg(FeatureCacheNamespace.EXHIBITION, 900),
+        FeatureCacheNamespace.TASK: _cfg(FeatureCacheNamespace.TASK, 3600),
     }
 
 

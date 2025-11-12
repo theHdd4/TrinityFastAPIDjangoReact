@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
+from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File, status
 import os
 from minio import Minio
 from minio.error import S3Error
@@ -16,6 +16,7 @@ from numbers import Real
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
+from app.core.celery_client import submit_task
 
 router = APIRouter()
 
@@ -34,6 +35,45 @@ minio_client = Minio(
 
 # In-memory storage for dataframe sessions
 SESSIONS: Dict[str, pl.DataFrame] = {}
+
+
+class TransformationRequest(BaseModel):
+    frame: List[Dict[str, Any]]
+    operations: List[Dict[str, Any]]
+    context: Dict[str, Any] | None = None
+
+
+@router.post("/jobs/load-csv", status_code=status.HTTP_202_ACCEPTED)
+async def enqueue_csv_load(file: UploadFile = File(...)) -> Dict[str, Any]:
+    content = await file.read()
+    submission = submit_task(
+        "dataframe.load_csv",
+        kwargs={"file_bytes": content},
+        meta={"filename": file.filename},
+    )
+    return {
+        "task_id": submission.id,
+        "task_name": submission.name,
+        "status_url": f"/tasks/{submission.id}",
+    }
+
+
+@router.post("/jobs/transform", status_code=status.HTTP_202_ACCEPTED)
+async def enqueue_transformation(request: TransformationRequest) -> Dict[str, Any]:
+    submission = submit_task(
+        "dataframe.apply_transformations",
+        kwargs={
+            "frame": request.frame,
+            "operations": request.operations,
+            "context": request.context or {},
+        },
+        meta={"operation_count": len(request.operations)},
+    )
+    return {
+        "task_id": submission.id,
+        "task_name": submission.name,
+        "status_url": f"/tasks/{submission.id}",
+    }
 
 
 def _get_df(df_id: str) -> pl.DataFrame:
