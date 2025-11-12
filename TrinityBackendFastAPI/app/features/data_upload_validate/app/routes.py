@@ -61,8 +61,16 @@ from app.features.data_upload_validate.app.database import (
     get_validation_units_from_mongo,
 )
 
+from celery import states as celery_states
+from celery.result import AsyncResult
+
+from app.celery_app import celery_app
 from app.core.celery_client import submit_task
-from app.core.task_tracking import get_task_metadata
+from app.core.task_tracking import (
+    get_task_metadata,
+    record_task_failure,
+    record_task_success,
+)
 from app.redis_cache import cache_master_config
 from app.core.observability import timing_dependency_factory
 
@@ -2721,6 +2729,59 @@ async def _await_upload_result(
                 )
             if status == "FAILURE":
                 error_message = metadata.get("error") or "Upload failed"
+                raise HTTPException(status_code=422, detail=error_message)
+
+        # Fallback to the Celery result backend when our task metadata cache is
+        # unavailable (for example, when a worker processed the job before it
+        # could persist bookkeeping data or Redis is temporarily unreachable).
+        async_result = None
+        try:
+            candidate = AsyncResult(task_id, app=celery_app)
+            # Accessing ``state`` performs the backend lookup; wrap it so any
+            # transient broker/backend issues do not bubble up to the request.
+            state = candidate.state or celery_states.PENDING
+            async_result = candidate
+        except Exception as exc:  # pragma: no cover - defensive logging only
+            logger.debug("AsyncResult lookup failed for %s: %s", task_id, exc)
+            state = celery_states.PENDING
+
+        if async_result is not None:
+            if state == celery_states.SUCCESS:
+                payload = async_result.result
+                file_path: str | None = None
+                if isinstance(payload, dict):
+                    file_path = payload.get("file_path")
+                    if not file_path:
+                        nested = payload.get("result")
+                        if isinstance(nested, str):
+                            try:
+                                nested = json.loads(nested)
+                            except json.JSONDecodeError:
+                                nested = {}
+                        if isinstance(nested, dict):
+                            file_path = nested.get("file_path")
+                if file_path:
+                    if not metadata or (metadata.get("status") or "").upper() != "SUCCESS":
+                        try:
+                            record_task_success(task_id, result={"file_path": file_path})
+                        except Exception:  # pragma: no cover - cache best effort
+                            logger.debug("Failed to backfill task metadata for %s", task_id)
+                    return file_path
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Upload task {task_id} completed without a file_path",
+                )
+            if state == celery_states.FAILURE:
+                reason = async_result.result
+                if isinstance(reason, Exception):
+                    error_message = str(reason)
+                else:
+                    error_message = str(reason) if reason else "Upload failed"
+                if not metadata or (metadata.get("status") or "").upper() != "FAILURE":
+                    try:
+                        record_task_failure(task_id, error=error_message)
+                    except Exception:  # pragma: no cover - cache best effort
+                        logger.debug("Failed to backfill failure metadata for %s", task_id)
                 raise HTTPException(status_code=422, detail=error_message)
 
         if perf_counter() >= deadline:
