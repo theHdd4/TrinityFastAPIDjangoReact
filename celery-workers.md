@@ -1,6 +1,7 @@
 # Celery Worker Coverage Report
 
 ## Summary
+- Data upload & validate now queues the `/upload-file` and `/validate` workflows so long-running parsing and rule execution run on workers while the API immediately returns task handles.【F:TrinityBackendFastAPI/app/features/data_upload_validate/app/routes.py†L498-L588】【F:TrinityBackendFastAPI/app/features/data_upload_validate/service.py†L185-L378】
 - Only the DataFrame Operations atom currently submits work to Celery, and even there only the `/load`, `/filter_rows`, and `/sort` endpoints use the task client while all other mutations run inline on the API worker.【F:TrinityBackendFastAPI/app/features/dataframe_operations/app/routes.py†L702-L806】
 - Every other atom in `TrinityBackendFastAPI/app/features/` still performs its heavy lifting synchronously inside the FastAPI process, so long-running uploads, dataframe transforms, model training, and cache refresh routines will continue to block requests unless they are refactored onto Celery workers.
 
@@ -9,6 +10,10 @@
 ### DataFrame Operations
 - Celery coverage: `/load`, `/filter_rows`, and `/sort` push into `celery_task_client.submit_callable`, so these execute on workers when `CELERY_TASKS_ALWAYS_EAGER` is false.【F:TrinityBackendFastAPI/app/features/dataframe_operations/app/routes.py†L702-L763】
 - Remaining endpoints like `/insert_row`, `/delete_row`, `/insert_column`, and many others still mutate session data synchronously and should be wrapped in tasks if they are expected to scale to large dataframes.【F:TrinityBackendFastAPI/app/features/dataframe_operations/app/routes.py†L766-L1039】
+
+### Data Upload & Validate
+- Celery coverage: `/upload-file` and `/validate` marshal uploaded payloads to `process_temp_upload` and `run_validation` service helpers that run entirely on workers and store result metadata in Redis, returning task identifiers for polling.【F:TrinityBackendFastAPI/app/features/data_upload_validate/app/routes.py†L498-L588】【F:TrinityBackendFastAPI/app/features/data_upload_validate/service.py†L27-L210】
+- Remaining operations like `/save_dataframes`, `/apply-data-transformations`, and the validator configuration endpoints still execute synchronously and should be migrated next so large uploads, Arrow exports, and Mongo bookkeeping do not block request threads.【F:TrinityBackendFastAPI/app/features/data_upload_validate/app/routes.py†L2959-L3080】【F:TrinityBackendFastAPI/app/features/data_upload_validate/app/routes.py†L3869-L3950】
 
 ### Feature Overview
 - Operations such as `/column_summary` pull large Arrow datasets from MinIO/Arrow Flight and compute summaries directly within the request handler without Celery involvement.【F:TrinityBackendFastAPI/app/features/feature_overview/routes.py†L125-L218】

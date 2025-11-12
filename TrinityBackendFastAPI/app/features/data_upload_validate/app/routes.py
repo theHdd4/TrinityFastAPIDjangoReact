@@ -1,6 +1,7 @@
 # app/routes.py - API Routes
 from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response
 from typing import List, Dict, Any
+import base64
 import json
 import pandas as pd
 import polars as pl
@@ -63,6 +64,7 @@ from app.features.data_upload_validate.app.database import (
 
 from app.redis_cache import cache_master_config
 from app.core.observability import timing_dependency_factory
+from app.core.task_queue import celery_task_client, format_task_response
 
 import re
 
@@ -95,78 +97,18 @@ logger = logging.getLogger(__name__)
 
 
 from app.features.data_upload_validate.app.validators.custom_validator import perform_enhanced_validation
+from app.features.data_upload_validate import service as data_upload_service
 
 # Config directory
-CUSTOM_CONFIG_DIR = Path("custom_validations")
-CUSTOM_CONFIG_DIR.mkdir(exist_ok=True)
+CUSTOM_CONFIG_DIR = data_upload_service.CUSTOM_CONFIG_DIR
+MONGODB_DIR = data_upload_service.MONGODB_DIR
+extraction_results = data_upload_service.extraction_results
 
-# In-memory storage
-extraction_results = {}
+CSV_READ_KWARGS = data_upload_service.CSV_READ_KWARGS
 
-# Common Polars CSV options to improve schema inference on large files
-CSV_READ_KWARGS = {
-    "low_memory": True, 
-    "infer_schema_length": 10_000,
-    "encoding": "utf8-lossy"  # Handle all encodings gracefully (UTF-8, Latin-1, Windows-1252, etc.)
-}
 
 def _smart_csv_parse(content: bytes, csv_kwargs: dict) -> tuple[pl.DataFrame, list[str], dict]:
-    """
-    Smart CSV parsing that automatically detects and handles mixed data types.
-    Returns DataFrame, list of warnings, and detailed metadata about data quality issues.
-    """
-    warnings = []
-    metadata = {
-        "mixed_dtype_columns": [],
-        "encoding_used": "utf8-lossy",
-        "parsing_method": "standard"
-    }
-    
-    # Step 1: Try normal parsing first (FAST PATH)
-    try:
-        df = pl.read_csv(io.BytesIO(content), **csv_kwargs)
-        return df, warnings, metadata
-    except Exception as e1:
-        error_msg = str(e1).lower()
-        
-        # Step 2: Quick check - if it's a mixed data type error, jump directly to ignore_errors
-        if "could not parse" in error_msg and "as dtype" in error_msg:
-            print(f"🔄 Mixed data type detected, using ignore_errors for fast handling...")
-            try:
-                kwargs_ignore = csv_kwargs.copy()
-                kwargs_ignore["ignore_errors"] = True
-                df = pl.read_csv(io.BytesIO(content), **kwargs_ignore)
-                metadata["parsing_method"] = "ignore_errors"
-                
-                # Extract problematic column name from error message
-                try:
-                    import re
-                    match = re.search(r"at column '([^']+)'", str(e1))
-                    if match:
-                        problematic_col = match.group(1)
-                        metadata["mixed_dtype_columns"] = [problematic_col]
-                        warnings.append(f"Detected mixed data types in column: {problematic_col}")
-                        warnings.append("File may contain mixed numeric and text values - converted problematic data to preserve integrity")
-                except:
-                    warnings.append("Detected mixed data types - some problematic data was handled")
-                
-                return df, warnings, metadata
-            except Exception as e2:
-                print(f"❌ ignore_errors failed: {e2}")
-        
-        # Step 3: Final fallback - everything as strings (GUARANTEED TO WORK)
-        try:
-            print(f"🔄 Final fallback: Reading all columns as strings")
-            kwargs_strings = {k: v for k, v in csv_kwargs.items() if k not in ["infer_schema_length"]}
-            df = pl.read_csv(io.BytesIO(content), dtypes=pl.Utf8, **kwargs_strings)
-            metadata["parsing_method"] = "all_strings"
-            metadata["mixed_dtype_columns"] = []  # Can't determine specific columns
-            warnings.append("All columns read as strings to handle data type conflicts")
-            warnings.append("Please use Dataframe Operations atom to fix column data types if needed")
-            return df, warnings, metadata
-        except Exception as e3:
-            print(f"❌ All parsing methods failed: {e3}")
-            raise e1  # Re-raise original error
+    return data_upload_service._smart_csv_parse(content, csv_kwargs)
 
 
 # Health check
@@ -313,19 +255,7 @@ async def get_object_prefix(
     return prefix
 
 
-def read_minio_object(object_name: str) -> bytes:
-    """Read an object from MinIO and return its bytes."""
-    client = get_client()
-    response = client.get_object(MINIO_BUCKET, object_name)
-    try:
-        data = response.read()
-    finally:
-        try:
-            response.close()
-            response.release_conn()
-        except Exception:
-            pass
-    return data
+read_minio_object = data_upload_service.read_minio_object
 
 
 @router.get("/get_object_prefix")
@@ -384,113 +314,9 @@ def save_non_validation_data(validator_atom_id: str, data_type: str, data: dict)
         print(f"❌ Error saving {data_type}: {str(e)}")
         return False
 
-def load_non_validation_data(validator_atom_id: str, data_type: str) -> dict:
-    """
-    Load non-validation data from mongodb folder
-    Returns: dict with file_key as keys
-    """
-    try:
-        file_path = MONGODB_DIR / f"{validator_atom_id}_{data_type}.json"
-        if file_path.exists():
-            with open(file_path, "r") as f:
-                data = json.load(f)
-            print(f"✅ Loaded {data_type} for {validator_atom_id} from mongodb folder")
-            return data
-        else:
-            print(f"ℹ️ No {data_type} file found for {validator_atom_id}")
-            return {}
-    except Exception as e:
-        print(f"❌ Error loading {data_type}: {str(e)}")
-        return {}
-
-def load_all_non_validation_data(validator_atom_id: str) -> dict:
-    """
-    Load all non-validation data for a validator atom from mongodb folder
-    Returns: dict with business_dimensions and identifier_assignments
-    """
-    business_dimensions = load_non_validation_data(validator_atom_id, "business_dimensions")
-    identifier_assignments = load_non_validation_data(validator_atom_id, "identifier_assignments")
-
-    return {
-        "business_dimensions": business_dimensions,
-        "identifier_assignments": identifier_assignments,
-    }
-
-def get_validator_from_memory_or_disk(validator_atom_id: str):
-    """
-    Get validator from memory, or load from disk if not in memory
-    Loads both validation data (custom_validations/) and non-validation data (mongodb/)
-    """
-    # Check memory first
-    if validator_atom_id in extraction_results:
-        return extraction_results[validator_atom_id]
-    
-    # Load from disk if not in memory
-    config_path = CUSTOM_CONFIG_DIR / f"{validator_atom_id}.json"
-    if config_path.exists():
-        try:
-            # Load validation data
-            with open(config_path, "r") as f:
-                config = json.load(f)
-            
-            # Load non-validation data from mongodb folder
-            non_validation_data = load_all_non_validation_data(validator_atom_id)
-            
-            # Combine all data in memory
-            extraction_results[validator_atom_id] = {
-                "validator_atom_id": validator_atom_id,
-                "schemas": config.get("schemas", {}),
-                "column_types": config.get("column_types", {}),
-                "config_saved": True,
-                "config_path": str(config_path),
-                **non_validation_data  # Add business_dimensions, identifier_assignments
-            }
-            
-            print(f"✅ Loaded {validator_atom_id} from disk (validation + mongodb data)")
-            return extraction_results[validator_atom_id]
-        except Exception as e:
-            print(f"❌ Error loading config from disk: {str(e)}")
-    
-    return None
-
-def load_existing_configs():
-    """
-    Load all existing validator configs from both folders on startup
-    - custom_validations/: validation data (schemas, column_types)
-    - mongodb/: non-validation data (dimensions, assignments)
-    """
-    if not CUSTOM_CONFIG_DIR.exists():
-        print("ℹ️ No custom_validations folder found")
-        return
-    
-    print("📁 Loading configs from custom_validations and mongodb folders...")
-    
-    for config_file in CUSTOM_CONFIG_DIR.glob("*.json"):
-        try:
-            with open(config_file, "r") as f:
-                config = json.load(f)
-            
-            validator_atom_id = config.get("validator_atom_id")
-            if validator_atom_id:
-                # Load validation data
-                extraction_results[validator_atom_id] = {
-                    "validator_atom_id": validator_atom_id,
-                    "schemas": config.get("schemas", {}),
-                    "column_types": config.get("column_types", {}),
-                    "config_saved": True,
-                    "config_path": str(config_file)
-                }
-                
-                # Load non-validation data from mongodb folder
-                non_validation_data = load_all_non_validation_data(validator_atom_id)
-                extraction_results[validator_atom_id].update(non_validation_data)
-                
-                print(f"✅ Loaded validator atom: {validator_atom_id}")
-                print(f"   - Validation: {len(config.get('schemas', {}))}")
-                print(f"   - Dimensions: {len(non_validation_data.get('business_dimensions', {}))}")
-                print(f"   - Assignments: {len(non_validation_data.get('identifier_assignments', {}))}")
-        except Exception as e:
-            print(f"⚠️ Failed to load config {config_file}: {str(e)}")
+load_all_non_validation_data = data_upload_service.load_all_non_validation_data
+get_validator_from_memory_or_disk = data_upload_service.get_validator_from_memory_or_disk
+load_existing_configs = data_upload_service.load_existing_configs
 
 
 # Upload arbitrary file to MinIO and return its path
@@ -524,11 +350,8 @@ async def upload_file(
         os.environ["APP_NAME"] = app_name
     if project_name:
         os.environ["PROJECT_NAME"] = project_name
+
     prefix = await get_object_prefix()
-    ensure_minio_bucket()
-    # Upload initial file to a temporary subfolder so it isn't exposed as a
-    # saved dataframe until explicitly persisted via the save_dataframes
-    # endpoint.
     tmp_prefix = prefix + "tmp/"
     content = await file.read()
     logger.info(
@@ -537,121 +360,37 @@ async def upload_file(
         len(content),
         tmp_prefix,
     )
-    
-    try:
-        if file.filename.lower().endswith(".csv"):
-            print(f"🔄 Processing CSV file: {file.filename}")
-            print(f"📊 File size: {len(content)} bytes")
-            print(f"📊 CSV_READ_KWARGS: {CSV_READ_KWARGS}")
-            
-            # Smart CSV parsing with automatic mixed data type detection
-            df_pl, parsing_warnings, parsing_metadata = _smart_csv_parse(content, CSV_READ_KWARGS)
-            
-            # Report any warnings about data quality issues
-            if parsing_warnings:
-                print(f"⚠️ Data Quality Warnings:")
-                for warning in parsing_warnings:
-                    print(f"  - {warning}")
-                    
-            if parsing_metadata.get("mixed_dtype_columns"):
-                print(f"🔍 Columns with mixed data types: {', '.join(parsing_metadata['mixed_dtype_columns'])}")
-                    
-            print(f"📊 DataFrame shape: {df_pl.shape}")
-            print(f"📊 Sample data: {df_pl.head(2).to_dicts()}")
-            
-        elif file.filename.lower().endswith((".xls", ".xlsx")):
-            print(f"🔄 Processing Excel file: {file.filename}")
-            try:
-                # First try with pandas, then convert to polars
-                df_pandas = pd.read_excel(io.BytesIO(content))
-                print(f"📊 Pandas DataFrame shape: {df_pandas.shape}")
-                print(f"📊 Sample data types: {df_pandas.dtypes.to_dict()}")
-                
-                # Convert to polars with better type handling
-                df_pl = pl.from_pandas(df_pandas)
-                print(f"✅ Excel parsed successfully - Shape: {df_pl.shape}")
-            except Exception as e1:
-                print(f"❌ Standard Excel parsing failed: {e1}")
-                try:
-                    # Try with different pandas options
-                    df_pandas = pd.read_excel(io.BytesIO(content), dtype=str)
-                    print(f"📊 Reading as string types - Shape: {df_pandas.shape}")
-                    df_pl = pl.from_pandas(df_pandas)
-                    print(f"✅ Excel parsed as strings - Shape: {df_pl.shape}")
-                except Exception as e2:
-                    print(f"❌ String parsing also failed: {e2}")
-                    raise e1  # Re-raise original error
-        else:
-            print(f"❌ Unsupported file type: {file.filename}")
-            raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-    except Exception as e:
-        print(f"❌ Error parsing file {file.filename}: {str(e)}")
-        print(f"📊 Error type: {type(e).__name__}")
-        logger.exception("data_upload.temp_upload.parse_failed file=%s", file.filename)
-        raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
 
-    print(f"🔄 Converting to Arrow format...")
-    arrow_buf = io.BytesIO()
-    df_pl.write_ipc(arrow_buf)
-    arrow_name = Path(file.filename).stem + ".arrow"
-    print(f"📊 Arrow file: {arrow_name}")
-    print(f"📊 Arrow buffer size: {len(arrow_buf.getvalue())} bytes")
-    
-    # Store under temporary prefix to hide from list_saved_dataframes
-    print(f"📤 Uploading to MinIO...")
-    print(f"📊 MinIO prefix: {tmp_prefix}")
-    result = upload_to_minio(arrow_buf.getvalue(), arrow_name, tmp_prefix)
-    print(f"📊 MinIO result: {result}")
-    
-    if result.get("status") != "success":
-        print(f"❌ MinIO upload failed: {result.get('error_message')}")
+    submission = celery_task_client.submit_callable(
+        name="data_upload_validate.upload_file",
+        dotted_path="app.features.data_upload_validate.service.process_temp_upload",
+        kwargs={
+            "file_b64": base64.b64encode(content).decode("utf-8"),
+            "filename": file.filename,
+            "tmp_prefix": tmp_prefix,
+        },
+        metadata={
+            "feature": "data_upload_validate",
+            "operation": "upload_file",
+            "filename": file.filename,
+            "prefix": tmp_prefix,
+        },
+    )
+
+    if submission.status == "failure":  # pragma: no cover - defensive programming
         logger.error(
-            "data_upload.temp_upload.minio_failed file=%s error=%s",
-            file.filename,
-            result.get("error_message"),
+            "data_upload.temp_upload.failed task_id=%s file=%s", submission.id, file.filename
         )
-        raise HTTPException(status_code=500, detail=result.get("error_message", "Upload failed"))
-    
-    print(f"✅ Upload successful: {result['object_name']}")
-    
-    # Prepare response with warnings and metadata if any
-    response = {
-        "file_path": result["object_name"],
-        "file_name": file.filename
-    }
-    
-    if 'parsing_warnings' in locals() and parsing_warnings:
-        response["warnings"] = parsing_warnings
-        response["has_data_quality_issues"] = True
-        
-        if 'parsing_metadata' in locals() and parsing_metadata.get("mixed_dtype_columns"):
-            mixed_cols = parsing_metadata["mixed_dtype_columns"]
-            response["mixed_dtype_columns"] = mixed_cols
-            response["mixed_dtype_count"] = len(mixed_cols)
-            
-            # Create user-friendly message
-            if len(mixed_cols) > 0:
-                col_list = ", ".join(mixed_cols[:5])  # Show first 5 columns
-                if len(mixed_cols) > 5:
-                    col_list += f" and {len(mixed_cols) - 5} more"
-                    
-                response["message"] = f"File '{file.filename}' has mixed data types in columns: {col_list}. This may lead to unstable results. Please use Dataframe Operations atom to fix column data types."
-            else:
-                response["message"] = "File uploaded successfully with data quality warnings. Some atoms may need data type conversion."
-        else:
-            response["message"] = "File uploaded successfully with data quality warnings. Some atoms may need data type conversion."
-    else:
-        response["message"] = "File uploaded successfully"
-        response["has_data_quality_issues"] = False
-    
+        raise HTTPException(status_code=400, detail=submission.detail or "Upload failed")
+
     duration_ms = (perf_counter() - start_time) * 1000
     logger.info(
-        "data_upload.temp_upload.completed file=%s object=%s duration_ms=%.2f",
+        "data_upload.temp_upload.queued file=%s task_id=%s duration_ms=%.2f",
         file.filename,
-        result.get("object_name"),
+        submission.id,
         duration_ms,
     )
-    return response
+    return format_task_response(submission, embed_result=True)
 
 
 @router.delete("/temp-uploads")
@@ -1759,151 +1498,59 @@ async def validate(
     if files_list and len(files_list) > 3:
         raise HTTPException(status_code=400, detail="Maximum 3 files allowed")
     
-    # ✅ Get validator atom data from MongoDB first
-    validator_data = get_validator_atom_from_mongo(validator_atom_id)
-    if not validator_data:
-        # Fallback to old method for backward compatibility
-        validator_data = get_validator_from_memory_or_disk(validator_atom_id)
-    
-    if not validator_data:
-        raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
-    
-    # ✅ ADD: Pass validator_atom_id to validation function for custom conditions lookup
-    validator_data["validator_atom_id"] = validator_atom_id
-    
-    # ✅ Column preprocessing function (same as create_new)
-    def preprocess_column_name(col_name: str) -> str:
-        """Preprocess column name: strip, lowercase, remove spaces but preserve underscores"""
-        col_name = col_name.strip().lower()
-        col_name = re.sub(r'(?<!_)\s+(?!_)', '', col_name)
-        return col_name
-    
-    # ✅ Parse files and store content for MinIO
-    files_data = []
-    file_contents = []
-
+    file_payloads: List[Dict[str, str]] | None = None
     if files_list:
+        file_payloads = []
         for file, key in zip(files_list, keys):
             try:
                 content = await file.read()
-                size_bytes = len(content)
+            except Exception as exc:  # pragma: no cover - defensive programming
+                logger.exception("Failed to read uploaded file %s", file.filename)
+                raise HTTPException(status_code=400, detail=f"Error reading file {file.filename}: {exc}")
+            file_payloads.append(
+                {
+                    "key": key,
+                    "filename": file.filename,
+                    "content_b64": base64.b64encode(content).decode("utf-8"),
+                }
+            )
 
-                if file.filename.lower().endswith(".csv"):
-                    df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
-                elif file.filename.lower().endswith((".xls", ".xlsx")):
-                    df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
-                elif file.filename.lower().endswith(".arrow"):
-                    df_pl = pl.read_ipc(io.BytesIO(content))
-                else:
-                    raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
-                df = df_pl.to_pandas()
-
-                df.columns = [preprocess_column_name(col) for col in df.columns]
-                files_data.append((key, df))
-                file_contents.append((size_bytes, file.filename, key))
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
-    else:
-        for path, key in zip(paths, keys):
-            try:
-                data = read_minio_object(path)
-                size_bytes = len(data)
-                filename = Path(path).name
-                if filename.lower().endswith(".csv"):
-                    df_pl = pl.read_csv(io.BytesIO(data), **CSV_READ_KWARGS)
-                elif filename.lower().endswith((".xls", ".xlsx")):
-                    df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(data)))
-                elif filename.lower().endswith(".arrow"):
-                    df_pl = pl.read_ipc(io.BytesIO(data))
-                else:
-                    raise HTTPException(status_code=400, detail="Only CSV, XLSX and Arrow files supported")
-                df = df_pl.to_pandas()
-
-                df.columns = [preprocess_column_name(col) for col in df.columns]
-                files_data.append((key, df))
-                file_contents.append((size_bytes, filename, key))
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Error parsing file {path}: {str(e)}")
-    
-    # ✅ Enhanced validation with auto-correction and custom conditions
-    validation_results = perform_enhanced_validation(files_data, validator_data)
-    
-    # ✅ Upload to Flight server for immediate use if validation passes
-    minio_uploads: list = []
-    flight_uploads: list = []
-    if validation_results["overall_status"] in ["passed", "passed_with_warnings"]:
-        for (_, filename, key), (_, df) in zip(file_contents, files_data):
-            arrow_file = get_arrow_dir() / f"{validator_atom_id}_{key}.arrow"
-            print(f"📝 saving arrow {arrow_file}")
-            save_arrow_table(df, arrow_file)
-
-            flight_path = f"{validator_atom_id}/{key}"
-            upload_dataframe(df, flight_path)
-            flight_uploads.append({"file_key": key, "flight_path": flight_path})
-    
-    # ✅ Save detailed validation log to MongoDB
-    validation_log_data = {
-        "validator_atom_id": validator_atom_id,
-        "files_validated": [
-            {
-                "file_key": key,
-                "filename": next(f[1] for f in file_contents if f[2] == key),
-                "file_size_bytes": next(f[0] for f in file_contents if f[2] == key),
-                "overall_status": validation_results["file_results"].get(key, {}).get("status", "unknown"),
-                "errors": validation_results["file_results"].get(key, {}).get("errors", []),
-                "warnings": validation_results["file_results"].get(key, {}).get("warnings", []),
-                "auto_corrections": validation_results["file_results"].get(key, {}).get("auto_corrections", []),
-                "condition_failures": validation_results["file_results"].get(key, {}).get("condition_failures", []),  # ✅ ADD
-                "columns_checked": validation_results["file_results"].get(key, {}).get("columns_checked", 0),
-                "data_corrections_applied": validation_results["file_results"].get(key, {}).get("data_corrections_applied", 0),
-                "custom_conditions_failed": validation_results["file_results"].get(key, {}).get("custom_conditions_failed", 0),  # ✅ ADD
-                "validation_duration_ms": 0  # Will implement timing later
-            }
-            for key in keys
-        ],
-        "overall_status": validation_results["overall_status"],
-        "total_files": len(keys),
-        "total_duration_ms": 0,  # Will implement timing later
-        "minio_uploads": minio_uploads,
-        "summary_stats": {
-            "total_auto_corrections": validation_results["summary"].get("total_auto_corrections", 0),
-            "total_condition_failures": validation_results["summary"].get("total_condition_failures", 0),  # ✅ ADD
-            "total_errors": sum(len(result.get("errors", [])) for result in validation_results["file_results"].values()),
-            "total_warnings": sum(len(result.get("warnings", [])) for result in validation_results["file_results"].values())
-        }
-    }
-    
-    # ✅ Save to MongoDB validation logs collection
-    mongo_log_result = save_validation_log_to_mongo(validation_log_data)
-    log_operation_to_mongo(
-        user_id=user_id,
-        client_id=client_id,
-        validator_atom_id=validator_atom_id,
-        operation="validate",
-        details={"overall_status": validation_results["overall_status"]},
+    submission = celery_task_client.submit_callable(
+        name="data_upload_validate.validate",
+        dotted_path="app.features.data_upload_validate.service.run_validation",
+        kwargs={
+            "validator_atom_id": validator_atom_id,
+            "file_payloads": file_payloads,
+            "file_paths": paths,
+            "keys": keys,
+            "date_frequency": date_frequency,
+            "user_id": user_id,
+            "client_id": client_id,
+        },
+        metadata={
+            "feature": "data_upload_validate",
+            "operation": "validate",
+            "validator_atom_id": validator_atom_id,
+            "file_count": len(keys),
+        },
     )
+
+    if submission.status == "failure":  # pragma: no cover - defensive
+        logger.error(
+            "data_upload.validate.failed validator=%s task_id=%s", validator_atom_id, submission.id
+        )
+        raise HTTPException(status_code=400, detail=submission.detail or "Validation failed")
 
     duration_ms = (perf_counter() - start_time) * 1000
     logger.info(
-        "data_upload.validate.completed validator=%s status=%s files=%s duration_ms=%.2f",
+        "data_upload.validate.queued validator=%s task_id=%s files=%s duration_ms=%.2f",
         validator_atom_id,
-        validation_results["overall_status"],
+        submission.id,
         len(keys),
         duration_ms,
     )
 
-    return {
-        "overall_status": validation_results["overall_status"],
-        "validator_atom_id": validator_atom_id,
-        "file_validation_results": validation_results["file_results"],
-        "summary": validation_results["summary"],
-        "minio_uploads": minio_uploads,
-        "flight_uploads": flight_uploads,
-        "validation_log_saved": mongo_log_result["status"] == "success",
-        "validation_log_id": mongo_log_result.get("mongo_id", ""),
-        "total_auto_corrections": validation_results["summary"].get("total_auto_corrections", 0),
-        "total_condition_failures": validation_results["summary"].get("total_condition_failures", 0)  # ✅ ADD
-    }
+    return format_task_response(submission, embed_result=True)
 
     
     
