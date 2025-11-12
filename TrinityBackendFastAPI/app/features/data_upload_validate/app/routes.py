@@ -1,6 +1,6 @@
 # app/routes.py - API Routes
 from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response, status
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Sequence
 import json
 import pandas as pd
 import polars as pl
@@ -62,6 +62,7 @@ from app.features.data_upload_validate.app.database import (
 )
 
 from app.core.celery_client import submit_task
+from app.core.task_tracking import get_task_metadata
 from app.redis_cache import cache_master_config
 from app.core.observability import timing_dependency_factory
 
@@ -384,6 +385,9 @@ async def upload_file(
         "task_name": submission.name,
         "status_url": status_url,
         "message": "Upload queued for background processing",
+        "file_path": f"task:{submission.id}",
+        "file_name": file.filename,
+        "has_data_quality_issues": False,
     }
 
 
@@ -2680,6 +2684,73 @@ async def validate_promo_endpoint(
 load_existing_configs()
 
 
+# Upload task resolution helpers -------------------------------------------------
+UPLOAD_TASK_PREFIX = "task:"
+UPLOAD_TASK_WAIT_SECONDS = 30.0
+UPLOAD_TASK_POLL_INTERVAL = 0.5
+
+
+async def _await_upload_result(
+    task_id: str,
+    *,
+    timeout: float = UPLOAD_TASK_WAIT_SECONDS,
+    poll_interval: float = UPLOAD_TASK_POLL_INTERVAL,
+) -> str:
+    """Wait for a staged upload task to expose its MinIO object path."""
+
+    deadline = perf_counter() + timeout
+    while True:
+        metadata = get_task_metadata(task_id)
+        if metadata:
+            status = (metadata.get("status") or "").upper()
+            if status == "SUCCESS":
+                result = metadata.get("result") or {}
+                file_path = result.get("file_path") or ""
+                if file_path:
+                    return file_path
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Upload task {task_id} completed without a file_path",
+                )
+            if status == "FAILURE":
+                error_message = metadata.get("error") or "Upload failed"
+                raise HTTPException(status_code=422, detail=error_message)
+
+        if perf_counter() >= deadline:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Upload task {task_id} is still processing. Please retry in a moment.",
+            )
+
+        await asyncio.sleep(poll_interval)
+
+
+async def _resolve_uploaded_paths(raw_paths: Sequence[str | None]) -> List[str]:
+    """Resolve staged upload references (task:<id>) into concrete MinIO object paths."""
+
+    resolved: List[str] = []
+    for idx, raw in enumerate(raw_paths):
+        if raw is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Missing file path for staged upload at index {idx + 1}",
+            )
+        if not isinstance(raw, str):
+            raise HTTPException(status_code=400, detail="file_paths must be a JSON array of strings")
+
+        if raw.startswith(UPLOAD_TASK_PREFIX):
+            task_id = raw[len(UPLOAD_TASK_PREFIX) :].strip()
+            if not task_id:
+                raise HTTPException(status_code=400, detail="Invalid upload task reference")
+            logger.debug("Waiting for staged upload task %s to finish", task_id)
+            resolved_path = await _await_upload_result(task_id)
+            logger.debug("Resolved staged upload task %s to object %s", task_id, resolved_path)
+            resolved.append(resolved_path)
+        else:
+            resolved.append(raw)
+    return resolved
+
+
 # --- New endpoints for saving and listing validated dataframes ---
 # Accept both trailing and non-trailing slash variants and explicitly
 # handle CORS preflight OPTIONS requests so browsers or proxies never
@@ -2727,23 +2798,29 @@ async def save_dataframes(
         raise HTTPException(status_code=400, detail="file_keys must be a JSON array")
 
     try:
-        paths = json.loads(file_paths) if file_paths else []
+        raw_paths_input = json.loads(file_paths) if file_paths else []
     except json.JSONDecodeError:
         logger.exception("Invalid JSON for file_paths")
         raise HTTPException(status_code=400, detail="Invalid JSON format for file_paths")
-    if paths and not isinstance(paths, list):
-        logger.error("file_paths not list: %s", type(paths))
+    if raw_paths_input and not isinstance(raw_paths_input, list):
+        logger.error("file_paths not list: %s", type(raw_paths_input))
         raise HTTPException(status_code=400, detail="file_paths must be a JSON array")
-    for idx, value in enumerate(paths or []):
+
+    raw_paths: List[str | None] = []
+    for idx, value in enumerate(raw_paths_input or []):
+        if value is None:
+            raw_paths.append(None)
+            continue
         if not isinstance(value, str):
             logger.error("file_paths[%s] not string: %s (%s)", idx, value, type(value))
             raise HTTPException(
                 status_code=400,
                 detail="file_paths must be a JSON array of strings",
             )
+        raw_paths.append(value)
 
     files_list = files or []
-    source_count = len(files_list) if files_list else len(paths)
+    source_count = len(files_list) if files_list else len(raw_paths)
     if source_count == 0:
         logger.error("No files or file paths provided")
         raise HTTPException(status_code=400, detail="No files or file paths provided")
@@ -2752,7 +2829,10 @@ async def save_dataframes(
     fallback_names = (
         [f.filename for f in files_list]
         if files_list
-        else [Path(p).name or f"source_{idx + 1}" for idx, p in enumerate(paths)]
+        else [
+            Path(p).name if isinstance(p, str) and p else f"source_{idx + 1}"
+            for idx, p in enumerate(raw_paths)
+        ]
     )
     if len(key_inputs) == 0:
         keys = fallback_names
@@ -2809,10 +2889,26 @@ async def save_dataframes(
         iter_sources = [
             (k, f.filename, f.file, None) for k, f in zip(keys, files_list)
         ]
+        resolved_paths: List[str] = []
     else:
+        resolved_paths = await _resolve_uploaded_paths(raw_paths)
         iter_sources = []
-        for k, p in zip(keys, paths):
-            data = read_minio_object(p)
+        for k, p in zip(keys, resolved_paths):
+            if not p:
+                logger.error("No staged upload available for key %s", k)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No staged upload available for {k}",
+                )
+            try:
+                data = read_minio_object(p)
+            except S3Error as exc:
+                logger.exception("Failed to read staged object %s for key %s", p, k)
+                error_detail = getattr(exc, "message", str(exc))
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Failed to read staged upload for {k}: {error_detail}",
+                ) from exc
             iter_sources.append((k, Path(p).name, io.BytesIO(data), p))
 
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
