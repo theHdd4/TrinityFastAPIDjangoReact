@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Plus, Settings, Calendar, X, Loader2, Target, Check, BarChart3, ArrowUp, ArrowDown, Filter as FilterIcon } from 'lucide-react';
 import { SCOPE_SELECTOR_API, CLASSIFIER_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { ScopeSelectorData, ScopeData } from '../ScopeSelectorAtom';
 import Table from '@/templates/tables/table';
 import scopeSelector from '../index';
@@ -97,7 +98,8 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
           // Fetch column summary
           const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`);
           if (res.ok) {
-            const fetchedData = await res.json();
+            const rawData = await res.json();
+            const fetchedData = await resolveTaskResponse<{ summary?: any[] }>(rawData);
             const allColumns = Array.isArray(fetchedData.summary) ? fetchedData.summary.filter(Boolean) : [];
 
             // Determine all categorical identifiers

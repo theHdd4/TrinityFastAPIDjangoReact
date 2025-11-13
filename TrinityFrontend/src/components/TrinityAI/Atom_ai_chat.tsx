@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Bot, User, X, MessageSquare, Send, Plus, RotateCcw } from 'lucide-react';
 import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API, CHART_MAKER_API, EXPLORE_API, DATAFRAME_OPERATIONS_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Message {
@@ -696,7 +697,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               // Fetch column summary to populate allColumns with full object name
               const columnRes = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fullObjectName)}`);
               if (columnRes.ok) {
-                const columnData = await columnRes.json();
+                const rawColumn = await columnRes.json();
+                const columnData = await resolveTaskResponse<{ summary?: any[] }>(rawColumn);
                 const allColumns = Array.isArray(columnData.summary) ? columnData.summary.filter(Boolean) : [];
                 
                 console.log('✅ Columns loaded successfully:', allColumns.length);

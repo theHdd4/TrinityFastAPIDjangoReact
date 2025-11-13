@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
@@ -76,7 +77,8 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     );
     let summary: ColumnInfo[] = [];
     if (res.ok) {
-      const data = await res.json();
+      const raw = await res.json();
+      const data = await resolveTaskResponse<{ summary?: ColumnInfo[] }>(raw);
       summary = (data.summary || []).filter(Boolean);
       setColumns(summary);
     }

@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import {
   Pagination,
   PaginationContent,
@@ -300,7 +301,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       try {
         const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(dataSource)}`);
         if (res.ok) {
-          const data = await res.json();
+          const raw = await res.json();
+          const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
           const summary = (data.summary || []).filter(Boolean);
           // Exclude 'date' (case-insensitive) from selectable identifiers
           const cats = summary.filter((c: any) =>
