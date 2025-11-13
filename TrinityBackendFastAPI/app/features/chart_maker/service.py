@@ -1,8 +1,9 @@
+import base64
 import pandas as pd
 import numpy as np
 import io
 import uuid
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Iterable, Tuple
 from fastapi import HTTPException
 import json
 from datetime import datetime, date
@@ -83,6 +84,45 @@ class ChartMakerService:
             return {"filename": f"file_{file_id}", "data_source": "unknown"}
         return self.file_metadata[file_id]
     
+    def ensure_dataframe(self, file_id: str) -> Tuple[pd.DataFrame, str]:
+        """Return a dataframe for ``file_id`` reloading persisted sources when required."""
+        if file_id in self.file_storage:
+            return self.get_file(file_id), file_id
+
+        last_error: Optional[str] = None
+
+        try:
+            new_file_id = self.load_saved_dataframe(file_id)
+            df = self.get_file(new_file_id)
+            return df, new_file_id
+        except HTTPException as exc:
+            detail = getattr(exc, "detail", None)
+            last_error = detail if isinstance(detail, str) else str(exc)
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            last_error = str(exc)
+
+        if "/" in file_id:
+            filename = file_id.split("/")[-1]
+            try:
+                new_file_id = self.load_saved_dataframe(filename)
+                df = self.get_file(new_file_id)
+                return df, new_file_id
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                last_error = str(exc)
+
+        metadata = self.file_metadata.get(file_id) or {}
+        source_name = metadata.get("filename")
+        source_type = metadata.get("data_source")
+        if source_name and source_type in {"arrow_flight", "minio_fallback"}:
+            try:
+                new_file_id = self.load_saved_dataframe(source_name)
+                df = self.get_file(new_file_id)
+                return df, new_file_id
+            except Exception as exc:  # pragma: no cover - defensive fallback
+                last_error = str(exc)
+
+        raise ValueError(last_error or f"File {file_id} not found")
+
     def load_saved_dataframe(self, object_name: str) -> str:
         """Load a saved dataframe from Arrow Flight and return file_id"""
         try:
@@ -593,3 +633,100 @@ class ChartMakerService:
 
 # Singleton instance
 chart_service = ChartMakerService()
+
+
+def _build_upload_response(df: pd.DataFrame, file_id: str) -> Dict[str, Any]:
+    columns = chart_service.get_all_columns(df)
+    column_types = chart_service.get_column_types(df)
+    categorical_columns = column_types["categorical_columns"][:20]
+    unique_values = chart_service.get_unique_values(df, categorical_columns)
+    sample_data = chart_service.get_sample_data(df, n=5)
+
+    return {
+        "file_id": file_id,
+        "columns": columns,
+        "numeric_columns": column_types["numeric_columns"],
+        "categorical_columns": column_types["categorical_columns"],
+        "unique_values": unique_values,
+        "sample_data": sample_data,
+        "row_count": len(df),
+    }
+
+
+def load_dataframe_from_upload(*, content_b64: str, filename: str) -> Dict[str, Any]:
+    content = base64.b64decode(content_b64.encode("utf-8"))
+    df = chart_service.read_file(content, filename)
+    file_id = chart_service.store_file(df, filename=filename, data_source="uploaded_file")
+    return _build_upload_response(df, file_id)
+
+
+def load_saved_dataframe_task(*, object_name: str) -> Dict[str, Any]:
+    file_id = chart_service.load_saved_dataframe(object_name)
+    df = chart_service.get_file(file_id)
+    return _build_upload_response(df, file_id)
+
+
+def get_all_columns_task(*, file_id: str) -> Dict[str, Any]:
+    df, resolved_id = chart_service.ensure_dataframe(file_id)
+    columns = chart_service.get_all_columns(df)
+    return {"file_id": resolved_id, "columns": columns}
+
+
+def get_column_types_task(*, file_id: str) -> Dict[str, Any]:
+    df, resolved_id = chart_service.ensure_dataframe(file_id)
+    column_types = chart_service.get_column_types(df)
+    column_types["file_id"] = resolved_id
+    return column_types
+
+
+def get_unique_values_task(*, file_id: str, columns: Iterable[str]) -> Dict[str, Any]:
+    df, resolved_id = chart_service.ensure_dataframe(file_id)
+    unique_values = chart_service.get_unique_values(df, list(columns))
+    return {"file_id": resolved_id, "values": unique_values}
+
+
+def filter_data_task(*, file_id: str, filters: Dict[str, List[str]]) -> Dict[str, Any]:
+    df, resolved_id = chart_service.ensure_dataframe(file_id)
+    filtered_df = chart_service.apply_filters(df, filters)
+    filtered_records = chart_service._convert_numpy_types(filtered_df.to_dict("records"))
+    return {"file_id": resolved_id, "filtered_data": filtered_records}
+
+
+def get_sample_data_task(*, file_id: str, n: int = 10) -> Dict[str, Any]:
+    df, resolved_id = chart_service.ensure_dataframe(file_id)
+    sample_data = chart_service.get_sample_data(df, n)
+    return {"file_id": resolved_id, "sample_data": sample_data}
+
+
+def generate_chart_task(*, payload: Dict[str, Any]) -> Dict[str, Any]:
+    request = ChartRequest(**payload)
+    _, resolved_id = chart_service.ensure_dataframe(request.file_id)
+    request.file_id = resolved_id
+
+    df = chart_service.get_file(request.file_id)
+    missing_columns = []
+    for trace in request.traces:
+        if trace.x_column not in df.columns:
+            missing_columns.append(trace.x_column)
+        if trace.y_column not in df.columns:
+            missing_columns.append(trace.y_column)
+    if missing_columns:
+        raise ValueError(
+            "Columns not found in dataframe: " + ", ".join(sorted(set(missing_columns)))
+        )
+
+    chart_response = chart_service.generate_chart_config(request)
+    return chart_response.dict()
+
+
+__all__ = [
+    "chart_service",
+    "load_dataframe_from_upload",
+    "load_saved_dataframe_task",
+    "get_all_columns_task",
+    "get_column_types_task",
+    "get_unique_values_task",
+    "filter_data_task",
+    "get_sample_data_task",
+    "generate_chart_task",
+]
