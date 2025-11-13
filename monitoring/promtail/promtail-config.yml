@@ -19,12 +19,17 @@ scrape_configs:
         target_label: compose_project
     pipeline_stages:
       - match:
-          selector: '{compose_service=~"web|fastapi|celery|trinity-ai"} |~ "redis_cache_event"'
+          selector: '{compose_service=~"web|fastapi|celery|trinity-ai"} |= "redis_cache_event"'
           stages:
             - regex:
                 expression: 'redis_cache_event (?P<json>{.*})'
             - json:
                 source: json
+                expressions:
+                  event: event
+                  command: command
+                  service: service
+                  namespace: namespace
             - labels:
                 event:
                 command:

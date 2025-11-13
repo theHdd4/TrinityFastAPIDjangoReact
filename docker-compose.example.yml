@@ -225,8 +225,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      <<: *redis-env
-      <<: *celery-env
+      <<: [*redis-env, *celery-env]
       DEBUG: "False"
       DJANGO_LOG_LEVEL: "WARNING"
       HOST_IP: ${HOST_IP:-10.2.4.48}
@@ -271,8 +270,7 @@ services:
     networks:
       - trinity-net
     environment:
-      <<: *redis-env
-      <<: *celery-env
+      <<: [*redis-env, *celery-env]
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
@@ -293,8 +291,7 @@ services:
     env_file:
       - ./TrinityBackendDjango/.env
     environment:
-      <<: *redis-env
-      <<: *celery-env
+      <<: [*redis-env, *celery-env]
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
