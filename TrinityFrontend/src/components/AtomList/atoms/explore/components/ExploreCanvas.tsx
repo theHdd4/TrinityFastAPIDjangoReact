@@ -363,10 +363,28 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     setAppliedFilters(prev => (deepEqual(prev, nextAppliedFilters) ? prev : nextAppliedFilters));
 
     const nextChartDataSets = safeData.chartDataSets ?? {};
-    setChartDataSets(prev => (deepEqual(prev, nextChartDataSets) ? prev : nextChartDataSets));
+    setChartDataSets(prev => {
+      if (
+        Object.keys(nextChartDataSets).length === 0 &&
+        prev &&
+        Object.keys(prev).length > 0
+      ) {
+        return prev;
+      }
+      return deepEqual(prev, nextChartDataSets) ? prev : nextChartDataSets;
+    });
 
     const nextChartGenerated = safeData.chartGenerated ?? {};
-    setChartGenerated(prev => (deepEqual(prev, nextChartGenerated) ? prev : nextChartGenerated));
+    setChartGenerated(prev => {
+      if (
+        Object.keys(nextChartGenerated).length === 0 &&
+        prev &&
+        Object.keys(prev).length > 0
+      ) {
+        return prev;
+      }
+      return deepEqual(prev, nextChartGenerated) ? prev : nextChartGenerated;
+    });
 
     const nextChartNotes = safeData.chartNotes ?? {};
     setChartNotes(prev => (deepEqual(prev, nextChartNotes) ? prev : nextChartNotes));
