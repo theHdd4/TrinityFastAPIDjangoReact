@@ -462,14 +462,12 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         method: 'POST',
         body: formData,
       });
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error('Backend did not return valid JSON. Response: ' + text.slice(0, 200));
+      if (!res.ok) {
+        throw new Error(`Backend error ${res.status}`);
       }
-      if (data.status !== 'SUCCESS') {
+      const raw = await res.json();
+      const data = await resolveTaskResponse<Record<string, any>>(raw);
+      if (data.status && data.status !== 'SUCCESS') {
         if (data.error && data.error.includes('Unsupported or custom frequency')) {
           // Set periodNeeded for all STL ops that don't have a period set
           const stlOps = operations.filter(
@@ -485,7 +483,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         }
         throw new Error(data.error || 'Backend error');
       }
-      
+
       // Save the createResults to atom settings
       if (data.createResults) {
         const currentSettings = atom?.settings || {};
@@ -558,7 +556,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         `${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(file)}&page=${page}&page_size=20`
       );
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const result = await response.json();
+      const payload = await response.json();
+      const result = await resolveTaskResponse<{ data: string; pagination: any }>(payload);
       const { headers, rows } = parseCSV(result.data);
       setPreviewData(rows);
       setPreviewHeaders(headers);
@@ -676,8 +675,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          csv_data, 
+        body: JSON.stringify({
+          csv_data,
           filename,
           client_name: env.CLIENT_NAME || '',
           app_name: env.APP_NAME || '',
@@ -690,8 +689,15 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
       }
+      const payload = await response.json();
+      const result = await resolveTaskResponse<Record<string, any>>(payload);
       setSaveSuccess(true);
-      setPreviewFile(filename.endsWith('.arrow') ? filename : filename + '.arrow');
+      const savedFile = typeof result?.result_file === 'string'
+        ? result.result_file
+        : filename.endsWith('.arrow')
+          ? filename
+          : `${filename}.arrow`;
+      setPreviewFile(savedFile);
       setShowSaveModal(false);
       // Don't clear the preview data - keep it visible
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
@@ -801,8 +807,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          csv_data, 
+        body: JSON.stringify({
+          csv_data,
           filename,
           client_name: env.CLIENT_NAME || '',
           app_name: env.APP_NAME || '',
@@ -816,8 +822,15 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
       }
+      const payload = await response.json();
+      const result = await resolveTaskResponse<Record<string, any>>(payload);
       setSaveSuccess(true);
-      setPreviewFile(filename.endsWith('.arrow') ? filename : filename + '.arrow');
+      const savedFile = typeof result?.result_file === 'string'
+        ? result.result_file
+        : filename.endsWith('.arrow')
+          ? filename
+          : `${filename}.arrow`;
+      setPreviewFile(savedFile);
       // Don't clear the preview data - keep it visible
       toast({ title: 'Success', description: 'Original file updated successfully.' });
     } catch (err: any) {

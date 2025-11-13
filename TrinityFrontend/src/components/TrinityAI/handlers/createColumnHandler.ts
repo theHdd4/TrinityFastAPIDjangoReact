@@ -410,10 +410,11 @@ export const createColumnHandler: AtomHandler = {
             const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(resolvedDataSource)}`);
             console.log('🔍 Classification response status:', resp.status);
             if (resp.ok) {
-              const classificationData = await resp.json();
+              const rawClassification = await resp.json();
+              const classificationData = await resolveTaskResponse<Record<string, any>>(rawClassification);
               console.log('🔍 Classification identifiers:', classificationData.identifiers);
               updateAtomSettings(atomId, {
-                selectedIdentifiers: classificationData.identifiers || []
+                selectedIdentifiers: (classificationData.identifiers as string[]) || []
               });
             } else {
               // Fallback to categorical columns

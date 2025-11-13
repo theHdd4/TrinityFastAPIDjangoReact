@@ -716,10 +716,11 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(cfg.object_name)}`);
                   console.log('🔍 Classification response status:', resp.status);
                   if (resp.ok) {
-                    const data = await resp.json();
+                    const rawClassification = await resp.json();
+                    const data = await resolveTaskResponse<Record<string, any>>(rawClassification);
                     console.log('🔍 Classification identifiers:', data.identifiers);
                     updateAtomSettings(atomId, {
-                      selectedIdentifiers: data.identifiers || []
+                      selectedIdentifiers: (data.identifiers as string[]) || []
                     });
                   } else {
                     // Fallback to categorical columns
