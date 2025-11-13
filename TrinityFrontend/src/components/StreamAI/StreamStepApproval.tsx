@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { X, Check, Plus, FastForward } from 'lucide-react';
@@ -35,7 +35,22 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [additionalInfo, setAdditionalInfo] = useState('');
+  const [autoTriggered, setAutoTriggered] = useState(false);
   const { isAgentMode } = useAgentMode();
+
+  useEffect(() => {
+    if (isAutoRunning && !autoTriggered) {
+      console.log(`⏩ [Auto-run] Auto-approving step ${stepNumber}`);
+      setAutoTriggered(true);
+      onRunAll();
+    }
+  }, [isAutoRunning, autoTriggered, onRunAll, stepNumber]);
+
+  useEffect(() => {
+    if (!isAutoRunning && autoTriggered) {
+      setAutoTriggered(false);
+    }
+  }, [isAutoRunning, autoTriggered]);
 
   const handleAddClick = () => {
     setShowAddModal(true);
@@ -145,6 +160,7 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
 
               <Button
                 onClick={onAccept}
+                disabled={isAutoRunning}
                 className="h-11 flex-1 min-w-[150px] bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
               >
                 <Check className="w-4 h-4 mr-1" />

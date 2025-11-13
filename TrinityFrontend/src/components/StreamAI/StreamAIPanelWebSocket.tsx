@@ -140,8 +140,17 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   // Laboratory store
   const { setCards, updateCard } = useLaboratoryStore();
 
+  const safeSetLocalStorage = useCallback((key: string, value: string) => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (error) {
+      console.warn(`⚠️ LocalStorage setItem failed for key "${key}"`, error);
+    }
+  }, []);
+
   const startAutoRun = useCallback(() => {
     if (!autoRunRef.current) {
+      console.log('⏩ [Auto-run] Activating auto-run mode');
       autoRunRef.current = true;
       setIsAutoRunning(true);
     }
@@ -149,45 +158,58 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
   const stopAutoRun = useCallback(() => {
     if (autoRunRef.current || isAutoRunning) {
+      console.log('⏹️ [Auto-run] Stopping auto-run mode');
       autoRunRef.current = false;
       setIsAutoRunning(false);
     }
   }, [isAutoRunning]);
 
-  const queueAutoApprove = useCallback((stepNumber: number, sequenceId?: string) => {
+  const queueAutoApprove = useCallback((
+    stepNumber: number,
+    sequenceId?: string,
+    attempt: number = 1
+  ) => {
     if (!autoRunRef.current) {
       return;
     }
 
-    console.log('⏩ Auto-run queue triggered for step', stepNumber, 'sequence', sequenceId);
+    const socket = wsRef.current;
 
-    window.setTimeout(() => {
-      const socket = wsRef.current;
-      if (socket && socket.readyState === WebSocket.OPEN) {
-        try {
-          socket.send(JSON.stringify({
-            type: 'approve_step',
-            step_number: stepNumber
-          }));
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      try {
+        console.log(`⏩ [Auto-run] Approving step ${stepNumber} (sequence ${sequenceId || 'n/a'}, attempt ${attempt})`);
+        socket.send(JSON.stringify({
+          type: 'approve_step',
+          step_number: stepNumber
+        }));
+        console.log(`✅ [Auto-run] Sent approve_step for step ${stepNumber}`);
 
-          const autoApproveMsg: Message = {
-            id: `auto-approve-${stepNumber}-${Date.now()}`,
-            content: `⏩ Auto-approved step ${stepNumber}. Continuing workflow...`,
-            sender: 'ai',
-            timestamp: new Date()
-          };
+        const autoApproveMsg: Message = {
+          id: `auto-approve-${stepNumber}-${Date.now()}`,
+          content: `⏩ Auto-approved step ${stepNumber}. Continuing workflow...`,
+          sender: 'ai',
+          timestamp: new Date()
+        };
 
-          setMessages(prev => [...prev, autoApproveMsg]);
-          setIsLoading(true);
-        } catch (err) {
-          console.error('❌ Failed to auto-approve step:', err);
+        setMessages(prev => [...prev, autoApproveMsg]);
+        setIsLoading(true);
+      } catch (err) {
+        console.error(`❌ [Auto-run] Failed to approve step ${stepNumber}:`, err);
+        if (attempt < 3) {
+          window.setTimeout(() => queueAutoApprove(stepNumber, sequenceId, attempt + 1), 200);
+        } else {
           stopAutoRun();
         }
+      }
+    } else {
+      if (attempt < 3) {
+        console.warn(`⚠️ [Auto-run] Socket not ready for step ${stepNumber}. Retrying... (attempt ${attempt})`);
+        window.setTimeout(() => queueAutoApprove(stepNumber, sequenceId, attempt + 1), 200);
       } else {
-        console.warn('⚠️ Auto-run active but WebSocket not ready. Stopping auto-run.');
+        console.warn(`⚠️ [Auto-run] Socket unavailable after ${attempt} attempts. Stopping auto-run.`);
         stopAutoRun();
       }
-    }, 200);
+    }
   }, [setMessages, stopAutoRun]);
 
   useEffect(() => {
@@ -350,16 +372,16 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   // Save chats to localStorage
   useEffect(() => {
     if (chats.length > 0) {
-      localStorage.setItem('trinity-ai-chats', JSON.stringify(chats));
+      safeSetLocalStorage('trinity-ai-chats', JSON.stringify(chats));
     }
-  }, [chats]);
+  }, [chats, safeSetLocalStorage]);
   
   // Save current chat ID
   useEffect(() => {
     if (currentChatId) {
-      localStorage.setItem('trinity-ai-current-chat-id', currentChatId);
+      safeSetLocalStorage('trinity-ai-current-chat-id', currentChatId);
     }
-  }, [currentChatId]);
+  }, [currentChatId, safeSetLocalStorage]);
   
   // Save messages to current chat
   useEffect(() => {
@@ -918,7 +940,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             const {cards} = useLaboratoryStore.getState();
             const updatedCards = [...cards, newCard];
             setCards(updatedCards);
-            localStorage.setItem('laboratory-layout', JSON.stringify(updatedCards));
+                  safeSetLocalStorage('laboratory-layout', JSON.stringify(updatedCards));
             setCards([...updatedCards]);  // Force refresh
             
             updateProgress(`\n   📊 Card created`);
@@ -1028,7 +1050,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                   // 🔧 CRITICAL FIX: Force React to re-render by updating cards state
                   // This ensures the UI updates even when called from central AI
                   const cards = useLaboratoryStore.getState().cards;
-                  localStorage.setItem('laboratory-layout', JSON.stringify(cards));
+                  safeSetLocalStorage('laboratory-layout', JSON.stringify(cards));
                   
                   // Force multiple state updates to ensure React detects changes
                   setCards([...cards]);
@@ -1057,70 +1079,79 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             
           case 'step_completed':
             console.log('✅ Step completed:', data.step, 'for sequence:', data.sequence_id);
+            console.log('⏩ Auto-run status:', { autoRunEnabled: autoRunRef.current, isAutoRunning, isLoading });
             
-            // Find and update the correct workflow message by sequence_id
-            let hasNextStep = false;
-            setMessages(prev => {
-              const updated = prev.map(msg => 
-                msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id
-                  ? {
-                      ...msg,
-                      data: {
-                        ...msg.data,
-                        steps: msg.data.steps.map((s: any) => 
-                          s.step_number === data.step 
-                            ? { ...s, status: 'completed', summary: data.summary || 'Step completed successfully' }
-                            : s
-                        )
+            const totalSteps = typeof data.total_steps === 'number'
+              ? data.total_steps
+              : (executionSteps.length || (workflowPlan?.total_steps ?? data.step));
+            const hasNextStep = data.step < totalSteps;
+            const shouldAutoApprove = autoRunRef.current && hasNextStep;
+
+            try {
+              setMessages(prev => {
+                const updated = prev.map(msg => 
+                  msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id
+                    ? {
+                        ...msg,
+                        data: {
+                          ...msg.data,
+                          steps: msg.data.steps.map((s: any) => 
+                            s.step_number === data.step 
+                              ? { ...s, status: 'completed', summary: data.summary || 'Step completed successfully' }
+                              : s
+                          )
+                        }
                       }
-                    }
-                  : msg
-              );
-              
-              const workflowMsg = updated.find(m => 
-                m.type === 'workflow_monitor' && m.data?.sequence_id === data.sequence_id
-              );
-              
-              if (workflowMsg && data.step < workflowMsg.data.steps.length) {
-                hasNextStep = true;
-                setCompletedStepNumber(data.step);
+                    : msg
+                );
                 
-                if (autoRunRef.current) {
-                  console.log('⏩ Auto-run detected completed step', data.step, '- scheduling approval');
-                  return updated;
+                const workflowMsg = updated.find(m => 
+                  m.type === 'workflow_monitor' && m.data?.sequence_id === data.sequence_id
+                );
+                
+                if (workflowMsg && hasNextStep) {
+                  setCompletedStepNumber(data.step);
+                  
+                  if (autoRunRef.current) {
+                    console.log('⏩ Auto-run detected completed step', data.step, '- skipping approval card');
+                    return updated;
+                  }
+                  
+                  console.log(`⏸️ Adding step approval for step ${data.step} (sequence: ${data.sequence_id})`);
+                  const stepInfo = workflowMsg.data.steps.find((s: any) => s.step_number === data.step);
+                  const approvalMsg: Message = {
+                    id: `step-approval-${data.sequence_id}-${data.step}-${Date.now()}`,
+                    content: '',
+                    sender: 'ai',
+                    timestamp: new Date(),
+                    type: 'step_approval',
+                    data: {
+                      stepNumber: data.step,
+                      totalSteps: workflowMsg.data.steps.length,
+                      stepDescription: stepInfo?.description || '',
+                      stepPrompt: stepInfo?.prompt || '',
+                      filesUsed: stepInfo?.files_used || [],
+                      inputs: stepInfo?.inputs || [],
+                      outputAlias: stepInfo?.output_alias || '',
+                      sequence_id: data.sequence_id
+                    }
+                  };
+                  return [...updated, approvalMsg];
                 }
                 
-                console.log(`⏸️ Adding step approval for step ${data.step} (sequence: ${data.sequence_id})`);
-                const stepInfo = workflowMsg.data.steps.find((s: any) => s.step_number === data.step);
-                const approvalMsg: Message = {
-                  id: `step-approval-${data.sequence_id}-${data.step}-${Date.now()}`,
-                  content: '',
-                  sender: 'ai',
-                  timestamp: new Date(),
-                  type: 'step_approval',
-                  data: {
-                    stepNumber: data.step,
-                    totalSteps: workflowMsg.data.steps.length,
-                    stepDescription: stepInfo?.description || '',
-                    stepPrompt: stepInfo?.prompt || '',
-                    filesUsed: stepInfo?.files_used || [],
-                    inputs: stepInfo?.inputs || [],
-                    outputAlias: stepInfo?.output_alias || '',
-                    sequence_id: data.sequence_id
-                  }
-                };
-                return [...updated, approvalMsg];
+                return updated;
+              });
+            } catch (error) {
+              console.error('❌ Error updating step completion state:', error);
+            } finally {
+              if (shouldAutoApprove) {
+                console.log('⏩ Auto-run enqueueing queueAutoApprove for step', data.step);
+                queueAutoApprove(data.step, data.sequence_id);
+              } else if (autoRunRef.current && !hasNextStep) {
+                setIsLoading(false);
+              } else {
+                setIsLoading(false);
               }
-              
-              return updated;
-            });
-
-            if (autoRunRef.current && hasNextStep) {
-              queueAutoApprove(data.step, data.sequence_id);
-            } else if (autoRunRef.current && !hasNextStep) {
-              setIsLoading(false);
-            } else {
-              setIsLoading(false);
             }
             break;
             
