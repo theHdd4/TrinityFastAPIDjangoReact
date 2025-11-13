@@ -1956,6 +1956,15 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
   const canUseHierarchicalLayouts = rowFields.length > 0 && hierarchyTree.roots.length > 0;
 
+  // Calculate max height for scrollable area (approximately 20 rows)
+  const tableMaxHeight = useMemo(() => {
+    const headerRowCount = columnHeaderRows.length > 0 ? columnHeaderRows.length : 1;
+    const headerHeight = headerRowCount * 50; // ~50px per header row
+    const rowHeight = 40; // ~40px per data row
+    const maxVisibleRows = 20;
+    return headerHeight + (maxVisibleRows * rowHeight);
+  }, [columnHeaderRows.length]);
+
   React.useEffect(() => {
     if (!canUseHierarchicalLayouts && (reportLayout === 'compact' || reportLayout === 'outline')) {
       onReportLayoutChange('tabular');
@@ -1964,7 +1973,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
   return (
     <div className="w-full h-full bg-[#F3F3F3] flex flex-col overflow-hidden">
-      <div className="p-3 space-y-3 flex-shrink-0 overflow-y-auto">
+      <div className="p-3 space-y-3 flex-shrink-0">
         <Card className="bg-white border border-[#D9D9D9] rounded-md shadow-sm">
           <div className="px-4 py-3">
             <div className="flex w-full flex-nowrap items-center gap-3 sm:gap-4 overflow-x-auto">
@@ -2379,7 +2388,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         </Card>
       </div>
 
-      <div className="flex-1 min-h-0 p-3 pt-0 overflow-hidden">
+      <div className="flex-1 min-h-0 p-3 pt-0">
         <div className="bg-white border border-[#D9D9D9] rounded-md overflow-hidden shadow-sm h-full flex flex-col">
         {filters.length > 0 && (
             <div className="bg-card border-b border-border flex-shrink-0">
@@ -2545,7 +2554,12 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
               </div>
             </div>
           )}
-          <div className="flex-1 overflow-auto min-h-0" style={{ maxHeight: '100%' }}>
+          <div 
+            className="flex-1 min-h-0 overflow-y-auto overflow-x-auto"
+            style={{
+              maxHeight: `${tableMaxHeight}px`
+            }}
+          >
             {renderCurrentLayout()}
           </div>
         </div>

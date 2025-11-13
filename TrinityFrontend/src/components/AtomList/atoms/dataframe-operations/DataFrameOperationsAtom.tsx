@@ -267,6 +267,9 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
             pivotFilterSelections: {},
             collapsedKeys: [],
           },
+          operationCompleted: true,
+          hasData: true,
+          dataLoaded: true,
         });
       })
       .catch(err => console.error('[DataFrameOperations] auto-load failed', err))

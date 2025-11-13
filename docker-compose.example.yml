@@ -1,5 +1,40 @@
 name: trinity-prod
 
+x-redis-env: &redis-env
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  REDIS_DB: ${REDIS_DB:-0}
+  REDIS_USERNAME: ${REDIS_USERNAME:-}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  REDIS_CLIENT_NAME: ${REDIS_CLIENT_NAME:-trinity}
+  REDIS_USE_TLS: ${REDIS_USE_TLS:-false}
+  REDIS_TLS_CA_FILE: ${REDIS_TLS_CA_FILE:-}
+  REDIS_TLS_CERT_FILE: ${REDIS_TLS_CERT_FILE:-}
+  REDIS_TLS_KEY_FILE: ${REDIS_TLS_KEY_FILE:-}
+  REDIS_TLS_CERT_REQS: ${REDIS_TLS_CERT_REQS:-required}
+  REDIS_POOL_MAX_CONNECTIONS: ${REDIS_POOL_MAX_CONNECTIONS:-50}
+  REDIS_POOL_TIMEOUT: ${REDIS_POOL_TIMEOUT:-10}
+  REDIS_SOCKET_TIMEOUT: ${REDIS_SOCKET_TIMEOUT:-5}
+  REDIS_SOCKET_CONNECT_TIMEOUT: ${REDIS_SOCKET_CONNECT_TIMEOUT:-5}
+  REDIS_HEALTH_CHECK_INTERVAL: ${REDIS_HEALTH_CHECK_INTERVAL:-15}
+
+x-celery-env: &celery-env
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-${REDIS_URL:-redis://redis:6379/0}}
+  CELERY_TASK_DEFAULT_QUEUE: ${CELERY_TASK_DEFAULT_QUEUE:-trinity.tasks}
+  CELERY_BEAT_QUEUE: ${CELERY_BEAT_QUEUE:-trinity.tasks.beat}
+  CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-4}
+
+x-redis-healthcheck: &redis-healthcheck
+  test:
+    - CMD-SHELL
+    - if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -h 127.0.0.1 -p ${REDIS_PORT:-6379} -a "$$REDIS_PASSWORD" ping; else redis-cli -h 127.0.0.1 -p ${REDIS_PORT:-6379} ping; fi
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 5s
+
 services:
   postgres:
     image: postgres:15
@@ -30,8 +65,101 @@ services:
 
   redis:
     image: redis:7
+    environment:
+      <<: *redis-env
+    healthcheck: *redis-healthcheck
     volumes:
       - redis_data:/data
+    networks:
+      - trinity-net
+    restart: always
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    environment:
+      REDIS_ADDR: ${REDIS_URL:-redis://redis:6379/0}
+      REDIS_USER: ${REDIS_USERNAME:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "9121:9121"
+    depends_on:
+      - redis
+    networks:
+      - trinity-net
+    restart: always
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - redis-exporter
+    networks:
+      - trinity-net
+    restart: always
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    depends_on:
+      - prometheus
+    networks:
+      - trinity-net
+    restart: always
+
+  grafana:
+    image: grafana/grafana:10.4.5
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - trinity-net
+    restart: always
+
+  loki:
+    image: grafana/loki:2.9.4
+    hostname: loki
+    command: -config.file=/etc/loki/config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+      - ./monitoring/loki/config.yml:/etc/loki/config.yml:ro
+    networks:
+      - trinity-net
+    restart: always
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./monitoring/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - promtail_positions:/tmp
+    depends_on:
+      - loki
     networks:
       - trinity-net
     restart: always
@@ -97,6 +225,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      <<: [*redis-env, *celery-env]
       DEBUG: "False"
       DJANGO_LOG_LEVEL: "WARNING"
       HOST_IP: ${HOST_IP:-10.2.4.48}
@@ -107,6 +236,7 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
+      REDIS_LOG_SERVICE: django-web
     depends_on:
       - postgres
       - mongo
@@ -140,10 +270,12 @@ services:
     networks:
       - trinity-net
     environment:
+      <<: [*redis-env, *celery-env]
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
+      REDIS_LOG_SERVICE: django-celery
     restart: always
 
   fastapi:
@@ -159,6 +291,7 @@ services:
     env_file:
       - ./TrinityBackendDjango/.env
     environment:
+      <<: [*redis-env, *celery-env]
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
       MINIO_SECRET_KEY: minio123
@@ -169,6 +302,7 @@ services:
       FASTAPI_CORS_ORIGINS: "http://${HOST_IP:-10.2.4.48}:8080,https://trinity.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+      REDIS_LOG_SERVICE: fastapi-api
     ports:
       - "8001:8001"
     depends_on:
@@ -197,7 +331,7 @@ services:
     labels:
       - "environment=prod"
     ports:
-      - "8815:8815"
+      - "${FLIGHT_HOST_PORT:-8815}:8815"
     networks:
       - trinity-net
     restart: always
@@ -209,7 +343,9 @@ services:
     env_file:
       - ./TrinityBackendDjango/.env
     environment:
+      <<: *redis-env
       OLLAMA_IP: 10.2.4.48
+      REDIS_LOG_SERVICE: trinity-ai
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
     ports:
@@ -271,6 +407,10 @@ volumes:
   mongo_data:
   redis_data:
   minio_data:
+  prometheus_data:
+  grafana_data:
+  loki_data:
+  promtail_positions:
 
 networks:
   trinity-net:

@@ -23,6 +23,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from corsheaders.defaults import default_headers, default_methods
 
+from .celery_settings import CELERY_CONFIG
+
 # ------------------------------------------------------------------
 # Load .env variables
 # ------------------------------------------------------------------
@@ -284,11 +286,14 @@ MEDIA_ROOT = BASE_DIR / "media"
 # ------------------------------------------------------------------
 # Celery
 # ------------------------------------------------------------------
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
+CELERY_BROKER_URL = CELERY_CONFIG["broker_url"]
+CELERY_RESULT_BACKEND = CELERY_CONFIG["result_backend"]
+CELERY_ACCEPT_CONTENT = CELERY_CONFIG["accept_content"]
+CELERY_TASK_SERIALIZER = CELERY_CONFIG["task_serializer"]
+CELERY_RESULT_SERIALIZER = CELERY_CONFIG["result_serializer"]
+CELERY_TASK_DEFAULT_QUEUE = CELERY_CONFIG["task_default_queue"]
+CELERY_TASK_QUEUES = CELERY_CONFIG["task_queues"]
+CELERY_WORKER_CONCURRENCY = CELERY_CONFIG["worker_concurrency"]
 
 # ------------------------------------------------------------------
 # django-simple-history

@@ -753,6 +753,67 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     pivotSettings.grandTotalsMode,
   ]);
 
+  // Load pivot data from backend cache when settings are restored (on mount or when pivotSettings change)
+  useEffect(() => {
+    const latestSettings = pivotSettingsRef.current;
+    
+    // Only try to load if we have configuration but no results or stale results
+    const hasConfig = !!latestSettings.dataSource && 
+                      Array.isArray(latestSettings.valueFields) && 
+                      latestSettings.valueFields.length > 0;
+    
+    if (!hasConfig) {
+      return;
+    }
+
+    // Only try to load if we don't have results or results are empty
+    const needsLoad = !latestSettings.pivotResults || 
+                      !Array.isArray(latestSettings.pivotResults) || 
+                      latestSettings.pivotResults.length === 0;
+    
+    if (!needsLoad) {
+      return; // Already have data, no need to load
+    }
+
+    // Try to load from backend cache first (when settings are restored from MongoDB)
+    const loadFromCache = async () => {
+      try {
+        const dataUrl = `${PIVOT_API}/${encodeURIComponent(atomId)}/data`;
+        console.log('[Pivot Load] Attempting to load pivot data from cache for atomId:', atomId);
+        const response = await fetch(dataUrl);
+        
+        if (response.ok) {
+          const cachedData = await response.json();
+          if (cachedData?.data && Array.isArray(cachedData.data) && cachedData.data.length > 0) {
+            console.log('[Pivot Load] Successfully loaded pivot data from cache, rows:', cachedData.data.length);
+            updatePivotSettingsRef.current({
+              pivotResults: cachedData.data ?? [],
+              pivotStatus: cachedData.status ?? 'success',
+              pivotError: null,
+              pivotUpdatedAt: cachedData.updated_at,
+              pivotRowCount: cachedData.rows,
+              pivotHierarchy: Array.isArray(cachedData.hierarchy) ? cachedData.hierarchy : [],
+              pivotColumnHierarchy: Array.isArray(cachedData.column_hierarchy) ? cachedData.column_hierarchy : [],
+            });
+            return true; // Data loaded successfully
+          }
+        } else {
+          console.log('[Pivot Load] No cached data available (status:', response.status, ')');
+        }
+      } catch (error) {
+        console.warn('[Pivot Load] Failed to load from cache:', error);
+      }
+      return false; // Data not available in cache
+    };
+
+    loadFromCache().then(loaded => {
+      if (!loaded) {
+        // If cache load failed, the compute useEffect will handle recomputing
+        console.log('[Pivot Load] Cache load failed, will recompute if signature matches');
+      }
+    });
+  }, [atomId, pivotSettings.dataSource, pivotSettings.valueFields?.length]); // Run when settings are restored
+
   useEffect(() => {
     setPivotSaveMessage(null);
     setPivotSaveError(null);
@@ -812,8 +873,10 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
           grand_totals: latestSettings.grandTotalsMode || 'off',
         };
 
+        const computeUrl = `${PIVOT_API}/${encodeURIComponent(atomId)}/compute`;
+        console.log('[Pivot Compute] Computing with atomId:', atomId, 'URL:', computeUrl);
         const response = await fetch(
-          `${PIVOT_API}/${encodeURIComponent(atomId)}/compute`,
+          computeUrl,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -828,6 +891,35 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         }
 
         const result = await response.json();
+        console.log('[Pivot Compute] Compute completed successfully, data rows:', result?.data?.length || 0);
+        
+        // Verify data was stored in backend cache by checking the data endpoint
+        // Add a small delay to ensure Redis write has completed
+        await new Promise(resolve => setTimeout(resolve, 100));
+        try {
+          const verifyResponse = await fetch(
+            `${PIVOT_API}/${encodeURIComponent(atomId)}/data`
+          );
+          if (verifyResponse.ok) {
+            const verifyData = await verifyResponse.json();
+            console.log('[Pivot Compute] Verified: Data is available in backend cache, rows:', verifyData?.data?.length || 0);
+          } else {
+            console.warn('[Pivot Compute] Warning: Data endpoint returned', verifyResponse.status, '- data may not be cached yet');
+            // Try one more time after a longer delay
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const retryResponse = await fetch(
+              `${PIVOT_API}/${encodeURIComponent(atomId)}/data`
+            );
+            if (retryResponse.ok) {
+              console.log('[Pivot Compute] Verified on retry: Data is now available in backend cache');
+            } else {
+              console.error('[Pivot Compute] ERROR: Data is still not available in cache after retry');
+            }
+          }
+        } catch (error) {
+          console.warn('[Pivot Compute] Could not verify data cache:', error);
+        }
+        
         updatePivotSettingsRef.current({
           pivotResults: result?.data ?? [],
           pivotStatus: result?.status ?? 'success',
@@ -872,22 +964,62 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   const handlePivotSave = useCallback(async () => {
     const latestSettings = pivotSettingsRef.current;
-    if (!latestSettings.dataSource || !(latestSettings.pivotResults?.length ?? 0)) {
+    if (!latestSettings.dataSource) {
+      setPivotSaveError('No data source selected. Please configure the pivot table first.');
       return;
     }
+    if (!(latestSettings.pivotResults?.length ?? 0)) {
+      setPivotSaveError('No pivot data available. Please compute the pivot table first.');
+      return;
+    }
+    if (pivotIsComputing) {
+      setPivotSaveError('Please wait for the pivot table computation to complete.');
+      return;
+    }
+    
     setPivotIsSaving(true);
     setPivotSaveError(null);
     setPivotSaveMessage(null);
     try {
+      // Save without filename to overwrite existing file
+      const saveUrl = `${PIVOT_API}/${encodeURIComponent(atomId)}/save`;
+      console.log('[Pivot Save] Attempting to save with atomId:', atomId, 'URL:', saveUrl);
       const response = await fetch(
-        `${PIVOT_API}/${encodeURIComponent(atomId)}/save`,
+        saveUrl,
         {
           method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
         }
       );
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || `Pivot save failed (${response.status})`);
+        let errorMessage = text || `Pivot save failed (${response.status})`;
+        
+        // Parse JSON error if available
+        try {
+          const errorJson = JSON.parse(text);
+          if (errorJson.detail) {
+            errorMessage = errorJson.detail;
+          }
+        } catch {
+          // Not JSON, use text as-is
+        }
+        
+        console.error('[Pivot Save] Save failed:', {
+          atomId,
+          status: response.status,
+          errorMessage,
+        });
+        
+        // Provide more helpful error message if data is not available
+        if (response.status === 404) {
+          if (errorMessage.includes('No pivot data available') || errorMessage.includes('not found')) {
+            errorMessage = `No pivot data available to save for atomId: ${atomId}. The pivot table may not have finished computing, or the data may have expired. Please click Refresh to recompute the pivot table.`;
+          }
+        }
+        
+        throw new Error(errorMessage);
       }
       const result = await response.json();
       const message = result?.object_name
@@ -907,7 +1039,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     } finally {
       setPivotIsSaving(false);
     }
-  }, [atomId]);
+  }, [atomId, pivotIsComputing]);
 
   const pivotReadinessMessage = useMemo(() => {
     if (!pivotSettings.dataSource) {
@@ -2669,16 +2801,41 @@ const handleHeaderClick = (header: string) => {
     resetSaveSuccess();
     // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
     const activeFileId = settings.fileId || fileId;
-    if (!data || !selectedColumn || !activeFileId) {
-      showValidationError('Please select a target column first');
+    
+    // 🔧 IMPROVED: Better error messages for debugging
+    if (!data) {
+      showValidationError('No data loaded. Please load a file first.');
+      console.error('[Formula] Cannot apply formula: No data loaded');
       return;
     }
+    
+    if (!selectedColumn) {
+      showValidationError('Please select a target column first');
+      console.error('[Formula] Cannot apply formula: No target column selected');
+      return;
+    }
+    
+    if (!activeFileId) {
+      showValidationError('File ID missing. Please reload the file and try again.');
+      console.error('[Formula] Cannot apply formula: Missing fileId', {
+        settingsFileId: settings.fileId,
+        propFileId: fileId,
+        activeFileId
+      });
+      return;
+    }
+    
     const trimmedFormula = formulaInput.trim();
     if (!trimmedFormula) {
       showValidationError('Please enter a formula');
       return;
     }
   
+    console.log('[Formula] 🚀 Applying formula:', {
+      fileId: activeFileId,
+      targetColumn: selectedColumn,
+      formula: trimmedFormula
+    });
   
   // Apply formula directly without queuing to test
   setFormulaLoading(true);
@@ -2691,18 +2848,38 @@ const handleHeaderClick = (header: string) => {
       const currentFilters = settings.filters || {};
       const currentSearchTerm = settings.searchTerm || '';
       
-      // Apply the formula to the original data (backend requirement)
-      // But we'll ensure the filtered view reflects the changes
+      // 🔧 CRITICAL: Apply the formula to the original data via backend endpoint
+      console.log('[Formula] 📡 Calling API endpoint: /apply_formula');
+      console.log('[Formula] Request payload:', {
+        df_id: activeFileId,
+        target_column: selectedColumn,
+        formula: trimmedFormula
+      });
+      
       const resp = await apiApplyFormula(activeFileId, selectedColumn, trimmedFormula);
+      console.log('[Formula] ✅ API response received:', resp);
+      
+      // 🔧 CRITICAL: Update fileId from response if provided (for future operations)
+      const updatedFileId = resp?.df_id || activeFileId;
+      if (updatedFileId && updatedFileId !== activeFileId) {
+        console.log('[Formula] 🔄 Updating fileId:', activeFileId, '→', updatedFileId);
+        onSettingsChange({ fileId: updatedFileId });
+      }
     
     // Preserve deleted columns by filtering out columns that were previously deleted
     const currentHiddenColumns = data.hiddenColumns || [];
     const currentDeletedColumns = data.deletedColumns || [];
     const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
     
+    console.log('[Formula] 📊 Updating canvas with calculated values:', {
+      rows: filtered.rows.length,
+      headers: filtered.headers.length,
+      targetColumn: selectedColumn
+    });
+    
     onDataChange({
       headers: filtered.headers,
-      rows: filtered.rows,
+      rows: filtered.rows, // ✅ This contains the CALCULATED values from backend
       fileName: data.fileName,
       columnTypes: filtered.columnTypes,
       pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),

@@ -8,7 +8,8 @@ import {
   createErrorMessage,
   processSmartResponse,
   executePerformOperation,
-  validateFileInput 
+  validateFileInput,
+  autoSaveStepResult
 } from './utils';
 
 export const mergeHandler: AtomHandler = {
@@ -18,25 +19,42 @@ export const mergeHandler: AtomHandler = {
     console.log('🆔 AtomId:', context.atomId);
     console.log('🔢 SessionId:', context.sessionId);
     
-    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId, stepAlias } = context;
     
-    // 🔧 FIX: Show smart_response in handleSuccess for success cases
-    // handleFailure will handle failure cases
+    // 🚨 FORCED TEST MESSAGE - This MUST appear if handler is called
+    console.log('🚨🚨🚨 MERGE HANDLER CALLED - FORCING TEST MESSAGE');
+    const testMsg: Message = {
+      id: `test_${Date.now()}`,
+      content: '🚨 TEST: Merge handler was called! If you see this, the handler works.',
+      sender: 'ai',
+      timestamp: new Date(),
+    };
+    setMessages((prev: Message[]) => {
+      console.log('🚨 BEFORE adding test message:', prev.length);
+      const updated = [...prev, testMsg];
+      console.log('🚨 AFTER adding test message:', updated.length);
+      return updated;
+    });
+    console.log('🚨 Test message added to state');
+    
+    // 🔧 CRITICAL FIX: Show smart_response EXACTLY like DataFrame Operations (no isStreamMode check)
     const smartResponseText = processSmartResponse(data);
-    console.log('💬 Smart response text available:', smartResponseText ? 'Yes' : 'No');
+    console.log('💬 Smart response text:', smartResponseText);
+    console.log('💬 Smart response length:', smartResponseText?.length);
     console.log('🔍 Has merge_json:', !!data.merge_json);
     
-    // Show smart_response for success cases (when merge_json exists)
+    // Add AI smart response message (prioritize smart_response - SAME AS DATAFRAME OPERATIONS)
     if (smartResponseText) {
-      const smartMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: smartResponseText,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      console.log('📤 Sending smart response message to chat...');
-      setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user:', smartResponseText);
+      // Use the AI's smart response for a more conversational experience
+      const aiMessage = createMessage(smartResponseText);
+      setMessages(prev => [...prev, aiMessage]);
+      console.log('🤖 AI Smart Response displayed:', smartResponseText);
+    } else {
+      // 🔧 FALLBACK: If backend doesn't send smart_response, create a generic success message
+      console.warn('⚠️ No smart_response found in merge data - creating fallback message');
+      const fallbackMsg = createMessage('✅ I\'ve received your merge request and will process it now.');
+      setMessages(prev => [...prev, fallbackMsg]);
+      console.log('🤖 Fallback message displayed');
     }
     
     if (!data.merge_json) {
@@ -144,6 +162,23 @@ export const mergeHandler: AtomHandler = {
             console.log(`✅ Partial match found for merge ${aiFilePath} -> ${partialMatch.object_name}`);
             return partialMatch.object_name;
           }
+
+          // Try matching by base name (handling timestamped auto-save files)
+          const aiBaseName = aiFileName ? aiFileName.replace(/\.[^.]+$/, '') : '';
+          if (aiBaseName) {
+            let aliasMatch = frames.find(f => {
+              const candidate =
+                (f.object_name?.split('/').pop() ||
+                  f.csv_name?.split('/').pop() ||
+                  '').replace(/\.[^.]+$/, '');
+              return candidate.startsWith(aiBaseName);
+            });
+
+            if (aliasMatch) {
+              console.log(`✅ Alias match found for merge ${aiFilePath} -> ${aliasMatch.object_name}`);
+              return aliasMatch.object_name;
+            }
+          }
           
           console.log(`⚠️ No match found for merge ${aiFilePath}, using original value`);
           return aiFilePath;
@@ -201,28 +236,30 @@ export const mergeHandler: AtomHandler = {
     });
 
     // 🔧 CRITICAL FIX: Call perform endpoint immediately (like create-column)
+    let performResult: any = null;
     try {
       console.log('🚀 Calling Merge perform endpoint immediately (like create-column)');
       console.log('📋 Configuration to execute:', { file1: mappedFile1, file2: mappedFile2, joinColumns, joinType });
       
-      // Extract just the filename if it's a full path
-      const filename1 = getFilename(file1);
-      const filename2 = getFilename(file2);
+      // Preserve folder structure when available (auto-saved files live under concatenated-data/)
+      const backendFile1 = mappedFile1?.includes('/') ? mappedFile1 : getFilename(file1);
+      const backendFile2 = mappedFile2?.includes('/') ? mappedFile2 : getFilename(file2);
+      console.log('📁 Normalized backend file paths for merge:', { backendFile1, backendFile2 });
       
       // Convert join columns to lowercase (backend requirement)
       const lowercaseJoinColumns = joinColumns.map((col: string) => col.toLowerCase());
       
       const formData = new URLSearchParams({
-        file1: filename1,
-        file2: filename2,
+        file1: backendFile1,
+        file2: backendFile2,
         bucket_name: bucketName,
         join_columns: JSON.stringify(lowercaseJoinColumns),
         join_type: joinType,
       });
       
       console.log('📁 Auto-executing with form data:', {
-        file1: filename1,
-        file2: filename2,
+        file1: backendFile1,
+        file2: backendFile2,
         bucket_name: bucketName,
         join_columns: lowercaseJoinColumns,
         join_type: joinType
@@ -231,8 +268,8 @@ export const mergeHandler: AtomHandler = {
       const performEndpoint = `${MERGE_API}/perform`;
       console.log('📡 Calling perform endpoint:', performEndpoint);
       console.log('📦 FormData payload:', {
-        file1: filename1,
-        file2: filename2,
+        file1: backendFile1,
+        file2: backendFile2,
         bucket_name: bucketName,
         join_columns: JSON.stringify(lowercaseJoinColumns),
         join_type: joinType
@@ -247,8 +284,8 @@ export const mergeHandler: AtomHandler = {
       console.log('📨 Perform endpoint response status:', res2.status);
       
       if (res2.ok) {
-        const result = await res2.json();
-        console.log('✅ Auto-execution successful:', result);
+        performResult = await res2.json();
+        console.log('✅ Auto-execution successful:', performResult);
         
         // Update atom settings with results
         updateAtomSettings(atomId, {
@@ -258,9 +295,9 @@ export const mergeHandler: AtomHandler = {
           joinType,
           availableColumns: joinColumns,
           mergeResults: {
-            ...result,
+            ...performResult,
             result_file: null,
-            unsaved_data: result.data,
+            unsaved_data: performResult.data,
           },
           operationCompleted: true,
           lastUpdateTime: Date.now()
@@ -271,9 +308,9 @@ export const mergeHandler: AtomHandler = {
           'Files': `${mappedFile1} + ${mappedFile2}`,
           'Join Type': joinType,
           'Join Columns': joinColumns.join(', '),
-          'Result ID': result.merge_id || 'N/A',
-          'Shape': result.result_shape || 'N/A',
-          'Columns': result.columns?.length || 0
+          'Result ID': performResult.merge_id || 'N/A',
+          'Shape': performResult.result_shape || 'N/A',
+          'Columns': performResult.columns?.length || 0
         };
         const completionMsg = createSuccessMessage('Merge operation', completionDetails);
         completionMsg.content += '\n\n📊 Results are ready! The files have been merged.\n\n💡 You can now view the merged data in the Merge interface.';
@@ -321,6 +358,20 @@ export const mergeHandler: AtomHandler = {
       });
     }
     
+    try {
+      await autoSaveStepResult({
+        atomType: 'merge',
+        atomId,
+        stepAlias,
+        result: performResult,
+        updateAtomSettings,
+        setMessages,
+        isStreamMode: context.isStreamMode,
+      });
+    } catch (autoSaveError) {
+      console.error('❌ Merge auto-save failed:', autoSaveError);
+    }
+
     console.log('🏁 MERGE HANDLER - handleSuccess COMPLETE');
     return { success: true };
   },
@@ -328,8 +379,7 @@ export const mergeHandler: AtomHandler = {
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { setMessages, atomId, updateAtomSettings } = context;
     
-    // 🔧 FIX: This function now handles BOTH success and failure cases
-    // Always show the smart_response message once, regardless of success/failure
+    // 🔧 FIX: EXACTLY like DataFrame Operations - no isStreamMode check
     let aiText = '';
     if (data.smart_response) {
       aiText = data.smart_response;
@@ -353,17 +403,15 @@ export const mergeHandler: AtomHandler = {
       aiText = data.smart_response || data.message || 'AI response received';
     }
     
-    // Only add the message if we have content
-    if (aiText) {
-      const aiMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: aiText,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, aiMsg]);
-      console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
-    }
+    // Create and add AI message (EXACTLY like DataFrame Operations - no conditional)
+    const aiMsg: Message = {
+      id: (Date.now() + 1).toString(),
+      content: aiText,
+      sender: 'ai',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, aiMsg]);
+    console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
     
     // 🔧 CRITICAL FIX: Load available files into atom settings for dropdown population
     // This ensures files appear in the merge interface even for failure cases

@@ -1,5 +1,5 @@
 # routes.py - Explore Atom Routes - Complete Implementation
-from fastapi import APIRouter, HTTPException, Form, Query, UploadFile, File
+from fastapi import APIRouter, HTTPException, Form, Query, UploadFile, File, Depends
 # ✅ Add this import:
 # UPDATE your existing import from database to include the new functions:
 from app.features.explore.app.database import (
@@ -18,7 +18,8 @@ from app.features.column_classifier.database import (
     get_classifier_config_from_mongo,
     save_classifier_config_to_mongo
 )
-from app.features.feature_overview.deps import redis_client
+from app.core.observability import timing_dependency_factory
+from app.core.feature_cache import feature_cache
 from app.core.utils import get_env_vars
 from app.features.chart_maker.service import chart_service
 # from app.features.column_classifier.database import get_all_classifier_configs_from_mongo
@@ -38,8 +39,13 @@ from minio.error import S3Error
 from urllib.parse import unquote, quote
 import os
 
+
+redis_client = feature_cache.router("explore")
+
 # Create router
-router = APIRouter()
+timing_dependency = timing_dependency_factory("app.features.explore")
+
+router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 # Global storage for explore atom configurations (in-memory backup)
 explore_atoms = {}

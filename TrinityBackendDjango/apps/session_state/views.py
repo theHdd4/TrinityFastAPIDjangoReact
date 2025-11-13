@@ -1,5 +1,6 @@
 import os
 import json
+import hashlib
 from typing import Any, Dict
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -8,18 +9,29 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from apps.accounts.views import CsrfExemptSessionAuthentication
 from redis_store.redis_client import redis_client
+from redis_store.cache_events import publish_cache_invalidation
 from pymongo import MongoClient
 from django.conf import settings
 from asgiref.sync import async_to_sync
 from apps.accounts.utils import get_env_vars
 # Removed import to avoid circular dependency with FastAPI backend
 
-TTL = 3600 * 2  # 2 hours
+TTL = 3600  # 1 hour to align with FastAPI cache policy
 TRINITY_DB_NAME = "trinity_db"
+VERSION_SUFFIX = ":version"
 
 
 def _session_key(client_id: str, user_id: str, app_id: str, project_id: str) -> str:
     return f"session:{client_id}:{user_id}:{app_id}:{project_id}"
+
+
+def _session_version_key(session_id: str) -> str:
+    return f"{session_id}{VERSION_SUFFIX}"
+
+
+def _session_version(state: Dict[str, Any]) -> str:
+    payload = json.dumps(state, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _mongo_client() -> MongoClient:
@@ -101,8 +113,24 @@ class SessionInitView(APIView):
                 "project_name": project_name,
             }
         )
-        redis_client.setex(session_id, TTL, json.dumps(session, default=str))
+        serialized = json.dumps(session, default=str)
+        redis_client.setex(session_id, TTL, serialized)
+        version = _session_version(session)
+        redis_client.setex(_session_version_key(session_id), TTL, version)
         redis_client.setex(ns, TTL, session_id)
+        publish_cache_invalidation(
+            "session",
+            {
+                "session_id": session_id,
+                "client_id": client_id,
+                "app_id": app_id,
+                "project_id": project_id,
+            },
+            action="write",
+            ttl=TTL,
+            version=version,
+            metadata={"source": "django"},
+        )
         return Response({"session_id": session_id, "state": session})
 
 
@@ -203,7 +231,10 @@ class SessionUpdateView(APIView):
             session["navigation"] = nav
         else:
             session[key] = value
-        redis_client.setex(session_id, TTL, json.dumps(session, default=str))
+        serialized = json.dumps(session, default=str)
+        redis_client.setex(session_id, TTL, serialized)
+        version = _session_version(session)
+        redis_client.setex(_session_version_key(session_id), TTL, version)
         try:
             mc = _mongo_client()
             db = mc[TRINITY_DB_NAME]
@@ -214,6 +245,19 @@ class SessionUpdateView(APIView):
             )
         except Exception:
             pass
+        publish_cache_invalidation(
+            "session",
+            {
+                "session_id": session_id,
+                "client_id": session.get("client_id", ""),
+                "app_id": session.get("app_id", ""),
+                "project_id": session.get("project_id", ""),
+            },
+            action="write",
+            ttl=TTL,
+            version=version,
+            metadata={"source": "django"},
+        )
         return Response({"session_id": session_id, "state": session})
 
 
@@ -227,10 +271,27 @@ class SessionEndView(APIView):
         if not session_id:
             return Response({"detail": "session_id required"}, status=status.HTTP_400_BAD_REQUEST)
         redis_client.delete(session_id)
+        redis_client.delete(_session_version_key(session_id))
         try:
             mc = _mongo_client()
             db = mc[TRINITY_DB_NAME]
             db.session_state.delete_one({"_id": session_id})
         except Exception:
             pass
+        parts = session_id.split(":")
+        metadata = {}
+        if len(parts) == 5:
+            metadata = {
+                "client_id": parts[1],
+                "user_id": parts[2],
+                "app_id": parts[3],
+                "project_id": parts[4],
+            }
+        publish_cache_invalidation(
+            "session",
+            {"session_id": session_id, **metadata},
+            action="delete",
+            ttl=0,
+            metadata={"source": "django"},
+        )
         return Response({"detail": "session ended"})

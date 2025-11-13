@@ -67,7 +67,6 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
   // Always use tableData as the data source
   const data = settings.tableData || null;
   const [tab, setTab] = React.useState('inputs');
-  const [selectedFile, setSelectedFile] = React.useState(settings.selectedFile || '');
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [selectedFrame, setSelectedFrame] = React.useState<any>(null);
@@ -134,8 +133,26 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
     [atomId, updateSettings],
   );
 
+  // 🔧 SIMPLIFIED: Use settings.selectedFile directly, no local state needed
+  const selectedFile = settings.selectedFile || '';
+  
+  // 🔧 COMPREHENSIVE DEBUG: Log everything
+  React.useEffect(() => {
+    console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [DataFrameOps Properties] STATE CHECK
+╠════════════════════════════════════════════════════════════════
+║ selectedFile (from settings): "${selectedFile}"
+║ settings.selectedFile: "${settings.selectedFile}"
+║ settings.fileId: "${settings.fileId}"
+║ settings.tableData exists: ${!!settings.tableData}
+║ settings.tableData rows: ${settings.tableData?.rows?.length || 0}
+╚════════════════════════════════════════════════════════════════
+    `);
+  }, [selectedFile, settings.selectedFile, settings.fileId, settings.tableData]);
+
   const applyFileSelect = async (fileId: string) => {
-    setSelectedFile(fileId);
+    console.log(`🔄 [DataFrameOps Properties] Loading file: ${fileId}`);
     setLoading(true);
     setError(null);
     try {

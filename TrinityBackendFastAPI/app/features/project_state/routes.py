@@ -12,6 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection
 from pydantic import BaseModel, Field
 
 from app.core.mongo import build_host_mongo_uri
+from app.core.observability import timing_dependency_factory
 from app.features.exhibition.deps import get_exhibition_layout_collection
 from app.features.exhibition.persistence import save_exhibition_list_configuration
 from app.session_state import load_state, save_state
@@ -24,7 +25,9 @@ DEFAULT_MONGO_URI = build_host_mongo_uri()
 MONGO_URI = os.getenv("MONGO_URI", DEFAULT_MONGO_URI)
 MONGO_DB = os.getenv("MONGO_DB", "trinity_db")
 
-router = APIRouter()
+timing_dependency = timing_dependency_factory("app.features.project_state")
+
+router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 
 class StateIn(BaseModel):
@@ -34,23 +37,49 @@ class StateIn(BaseModel):
     state: dict
 
 
-project_state_router = APIRouter()
+project_state_router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 
 @project_state_router.post("/save", status_code=status.HTTP_201_CREATED)
 async def save_project_state(payload: StateIn):
     try:
+        logger.info(
+            "project_state.save client=%s app=%s project=%s",
+            payload.client_id,
+            payload.app_id,
+            payload.project_id,
+        )
         await save_state(
             payload.client_id, payload.app_id, payload.project_id, payload.state
         )
+        logger.info(
+            "project_state.save.completed client=%s app=%s project=%s",
+            payload.client_id,
+            payload.app_id,
+            payload.project_id,
+        )
     except Exception as exc:
+        logger.exception("project_state.save.failed client=%s app=%s project=%s", payload.client_id, payload.app_id, payload.project_id)
         raise HTTPException(status_code=400, detail=str(exc))
     return {"status": "saved"}
 
 
 @project_state_router.get("/{client_id}/{app_id}/{project_id}")
 async def get_project_state(client_id: str, app_id: str, project_id: str):
+    logger.info(
+        "project_state.get client=%s app=%s project=%s",
+        client_id,
+        app_id,
+        project_id,
+    )
     state = await load_state(client_id, app_id, project_id)
+    logger.info(
+        "project_state.get.completed client=%s app=%s project=%s hit=%s",
+        client_id,
+        app_id,
+        project_id,
+        state is not None,
+    )
     return {"state": state}
 
 
@@ -63,7 +92,7 @@ class LaboratoryProjectStateIn(BaseModel):
     mode: Optional[str] = Field(default=None)
 
 
-laboratory_project_state_router = APIRouter()
+laboratory_project_state_router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 
 @laboratory_project_state_router.post("/save", status_code=status.HTTP_200_OK)
@@ -74,6 +103,14 @@ async def save_laboratory_project_state(payload: LaboratoryProjectStateIn):
 
     if not client_name or not app_name or not project_name:
         raise HTTPException(status_code=400, detail="client_name, app_name, and project_name are required")
+
+    logger.info(
+        "project_state.laboratory.save client=%s app=%s project=%s cards=%s",
+        client_name,
+        app_name,
+        project_name,
+        len(payload.cards or []),
+    )
 
     config_payload = payload.model_dump()
     config_payload.setdefault("mode", payload.mode or "laboratory")
@@ -93,12 +130,20 @@ async def save_laboratory_project_state(payload: LaboratoryProjectStateIn):
 
     timestamp = datetime.utcnow().isoformat()
 
-    return {
+    response = {
         "status": "ok",
         "updated_at": timestamp,
         "documents_inserted": persistence_result.get("documents_inserted", 0),
         "collection": persistence_result.get("collection"),
     }
+    logger.info(
+        "project_state.laboratory.save.completed client=%s app=%s project=%s inserted=%s",
+        client_name,
+        app_name,
+        project_name,
+        response["documents_inserted"],
+    )
+    return response
 
 
 @laboratory_project_state_router.get("/get/{client_name}/{app_name}/{project_name}")
@@ -117,6 +162,14 @@ async def get_laboratory_project_state(
         if not client_name or not app_name or not project_name:
             raise HTTPException(status_code=400, detail="client_name, app_name, and project_name are required")
 
+        logger.info(
+            "project_state.laboratory.get client=%s app=%s project=%s mode=%s",
+            client_name,
+            app_name,
+            project_name,
+            mode,
+        )
+
         result = await get_atom_list_configuration(
             client_name=client_name,
             app_name=app_name,
@@ -132,7 +185,7 @@ async def get_laboratory_project_state(
 
         timestamp = datetime.utcnow().isoformat()
 
-        return {
+        response = {
             "status": "ok",
             "cards": result.get("cards", []),
             "workflow_molecules": result.get("workflow_molecules", []),
@@ -140,6 +193,14 @@ async def get_laboratory_project_state(
             "retrieved_at": timestamp,
             "collection": "atom_list_configuration",
         }
+        logger.info(
+            "project_state.laboratory.get.completed client=%s app=%s project=%s count=%s",
+            client_name,
+            app_name,
+            project_name,
+            response["count"],
+        )
+        return response
 
     except HTTPException:
         raise
@@ -151,7 +212,7 @@ class ExhibitionProjectStateIn(LaboratoryProjectStateIn):
     slide_objects: Dict[str, Any] = Field(default_factory=dict)
 
 
-exhibition_project_state_router = APIRouter()
+exhibition_project_state_router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 
 @exhibition_project_state_router.post("/save", status_code=status.HTTP_200_OK)
@@ -165,6 +226,15 @@ async def save_exhibition_project_state(
 
     if not client_name or not app_name or not project_name:
         raise HTTPException(status_code=400, detail="client_name, app_name, and project_name are required")
+
+    logger.info(
+        "project_state.exhibition.save client=%s app=%s project=%s cards=%s slides=%s",
+        client_name,
+        app_name,
+        project_name,
+        len(payload.cards or []),
+        len((payload.slide_objects or {}).get("slides", [])) if isinstance(payload.slide_objects, dict) else "unknown",
+    )
 
     cards = payload.cards or []
     slide_objects = payload.slide_objects or {}
@@ -190,12 +260,20 @@ async def save_exhibition_project_state(
     timestamp = persistence_result.get("updated_at", datetime.utcnow())
     updated_at = timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp)
 
-    return {
+    response = {
         "status": "ok",
         "updated_at": updated_at,
         "documents_inserted": persistence_result.get("documents_written", 0),
         "collection": persistence_result.get("collection"),
     }
+    logger.info(
+        "project_state.exhibition.save.completed client=%s app=%s project=%s inserted=%s",
+        client_name,
+        app_name,
+        project_name,
+        response["documents_inserted"],
+    )
+    return response
 
 
 router.include_router(
@@ -470,11 +548,34 @@ async def save_atom_list_configuration(
                 if 'positive_constraints' in atom_settings:
                     logger.info(f"🔍 DEBUG: Found positive_constraints in {atom_id}: {atom_settings['positive_constraints']}")
                 
+                # Check for pivotSettings and pivotResults
+                if 'pivotSettings' in atom_settings:
+                    pivot_settings = atom_settings.get('pivotSettings', {})
+                    pivot_results = pivot_settings.get('pivotResults', [])
+                    logger.info(f"🔍 DEBUG: Found pivotSettings in {atom_id}, pivotResults length: {len(pivot_results) if isinstance(pivot_results, list) else 'N/A'}")
+                
                 # Clean up dataframe-operations data (similar to Django backend)
+                # Note: We strip tableData and data (large datasets), but preserve pivotSettings
+                # including pivotResults, which is needed for session restoration
+                # If pivotResults becomes too large, frontend can reload from backend cache
                 if atom.get("atomId") == "dataframe-operations":
+                    # Check pivotResults before stripping
+                    pivot_results_before = None
+                    if 'pivotSettings' in atom_settings:
+                        pivot_results_before = atom_settings.get('pivotSettings', {}).get('pivotResults', [])
+                    
                     atom_settings = {
                         k: v for k, v in atom_settings.items() if k not in {"tableData", "data"}
                     }
+                    # pivotResults is preserved as part of pivotSettings
+                    
+                    # Verify pivotResults is still present after stripping
+                    if pivot_results_before is not None and 'pivotSettings' in atom_settings:
+                        pivot_results_after = atom_settings.get('pivotSettings', {}).get('pivotResults', [])
+                        if len(pivot_results_after) != len(pivot_results_before) if isinstance(pivot_results_before, list) and isinstance(pivot_results_after, list) else pivot_results_after != pivot_results_before:
+                            logger.warning(f"⚠️ WARNING: pivotResults may have been lost during sanitization for {atom_id}")
+                        else:
+                            logger.info(f"✅ Verified: pivotResults preserved for {atom_id} ({len(pivot_results_after) if isinstance(pivot_results_after, list) else 'N/A'} items)")
                 
                 # Generate version hash
                 version_hash = hashlib.sha256(

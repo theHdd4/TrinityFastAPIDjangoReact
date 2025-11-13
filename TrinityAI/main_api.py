@@ -3,7 +3,6 @@ import sys
 import time
 import logging
 import json
-import redis
 import requests
 import uvicorn
 import asyncio
@@ -15,6 +14,10 @@ from typing import Dict, Any, Tuple, Optional, Iterable, Mapping
 import numpy as np
 from pymongo import MongoClient
 from fastapi.encoders import jsonable_encoder
+try:
+    from TrinityAI.redis_client import get_redis_client
+except ModuleNotFoundError:  # pragma: no cover - fallback for docker image layout
+    from redis_client import get_redis_client
 
 logger = logging.getLogger("trinity.ai")
 
@@ -123,8 +126,7 @@ load_env_from_redis()
 # ---------------------------------------------------------------------------
 # Redis and Mongo configuration
 # ---------------------------------------------------------------------------
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
+redis_client = get_redis_client()
 
 DEFAULT_MONGO_URI = build_host_mongo_uri()
 MONGO_URI = (
@@ -370,7 +372,6 @@ GROUPBY_PATH = Path(__file__).resolve().parent / "Agent_groupby"
 CHARTMAKER_PATH = Path(__file__).resolve().parent / "Agent_chartmaker"
 EXPLORE_PATH = Path(__file__).resolve().parent / "Agent_explore"
 DATAFRAME_OPERATIONS_PATH = Path(__file__).resolve().parent / "Agent_dataframe_operations"
-SUPERAGENT_PATH = Path(__file__).resolve().parent / "SUPERAGENT"
 sys.path.append(str(MERGE_PATH))
 sys.path.append(str(CONCAT_PATH))
 sys.path.append(str(CREATE_TRANSFORM_PATH))
@@ -378,7 +379,6 @@ sys.path.append(str(GROUPBY_PATH))
 sys.path.append(str(CHARTMAKER_PATH))
 sys.path.append(str(EXPLORE_PATH))
 sys.path.append(str(DATAFRAME_OPERATIONS_PATH))
-sys.path.append(str(SUPERAGENT_PATH))
 
 from single_llm_processor import SingleLLMProcessor
 from Agent_Merge.main_app import router as merge_router
@@ -388,9 +388,9 @@ from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
 from Agent_dataframe_operations.main_app import router as dataframe_operations_router
-from SUPERAGENT.main_app import router as superagent_router
-from workflow_mode.api import router as workflow_router
 from insight import router as insight_router
+from STREAMAI.main_app import router as streamai_router
+from workflow_mode import workflow_router
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -586,9 +586,8 @@ api_router.include_router(groupby_router)
 api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
 api_router.include_router(dataframe_operations_router)
-api_router.include_router(superagent_router)  # Laboratory Mode (executes agents)
-api_router.include_router(workflow_router)     # Workflow Mode (composes molecules)
 api_router.include_router(insight_router)
+api_router.include_router(workflow_router)
 
 # Enable CORS for browser-based clients
 app.add_middleware(
@@ -742,6 +741,50 @@ async def get_environment(
 
 # After defining all endpoints include the router so the app registers them
 app.include_router(api_router)
+
+# Include Trinity AI streaming router
+app.include_router(streamai_router)
+
+# =============================================================================
+# Initialize Trinity AI WebSocket components
+# =============================================================================
+try:
+    logger.info("🚀 Initializing Trinity AI WebSocket components...")
+    
+    # Get LLM configuration
+    llm_config = get_llm_config()
+    
+    # Initialize components
+    from STREAMAI.result_storage import get_result_storage
+    from STREAMAI.stream_rag_engine import get_stream_rag_engine
+    from STREAMAI.stream_api import router as stream_ws_router, initialize_stream_ai_components
+    
+    # Create instances (simplified for WebSocket)
+    rag_engine = get_stream_rag_engine()
+    result_storage = get_result_storage()
+    
+    # Create minimal parameter generator for WebSocket orchestrator
+    class SimpleParameterGenerator:
+        pass
+    
+    param_gen = SimpleParameterGenerator()
+    
+    # Initialize the stream_api components
+    initialize_stream_ai_components(
+        param_gen=param_gen,
+        rag=rag_engine
+    )
+    
+    # Include the WebSocket API router
+    app.include_router(stream_ws_router)
+    
+    logger.info("✅ Trinity AI WebSocket components initialized successfully")
+    
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Trinity AI WebSocket components: {e}")
+    import traceback
+    traceback.print_exc()
+    # Continue running without Trinity AI streaming functionality
 
 if __name__ == "__main__":
     # Run the FastAPI application. Using the `app` instance directly

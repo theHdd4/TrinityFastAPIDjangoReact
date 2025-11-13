@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional
+import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.core.observability import timing_dependency_factory
 
 from .schemas import (
     PivotComputeRequest,
@@ -22,14 +25,30 @@ from .service import (
 )
 
 
-router = APIRouter(prefix="/pivot", tags=["Pivot Table"])
+logger = logging.getLogger(__name__)
+
+timing_dependency = timing_dependency_factory("app.features.pivot_table")
+
+router = APIRouter(
+    prefix="/pivot",
+    tags=["Pivot Table"],
+    dependencies=[Depends(timing_dependency)],
+)
 
 
 @router.post("/{config_id}/compute", response_model=PivotComputeResponse)
 async def compute_pivot_endpoint(config_id: str, payload: PivotComputeRequest) -> PivotComputeResponse:
     """Generate a pivot table for the supplied configuration."""
 
-    return await compute_pivot(config_id, payload)
+    logger.info("pivot.compute config_id=%s rows=%s", config_id, len(payload.rows or []))
+    response = await compute_pivot(config_id, payload)
+    logger.info(
+        "pivot.compute.completed config_id=%s status=%s rows=%s",
+        config_id,
+        response.status,
+        response.rows,
+    )
+    return response
 
 
 @router.get("/{config_id}/data", response_model=PivotComputeResponse)
@@ -51,6 +70,13 @@ async def get_pivot_data_endpoint(config_id: str) -> PivotComputeResponse:
     except Exception as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=500, detail=f"Malformed cached data: {exc}")
 
+    logger.info(
+        "pivot.cache_hit config_id=%s status=%s rows=%s",
+        config_id,
+        status,
+        rows,
+    )
+
     return PivotComputeResponse(
         config_id=cached.get("config_id", config_id),
         status=status,
@@ -66,7 +92,10 @@ async def get_pivot_data_endpoint(config_id: str) -> PivotComputeResponse:
 async def refresh_pivot_endpoint(config_id: str) -> PivotRefreshResponse:
     """Force recomputation of a pivot table using the last cached configuration."""
 
-    return await refresh_pivot(config_id)
+    logger.info("pivot.refresh config_id=%s", config_id)
+    response = await refresh_pivot(config_id)
+    logger.info("pivot.refresh.completed config_id=%s status=%s", config_id, response.status)
+    return response
 
 
 @router.post("/{config_id}/save", response_model=PivotSaveResponse)
@@ -77,13 +106,20 @@ async def save_pivot_endpoint(config_id: str, payload: Optional[PivotSaveRequest
     If payload is None or filename is not provided, overwrites existing saved file (save).
     """
 
-    return await save_pivot(config_id, payload)
+    logger.info("pivot.save config_id=%s", config_id)
+    response = await save_pivot(config_id, payload)
+    logger.info("pivot.save.completed config_id=%s status=%s", config_id, response.status)
+    return response
 
 
 @router.get("/{config_id}/status", response_model=PivotStatusResponse)
 async def pivot_status_endpoint(config_id: str) -> PivotStatusResponse:
     """Return cached compute status for the pivot table."""
 
-    return get_pivot_status(config_id)
+    status = get_pivot_status(config_id)
+    logger.info(
+        "pivot.status config_id=%s status=%s", config_id, status.status
+    )
+    return status
 
 

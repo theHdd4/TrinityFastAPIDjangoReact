@@ -976,95 +976,96 @@ class SingleLLMProcessor:
             "Content-Type": "application/json"
         }
         
-        # Complete valid atom names from paste file
+        # Updated valid atom names from atoms_knowledge_base.json
         self.valid_atoms = [
-            "ChartMaker", "Feature Overview", "GroupBy with Wtg Avg", "Data Upload & Validate",
-            "Explore", "Merge", "Concatenate", "Create", "Delete", "Rename", "Text Box",
-            "Correlation", "Scope Selector", "Row Operations", "Regression - Feature Based",
+            "Data Upload & Validate", "Feature Overview", "Column Classifier", "DataFrame Operations",
+            "Create and Transform Features", "GroupBy with Wtg Avg", "Merge", "Concat",
+            "Scope Selector", "Correlation", "Explore", "Regression - Feature Based",
             "Select Models - Feature Based", "Evaluate Models - Feature Based",
-            "Auto-regressive Models", "Select Models - Auto Regressive", 
-            "Evaluate Models - Auto Regressive", "Scenario Planner", "Optimizer",
-            "Base Price Estimator", "Promo Estimator", "Fetch Atom"
+            "Auto-regressive Models", "Build Model - Feature Based", "Clustering",
+            "ChartMaker", "Scenario Planner"
         ]
         
-        # Complete atom descriptions from paste file
+        # Updated atom descriptions from atoms_knowledge_base.json
         self.atom_descriptions = {
-            "ChartMaker": "A modular, API-driven pipeline for dynamic data exploration, filtering, and interactive chart creation. ChartMaker uses FastAPI, pandas, and Plotly to support a wide range of chart types (bar, line, area, pie, histogram, distplot, waterfall, heatmap, subplots) and robust data filtering.",
-            "Feature Overview": "feature_overview provides a comprehensive snapshot of a dataset, profiling its distribution across markets, products, and time. It automatically summarizes completeness, segment coverage, and key statistics to assess readiness for modeling or analytics.",
-            "GroupBy with Wtg Avg": "Aggregates and summarizes datasets by grouping across selected dimensions (e.g., product, region, date) using statistical functions like sum, mean, weighted average, and rank percentile. Used for business KPIs, reporting, and segment analysis.",
-            "Data Upload & Validate": "Uploads master files, validates schemas, classifies columns into identifiers/measures, maps business dimensions. Pre-built templates for marketing mix, promo analysis, category forecasting.",
-            "Explore": "Interactive data browsing, missing value analysis, column profiling, data distribution analysis.",
-            "Merge": "Joins two datasets together based on common columns (like date, product, region). Supports inner, left, right, and outer joins. Similar to VLOOKUP or JOIN in Excel/SQL.",
-            "Concatenate": "Combines datasets vertically (row-wise) or horizontally (column-wise).",
-            "Create": "Generates new columns through operations (add, subtract, multiply, divide, residual, dummy conversion, trend detection, RPI).",
-            "Delete": "Removes unnecessary columns from datasets.",
-            "Rename": "Changes the name of a column in a dataset for clarity or standardization before analysis or modeling.",
-            "Text Box": "Input/edit custom text or markdown content for annotations and documentation.",
-            "Correlation": "Computes correlation matrices (Pearson, Spearman, Kendall) between numerical variables.",
-            "Scope Selector": "Defines dynamic data scope filters (date ranges, segments, categories).",
-            "Row Operations": "Performs row-level operations (filtering, deleting, editing values, lambda functions).",
-            "Regression - Feature Based": "Fits regression models using manually engineered features. OLS regression with interpretable coefficients.",
-            "Select Models - Feature Based": "Chooses best performing regression models using forward selection, cross-validation, AIC/BIC.",
-            "Evaluate Models - Feature Based": "Evaluates regression model performance using RMSE, MAPE, R-squared, cross-validation.",
-            "Auto-regressive Models": "Fits time-series models (AR, ARIMA, SARIMA) for forecasting. Captures trends, seasonality, auto-correlations.",
-            "Select Models - Auto Regressive": "Chooses optimal ARIMA models using AIC/BIC, auto-ARIMA grid search.",
-            "Evaluate Models - Auto Regressive": "Evaluates time-series model performance using WMAPE, MASE, residual analysis.",
-            "Scenario Planner": "Simulates business outcomes under different assumptions. What-if analysis for planning.",
-            "Optimizer": "Solves constrained optimization problems (maximize sales, minimize cost, resource allocation).",
-            "Base Price Estimator": "Estimates underlying base price removing promotional effects using regression/smoothing.",
-            "Promo Estimator": "Measures promotional uplift using causal inference. Evaluates campaign effectiveness and ROI.",
-            "Fetch Atom": "AI-powered query processor that analyzes user requests and determines the most suitable atom/tool for data analytics tasks. Provides intelligent recommendations, query enhancement, and domain classification."
+            "Data Upload & Validate": "Primary data ingestion atom that uploads CSV, Excel, and Arrow files with intelligent schema inference, automatic data type detection, missing value analysis, and comprehensive quality checks. This atom is ALWAYS the starting point of any data workflow.",
+            
+            "Feature Overview": "Comprehensive data profiling and exploratory data analysis atom. Generates statistical summaries, identifies patterns, detects anomalies, and provides visual insights into your dataset. Essential for understanding data structure before feature engineering.",
+            
+            "Column Classifier": "Intelligent column classification atom that automatically detects data types (numeric, categorical, datetime, text) and suggests appropriate transformations. Essential for preparing features for machine learning models.",
+            
+            "DataFrame Operations": "Universal data transformation atom that handles ALL data manipulation tasks through natural language. Think of it as your 'data swiss army knife' - it can filter rows, sort data, reorder columns, calculate metrics, clean data, and perform any ad-hoc data transformation in a single step.",
+            
+            "Create and Transform Features": "Feature engineering atom for creating calculated columns, derived metrics, and transformed features. Supports mathematical operations, string manipulations, date calculations, and conditional logic to enrich your dataset.",
+            
+            "GroupBy with Wtg Avg": "Powerful aggregation atom for grouping data by dimensions and calculating summaries including weighted averages. Essential for business intelligence, KPIs, and segment-level analysis.",
+            
+            "Merge": "Join datasets atom for combining multiple dataframes. Supports SQL-style joins (inner, left, right, outer) and can handle multiple key columns for complex data enrichment.",
+            
+            "Concat": "Concatenate datasets vertically (stack rows) or horizontally (append columns). Used for combining multiple files or extending datasets with additional records or attributes.",
+            
+            "Scope Selector": "Filter and subset data atom for selecting specific columns, rows, or data ranges. Essential for focusing analysis on relevant data segments.",
+            
+            "Correlation": "Calculate correlation analysis atom for discovering relationships between variables. Generates correlation matrices and heatmaps to identify dependencies, multicollinearity, and feature relationships.",
+            
+            "Explore": "Interactive data exploration atom with AI-powered insights. Browse, profile, and discover patterns in data through an intuitive interface with intelligent recommendations.",
+            
+            "Regression - Feature Based": "Build regression models atom for predicting continuous target variables using features. Trains linear regression, polynomial, and feature-based models with automatic feature selection.",
+            
+            "Select Models - Feature Based": "Model selection atom for comparing multiple regression models, performing hyperparameter tuning, and identifying the best performing model through cross-validation.",
+            
+            "Evaluate Models - Feature Based": "Model evaluation atom for assessing regression model performance with comprehensive metrics, residual analysis, and diagnostic plots to validate model quality.",
+            
+            "Auto-regressive Models": "Time series forecasting atom using ARIMA and seasonal decomposition for predicting future values based on historical patterns, trends, and seasonality.",
+            
+            "Build Model - Feature Based": "Production-ready model building atom for training, persisting, and deploying regression models with comprehensive feature engineering and model artifacts.",
+            
+            "Clustering": "Unsupervised clustering atom for customer segmentation, pattern discovery, and grouping similar observations using K-means and optimal cluster selection.",
+            
+            "ChartMaker": "AI-powered chart creation atom with natural language interface. Creates interactive, publication-ready charts and dashboards from data. Supports bar, line, area, pie, scatter plots, heatmaps, and more.",
+            
+            "Scenario Planner": "Business scenario planning atom for creating and comparing multiple what-if scenarios. Adjusts variables to assess impacts and supports strategic decision making."
         }
         
-        # Complete atom categories with keywords from paste file
+        # Updated atom keywords from atoms_knowledge_base.json
         self.atom_categories = {
-            "ChartMaker": ['atom chartmaker', 'chart maker', 'chart creation', 'data visualization', 'plotly', 'pandas', 'tool chart', 'chart', 'graph', 'plot', 'interactive chart', 'chart type', 'chart properties', 'bar chart', 'line chart', 'area chart', 'pie chart', 'histogram', 'distplot', 'waterfall chart', 'heatmap', 'subplots', 'categorical filter', 'numerical filter', 'data filtering', 'chart layout', 'annotations', 'vertical grid', 'horizontal grid', 'multiple line graphs', 'chart title', 'font', 'axis', 'bar width', 'line width', 'line type', 'chart configuration', 'chart style', 'chart image', 'chart JSON', 'business dashboard', 'analytics chart', 'business data', 'business intelligence', 'BI', 'business analytics'],
+            "Data Upload & Validate": ['upload', 'validate', 'import', 'data-quality', 'schema', 'ingestion', 'csv', 'excel', 'arrow', 'file upload', 'data validation', 'schema inference', 'data type detection', 'missing value analysis', 'quality checks', 'data ingestion', 'first step', 'starting point', 'load data', 'import data'],
             
-            "Feature Overview": ['feature overview', 'atom overview', 'atom feature overview', 'data overview', 'dataset summary', 'feature profiling', 'market-product analysis', 'data readiness', 'EDA', 'business dimensions', 'summary statistics', 'data completeness', 'data health check', 'forecasting readiness', 'model readiness', 'segment coverage', 'data profiling', 'business data profiling'],
+            "Feature Overview": ['eda', 'profiling', 'overview', 'statistics', 'exploration', 'analysis', 'data profiling', 'exploratory', 'summary statistics', 'data overview', 'dataset summary', 'statistical summary', 'anomaly detection', 'pattern identification', 'data insights', 'data discovery'],
             
-            "GroupBy with Wtg Avg": ['atom groupby with wtg avg', 'weighted average', 'group by', 'dimension summary', 'aggregate by segment', 'wt avg', 'aggregate', 'grouping', 'atom groupby', 'data aggregation', 'summarization', 'weighted mean', 'rank percentile', 'time aggregation', 'resampling', 'dimension analysis', 'KPIs', 'business intelligence', 'segment analysis', 'business KPIs'],
+            "Column Classifier": ['classification', 'data-types', 'schema', 'feature-types', 'preparation', 'column classification', 'type detection', 'categorical', 'numerical', 'datetime', 'text classification', 'feature types', 'data types', 'column types'],
             
-            "Data Upload & Validate": ['atom data upload', 'atom file validation', 'atom master file', 'atom template validation', 'atom validate', 'data upload', 'file validation', 'master file', 'template validation', 'column classification', 'identifiers', 'measures', 'dimensions mapping', 'promo analysis', 'marketing mix modeling', 'category forecasting', 'data preprocessing', 'data governance', 'schema validation', 'file upload'],
+            "DataFrame Operations": ['operations', 'transform', 'manipulate', 'ai-powered', 'cleaning', 'filtering', 'versatile', 'filter', 'sort', 'reorder', 'delete columns', 'edit cells', 'calculated columns', 'data cleaning', 'subset', 'natural language', 'data manipulation', 'data preparation', 'swiss army knife', 'ad-hoc', 'quick transform', 'restructure'],
             
-            "Explore": ['atom explore', 'data exploration', 'data browser', 'missing values', 'summary statistics', 'column profile', 'EDA', 'exploratory data analysis', 'data browsing', 'interactive browsing', 'data distribution', 'column profiling', 'missing value analysis'],
+            "Create and Transform Features": ['calculate', 'derive', 'transform', 'feature-engineering', 'columns', 'mathematical operations', 'string operations', 'date calculations', 'conditional logic', 'new columns', 'derived metrics', 'feature creation', 'calculated fields', 'transformations'],
             
-            "Merge": ['atom merge', 'atom join', 'data merge', 'data join', 'dataset merging', 'merge', 'join', 'combine', 'VLOOKUP', 'Excel join', 'inner join', 'left join', 'outer join', 'right join', 'link data', 'match files', 'data integration', 'dataset joining'],
+            "GroupBy with Wtg Avg": ['groupby', 'aggregate', 'weighted-average', 'summarize', 'kpi', 'weighted average', 'group by', 'aggregation', 'sum', 'mean', 'median', 'count', 'business intelligence', 'segment analysis', 'dimension analysis', 'weighted sum'],
             
-            "Concatenate": ['atom concatenate', 'atom concat', 'atom stack', 'atom join columns', 'atom join rows', 'data concatenation', 'concatenate', 'concat', 'stack', 'join columns', 'join rows', 'append', 'extend', 'combine datasets', 'vertical merge', 'horizontal merge', 'row-wise', 'column-wise'],
+            "Merge": ['merge', 'join', 'combine', 'vlookup', 'lookup', 'inner join', 'left join', 'right join', 'outer join', 'sql join', 'data integration', 'combine datasets', 'enrich data', 'link data'],
             
-            "Create": ['atom create', 'atom feature generation', 'feature engineering', 'new columns', 'create fields', 'add', 'subtract', 'multiply', 'divide', 'dummy variable', 'residual', 'trend', 'feature generation', 'RPI', 'column operations', 'calculated fields', 'data transformation', 'feature creation'],
+            "Concat": ['concat', 'stack', 'append', 'combine', 'union', 'concatenate', 'vertical', 'horizontal', 'row-wise', 'column-wise', 'combine files', 'stack data', 'extend dataset'],
             
-            "Delete": ['atom delete', 'atom drop', 'delete columns', 'drop fields', 'remove variables', 'data cleanup', 'column removal', 'field deletion', 'unnecessary columns', 'data cleaning'],
+            "Scope Selector": ['filter', 'select', 'subset', 'focus', 'column selection', 'row filtering', 'conditional selection', 'date range', 'value range', 'data scoping', 'focus analysis', 'segment data'],
             
-            "Rename": ['atom rename', 'rename column', 'change column name', 'edit header', 'standardize column', 'column naming', 'header modification', 'field renaming'],
+            "Correlation": ['correlation', 'relationship', 'statistics', 'pattern', 'pearson', 'spearman', 'correlation matrix', 'heatmap', 'multicollinearity', 'feature relationships', 'variable relationships', 'dependencies'],
             
-            "Text Box": ['atom textbox', 'text input', 'add note', 'markdown', 'text annotation', 'documentation', 'notes', 'comments', 'text editor', 'custom text'],
+            "Explore": ['explore', 'eda', 'interactive', 'insights', 'discovery', 'data exploration', 'interactive browsing', 'data browser', 'pattern recognition', 'ai insights', 'anomaly detection', 'data navigation'],
             
-            "Correlation": ['correlation', 'relationship', 'linear relationship', 'pearson', 'spearman', 'kendall', 'correlation matrix', 'variable relationships', 'feature correlation', 'statistical correlation'],
+            "Regression - Feature Based": ['regression', 'prediction', 'ml', 'supervised', 'modeling', 'linear regression', 'polynomial', 'feature-based', 'predictive modeling', 'continuous target', 'model training'],
             
-            "Scope Selector": ['data filter', 'segment selector', 'date filter', 'scope selector', 'data scope', 'filtering', 'segment filter', 'category filter', 'dynamic filter'],
+            "Select Models - Feature Based": ['model-selection', 'comparison', 'hyperparameter', 'optimization', 'cross-validation', 'model comparison', 'best model', 'hyperparameter tuning', 'grid search', 'model optimization'],
             
-            "Row Operations": ['edit row', 'lambda function', 'delete row', 'row transform', 'custom row logic', 'row-level operations', 'row filtering', 'row editing', 'row manipulation'],
+            "Evaluate Models - Feature Based": ['evaluation', 'metrics', 'performance', 'diagnostics', 'r-squared', 'mae', 'mse', 'rmse', 'residual analysis', 'model validation', 'prediction accuracy', 'model assessment'],
             
-            "Regression - Feature Based": ['atom regression feature based', 'linear regression', 'feature model', 'regression with predictors', 'OLS', 'manual regression', 'feature-based modeling', 'regression modeling', 'predictive modeling'],
+            "Auto-regressive Models": ['time-series', 'forecasting', 'arima', 'prediction', 'seasonal decomposition', 'forecast', 'trend', 'seasonality', 'time series forecasting', 'historical patterns'],
             
-            "Select Models - Feature Based": ['atom select models feature based', 'model selection', 'feature selection', 'choose regression model', 'best model', 'model optimization', 'cross-validation', 'AIC', 'BIC'],
+            "Build Model - Feature Based": ['modeling', 'production', 'deployment', 'training', 'model persistence', 'feature engineering', 'model artifacts', 'batch prediction', 'model versioning', 'production model'],
             
-            "Evaluate Models - Feature Based": ['atom evaluate models feature based', 'model evaluation', 'regression metrics', 'MAPE', 'RMSE', 'R2', 'model performance', 'model assessment'],
+            "Clustering": ['clustering', 'segmentation', 'unsupervised', 'kmeans', 'customer segmentation', 'pattern discovery', 'k-means', 'cluster analysis', 'grouping', 'segment discovery'],
             
-            "Auto-regressive Models": ['atom auto regressive models', 'time series model', 'ARIMA', 'SARIMA', 'forecast model', 'lag features', 'seasonality', 'time series forecasting', 'auto-correlation'],
+            "ChartMaker": ['chart', 'visualization', 'plotly', 'interactive', 'dashboard', 'bar chart', 'line chart', 'area chart', 'pie chart', 'scatter plot', 'histogram', 'heatmap', 'waterfall', 'visual', 'graph', 'plot', 'business dashboard', 'reporting'],
             
-            "Select Models - Auto Regressive": ['atom select models auto regressive', 'auto arima', 'select time series model', 'ARIMA selection', 'time series optimization'],
-            
-            "Evaluate Models - Auto Regressive": ['atom evaluate models auto regressive', 'forecast evaluation', 'WMAPE', 'MASE', 'time series evaluation', 'forecast accuracy'],
-            
-            "Scenario Planner": ['atom scenario planner', 'what-if analysis', 'business scenario', 'planning tool', 'input simulator', 'scenario testing', 'business simulation', 'scenario analysis'],
-            
-            "Optimizer": ['atom optimizer', 'business optimization', 'maximize sales', 'minimize spend', 'resource allocation', 'optimal plan', 'constrained optimization', 'budget optimization'],
-            
-            "Base Price Estimator": ['base price', 'price decomposition', 'price estimator', 'non-promo price', 'underlying price', 'promotional effects', 'price analysis'],
-            
-            "Promo Estimator": ['promo uplift', 'promotion impact', 'campaign evaluation', 'promotion estimator', 'promotional analysis', 'marketing ROI', 'campaign effectiveness', 'uplift measurement']
+            "Scenario Planner": ['planning', 'scenarios', 'what-if', 'strategy', 'scenario planning', 'what-if analysis', 'business scenarios', 'impact analysis', 'sensitivity testing', 'strategic planning', 'decision making']
         }
         
         # Build comprehensive atom knowledge
@@ -1110,11 +1111,21 @@ User Query: "{raw_query}"
 
 {self.atom_knowledge}
 
+IMPORTANT MATCHING GUIDELINES:
+- "DataFrame Operations" is the MOST VERSATILE atom - use it for: filtering, sorting, reordering columns, data cleaning, subsetting, viewing raw data, excel-like operations, and general data manipulation
+- "Data Upload & Validate" is ALWAYS the first atom for loading/uploading data files
+- "ChartMaker" for all visualization, charts, graphs, and plotting requests
+- "Feature Overview" for data profiling, EDA, and summary statistics
+- "Create and Transform Features" for creating calculated columns and feature engineering
+- "Correlation" for analyzing relationships between variables
+- Use machine learning atoms only when explicitly building predictive models
+
 Instructions:
 - Enhance the query for better clarity and grammar
 - Determine if query is related to data analytics, visualization, ML, statistics, or modeling 
 - Use the keywords and descriptions to match the best atom(s)
 - Consider synonyms and related terms from the keyword lists
+- Prioritize DataFrame Operations for general data manipulation tasks
 - Return response in the exact JSON format below
 
 For IN-DOMAIN with SINGLE atom match:
@@ -1123,10 +1134,10 @@ For IN-DOMAIN with SINGLE atom match:
   "raw_query": "{raw_query}",
   "enhanced_query": "enhanced version of the query",
   "match_type": "single",
-  "atom_name": "ChartMaker",
+  "atom_name": "DataFrame Operations",
   "confidence": 0.9,
-  "reason": "Perfect match for visualization needs based on keywords",
-  "domain_reason": "Query relates to data visualization"
+  "reason": "Perfect match for data filtering and manipulation based on keywords",
+  "domain_reason": "Query relates to data manipulation"
 }}
 
 For IN-DOMAIN with MULTIPLE atom matches:
@@ -1137,9 +1148,9 @@ For IN-DOMAIN with MULTIPLE atom matches:
   "match_type": "multi",
   "relevant_atoms": [
     {{
-      "atom_name": "ChartMaker",
+      "atom_name": "DataFrame Operations",
       "confidence": 0.8,
-      "reason": "Good for visualization based on keywords"
+      "reason": "Good for data manipulation based on keywords"
     }},
     {{
       "atom_name": "Feature Overview",
@@ -1155,7 +1166,7 @@ For OUT-OF-DOMAIN:
   "domain_status": "out_of_domain",
   "raw_query": "{raw_query}",
   "enhanced_query": "enhanced version of the query", 
-  "domain_reason": "Query does not relate to data analytics, visualization, or modleing tasks"
+  "domain_reason": "Query does not relate to data analytics, visualization, or modeling tasks"
 }}
 
 Analyze and respond with JSON only:"""
@@ -1169,7 +1180,7 @@ Analyze and respond with JSON only:"""
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an expert data analytics consultant with comprehensive knowledge of all available atoms and their keywords. ALWAYS respond with ONLY valid JSON. NO additional text, explanations, or formatting outside the JSON structure. Use the detailed atom descriptions and keywords for precise matching."
+                    "content": "You are an expert data analytics consultant with comprehensive knowledge of all available atoms (19 total) from the atoms_knowledge_base.json. These atoms are organized into 6 categories: data_sources, data_processing, analytics, machine_learning, visualization, and planning_optimization. ALWAYS respond with ONLY valid JSON. NO additional text, explanations, or formatting outside the JSON structure. Use the detailed atom descriptions and keywords for precise matching. Prioritize 'DataFrame Operations' for general data manipulation tasks as it's the most versatile atom."
                 },
                 {
                     "role": "user",
@@ -1466,32 +1477,27 @@ Response:"""
         return ""
 
     def _get_atom_category(self, atom_name: str) -> str:
-        """Get atom category"""
+        """Get atom category - updated from atoms_knowledge_base.json"""
         category_map = {
+            "Data Upload & Validate": "data_sources",
+            "Feature Overview": "data_processing",
+            "Column Classifier": "data_processing",
+            "DataFrame Operations": "data_processing",
+            "Create and Transform Features": "data_processing",
+            "GroupBy with Wtg Avg": "data_processing",
+            "Merge": "data_processing",
+            "Concat": "data_processing",
+            "Scope Selector": "data_processing",
+            "Correlation": "analytics",
+            "Explore": "analytics",
+            "Regression - Feature Based": "machine_learning",
+            "Select Models - Feature Based": "machine_learning",
+            "Evaluate Models - Feature Based": "machine_learning",
+            "Auto-regressive Models": "machine_learning",
+            "Build Model - Feature Based": "machine_learning",
+            "Clustering": "machine_learning",
             "ChartMaker": "visualization",
-            "Feature Overview": "data_profiling",
-            "GroupBy with Wtg Avg": "aggregation",
-            "Data Upload & Validate": "data_governance",
-            "Explore": "data_exploration",
-            "Merge": "data_integration",
-            "Concatenate": "data_integration",
-            "Create": "feature_engineering",
-            "Delete": "data_cleaning",
-            "Rename": "data_cleaning",
-            "Text Box": "documentation",
-            "Correlation": "statistical_analysis",
-            "Scope Selector": "data_filtering",
-            "Row Operations": "data_manipulation",
-            "Regression - Feature Based": "modeling",
-            "Select Models - Feature Based": "model_selection",
-            "Evaluate Models - Feature Based": "model_evaluation",
-            "Auto-regressive Models": "time_series_modeling",
-            "Select Models - Auto Regressive": "model_selection",
-            "Evaluate Models - Auto Regressive": "model_evaluation",
-            "Scenario Planner": "business_planning",
-            "Optimizer": "optimization",
-            "Base Price Estimator": "pricing_analysis",
-            "Promo Estimator": "marketing_analysis"
+            "Scenario Planner": "planning_optimization"
         }
         return category_map.get(atom_name, "unknown")
 

@@ -1285,34 +1285,40 @@ const FormularBar: React.FC<FormularBarProps> = ({
   };
 
   const handleSubmit = () => {
-    console.log('[FormularBar] Submit attempt:', { 
-      selectedColumn, 
-      formulaInput, 
-      hasData: !!data?.headers,
-      validationResult
-    });
+    console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [FormularBar] 🚀 APPLY BUTTON CLICKED
+╠════════════════════════════════════════════════════════════════
+║ selectedColumn: "${selectedColumn}"
+║ formulaInput: "${formulaInput}"
+║ hasData: ${!!data?.headers}
+║ validationResult.isValid: ${validationResult.isValid}
+║ validationResult.error: ${validationResult.error || 'none'}
+╚════════════════════════════════════════════════════════════════
+    `);
 
     if (!selectedColumn) {
-      console.log('[FormularBar] No selected column');
+      console.error('[FormularBar] ❌ BLOCKED: No selected column');
       onValidationError?.('Please select a target column first');
       return;
     }
 
     if (!formulaInput.trim()) {
+      console.error('[FormularBar] ❌ BLOCKED: Empty formula');
       onValidationError?.('Please enter a formula');
       return;
     }
 
     // Check validation result
     if (!validationResult.isValid) {
-      console.log('[FormularBar] Validation failed:', validationResult.error);
+      console.error('[FormularBar] ❌ BLOCKED: Validation failed:', validationResult.error);
       onValidationError?.(validationResult.error);
       return;
     }
 
-    console.log('[FormularBar] Submitting formula');
+    console.log('[FormularBar] ✅ All checks passed - Calling onFormulaSubmit()');
     onValidationError?.(null);
-    onFormulaSubmit();
+    onFormulaSubmit(); // ✅ This should trigger handleFormulaSubmit in Canvas
   };
 
   const renderFormulaCard = (formula: FormulaItem) => {

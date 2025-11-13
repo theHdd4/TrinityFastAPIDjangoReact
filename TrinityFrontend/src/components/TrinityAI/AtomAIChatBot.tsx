@@ -121,13 +121,30 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
   }, [sessionId, atomId]);
 
   const handleSendMessage = async () => {
+    console.log('🚨🚨🚨 ===== HANDLE SEND MESSAGE CALLED =====');
+    console.log('🚨 atomType:', atomType);
+    console.log('🚨 inputValue:', inputValue);
+    
     const endpoint = ENDPOINTS[atomType];
-    if (!inputValue.trim() || !endpoint) return;
+    console.log('🚨 endpoint:', endpoint);
+    
+    if (!inputValue.trim() || !endpoint) {
+      console.log('🚨 EARLY RETURN - no input or endpoint');
+      return;
+    }
 
     const userMsg: Message = { id: Date.now().toString(), content: inputValue, sender: 'user', timestamp: new Date() };
-    setMessages(prev => [...prev, userMsg]);
+    console.log('🚨 User message created:', userMsg);
+    
+    setMessages(prev => {
+      console.log('🚨 Adding user message, prev count:', prev.length);
+      return [...prev, userMsg];
+    });
+    
     setInputValue('');
     setIsLoading(true);
+    
+    console.log('🚨 About to make API request to:', endpoint);
 
     try {
       // Get environment context from localStorage for dynamic path resolution
@@ -158,26 +175,54 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         ...envContext
       };
       
-      console.log('🔍 FRONTEND - SENDING REQUEST TO MERGE API:');
+      console.log('🚨🚨🚨 FRONTEND - SENDING REQUEST:');
       console.log('='.repeat(80));
       console.log('Endpoint:', endpoint);
+      console.log('AtomType:', atomType);
       console.log('Payload:', JSON.stringify(requestPayload, null, 2));
       console.log('='.repeat(80));
       
+      console.log('🚨 About to call fetch...');
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestPayload),
       });
+      
+      console.log('🚨 Fetch completed, status:', res.status, 'ok:', res.ok);
 
       if (res.ok) {
         const data = await res.json();
-        console.log('🔍 FRONTEND - RECEIVED RESPONSE FROM MERGE API:');
+        console.log('🔍 🔍 🔍 FRONTEND - RECEIVED RESPONSE FROM API:');
         console.log('='.repeat(80));
+        console.log('Endpoint:', endpoint);
+        console.log('Atom Type:', atomType);
         console.log('Status:', res.status);
-        console.log('Response:', JSON.stringify(data, null, 2));
+        console.log('Response Keys:', Object.keys(data));
         console.log('='.repeat(80));
-        console.log(`📥 Received AI response for ${atomType}:`, data);
+        console.log('🚨 CRITICAL CHECKS:');
+        console.log('Has merge_json:', !!data.merge_json);
+        console.log('Has concat_json:', !!data.concat_json);
+        console.log('Has smart_response:', !!data.smart_response);
+        console.log('data.success:', data.success);
+        console.log('data.success TYPE:', typeof data.success);
+        console.log('data.success === true:', data.success === true);
+        console.log('data.success == true:', data.success == true);
+        console.log('='.repeat(80));
+        console.log('Full Response (first 500 chars):', JSON.stringify(data).substring(0, 500));
+        console.log('='.repeat(80));
+        
+        // 🚨 FORCE DISPLAY OF CONCAT_JSON if it exists
+        if (data.concat_json) {
+          console.log('🚨🚨🚨 CONCAT_JSON EXISTS:');
+          console.log(JSON.stringify(data.concat_json, null, 2));
+        }
+        
+        // 🚨 FORCE DISPLAY OF MERGE_JSON if it exists  
+        if (data.merge_json) {
+          console.log('🚨🚨🚨 MERGE_JSON EXISTS:');
+          console.log(JSON.stringify(data.merge_json, null, 2));
+        }
         
         // Enhanced AI response handling with smart_response as priority (SAME AS OLD FILE)
         let aiText = '';
@@ -231,15 +276,17 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                                  (atomType === 'explore' && data.exploration_config) ||
                                  (atomType === 'dataframe-operations' && data.dataframe_config);
         
-        console.log('🔍 hasSpecificHandler check:', {
-          atomType,
-          hasSpecificHandler,
-          hasDataJson: !!data.json,
-          hasConcatJson: !!data.concat_json,
-          hasMergeJson: !!data.merge_json,
-          dataKeys: Object.keys(data),
-          dataSuccess: data.success
-        });
+        console.log('🔍 ===== HANDLER ROUTING DEBUG =====');
+        console.log('🔍 atomType:', atomType);
+        console.log('🔍 hasSpecificHandler:', hasSpecificHandler);
+        console.log('🔍 hasDataJson:', !!data.json);
+        console.log('🔍 hasConcatJson:', !!data.concat_json);
+        console.log('🔍 hasMergeJson:', !!data.merge_json);
+        console.log('🔍 hasGroupbyJson:', !!data.groupby_json);
+        console.log('🔍 data.success:', data.success);
+        console.log('🔍 dataKeys:', Object.keys(data));
+        console.log('🔍 handler exists:', !!handler);
+        console.log('🔍 ===============================');
         
         // Create handler context for modular handlers
         const handlerContext: AtomHandlerContext = {
@@ -248,11 +295,20 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           atomTitle,
           sessionId,
           updateAtomSettings,
-          setMessages
+          setMessages,
+          isStreamMode: false // Individual AI - show messages in chat
         };
 
         // Get the handler for this atom type
         const handler = atomHandlers[atomType];
+        
+        // 🚨 DEBUG: Check if handler is registered
+        console.log('🚨 ===== HANDLER REGISTRY CHECK =====');
+        console.log('🚨 atomType:', atomType);
+        console.log('🚨 Available handlers:', Object.keys(atomHandlers));
+        console.log('🚨 handler for this atomType:', handler);
+        console.log('🚨 handler exists:', !!handler);
+        console.log('🚨 ===================================');
         
         // 🔧 FIX: Only show general message if NO handler exists at all
         // Otherwise, let the handler (handleSuccess or handleFailure) show the message
@@ -275,15 +331,55 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         console.log('🔍 Smart response available:', !!data.smart_response);
 
         // Use modular handlers for BOTH UI updates AND message display
-        if (handler && data.success && hasSpecificHandler) {
+        // 🔧 CRITICAL FIX: If hasSpecificHandler is true (concat_json, merge_json, etc. exists),
+        // treat it as a success case regardless of data.success flag
+        // This matches the TrinityAIPanel behavior and fixes individual AI agents
+        const shouldCallHandleSuccess = handler && (hasSpecificHandler || data.success);
+        
+        console.log('🔍 ===== HANDLER DECISION =====');
+        console.log('🔍 handler exists:', !!handler);
+        console.log('🔍 handler value:', handler);
+        console.log('🔍 hasSpecificHandler:', hasSpecificHandler);
+        console.log('🔍 data.success:', data.success);
+        console.log('🔍 hasSpecificHandler || data.success:', hasSpecificHandler || data.success);
+        console.log('🔍 shouldCallHandleSuccess:', shouldCallHandleSuccess);
+        console.log('🔍 Will call handleSuccess:', !!shouldCallHandleSuccess);
+        console.log('🔍 Will call handleFailure:', !!(handler && !hasSpecificHandler));
+        console.log('🔍 ============================');
+        
+        // 🚨 DETAILED BREAKDOWN OF WHY HANDLER MIGHT NOT BE CALLED
+        if (!shouldCallHandleSuccess && !(handler && !hasSpecificHandler)) {
+          console.error('🚨🚨🚨 NO HANDLER WILL BE CALLED! Here is why:');
+          if (!handler) {
+            console.error('❌ handler is falsy:', handler);
+          }
+          if (!hasSpecificHandler && !data.success) {
+            console.error('❌ Both hasSpecificHandler and data.success are false');
+            console.error('   hasSpecificHandler:', hasSpecificHandler);
+            console.error('   data.success:', data.success);
+          }
+          console.error('🚨 This means the response will NOT be processed!');
+          console.error('🚨 Response data:', data);
+        }
+        
+        if (shouldCallHandleSuccess) {
           // 🔧 Call handleSuccess for UI population AND message display
-          console.log(`🎯 Using modular handler for ${atomType} (success=true)`);
-          console.log(`🔍 Handler data:`, { atomType, hasData: !!data.json, data });
+          console.log(`🎯 ===== CALLING HANDLER.HANDLESUCCESS for ${atomType} =====`);
+          console.log(`🔍 Handler data:`, { 
+            atomType, 
+            hasSpecificHandler, 
+            dataSuccess: data.success,
+            hasData: !!data.json, 
+            hasConcatJson: !!data.concat_json,
+            hasMergeJson: !!data.merge_json,
+            hasSmartResponse: !!data.smart_response,
+            isStreamMode: handlerContext.isStreamMode
+          });
           try {
             await handler.handleSuccess(data, handlerContext);
-            console.log(`✅ Handler completed for ${atomType}`);
+            console.log(`✅ ===== HANDLER.HANDLESUCCESS COMPLETED for ${atomType} =====`);
           } catch (error) {
-            console.error(`❌ Handler error for ${atomType}:`, error);
+            console.error(`❌ ===== HANDLER.HANDLESUCCESS ERROR for ${atomType} =====`, error);
             const errorMsg: Message = {
               id: (Date.now() + 1).toString(),
               content: `Error processing ${atomTitle}: ${(error as Error).message || 'Unknown error'}`,
@@ -292,18 +388,20 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             };
             setMessages(prev => [...prev, errorMsg]);
           }
-        } else if (handler && !data.success) {
-          // 🔧 Call handleFailure for UI updates AND message display
-          console.log(`💡 Calling handleFailure for ${atomType} (success=false)`);
+        } else if (handler && !hasSpecificHandler) {
+          // 🔧 Call handleFailure only when NO specific handler data (no concat_json, merge_json, etc.)
+          console.log(`💡 ===== CALLING HANDLER.HANDLEFAILURE for ${atomType} (no specific config) =====`);
           try {
             await handler.handleFailure(data, handlerContext);
-            console.log(`✅ HandleFailure completed for ${atomType}`);
+            console.log(`✅ ===== HANDLER.HANDLEFAILURE COMPLETED for ${atomType} =====`);
           } catch (error) {
-            console.error(`❌ HandleFailure error for ${atomType}:`, error);
+            console.error(`❌ ===== HANDLER.HANDLEFAILURE ERROR for ${atomType} =====`, error);
           }
-        } else if (hasSpecificHandler) {
-          console.log(`🔧 Using inline handler for ${atomType} (no modular handler available)`);
-          // This is where we would fall back to old inline logic if needed
+        } else {
+          console.warn(`⚠️ ===== NO HANDLER CALLED for ${atomType} =====`);
+          console.warn('⚠️ handler:', !!handler);
+          console.warn('⚠️ hasSpecificHandler:', hasSpecificHandler);
+          console.warn('⚠️ This means the response will NOT be processed!');
         }
       } else {
         // Handle API response error

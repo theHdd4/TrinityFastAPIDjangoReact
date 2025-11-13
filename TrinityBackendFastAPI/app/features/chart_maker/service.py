@@ -136,13 +136,17 @@ class ChartMakerService:
         return df.columns.tolist()
     
     def get_column_types(self, df: pd.DataFrame) -> Dict[str, List[str]]:
-        """Classify columns into numeric and categorical"""
-        numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
-        categorical_columns = df.select_dtypes(include=['object', 'category']).columns.tolist()
+        """Classify columns into numeric and categorical."""
+        numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
+        categorical_columns = df.select_dtypes(include=["object", "category"]).columns.tolist()
+        datetime_columns = df.select_dtypes(include=["datetime", "datetimetz"]).columns.tolist()
+
+        # Ensure datetime columns are available for selection (e.g., as X-axis options)
+        combined_categorical = list(dict.fromkeys([*categorical_columns, *datetime_columns]))
         
         return {
             "numeric_columns": numeric_columns,
-            "categorical_columns": categorical_columns
+            "categorical_columns": combined_categorical
         }
     
     def get_unique_values(self, df: pd.DataFrame, columns: List[str]) -> Dict[str, List[str]]:

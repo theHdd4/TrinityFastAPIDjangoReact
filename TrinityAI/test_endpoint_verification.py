@@ -23,8 +23,6 @@ AGENT_ENDPOINTS = {
     "explore": "/trinityai/explore",
     "dataframe_operations": "/trinityai/dataframe-operations",
     "create_transform": "/trinityai/create-transform",
-    "superagent": "/trinityai/superagent/chat",
-    "superagent_workflow": "/trinityai/superagent/generate-workflow",
 }
 
 def test_endpoint_accessibility(endpoint: str, agent_name: str) -> Dict[str, Any]:
@@ -35,8 +33,6 @@ def test_endpoint_accessibility(endpoint: str, agent_name: str) -> Dict[str, Any
     # Prepare test payload based on agent type
     if agent_name == "fetch_atom":
         payload = {"query": "test query"}
-    elif agent_name in ["superagent", "superagent_workflow"]:
-        payload = {"message": "test message"}
     else:
         payload = {"prompt": "test prompt", "session_id": "test_session"}
     

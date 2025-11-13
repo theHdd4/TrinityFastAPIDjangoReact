@@ -1,0 +1,387 @@
+{
+  "description": "Complete DataFrame Operations API Reference - Mapping of all backend endpoints with their exact parameter requirements",
+  "base_url": "/api/dataframe-operations/",
+  "endpoints": {
+    "/load_cached": {
+      "method": "POST",
+      "description": "Load a cached Arrow file into DataFrame session",
+      "required_parameters": {
+        "object_name": {
+          "type": "string",
+          "description": "EXACT filename from available_files list (e.g., 'D0_KHC_UK_Beans.arrow')"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "object_name": "client/app/project/filename.arrow"
+      }
+    },
+    "/filter_rows": {
+      "method": "POST",
+      "description": "Filter DataFrame rows based on column values",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "column": {
+          "type": "string",
+          "description": "Column name to filter on"
+        },
+        "value": {
+          "type": "any",
+          "description": "Value to filter by - can be string, number, {min, max} for range, or array for list filter"
+        }
+      },
+      "optional_parameters": {},
+      "example_simple": {
+        "df_id": "auto_from_previous",
+        "column": "Country",
+        "value": "India"
+      },
+      "example_range": {
+        "df_id": "auto_from_previous",
+        "column": "Age",
+        "value": {"min": 18, "max": 65}
+      },
+      "example_list": {
+        "df_id": "auto_from_previous",
+        "column": "Status",
+        "value": ["Active", "Pending", "Complete"]
+      }
+    },
+    "/sort": {
+      "method": "POST",
+      "description": "Sort DataFrame by specified column",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "column": {
+          "type": "string",
+          "description": "Column name to sort by"
+        }
+      },
+      "optional_parameters": {
+        "direction": {
+          "type": "string",
+          "description": "Sort direction: 'asc' (default) or 'desc'",
+          "default": "asc"
+        }
+      },
+      "example": {
+        "df_id": "auto_from_previous",
+        "column": "Date",
+        "direction": "asc"
+      }
+    },
+    "/insert_row": {
+      "method": "POST",
+      "description": "Insert a new empty row at specified position",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Row index where to insert (0-based)"
+        }
+      },
+      "optional_parameters": {
+        "direction": {
+          "type": "string",
+          "description": "Insert direction: 'below' (default) or 'above'",
+          "default": "below"
+        }
+      },
+      "example": {
+        "df_id": "auto_from_previous",
+        "index": 4,
+        "direction": "below"
+      }
+    },
+    "/delete_row": {
+      "method": "POST",
+      "description": "Delete row at specified index",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Row index to delete (0-based)"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "df_id": "auto_from_previous",
+        "index": 10
+      }
+    },
+    "/duplicate_row": {
+      "method": "POST",
+      "description": "Duplicate row at specified index",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Row index to duplicate (0-based)"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "df_id": "auto_from_previous",
+        "index": 7
+      }
+    },
+    "/insert_column": {
+      "method": "POST",
+      "description": "Insert new column at specified position",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "index": {
+          "type": "integer",
+          "description": "Column position where to insert (0-based)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of the new column"
+        }
+      },
+      "optional_parameters": {
+        "default": {
+          "type": "any",
+          "description": "Default value for all cells",
+          "default": null
+        }
+      },
+      "example": {
+        "df_id": "auto_from_previous",
+        "index": 3,
+        "name": "New_Column",
+        "default": ""
+      }
+    },
+    "/delete_column": {
+      "method": "POST",
+      "description": "Delete specified column",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of column to delete"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "df_id": "auto_from_previous",
+        "name": "OldColumn"
+      }
+    },
+    "/duplicate_column": {
+      "method": "POST",
+      "description": "Duplicate column with new name",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Name of column to duplicate"
+        },
+        "new_name": {
+          "type": "string",
+          "description": "Name for the duplicated column"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "df_id": "auto_from_previous",
+        "name": "Revenue",
+        "new_name": "Revenue_copy"
+      }
+    },
+    "/move_column": {
+      "method": "POST",
+      "description": "Move column to new position",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "from": {
+          "type": "string",
+          "description": "Name of column to move (API uses 'from' alias)"
+        },
+        "to_index": {
+          "type": "integer",
+          "description": "New position index (0-based, must be < total columns)"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "df_id": "auto_from_previous",
+        "from": "Date",
+        "to_index": 1
+      }
+    },
+    "/rename_column": {
+      "method": "POST",
+      "description": "Rename existing column",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "old_name": {
+          "type": "string",
+          "description": "Current column name"
+        },
+        "new_name": {
+          "type": "string",
+          "description": "New column name"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "df_id": "auto_from_previous",
+        "old_name": "Revenue",
+        "new_name": "Sales"
+      }
+    },
+    "/retype_column": {
+      "method": "POST",
+      "description": "Change column data type",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "name": {
+          "type": "string",
+          "description": "Column name to retype"
+        },
+        "new_type": {
+          "type": "string",
+          "description": "New data type: 'string', 'number', 'date'"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "df_id": "auto_from_previous",
+        "name": "Amount",
+        "new_type": "number"
+      }
+    },
+    "/edit_cell": {
+      "method": "POST",
+      "description": "Edit individual cell value",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "row": {
+          "type": "integer",
+          "description": "Row index (0-based)"
+        },
+        "column": {
+          "type": "string",
+          "description": "Column name"
+        },
+        "value": {
+          "type": "any",
+          "description": "New cell value"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "df_id": "auto_from_previous",
+        "row": 0,
+        "column": "Sales",
+        "value": 1000
+      }
+    },
+    "/apply_formula": {
+      "method": "POST",
+      "description": "Apply Excel-like formula to create new column with comprehensive function support",
+      "required_parameters": {
+        "df_id": {
+          "type": "string",
+          "description": "DataFrame session ID (use 'auto_from_previous' for chained operations)"
+        },
+        "target_column": {
+          "type": "string",
+          "description": "Name of column to create/update"
+        },
+        "formula": {
+          "type": "string",
+          "description": "Formula expression - start with '=' for row-by-row evaluation, or constant value"
+        }
+      },
+      "optional_parameters": {},
+      "supported_functions": {
+        "mathematical": ["SUM", "AVG", "MEAN", "PROD", "DIV", "MAX", "MIN", "ABS", "ROUND", "FLOOR", "CEIL", "EXP", "LOG", "SQRT"],
+        "statistical": ["ZSCORE", "NORM", "CORR"],
+        "string": ["UPPER", "LOWER", "LEN", "SUBSTR", "STR_REPLACE"],
+        "date": ["YEAR", "MONTH", "DAY", "WEEKDAY", "DATE_DIFF"],
+        "data": ["BIN", "MAP", "ISNULL", "FILLNA", "FILLBLANK"],
+        "conditional": ["IF"]
+      },
+      "formula_examples": {
+        "mathematical": "=SUM(Revenue,Cost)",
+        "division": "=DIV(Revenue,Volume)",
+        "statistical": "=ZSCORE(Sales)",
+        "conditional": "=IF(Volume>100,'High','Low')",
+        "string": "=UPPER(ProductName)",
+        "date": "=YEAR(OrderDate)",
+        "binning": "=BIN(Age,[0,18,35,65,100])",
+        "mapping": "=MAP(Grade,{'A':4,'B':3,'C':2,'D':1})",
+        "complex": "=IF(Volume>0,DIV(Revenue,Volume),0)"
+      }
+    },
+    "/save": {
+      "method": "POST",
+      "description": "Save dataframe to storage",
+      "required_parameters": {
+        "csv_data": {
+          "type": "string",
+          "description": "CSV data to save or 'auto_generated_csv' to use current df state"
+        },
+        "filename": {
+          "type": "string",
+          "description": "Filename for saved file (use exact name from user, no prefixes)"
+        }
+      },
+      "optional_parameters": {},
+      "example": {
+        "csv_data": "auto_generated_csv",
+        "filename": "user_specified_filename.arrow"
+      }
+    }
+  },
+  "critical_rules": [
+    "ALWAYS start with /load_cached as operation_id '1'",
+    "Use 'auto_from_previous' for df_id in chained operations",
+    "NEVER add random filters unless user explicitly requests filtering",
+    "Validate column names exist in the selected file (case-sensitive)",
+    "For move_column: to_index must be < total number of columns",
+    "Use EXACT filenames from available_files - no prefixes like 'ai_' or 'processed_'",
+    "Move columns AFTER they are created/inserted",
+    "All operations require a valid df_id from a previous load operation"
+  ]
+}
+

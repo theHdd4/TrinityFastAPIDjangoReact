@@ -279,7 +279,28 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     setCardinalityError(null);
     
     try {
-      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(settings.dataSource)}`;
+      // 🔧 CRITICAL FIX: Construct full path if only filename is stored
+      let fullDataSource = settings.dataSource;
+      
+      // Get environment context to construct full path
+      const envStr = localStorage.getItem('env');
+      if (envStr && settings.dataSource && !settings.dataSource.includes('/')) {
+        try {
+          const env = JSON.parse(envStr);
+          const clientName = env.CLIENT_NAME || '';
+          const appName = env.APP_NAME || '';
+          const projectName = env.PROJECT_NAME || '';
+          
+          if (clientName && appName && projectName) {
+            fullDataSource = `${clientName}/${appName}/${projectName}/${settings.dataSource}`;
+            console.log(`🔧 Constructed full path for groupby cardinality: ${settings.dataSource} → ${fullDataSource}`);
+          }
+        } catch (e) {
+          console.warn('Failed to construct full path for groupby cardinality:', e);
+        }
+      }
+      
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(fullDataSource)}`;
       const res = await fetch(url);
       const data = await res.json();
       

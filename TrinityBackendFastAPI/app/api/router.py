@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from .health import router as health_router
 from app.features.feature_overview.endpoint import router as feature_overview_router
 from app.features.text_box.routes import router as textbox_router
 from app.features.data_upload_validate.endpoint import router as data_upload_validate_router
@@ -31,6 +32,9 @@ from app.features.pivot_table.endpoint import router as pivot_table_router
 
 api_router = APIRouter()
 text_router = APIRouter()
+
+# Platform health routers
+api_router.include_router(health_router)
 
 # Core feature routers
 api_router.include_router(feature_overview_router)

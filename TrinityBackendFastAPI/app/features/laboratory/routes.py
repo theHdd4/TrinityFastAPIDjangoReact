@@ -13,24 +13,26 @@ router = APIRouter()
 async def create_laboratory_card(payload: LaboratoryCardRequest) -> LaboratoryCardResponse:
     """Create a laboratory card scaffold for the frontend workspace."""
 
-    atom_id = payload.atom_id.strip()
-    if not atom_id:
-        raise HTTPException(status_code=422, detail="atomId is required")
-
     card_id = f"card-{uuid4().hex}"
-    atom_instance_id = f"{atom_id}-{uuid4().hex}"
+    atoms = []
+    
+    # Create atom only if atomId is provided
+    if payload.atom_id and payload.atom_id.strip():
+        atom_id = payload.atom_id.strip()
+        atom_instance_id = f"{atom_id}-{uuid4().hex}"
 
-    atom_response = LaboratoryAtomResponse(
-        id=atom_instance_id,
-        atomId=atom_id,  # Use alias field name for Pydantic v2 compatibility
-        source=payload.source,
-        llm=payload.llm,
-        settings=payload.settings,
-    )
+        atom_response = LaboratoryAtomResponse(
+            id=atom_instance_id,
+            atomId=atom_id,
+            source=payload.source,
+            llm=payload.llm,
+            settings=payload.settings,
+        )
+        atoms = [atom_response]
 
     return LaboratoryCardResponse(
         id=card_id,
-        atoms=[atom_response],
+        atoms=atoms,  # Empty list if no atomId provided
         molecule_id=payload.molecule_id,
         molecule_title=None,
     )

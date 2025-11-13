@@ -1,6 +1,11 @@
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
-import redis
+
+from app.core.feature_cache import feature_cache
+from app.core.redis import (
+    get_async_redis,
+    get_redis_settings,
+)
 
 MONGO_URI = os.getenv(
     "OVERVIEW_MONGO_URI",
@@ -10,8 +15,10 @@ MONGO_URI = os.getenv(
 client = AsyncIOMotorClient(MONGO_URI)
 db = client["feature_overview_db"]
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=False)
+redis_client = feature_cache.router("feature_overview")
+redis_text_client = redis_client
+redis_async_client = get_async_redis()
+redis_settings = get_redis_settings()
 
 async def get_unique_dataframe_results_collection():
     return db["unique_dataframe"]

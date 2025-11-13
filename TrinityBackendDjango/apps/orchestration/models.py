@@ -20,11 +20,24 @@ class EngineRegistry(models.Model):
 
 
 class TaskRun(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_RUNNING = "running"
+    STATUS_SUCCESS = "success"
+    STATUS_FAILURE = "failure"
+
+    EXECUTION_PROFILE_CPU = "cpu"
+    EXECUTION_PROFILE_IO = "io"
+
     STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("running", "Running"),
-        ("success", "Success"),
-        ("failure", "Failure"),
+        (STATUS_PENDING, "Pending"),
+        (STATUS_RUNNING, "Running"),
+        (STATUS_SUCCESS, "Success"),
+        (STATUS_FAILURE, "Failure"),
+    ]
+
+    EXECUTION_PROFILE_CHOICES = [
+        (EXECUTION_PROFILE_IO, "I/O bound"),
+        (EXECUTION_PROFILE_CPU, "CPU bound"),
     ]
 
     workflow_run = models.ForeignKey(
@@ -34,10 +47,26 @@ class TaskRun(models.Model):
     engine       = models.ForeignKey(
         EngineRegistry, on_delete=models.SET_NULL, null=True, blank=True
     )
-    status       = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    status       = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     input        = models.JSONField()
     output       = models.JSONField(blank=True, null=True)
     error        = models.TextField(blank=True)
+    tenant_schema = models.CharField(
+        max_length=63,
+        blank=True,
+        help_text="Tenant schema that submitted this task run",
+    )
+    execution_profile = models.CharField(
+        max_length=10,
+        choices=EXECUTION_PROFILE_CHOICES,
+        default=EXECUTION_PROFILE_IO,
+        help_text="Scheduling hint for Celery routing",
+    )
+    celery_task_id = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Last Celery task id that processed this TaskRun",
+    )
     created_at   = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)
 

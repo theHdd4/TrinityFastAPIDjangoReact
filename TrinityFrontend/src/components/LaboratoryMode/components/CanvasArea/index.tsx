@@ -1834,6 +1834,16 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       const atom = JSON.parse(atomData);
       const info = allAtoms.find(a => a.id === atom.id);
 
+      // Find the card to get its moleculeId and current atom count
+      const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+      if (card && card.atoms.length >= 1) {
+        toast({
+          title:
+            'Already one atom is present in the card - please remove atom and then try adding an atom.',
+        });
+        return;
+      }
+
       const newAtom: DroppedAtom = {
         id: `${atom.id}-${Date.now()}`,
         atomId: atom.id,
@@ -1863,9 +1873,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             ? { data: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_DATA }, settings: { ...DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS } }
             : undefined,
       };
-
-      // Find the card to get its moleculeId and current atom count
-      const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
 
       // Calculate position accounting for existing workflow molecule atoms
       let atomPosition = card?.atoms ? card.atoms.length : 0;
@@ -2823,13 +2830,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       a => normalizeName(a.id) === norm || normalizeName(a.title) === norm
     );
     if (!info) return;
+    // Find the card to get its moleculeId and current atom count
+    const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
+
+    if (card && card.atoms.length >= 1) {
+      toast({
+        title:
+          'Already one atom is present in the card - please remove atom and then try adding an atom.',
+      });
+      return;
+    }
+
     const newAtom = buildAtomFromApiPayload(info.id, {
       atomId: info.id,
       source: 'ai',
     });
-
-    // Find the card to get its moleculeId and current atom count
-    const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
 
     // Calculate position accounting for existing workflow molecule atoms
     let atomPosition = card?.atoms ? card.atoms.length : 0;

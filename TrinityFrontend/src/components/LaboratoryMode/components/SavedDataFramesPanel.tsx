@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2 } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API, CLASSIFIER_API } from '@/lib/api';
@@ -17,9 +17,10 @@ import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 interface Props {
   isOpen: boolean;
   onToggle: () => void;
+  collapseDirection?: 'left' | 'right';
 }
 
-const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
+const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirection = 'right' }) => {
   interface Frame {
     object_name: string;
     csv_name: string;
@@ -1069,9 +1070,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     );
   };
 
+  const borderClass = collapseDirection === 'left' ? 'border-r border-gray-200' : 'border-l border-gray-200';
+
   if (!isOpen) {
     return (
-      <div className="w-12 bg-white border-l border-gray-200 flex flex-col h-full">
+      <div className={`w-12 bg-white flex flex-col h-full ${borderClass}`}>
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
           <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
             <Database className="w-4 h-4" />
@@ -1081,8 +1084,10 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     );
   }
 
+  const CollapseIcon = collapseDirection === 'left' ? ChevronLeft : ChevronRight;
+
   return (
-    <div className="w-80 bg-white border-l border-gray-200 flex flex-col h-full">
+    <div className={`w-80 bg-white flex flex-col h-full ${borderClass}`}>
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
           <Database className="w-4 h-4" />
@@ -1099,7 +1104,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             <Trash2 className="w-4 h-4" />
           </Button>
           <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
-            <ChevronRight className="w-4 h-4" />
+            <CollapseIcon className="w-4 h-4" />
           </Button>
         </div>
       </div>
