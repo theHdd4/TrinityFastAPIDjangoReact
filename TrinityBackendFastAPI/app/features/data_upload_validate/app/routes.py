@@ -379,7 +379,9 @@ async def upload_file(
 
     if submission.status == "failure":  # pragma: no cover - defensive programming
         logger.error(
-            "data_upload.temp_upload.failed task_id=%s file=%s", submission.id, file.filename
+            "data_upload.temp_upload.failed task_id=%s file=%s",
+            submission.task_id,
+            file.filename,
         )
         raise HTTPException(status_code=400, detail=submission.detail or "Upload failed")
 
@@ -387,7 +389,7 @@ async def upload_file(
     logger.info(
         "data_upload.temp_upload.queued file=%s task_id=%s duration_ms=%.2f",
         file.filename,
-        submission.id,
+        submission.task_id,
         duration_ms,
     )
     return format_task_response(submission, embed_result=True)
@@ -1537,7 +1539,9 @@ async def validate(
 
     if submission.status == "failure":  # pragma: no cover - defensive
         logger.error(
-            "data_upload.validate.failed validator=%s task_id=%s", validator_atom_id, submission.id
+            "data_upload.validate.failed validator=%s task_id=%s",
+            validator_atom_id,
+            submission.task_id,
         )
         raise HTTPException(status_code=400, detail=submission.detail or "Validation failed")
 
@@ -1545,7 +1549,7 @@ async def validate(
     logger.info(
         "data_upload.validate.queued validator=%s task_id=%s files=%s duration_ms=%.2f",
         validator_atom_id,
-        submission.id,
+        submission.task_id,
         len(keys),
         duration_ms,
     )
