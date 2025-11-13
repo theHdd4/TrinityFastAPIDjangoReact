@@ -1692,9 +1692,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   }, [layoutCards, workflowMolecules]);
 
   // Sync cards with exhibition store
-  useEffect(() => {
-    setCards(layoutCards);
-  }, [layoutCards, setCards]);
+  // useEffect(() => {
+  //   setCards(layoutCards);
+  // }, [layoutCards, setCards]);
 
   // Persist workflowMolecules to localStorage only when we have cards with molecule info
   useEffect(() => {

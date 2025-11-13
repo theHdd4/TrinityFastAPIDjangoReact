@@ -171,28 +171,47 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
     // Determine the base URL for WebSocket
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const hostIp = (import.meta as any).env?.VITE_HOST_IP;
-    const resolvedFastapiPort = (() => {
-      const envPort = (import.meta as any).env?.VITE_FASTAPI_PORT;
-      if (envPort) {
-        return envPort;
-      }
-
-      if (typeof window !== 'undefined') {
-        const { port } = window.location;
-        if (port === '8081') {
-          return '8004';
-        }
-      }
-
-      return '8001';
-    })();
+    const host = window.location.hostname;
     
     let baseUrl: string;
-        if (hostIp) {
-          baseUrl = `${protocol}//${hostIp}:${resolvedFastapiPort}`;
-    } else {
-      const host = window.location.hostname;
-          baseUrl = `${protocol}//${host}:${resolvedFastapiPort}`;
+    
+    // Production: Use domain without port (reverse proxy handles routing)
+    if (host.includes('quantmatrixai.com') || host.includes('trinity')) {
+      baseUrl = `${protocol}//${host}`;
+    } 
+    // Local development with HOST_IP
+    else if (hostIp) {
+      const resolvedFastapiPort = (() => {
+        const envPort = (import.meta as any).env?.VITE_FASTAPI_PORT;
+        if (envPort) {
+          return envPort;
+        }
+        if (typeof window !== 'undefined') {
+          const { port } = window.location;
+          if (port === '8081') {
+            return '8004';
+          }
+        }
+        return '8001';
+      })();
+      baseUrl = `${protocol}//${hostIp}:${resolvedFastapiPort}`;
+    } 
+    // Local development without HOST_IP
+    else {
+      const resolvedFastapiPort = (() => {
+        const envPort = (import.meta as any).env?.VITE_FASTAPI_PORT;
+        if (envPort) {
+          return envPort;
+        }
+        if (typeof window !== 'undefined') {
+          const { port } = window.location;
+          if (port === '8081') {
+            return '8004';
+          }
+        }
+        return '8001';
+      })();
+      baseUrl = `${protocol}//${host}:${resolvedFastapiPort}`;
     }
 
     const wsUrl = `${baseUrl}/api/laboratory/sync/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
@@ -376,6 +395,11 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
 
       // Ignore messages from self
       if (message.client_id === clientIdRef.current) {
+        console.log('[CollaborativeSync] Ignoring self-echo message:', {
+          type: message.type,
+          myClientId: clientIdRef.current,
+          messageClientId: message.client_id,
+        });
         return;
       }
 
