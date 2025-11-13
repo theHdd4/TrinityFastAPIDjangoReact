@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Database, Target, Cpu } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { BuildModelFeatureBasedData, BuildModelFeatureBasedSettings as SettingsType, ModelConfig } from '../BuildModelFeatureBasedAtom';
 
 interface BuildModelFeatureBasedSettingsProps {
@@ -38,6 +39,7 @@ const BuildModelFeatureBasedSettings: React.FC<BuildModelFeatureBasedSettingsPro
   useEffect(() => {
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
+      .then(resolveTaskResponse)
       .then(d => {
         const files = Array.isArray(d.files) ? d.files.map((f: any)=> f.object_name || f) : [];
         if (files.length && (!data?.availableFiles || data.availableFiles.length === 0)) {

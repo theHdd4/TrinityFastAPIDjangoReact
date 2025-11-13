@@ -170,6 +170,10 @@ export const CLASSIFIER_API =
 export const DATAFRAME_OPERATIONS_API =
   import.meta.env.VITE_DATAFRAME_OPERATIONS_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/dataframe-operations`;
 
+export const BUILD_FEATURE_BASED_API =
+  normalizeUrl(import.meta.env.VITE_BUILD_FEATURE_BASED_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-feature-based`;
+
 export const CLUSTERING_API =
   normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`;
