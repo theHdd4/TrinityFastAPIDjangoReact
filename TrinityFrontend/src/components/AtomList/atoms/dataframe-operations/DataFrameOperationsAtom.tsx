@@ -138,6 +138,13 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     if ("filters" in newSettings) {
       mergedSettings.filters = newSettings.filters;
     }
+    // Properly merge pivotSettings to ensure nested updates are preserved
+    if ("pivotSettings" in newSettings && newSettings.pivotSettings) {
+      mergedSettings.pivotSettings = {
+        ...(current?.pivotSettings || DEFAULT_PIVOT_TABLE_SETTINGS),
+        ...newSettings.pivotSettings,
+      };
+    }
     if (current?.tableData && (!mergedSettings.selectedColumns || mergedSettings.selectedColumns.length === 0)) {
       mergedSettings.selectedColumns = current.tableData.headers;
     }

@@ -650,30 +650,38 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     ...(settings.pivotSettings || {}),
   }), [settings.pivotSettings]);
 
-  const [pivotVisible, setPivotVisible] = useState(false);
+  const [activeTab, setActiveTab] = useState<'dataframe' | 'pivot'>('dataframe');
   const [pivotIsComputing, setPivotIsComputing] = useState(false);
   const [pivotComputeError, setPivotComputeError] = useState<string | null>(null);
   const [pivotManualRefreshToken, setPivotManualRefreshToken] = useState(0);
   const [pivotIsSaving, setPivotIsSaving] = useState(false);
   const [pivotSaveError, setPivotSaveError] = useState<string | null>(null);
   const [pivotSaveMessage, setPivotSaveMessage] = useState<string | null>(null);
-
-  const updatePivotSettings = useCallback(
-    (partial: Partial<PivotSettings>) => {
-      onSettingsChange({
-        pivotSettings: {
-          ...pivotSettings,
-          ...partial,
-        },
-      });
-    },
-    [pivotSettings, onSettingsChange],
-  );
+  const [showPivotSaveModal, setShowPivotSaveModal] = useState(false);
+  const [pivotSaveFileName, setPivotSaveFileName] = useState('');
 
   const pivotSettingsRef = useRef(pivotSettings);
   useEffect(() => {
     pivotSettingsRef.current = pivotSettings;
   }, [pivotSettings]);
+
+  // Track if this is the initial load to preserve restored data from MongoDB
+  const isInitialLoadRef = useRef(true);
+  const lastComputedSignatureRef = useRef<string | null>(null);
+
+  const updatePivotSettings = useCallback(
+    (partial: Partial<PivotSettings>) => {
+      // Use pivotSettingsRef.current to get the latest values, not the potentially stale pivotSettings from useMemo
+      const currentSettings = pivotSettingsRef.current;
+      onSettingsChange({
+        pivotSettings: {
+          ...currentSettings,
+          ...partial,
+        },
+      });
+    },
+    [onSettingsChange],
+  );
 
   const updatePivotSettingsRef = useRef(updatePivotSettings);
   useEffect(() => {
@@ -753,66 +761,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     pivotSettings.grandTotalsMode,
   ]);
 
-  // Load pivot data from backend cache when settings are restored (on mount or when pivotSettings change)
-  useEffect(() => {
-    const latestSettings = pivotSettingsRef.current;
-    
-    // Only try to load if we have configuration but no results or stale results
-    const hasConfig = !!latestSettings.dataSource && 
-                      Array.isArray(latestSettings.valueFields) && 
-                      latestSettings.valueFields.length > 0;
-    
-    if (!hasConfig) {
-      return;
-    }
-
-    // Only try to load if we don't have results or results are empty
-    const needsLoad = !latestSettings.pivotResults || 
-                      !Array.isArray(latestSettings.pivotResults) || 
-                      latestSettings.pivotResults.length === 0;
-    
-    if (!needsLoad) {
-      return; // Already have data, no need to load
-    }
-
-    // Try to load from backend cache first (when settings are restored from MongoDB)
-    const loadFromCache = async () => {
-      try {
-        const dataUrl = `${PIVOT_API}/${encodeURIComponent(atomId)}/data`;
-        console.log('[Pivot Load] Attempting to load pivot data from cache for atomId:', atomId);
-        const response = await fetch(dataUrl);
-        
-        if (response.ok) {
-          const cachedData = await response.json();
-          if (cachedData?.data && Array.isArray(cachedData.data) && cachedData.data.length > 0) {
-            console.log('[Pivot Load] Successfully loaded pivot data from cache, rows:', cachedData.data.length);
-            updatePivotSettingsRef.current({
-              pivotResults: cachedData.data ?? [],
-              pivotStatus: cachedData.status ?? 'success',
-              pivotError: null,
-              pivotUpdatedAt: cachedData.updated_at,
-              pivotRowCount: cachedData.rows,
-              pivotHierarchy: Array.isArray(cachedData.hierarchy) ? cachedData.hierarchy : [],
-              pivotColumnHierarchy: Array.isArray(cachedData.column_hierarchy) ? cachedData.column_hierarchy : [],
-            });
-            return true; // Data loaded successfully
-          }
-        } else {
-          console.log('[Pivot Load] No cached data available (status:', response.status, ')');
-        }
-      } catch (error) {
-        console.warn('[Pivot Load] Failed to load from cache:', error);
-      }
-      return false; // Data not available in cache
-    };
-
-    loadFromCache().then(loaded => {
-      if (!loaded) {
-        // If cache load failed, the compute useEffect will handle recomputing
-        console.log('[Pivot Load] Cache load failed, will recompute if signature matches');
-      }
-    });
-  }, [atomId, pivotSettings.dataSource, pivotSettings.valueFields?.length]); // Run when settings are restored
+  // Removed Redis cache loading - pivot data now comes from MongoDB (via settings) or gets computed fresh
+  // The pivot settings (including results) are restored from MongoDB when the atom loads
+  // If no results exist, the compute useEffect will handle fresh computation
 
   useEffect(() => {
     setPivotSaveMessage(null);
@@ -830,6 +781,31 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       setPivotComputeError(null);
       return;
     }
+
+    // Check if we already have valid pivot results from MongoDB (restored session)
+    // On initial load: if we have restored results, skip computation to preserve them
+    // On subsequent runs: if signature changed or refresh requested, recompute (handled by dependencies)
+    const hasValidResults = latestSettings.pivotResults &&
+                            Array.isArray(latestSettings.pivotResults) &&
+                            latestSettings.pivotResults.length > 0;
+
+    const isInitialLoad = isInitialLoadRef.current;
+    const signatureChanged = lastComputedSignatureRef.current !== pivotComputeSignature;
+
+    // Only skip computation on initial load if we have valid restored results
+    // If signature changed or refresh was requested, we should recompute
+    if (isInitialLoad && hasValidResults && latestSettings.pivotStatus !== 'failed' && !signatureChanged) {
+      // Initial load with valid restored data from MongoDB, skip computation
+      console.log('[Pivot Compute] Initial load: Valid results found from MongoDB, skipping computation. Rows:', latestSettings.pivotResults.length);
+      isInitialLoadRef.current = false;
+      lastComputedSignatureRef.current = pivotComputeSignature;
+      setPivotIsComputing(false);
+      setPivotComputeError(latestSettings.pivotError || null);
+      return;
+    }
+
+    // Mark that we're past initial load
+    isInitialLoadRef.current = false;
 
     const controller = new AbortController();
 
@@ -893,33 +869,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         const result = await response.json();
         console.log('[Pivot Compute] Compute completed successfully, data rows:', result?.data?.length || 0);
         
-        // Verify data was stored in backend cache by checking the data endpoint
-        // Add a small delay to ensure Redis write has completed
-        await new Promise(resolve => setTimeout(resolve, 100));
-        try {
-          const verifyResponse = await fetch(
-            `${PIVOT_API}/${encodeURIComponent(atomId)}/data`
-          );
-          if (verifyResponse.ok) {
-            const verifyData = await verifyResponse.json();
-            console.log('[Pivot Compute] Verified: Data is available in backend cache, rows:', verifyData?.data?.length || 0);
-          } else {
-            console.warn('[Pivot Compute] Warning: Data endpoint returned', verifyResponse.status, '- data may not be cached yet');
-            // Try one more time after a longer delay
-            await new Promise(resolve => setTimeout(resolve, 500));
-            const retryResponse = await fetch(
-              `${PIVOT_API}/${encodeURIComponent(atomId)}/data`
-            );
-            if (retryResponse.ok) {
-              console.log('[Pivot Compute] Verified on retry: Data is now available in backend cache');
-            } else {
-              console.error('[Pivot Compute] ERROR: Data is still not available in cache after retry');
-            }
-          }
-        } catch (error) {
-          console.warn('[Pivot Compute] Could not verify data cache:', error);
-        }
-        
+        // Removed Redis cache verification - data persistence is handled through MongoDB
         updatePivotSettingsRef.current({
           pivotResults: result?.data ?? [],
           pivotStatus: result?.status ?? 'success',
@@ -932,6 +882,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
             : [],
           collapsedKeys: [],
         });
+        // Track the signature that was used for this computation
+        lastComputedSignatureRef.current = pivotComputeSignature;
         setPivotIsComputing(false);
         setPivotComputeError(null);
       } catch (error) {
@@ -1040,6 +992,108 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       setPivotIsSaving(false);
     }
   }, [atomId, pivotIsComputing]);
+
+  const handlePivotSaveAs = useCallback(() => {
+    const latestSettings = pivotSettingsRef.current;
+    if (!latestSettings.dataSource) {
+      setPivotSaveError('No data source selected. Please configure the pivot table first.');
+      return;
+    }
+    if (!(latestSettings.pivotResults?.length ?? 0)) {
+      setPivotSaveError('No pivot data available. Please compute the pivot table first.');
+      return;
+    }
+    
+    // Generate default filename
+    const baseName = latestSettings.dataSource ? latestSettings.dataSource.split('/').pop()?.replace(/\.[^/.]+$/, '') : 'pivot';
+    const defaultFilename = `PIVOT_${Date.now()}_${baseName}`;
+    setPivotSaveFileName(defaultFilename);
+    setShowPivotSaveModal(true);
+    setPivotSaveError(null);
+  }, []);
+
+  const confirmPivotSaveAs = useCallback(async () => {
+    const latestSettings = pivotSettingsRef.current;
+    if (!latestSettings.dataSource) {
+      setPivotSaveError('No data source selected. Please configure the pivot table first.');
+      return;
+    }
+    if (!(latestSettings.pivotResults?.length ?? 0)) {
+      setPivotSaveError('No pivot data available. Please compute the pivot table first.');
+      return;
+    }
+    if (pivotIsComputing) {
+      setPivotSaveError('Please wait for the pivot table computation to complete.');
+      return;
+    }
+    if (!pivotSaveFileName.trim()) {
+      setPivotSaveError('Please enter a file name.');
+      return;
+    }
+    
+    setPivotIsSaving(true);
+    setPivotSaveError(null);
+    setPivotSaveMessage(null);
+    try {
+      const saveUrl = `${PIVOT_API}/${encodeURIComponent(atomId)}/save`;
+      const filename = pivotSaveFileName.trim().endsWith('.arrow') 
+        ? pivotSaveFileName.trim() 
+        : `${pivotSaveFileName.trim()}.arrow`;
+      
+      console.log('[Pivot Save As] Attempting to save with atomId:', atomId, 'filename:', filename, 'URL:', saveUrl);
+      const response = await fetch(
+        saveUrl,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename }),
+        }
+      );
+      
+      if (!response.ok) {
+        const text = await response.text();
+        let errorMessage = text || `Pivot save failed (${response.status})`;
+        
+        try {
+          const errorJson = JSON.parse(text);
+          if (errorJson.detail) {
+            errorMessage = errorJson.detail;
+          }
+        } catch {
+          // Not JSON, use text as-is
+        }
+        
+        console.error('[Pivot Save As] Save failed:', {
+          atomId,
+          filename,
+          status: response.status,
+          errorMessage,
+        });
+        
+        throw new Error(errorMessage);
+      }
+      
+      const result = await response.json();
+      const message = result?.object_name
+        ? `Saved pivot to ${result.object_name}`
+        : 'Pivot table saved successfully';
+      setPivotSaveMessage(message);
+      updatePivotSettingsRef.current({
+        pivotLastSavedPath: result?.object_name ?? null,
+        pivotLastSavedAt: result?.updated_at ?? null,
+      });
+      setShowPivotSaveModal(false);
+      setPivotSaveFileName('');
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to save pivot table. Please try again.';
+      setPivotSaveError(message);
+    } finally {
+      setPivotIsSaving(false);
+    }
+  }, [atomId, pivotIsComputing, pivotSaveFileName]);
 
   const pivotReadinessMessage = useMemo(() => {
     if (!pivotSettings.dataSource) {
@@ -4090,185 +4144,193 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
-        {/* Controls section */}
+        
+        {/* Tab Navigation and Controls */}
+        <div className="border-b border-slate-200 bg-white">
+          <div className="flex items-center justify-between px-6 py-3">
+            {/* Tabs */}
+            <div className="flex items-center space-x-1 bg-slate-100 rounded-lg p-1">
+              <button
+                onClick={() => setActiveTab('dataframe')}
+                className={`px-4 py-2.5 text-sm font-medium transition-all duration-200 rounded-md flex items-center space-x-2 whitespace-nowrap ${
+                  activeTab === 'dataframe'
+                    ? 'bg-white text-blue-600 shadow-sm border border-blue-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <Table className="w-4 h-4" />
+                <span>DataFrame Operations</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('pivot')}
+                className={`px-4 py-2.5 text-sm font-medium transition-all duration-200 rounded-md flex items-center space-x-2 ${
+                  activeTab === 'pivot'
+                    ? 'bg-white text-emerald-600 shadow-sm border border-emerald-200'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <Grid3x3 className="w-4 h-4" />
+                <span>Pivot Table</span>
+              </button>
+            </div>
+
+            {/* Alignment Control and Save Buttons */}
+            <div className="flex items-center gap-7">
+              {/* Alignment Control */}
+              {activeTab === 'dataframe' && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      title={`Text Alignment${selectedColumn ? ` (${selectedColumn})` : ' (All Columns)'}`}
+                    >
+                      {(() => {
+                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                        if (currentAlignment === 'left') return <AlignLeft className="h-4 w-4" />;
+                        if (currentAlignment === 'center') return <AlignCenter className="h-4 w-4" />;
+                        if (currentAlignment === 'right') return <AlignRight className="h-4 w-4" />;
+                        return <AlignLeft className="h-4 w-4" />;
+                      })()}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-48 p-2">
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-gray-700 mb-2">
+                        Text Alignment{selectedColumn ? ` - ${selectedColumn}` : ' - All Columns'}
+                      </div>
+                      <Button
+                        variant={(() => {
+                          const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                          return currentAlignment === 'left' ? 'default' : 'ghost';
+                        })()}
+                        size="sm"
+                        className="w-full justify-start h-8"
+                        onClick={() => {
+                          if (selectedColumn) {
+                            setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'left' }));
+                          } else {
+                            setCellAlignment('left');
+                            setColumnAlignments({}); // Reset column-specific alignments
+                          }
+                        }}
+                      >
+                        <AlignLeft className="h-4 w-4 mr-2" />
+                        Left Align
+                      </Button>
+                      <Button
+                        variant={(() => {
+                          const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                          return currentAlignment === 'center' ? 'default' : 'ghost';
+                        })()}
+                        size="sm"
+                        className="w-full justify-start h-8"
+                        onClick={() => {
+                          if (selectedColumn) {
+                            setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'center' }));
+                          } else {
+                            setCellAlignment('center');
+                            setColumnAlignments({}); // Reset column-specific alignments
+                          }
+                        }}
+                      >
+                        <AlignCenter className="h-4 w-4 mr-2" />
+                        Center Align
+                      </Button>
+                      <Button
+                        variant={(() => {
+                          const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
+                          return currentAlignment === 'right' ? 'default' : 'ghost';
+                        })()}
+                        size="sm"
+                        className="w-full justify-start h-8"
+                        onClick={() => {
+                          if (selectedColumn) {
+                            setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'right' }));
+                          } else {
+                            setCellAlignment('right');
+                            setColumnAlignments({}); // Reset column-specific alignments
+                          }
+                        }}
+                      >
+                        <AlignRight className="h-4 w-4 mr-2" />
+                        Right Align
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+              
+              {/* Save Buttons - Only show when DataFrame tab is active */}
+              {activeTab === 'dataframe' && (
+                <>
+                  <Button
+                    onClick={handleSaveToOriginalFile}
+                    disabled={saveLoading}
+                    className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
+                  >
+                    {saveLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Save</span>
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={handleSaveDataFrame}
+                    disabled={saveLoading}
+                    className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4"
+                  >
+                    {saveLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>Save As</span>
+                      </>
+                    )}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'dataframe' && (
+          <>
+            {/* Formula Validation Error Display */}
+            {formulaValidationError && (
+              <div className="flex-shrink-0 border-b border-slate-200 px-5 py-2 bg-white">
+                <div className="relative">
+                  <div className="px-3 py-2 bg-red-100 border border-red-300 rounded-lg shadow-sm">
+                    <div className="text-xs font-medium text-red-700">
+                      {formulaValidationError}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Table section - Excel-like appearance */}
             <div 
-              className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-3"
+              className="flex-1 flex flex-col overflow-hidden min-h-0"
               onClick={(e) => {
-                // Deselect column when clicking in controls area (but not on buttons/inputs)
+                // Deselect column when clicking in empty area above the table
                 if (selectedColumn && e.target === e.currentTarget) {
                   setSelectedColumn(null);
                 }
               }}
             >
-          <div className="flex items-center space-x-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="text"
-                  placeholder="Search..."
-                  value={settings.searchTerm || ''}
-                  onChange={(e) => onSettingsChange({ searchTerm: e.target.value })}
-                  className="pl-9 w-64"
-                />
-              </div>
-              
-              {/* Alignment Control */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 w-8 p-0"
-                    title={`Text Alignment${selectedColumn ? ` (${selectedColumn})` : ' (All Columns)'}`}
-                  >
-                    {(() => {
-                      const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
-                      if (currentAlignment === 'left') return <AlignLeft className="h-4 w-4" />;
-                      if (currentAlignment === 'center') return <AlignCenter className="h-4 w-4" />;
-                      if (currentAlignment === 'right') return <AlignRight className="h-4 w-4" />;
-                      return <AlignLeft className="h-4 w-4" />;
-                    })()}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-48 p-2">
-                  <div className="space-y-1">
-                    <div className="text-xs font-medium text-gray-700 mb-2">
-                      Text Alignment{selectedColumn ? ` - ${selectedColumn}` : ' - All Columns'}
-                    </div>
-                    <Button
-                      variant={(() => {
-                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
-                        return currentAlignment === 'left' ? 'default' : 'ghost';
-                      })()}
-                      size="sm"
-                      className="w-full justify-start h-8"
-                      onClick={() => {
-                        if (selectedColumn) {
-                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'left' }));
-                        } else {
-                          setCellAlignment('left');
-                          setColumnAlignments({}); // Reset column-specific alignments
-                        }
-                      }}
-                    >
-                      <AlignLeft className="h-4 w-4 mr-2" />
-                      Left Align
-                    </Button>
-                    <Button
-                      variant={(() => {
-                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
-                        return currentAlignment === 'center' ? 'default' : 'ghost';
-                      })()}
-                      size="sm"
-                      className="w-full justify-start h-8"
-                      onClick={() => {
-                        if (selectedColumn) {
-                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'center' }));
-                        } else {
-                          setCellAlignment('center');
-                          setColumnAlignments({}); // Reset column-specific alignments
-                        }
-                      }}
-                    >
-                      <AlignCenter className="h-4 w-4 mr-2" />
-                      Center Align
-                    </Button>
-                    <Button
-                      variant={(() => {
-                        const currentAlignment = selectedColumn ? getColumnAlignment(selectedColumn) : cellAlignment;
-                        return currentAlignment === 'right' ? 'default' : 'ghost';
-                      })()}
-                      size="sm"
-                      className="w-full justify-start h-8"
-                      onClick={() => {
-                        if (selectedColumn) {
-                          setColumnAlignments(prev => ({ ...prev, [selectedColumn]: 'right' }));
-                        } else {
-                          setCellAlignment('right');
-                          setColumnAlignments({}); // Reset column-specific alignments
-                        }
-                      }}
-                    >
-                      <AlignRight className="h-4 w-4 mr-2" />
-                      Right Align
-                    </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
-              
-              <div className="flex items-center space-x-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    showValidationError(null);
-                    setPermanentlyDeletedRows(new Set());
-                    onClearAll();
-                  }}
-                >
-                  <RotateCcw className="w-4 h-4 mr-1" />
-                  Reset
-                </Button>
-                {formulaValidationError && (
-                  <div className="relative">
-                    <div className="absolute bottom-full left-0 mb-2 px-3 py-2 bg-red-100 border border-red-300 rounded-lg shadow-lg z-50 whitespace-nowrap">
-                      <div className="text-xs font-medium text-red-700">
-                        {formulaValidationError}
-                      </div>
-                      <div className="absolute top-full left-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-red-300"></div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className="relative flex items-center gap-2">
-              <Button
-                onClick={handleSaveToOriginalFile}
-                disabled={saveLoading}
-                className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2"
-              >
-                {saveLoading ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    <span>Save</span>
-                  </>
-                )}
-              </Button>
-              <Button
-                onClick={handleSaveDataFrame}
-                disabled={saveLoading}
-                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2"
-              >
-                {saveLoading ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    <span>Save As</span>
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Table section - Excel-like appearance */}
-          <div 
-            className="flex-1 flex flex-col overflow-hidden min-h-0"
-            onClick={(e) => {
-              // Deselect column when clicking in empty area above the table
-              if (selectedColumn && e.target === e.currentTarget) {
-                setSelectedColumn(null);
-              }
-            }}
-          >
             {data && (
               <div 
                 className="flex items-center border-b border-slate-200 min-h-0"
@@ -4321,26 +4383,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                </button>
-                <button
-                  onClick={() => {
-                    setPivotVisible(prev => {
-                      const next = !prev;
-                      if (!prev && pivotContainerRef.current) {
-                        requestAnimationFrame(() => {
-                          pivotContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        });
-                      }
-                      return next;
-                    });
-                  }}
-                  className={`p-2 mx-1 rounded-md transition-colors ${
-                    pivotVisible ? 'bg-emerald-50' : 'hover:bg-emerald-50'
-                  }`}
-                  title={pivotVisible ? 'Hide Pivot Table' : 'Show Pivot Table'}
-                  aria-pressed={pivotVisible}
-                >
-                  <Grid3x3 className={`w-6 h-6 ${pivotVisible ? 'text-emerald-600' : 'text-emerald-500'}`} />
                 </button>
               </div>
             )}
@@ -4867,9 +4909,45 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               </Pagination>
             </div>
           )}
-        </div>
+            </div>
+          </>
+        )}
+
+        {activeTab === 'pivot' && (
+          <div ref={pivotContainerRef} className="p-6">
+            <PivotTableCanvas
+              data={pivotSettings}
+              onDataChange={handlePivotDataChange}
+              isLoading={pivotIsComputing}
+              error={pivotComputeError}
+              infoMessage={pivotReadinessMessage}
+              isSaving={pivotIsSaving}
+              saveError={pivotSaveError}
+              saveMessage={
+                pivotSaveMessage ||
+                (pivotSettings.pivotLastSavedPath
+                  ? `Last saved: ${pivotSettings.pivotLastSavedPath}`
+                  : null)
+              }
+              onRefresh={handlePivotRefresh}
+              onSave={handlePivotSave}
+              onSaveAs={handlePivotSaveAs}
+              filterOptions={pivotFilterOptions}
+              filterSelections={pivotFilterSelections}
+              onGrandTotalsChange={handlePivotGrandTotalsChange}
+              onSubtotalsChange={handlePivotSubtotalsChange}
+              onStyleChange={handlePivotStyleChange}
+              onStyleOptionsChange={handlePivotStyleOptionsChange}
+              reportLayout={pivotReportLayout}
+              onReportLayoutChange={handlePivotReportLayoutChange}
+              collapsedKeys={pivotCollapsedKeys}
+              onToggleCollapse={handlePivotToggleCollapse}
+            />
+          </div>
+        )}
         </div>
       </div>
+
       {portalTarget && contextMenu && data && typeof contextMenu.col === 'string' &&
         createPortal(
           <div
@@ -5708,38 +5786,6 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         </div>
       )}
 
-      {pivotVisible && (
-        <div ref={pivotContainerRef} className="mt-4 border border-slate-200 rounded-lg bg-white shadow-sm">
-          <PivotTableCanvas
-            data={pivotSettings}
-            onDataChange={handlePivotDataChange}
-            isLoading={pivotIsComputing}
-            error={pivotComputeError}
-            infoMessage={pivotReadinessMessage}
-            isSaving={pivotIsSaving}
-            saveError={pivotSaveError}
-            saveMessage={
-              pivotSaveMessage ||
-              (pivotSettings.pivotLastSavedPath
-                ? `Last saved: ${pivotSettings.pivotLastSavedPath}`
-                : null)
-            }
-            onRefresh={handlePivotRefresh}
-            onSave={handlePivotSave}
-            filterOptions={pivotFilterOptions}
-            filterSelections={pivotFilterSelections}
-            onGrandTotalsChange={handlePivotGrandTotalsChange}
-            onSubtotalsChange={handlePivotSubtotalsChange}
-            onStyleChange={handlePivotStyleChange}
-            onStyleOptionsChange={handlePivotStyleOptionsChange}
-            reportLayout={pivotReportLayout}
-            onReportLayoutChange={handlePivotReportLayoutChange}
-            collapsedKeys={pivotCollapsedKeys}
-            onToggleCollapse={handlePivotToggleCollapse}
-          />
-        </div>
-      )}
-
       {/* History Panel */}
 
       {historyPanelOpen && (
@@ -5905,6 +5951,54 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save Pivot Table Modal */}
+      <Dialog open={showPivotSaveModal} onOpenChange={setShowPivotSaveModal}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Save Pivot Table</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <label className="text-sm font-medium text-gray-700 mb-2 block">
+              File Name
+            </label>
+            <Input
+              value={pivotSaveFileName}
+              onChange={(e) => setPivotSaveFileName(e.target.value)}
+              placeholder="Enter file name"
+              className="w-full"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && pivotSaveFileName.trim()) {
+                  confirmPivotSaveAs();
+                }
+              }}
+            />
+            {pivotSaveError && (
+              <p className="text-red-500 text-sm mt-2">{pivotSaveError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPivotSaveModal(false);
+                setPivotSaveFileName('');
+                setPivotSaveError(null);
+              }}
+              disabled={pivotIsSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmPivotSaveAs}
+              disabled={pivotIsSaving || !pivotSaveFileName.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {pivotIsSaving ? 'Saving...' : 'Save'}
             </Button>
           </DialogFooter>
         </DialogContent>

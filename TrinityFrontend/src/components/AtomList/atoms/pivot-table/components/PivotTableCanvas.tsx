@@ -2325,24 +2325,38 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       </div>
             <div className="flex items-center gap-2">
               <Button
-                variant="default"
-                size="sm"
                 onClick={onSave}
                 disabled={isSaving || !hasResults}
-                className="h-8 px-3 text-[12px] font-semibold bg-[#1A73E8] hover:bg-[#1455ad] text-white"
+                className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
               >
-                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save
+                {isSaving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save</span>
+                  </>
+                )}
               </Button>
               <Button
-                variant="outline"
-                size="sm"
                 onClick={onSaveAs}
                 disabled={isSaving || !hasResults}
-                className="h-8 px-3 text-[12px] font-semibold border-[#D0D0D0] text-[#1A73E8] hover:bg-[#E8F0FE]"
+                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4"
               >
-                <Save className="mr-2 h-4 w-4" />
-                Save As
+                {isSaving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save As</span>
+                  </>
+                )}
               </Button>
               <Button
                 variant="outline"
