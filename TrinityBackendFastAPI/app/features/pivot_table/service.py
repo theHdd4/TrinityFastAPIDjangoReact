@@ -1051,3 +1051,25 @@ async def save_pivot(config_id: str, payload: Optional[PivotSaveRequest] = None)
     )
 
 
+async def compute_pivot_task(config_id: str, payload_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Adapter task that reconstructs the request model and serialises the response."""
+
+    payload = PivotComputeRequest(**payload_data)
+    result = await compute_pivot(config_id, payload)
+    return result.model_dump()
+
+
+async def refresh_pivot_task(config_id: str) -> Dict[str, Any]:
+    """Adapter task for refreshing the pivot table using cached configuration."""
+
+    result = await refresh_pivot(config_id)
+    return result.model_dump()
+
+
+async def save_pivot_task(config_id: str) -> Dict[str, Any]:
+    """Adapter task that persists the latest pivot result to storage."""
+
+    result = await save_pivot(config_id)
+    return result.model_dump()
+
+

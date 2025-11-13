@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
+import base64
 import os
 from minio import Minio
 from minio.error import S3Error
@@ -16,6 +17,15 @@ from numbers import Real
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
+from app.core.task_queue import celery_task_client, format_task_response
+from app.features.dataframe_operations.service import (
+    SESSIONS,
+    dataframe_payload as _df_payload,
+    filter_dataframe,
+    get_session_dataframe as _get_df,
+    load_dataframe_from_base64,
+    sort_dataframe,
+)
 
 router = APIRouter()
 
@@ -31,30 +41,6 @@ minio_client = Minio(
     secret_key=MINIO_SECRET_KEY,
     secure=False
 )
-
-# In-memory storage for dataframe sessions
-SESSIONS: Dict[str, pl.DataFrame] = {}
-
-
-def _get_df(df_id: str) -> pl.DataFrame:
-    df = SESSIONS.get(df_id)
-    if df is None:
-        raise HTTPException(status_code=404, detail="DataFrame not found")
-    return df
-
-
-def _df_payload(df: pl.DataFrame, df_id: str) -> Dict[str, Any]:
-    """Serialize the entire dataframe for the frontend using Polars."""
-
-    return {
-        "df_id": df_id,
-        "headers": df.columns,
-        "rows": df.to_dicts(),
-        "types": {col: str(dtype) for col, dtype in zip(df.columns, df.dtypes)},
-        "row_count": df.height,
-        "column_count": df.width,
-    }
-
 
 def _is_null(value: Any) -> bool:
     if value is None:
@@ -711,65 +697,70 @@ async def save_dataframe(payload: SaveRequest):
 
 @router.post("/load")
 async def load_dataframe(file: UploadFile = File(...)):
-    """Load a CSV file and store it in a session."""
-    try:
-        content = await file.read()
-        df = pl.read_csv(io.BytesIO(content))
-    except Exception:
+    """Load a CSV file and store it in a session via the task queue."""
+
+    content = await file.read()
+    submission = celery_task_client.submit_callable(
+        name="dataframe_operations.load",
+        dotted_path="app.features.dataframe_operations.service.load_dataframe_from_base64",
+        kwargs={
+            "content_b64": base64.b64encode(content).decode("utf-8"),
+            "filename": file.filename,
+        },
+        metadata={
+            "feature": "dataframe_operations",
+            "operation": "load",
+            "filename": file.filename,
+        },
+    )
+    if submission.status == "failure":  # pragma: no cover - defensive
         raise HTTPException(status_code=400, detail="Failed to parse uploaded file")
-    df_id = str(uuid.uuid4())
-    SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    return format_task_response(submission, embed_result=True)
 
 
 @router.post("/filter_rows")
-async def filter_rows(df_id: str = Body(...), column: str = Body(...), value: Any = Body(...)):
-    import logging
-    logger = logging.getLogger("dataframe_operations.filter")
-    
-    logger.info(f"🔵 [FILTER] Starting filter operation - df_id: {df_id}, column: {column}, value: {value}")
-    
-    df = _get_df(df_id)
-    
-    logger.info(f"📊 [FILTER] Before filter - Shape: {df.shape}, Dtypes: {dict(zip(df.columns, df.dtypes))}")
-    logger.info(f"📊 [FILTER] Column '{column}' dtype: {df[column].dtype}, null_count: {df[column].null_count()}")
-    
-    try:
-        if isinstance(value, dict):
-            min_v = value.get("min")
-            max_v = value.get("max")
-            logger.info(f"🔍 [FILTER] Range filter: {min_v} <= {column} <= {max_v}")
-            df = df.filter(pl.col(column).is_between(min_v, max_v))
-        elif isinstance(value, list):
-            logger.info(f"🔍 [FILTER] List filter: {column} in {value}")
-            df = df.filter(pl.col(column).is_in(value))
-        else:
-            logger.info(f"🔍 [FILTER] Equality filter: {column} == {value}")
-            df = df.filter(pl.col(column) == value)
-            
-        logger.info(f"📊 [FILTER] After filter - Shape: {df.shape}, Dtypes: {dict(zip(df.columns, df.dtypes))}")
-        logger.info(f"✅ [FILTER] Filter operation successful")
-        
-    except Exception as e:
-        logger.error(f"❌ [FILTER] Filter operation failed: {e}")
-        logger.error(f"❌ [FILTER] Error type: {type(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    SESSIONS[df_id] = df
-    result = _df_payload(df, df_id)
-    return result
+async def filter_rows(
+    df_id: str = Body(...),
+    column: str = Body(...),
+    value: Any = Body(...),
+):
+    submission = celery_task_client.submit_callable(
+        name="dataframe_operations.filter_rows",
+        dotted_path="app.features.dataframe_operations.service.filter_dataframe",
+        kwargs={"df_id": df_id, "column": column, "value": value},
+        metadata={
+            "feature": "dataframe_operations",
+            "operation": "filter_rows",
+            "df_id": df_id,
+            "column": column,
+        },
+    )
+    if submission.status == "failure":  # pragma: no cover - defensive
+        raise HTTPException(status_code=400, detail="Failed to filter dataframe")
+    return format_task_response(submission, embed_result=True)
 
 
 @router.post("/sort")
-async def sort_dataframe(df_id: str = Body(...), column: str = Body(...), direction: str = Body("asc")):
-    df = _get_df(df_id)
-    try:
-        df = df.sort(column, descending=direction != "asc")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    SESSIONS[df_id] = df
-    result = _df_payload(df, df_id)
-    return result
+async def sort_dataframe(
+    df_id: str = Body(...),
+    column: str = Body(...),
+    direction: str = Body("asc"),
+):
+    submission = celery_task_client.submit_callable(
+        name="dataframe_operations.sort",
+        dotted_path="app.features.dataframe_operations.service.sort_dataframe",
+        kwargs={"df_id": df_id, "column": column, "direction": direction},
+        metadata={
+            "feature": "dataframe_operations",
+            "operation": "sort",
+            "df_id": df_id,
+            "column": column,
+            "direction": direction,
+        },
+    )
+    if submission.status == "failure":  # pragma: no cover - defensive
+        raise HTTPException(status_code=400, detail="Failed to sort dataframe")
+    return format_task_response(submission, embed_result=True)
 
 
 @router.post("/insert_row")
