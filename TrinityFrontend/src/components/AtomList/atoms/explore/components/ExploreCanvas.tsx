@@ -396,7 +396,29 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
   const [cardinalityLoading, setCardinalityLoading] = useState(false);
   const [cardinalityError, setCardinalityError] = useState<string | null>(null);
-  
+
+  const getUniqueValuesForColumn = React.useCallback((identifier: string): string[] => {
+    if (!identifier) {
+      return [];
+    }
+
+    if (identifierUniqueValues[identifier]) {
+      return identifierUniqueValues[identifier];
+    }
+
+    if (Array.isArray(safeData.columnSummary)) {
+      const colInfo: any = safeData.columnSummary.find((c: any) => c && c.column === identifier);
+      if (colInfo && Array.isArray(colInfo.unique_values)) {
+        const maxValues = colInfo.is_numerical ? 1000 : 200;
+        return colInfo.unique_values
+          .slice(0, maxValues)
+          .map((value: any) => String(value));
+      }
+    }
+
+    return [];
+  }, [identifierUniqueValues, safeData.columnSummary]);
+
   // Sorting and filtering state for Cardinality View
   const [sortColumn, setSortColumn] = useState<string>('unique_count');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -436,12 +458,150 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     chartDataSets: {},
     chartGenerated: {},
     chartNotes: {},
+    columnSummary: [],
     ...data
   };
 
+  const summaryDerivedIdentifiers = React.useMemo<string[]>(() => {
+    if (!Array.isArray(safeData.columnSummary)) {
+      return [];
+    }
+
+    const numericKeywords = ['int', 'integer', 'float', 'double', 'decimal', 'number', 'numeric', 'real', 'long', 'short'];
+
+    const identifiers = safeData.columnSummary
+      .filter((col: any) => col && typeof col.column === 'string')
+      .filter((col: any) => {
+        const columnName = col.column;
+        if (!columnName) {
+          return false;
+        }
+
+        const isNumeric = typeof col.is_numerical === 'boolean'
+          ? col.is_numerical
+          : (typeof col.data_type === 'string'
+            ? numericKeywords.some(keyword => col.data_type.toLowerCase().includes(keyword))
+            : false);
+
+        return !isNumeric;
+      })
+      .map((col: any) => String(col.column)) as string[];
+
+    return Array.from(new Set(identifiers));
+  }, [safeData.columnSummary]);
+
+  const summaryDerivedMeasures = React.useMemo<string[]>(() => {
+    if (!Array.isArray(safeData.columnSummary)) {
+      return [];
+    }
+
+    const numericKeywords = ['int', 'integer', 'float', 'double', 'decimal', 'number', 'numeric', 'real', 'long', 'short'];
+
+    const measures = safeData.columnSummary
+      .filter((col: any) => col && typeof col.column === 'string')
+      .filter((col: any) => {
+        if (typeof col.is_numerical === 'boolean') {
+          return col.is_numerical;
+        }
+
+        if (typeof col.data_type === 'string') {
+          const lowered = col.data_type.toLowerCase();
+          return numericKeywords.some(keyword => lowered.includes(keyword));
+        }
+
+        return false;
+      })
+      .map((col: any) => String(col.column)) as string[];
+
+    return Array.from(new Set(measures));
+  }, [safeData.columnSummary]);
+
+  const summaryDimensionMap = React.useMemo<Record<string, string[]>>(() => {
+    if (summaryDerivedIdentifiers.length === 0) {
+      return {};
+    }
+    return { columns: summaryDerivedIdentifiers };
+  }, [summaryDerivedIdentifiers]);
+
+  const classifierDimensions = safeData.columnClassifierConfig?.dimensions as Record<string, string[]> | undefined;
+
+  const hasClassifierDimensions = React.useMemo(() => {
+    if (!classifierDimensions) {
+      return false;
+    }
+
+    return Object.values(classifierDimensions).some(ids => Array.isArray(ids) && ids.length > 0);
+  }, [classifierDimensions]);
+
+  const dimensionsWithIdentifiers = React.useMemo<Record<string, string[]>>(() => {
+    if (hasClassifierDimensions && classifierDimensions) {
+      return classifierDimensions;
+    }
+
+    return summaryDimensionMap;
+  }, [classifierDimensions, hasClassifierDimensions, summaryDimensionMap]);
+
+  const columnSummaryColumnSet = React.useMemo(() => {
+    if (!Array.isArray(safeData.columnSummary)) {
+      return new Set<string>();
+    }
+
+    const columns = safeData.columnSummary
+      .map((col: any) => (col && typeof col.column === 'string' ? col.column : null))
+      .filter((column): column is string => Boolean(column));
+
+    return new Set(columns);
+  }, [safeData.columnSummary]);
+
+  const normaliseFilterColumnKey = React.useCallback((key: string) => {
+    if (!key) {
+      return key;
+    }
+
+    if (columnSummaryColumnSet.has(key)) {
+      return key;
+    }
+
+    if (key.includes('_')) {
+      const parts = key.split('_');
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const candidate = parts.slice(i).join('_');
+        if (columnSummaryColumnSet.has(candidate)) {
+          return candidate;
+        }
+      }
+    }
+
+    return key;
+  }, [columnSummaryColumnSet]);
+
   useEffect(() => {
     const nextChartFilters = safeData.chartFilters ?? {};
-    setChartFilters(prev => (deepEqual(prev, nextChartFilters) ? prev : nextChartFilters));
+    const normalisedChartFilters = Object.entries(nextChartFilters).reduce(
+      (acc, [idx, filters]) => {
+        const source = filters || {};
+        const transformed: { [identifier: string]: string[] } = {};
+
+        Object.entries(source).forEach(([key, values]) => {
+          const columnKey = normaliseFilterColumnKey(key);
+          if (Array.isArray(values) && values.length > 0) {
+            transformed[columnKey] = values.map(value => String(value));
+          }
+        });
+
+        const chartIndex = Number(idx);
+        if (!Number.isNaN(chartIndex)) {
+          acc[chartIndex] = transformed;
+        } else {
+          (acc as Record<string, { [identifier: string]: string[] }>)[idx] = transformed;
+        }
+
+        return acc;
+      },
+      {} as { [chartIndex: number]: { [identifier: string]: string[] } }
+    );
+
+    setChartFilters(prev => (deepEqual(prev, normalisedChartFilters) ? prev : normalisedChartFilters));
 
     const nextChartThemes = safeData.chartThemes ?? {};
     setChartThemes(prev => (deepEqual(prev, nextChartThemes) ? prev : nextChartThemes));
@@ -486,6 +646,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     safeData.chartDataSets,
     safeData.chartGenerated,
     safeData.chartNotes,
+    normaliseFilterColumnKey,
   ]);
 
   // Update chartConfigs when AI-generated data arrives
@@ -1693,12 +1854,13 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     // onDataChange({ [field]: value });
   };
 
-  const handleFilterChange = (dimensionId: string, values: string[]) => {
+  const handleFilterChange = (column: string, values: string[]) => {
+    const columnKey = normaliseFilterColumnKey(column);
     const currentFilters = safeData.dateFilters || [];
-    const updatedFilters = currentFilters.filter(f => f.column !== dimensionId);
+    const updatedFilters = currentFilters.filter(f => f.column !== columnKey);
 
     if (values.length > 0) {
-      updatedFilters.push({ column: dimensionId, values });
+      updatedFilters.push({ column: columnKey, values: values.map(value => String(value)) });
     }
 
     const updatedChartFilters: { [chartIndex: number]: { [identifier: string]: string[] } } = {};
@@ -1706,9 +1868,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       const existing = chartFilters[idx] || {};
       const chartFilter = { ...existing };
       if (values.length > 0) {
-        chartFilter[dimensionId] = values;
+        chartFilter[columnKey] = values.map(value => String(value));
       } else {
-        delete chartFilter[dimensionId];
+        delete chartFilter[columnKey];
+      }
+      if (columnKey !== column) {
+        delete chartFilter[column];
       }
       updatedChartFilters[idx] = chartFilter;
     });
@@ -1725,15 +1890,26 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     identifier: string,
     values: string[] | null
   ) => {
+    const columnKey = normaliseFilterColumnKey(identifier);
+    const nextValues = Array.isArray(values) ? values.map(value => String(value)) : null;
     setChartFilters(prev => {
-      const newState = {
+      const existingFilters = prev[chartIndex] || {};
+      const updatedFilters = { ...existingFilters };
+
+      if (nextValues && nextValues.length > 0) {
+        updatedFilters[columnKey] = nextValues;
+      } else {
+        delete updatedFilters[columnKey];
+      }
+
+      if (columnKey !== identifier) {
+        delete updatedFilters[identifier];
+      }
+
+      return {
         ...prev,
-        [chartIndex]: {
-          ...prev[chartIndex],
-          [identifier]: values,
-        },
+        [chartIndex]: updatedFilters,
       };
-      return newState;
     });
 
     // Don't regenerate chart immediately - let user apply multiple filters first
@@ -1808,9 +1984,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         const columnSummary = summaryData.find((col: any) => col.column === identifier);
         
         if (columnSummary && Array.isArray(columnSummary.unique_values)) {
+          const values = columnSummary.unique_values.map((value: any) => String(value));
           setIdentifierUniqueValues(prev => ({
             ...prev,
-            [identifier]: columnSummary.unique_values
+            [identifier]: values
           }));
         }
       }
@@ -1860,7 +2037,21 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       const availableColumns = [...dimensions, ...measures];
 
       // Prepare filters from chart filters early so we can include filter columns as dimensions
-      const chartFiltersData = resetMode ? {} : (chartFilters[index] || {});
+      const rawChartFilters = resetMode ? {} : (chartFilters[index] || {});
+      const chartFiltersData = Object.entries(rawChartFilters).reduce(
+        (acc, [key, values]) => {
+          const columnKey = normaliseFilterColumnKey(key);
+          if (Array.isArray(values) && values.length > 0) {
+            acc[columnKey] = values.map(value => String(value));
+          }
+          return acc;
+        },
+        {} as { [identifier: string]: string[] }
+      );
+
+      const hasActiveFilters = Object.values(chartFiltersData).some(
+        values => Array.isArray(values) && values.length > 0
+      );
 
       // Create explore atom with flexible structure - both X and Y can be identifiers or measures
       // Include legend field and filter columns so backend can filter correctly
@@ -1913,7 +2104,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         .filter(([identifier, values]) => Array.isArray(values) && values.length > 0)
         .map(([identifier, values]) => ({
           column: identifier,
-          values: values
+          values
         }));
       
       
@@ -1985,11 +2176,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
           [index]: chartRows,
         };
 
-        const hasFilters = chartFilters[index] && Object.keys(chartFilters[index]).some(key =>
-          Array.isArray(chartFilters[index][key]) && chartFilters[index][key].length > 0
-        );
-
-        if (!hasFilters) {
+        if (!hasActiveFilters) {
           setOriginalChartData(prevOriginal => ({
             ...prevOriginal,
             [index]: chartRows,
@@ -2030,11 +2217,24 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
 
   // Get selected dimensions and measures
-  const selectedDimensions = safeData.selectedIdentifiers
-    ? Object.keys(safeData.selectedIdentifiers)
-    : (safeData.dimensions || []);
   const selectedMeasures = safeData.measures || [];
-  const dimensionsWithIdentifiers = safeData.columnClassifierConfig?.dimensions || {};
+
+  const availableDimensionKeys = React.useMemo(() => Object.keys(dimensionsWithIdentifiers), [dimensionsWithIdentifiers]);
+
+  const selectedDimensions = React.useMemo(() => {
+    const base = safeData.selectedIdentifiers
+      ? Object.keys(safeData.selectedIdentifiers)
+      : (safeData.dimensions || []);
+
+    const baseArray = Array.isArray(base) ? base : [];
+    const filtered = baseArray.filter(dimension => availableDimensionKeys.includes(dimension));
+
+    if (filtered.length > 0) {
+      return filtered;
+    }
+
+    return availableDimensionKeys;
+  }, [safeData.selectedIdentifiers, safeData.dimensions, availableDimensionKeys]);
   
   // State for available columns from backend
   const [availableIdentifiers, setAvailableIdentifiers] = useState<string[]>([]);
@@ -2056,24 +2256,41 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     setIsLoadingColumns(true);
 
     try {
-      const identifiers = safeData.columnClassifierConfig?.identifiers?.length
+      let identifiers: string[] = safeData.columnClassifierConfig?.identifiers?.length
         ? safeData.columnClassifierConfig.identifiers
         : safeData.fallbackDimensions?.length
           ? safeData.fallbackDimensions
-          : safeData.allColumns || [];
+          : Array.isArray(safeData.allColumns)
+            ? safeData.allColumns
+            : [];
 
-      const measures = safeData.columnClassifierConfig?.measures?.length
+      let measures: string[] = safeData.columnClassifierConfig?.measures?.length
         ? safeData.columnClassifierConfig.measures
         : safeData.fallbackMeasures?.length
           ? safeData.fallbackMeasures
-          : safeData.allColumns || [];
+          : Array.isArray(safeData.allColumns)
+            ? safeData.allColumns
+            : [];
 
-      setAvailableIdentifiers(identifiers);
-      setAvailableMeasures(measures);
+      if ((!identifiers || identifiers.length === 0) && summaryDerivedIdentifiers.length > 0) {
+        identifiers = summaryDerivedIdentifiers;
+      }
+
+      if ((!measures || measures.length === 0) && summaryDerivedMeasures.length > 0) {
+        measures = summaryDerivedMeasures;
+      }
+
+      if ((!identifiers || identifiers.length === 0) && (!measures || measures.length === 0) && Array.isArray(safeData.allColumns)) {
+        identifiers = safeData.allColumns;
+        measures = safeData.allColumns;
+      }
+
+      setAvailableIdentifiers(Array.from(new Set((identifiers || []).filter(Boolean))));
+      setAvailableMeasures(Array.from(new Set((measures || []).filter(Boolean))));
     } catch (error) {
-      // Fall back to all columns if something goes wrong
-      setAvailableIdentifiers(safeData.allColumns || []);
-      setAvailableMeasures(safeData.allColumns || []);
+      const fallback = Array.isArray(safeData.allColumns) ? safeData.allColumns : [];
+      setAvailableIdentifiers(fallback);
+      setAvailableMeasures(fallback);
     } finally {
       setIsLoadingColumns(false);
     }
@@ -2083,21 +2300,15 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     safeData.fallbackDimensions,
     safeData.fallbackMeasures,
     safeData.allColumns,
+    summaryDerivedIdentifiers,
+    summaryDerivedMeasures,
   ]);
 
   // Log available columns for debugging
   
 
   // Sample dimensions with identifiers for the filter UI - ONLY show selected dimensions
-  
-  // Only process dimensions that exist in the column classifier config
-  const availableDimensionKeys = Object.keys(dimensionsWithIdentifiers);
-  
-  // Filter selectedDimensions to only include those that exist in column classifier config
-  const validSelectedDimensions = Array.isArray(selectedDimensions) ? 
-    selectedDimensions.filter(dimension => availableDimensionKeys.includes(dimension)) : [];
-  
-  const sampleDimensions = validSelectedDimensions.length > 0 ? validSelectedDimensions.map(dimension => {
+  const sampleDimensions = selectedDimensions.length > 0 ? selectedDimensions.map(dimension => {
     // Since we've already filtered to valid dimensions, we can directly access them
     let identifiers = dimensionsWithIdentifiers[dimension] || [];
     
@@ -2128,35 +2339,20 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
 
   // Render identifier chip for filter UI
   const renderIdentifierChip = (dimensionId: string, identifier: string) => {
-    const selectedFilters = chartFilters[0]?.[`${dimensionId}_${identifier}`] || [];
-    
-    const getUniqueValues = (dimId: string, ident: string) => {
-      // Look up unique values from column summary if available
-      if (Array.isArray(safeData.columnSummary)) {
-        const colInfo: any = safeData.columnSummary.find((c: any) => c.column === ident);
-        if (colInfo && Array.isArray(colInfo.unique_values)) {
-          
-          // For numerical columns, show all unique values (up to 1000)
-          // For non-numerical columns, limit to 200 to avoid huge dropdowns
-          const maxValues = colInfo.is_numerical ? 1000 : 200;
-          const uniqueValues = colInfo.unique_values.slice(0, maxValues);
-          
-          return uniqueValues;
-        }       }       return [];
-    };
+    const selectedFilters = chartFilters[0]?.[identifier] || [];
 
-    const uniqueValues = getUniqueValues(dimensionId, identifier);
+    const uniqueValues = getUniqueValuesForColumn(identifier);
 
     return (
       <div key={`${dimensionId}_${identifier}`} className="relative">
-        <Select 
+        <Select
           value={selectedFilters.length > 0 ? selectedFilters[0] : ''}
           onValueChange={(value) => {
-            const currentFilters = chartFilters[0]?.[`${dimensionId}_${identifier}`] || [];
-            const newFilters = currentFilters.includes(value) 
+            const currentFilters = chartFilters[0]?.[identifier] || [];
+            const newFilters = currentFilters.includes(value)
               ? currentFilters.filter(f => f !== value)
               : [...currentFilters, value];
-            handleFilterChange(`${dimensionId}_${identifier}`, newFilters);
+            handleFilterChange(identifier, newFilters);
           }}
           disabled={isLoadingColumnSummary}
         >
@@ -2715,10 +2911,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                                   onSelectionChange={(selectedValues) => {
                                     handleMultiSelectFilterChange(index, identifier, selectedValues);
                                   }}
-                                  options={identifierUniqueValues[identifier]?.map((value) => ({ 
-                                    value, 
-                                    label: value 
-                                  })) || []}
+                                  options={getUniqueValuesForColumn(identifier).map((value) => ({
+                                    value,
+                                    label: value
+                                  }))}
                                   showSelectAll={true}
                                   showTrigger={true}
                                   placeholder={`Filter by ${identifier}`}
