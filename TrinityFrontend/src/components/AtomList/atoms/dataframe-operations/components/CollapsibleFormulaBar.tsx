@@ -11,10 +11,13 @@ interface CollapsibleFormulaBarProps {
   isFormulaMode: boolean;
   isFormulaBarFrozen: boolean;
   formulaValidationError: string | null;
+  columnFormulas: Record<string, string>;
+  isEditingFormula: boolean;
   onSelectedCellChange: (cell: { row: number; col: string } | null) => void;
   onSelectedColumnChange: (col: string | null) => void;
   onFormulaInputChange: (value: string) => void;
   onFormulaModeChange: (mode: boolean) => void;
+  onEditingStateChange: (editing: boolean) => void;
   onFormulaSubmit: () => void;
   onValidationError: (error: string | null) => void;
   formulaLoading?: boolean;
@@ -37,12 +40,15 @@ const CollapsibleFormulaBar: React.FC<CollapsibleFormulaBarProps> = ({
   selectedColumn,
   formulaInput,
   isFormulaMode,
+  isEditingFormula,
+  columnFormulas,
   isFormulaBarFrozen,
   formulaValidationError,
   onSelectedCellChange,
   onSelectedColumnChange,
   onFormulaInputChange,
   onFormulaModeChange,
+  onEditingStateChange,
   onFormulaSubmit,
   onValidationError,
   formulaLoading = false,
@@ -104,12 +110,15 @@ const CollapsibleFormulaBar: React.FC<CollapsibleFormulaBarProps> = ({
               data={data}
               selectedCell={selectedCell}
               selectedColumn={selectedColumn}
+              columnFormulas={columnFormulas}
               formulaInput={formulaInput}
               isFormulaMode={isFormulaMode}
+              isEditingFormula={isEditingFormula}
               isFormulaBarFrozen={isFormulaBarFrozen}
               formulaValidationError={formulaValidationError}
               onSelectedCellChange={onSelectedCellChange}
               onSelectedColumnChange={onSelectedColumnChange}
+              onEditingStateChange={onEditingStateChange}
               onFormulaInputChange={onFormulaInputChange}
               onFormulaModeChange={onFormulaModeChange}
               onFormulaSubmit={onFormulaSubmit}

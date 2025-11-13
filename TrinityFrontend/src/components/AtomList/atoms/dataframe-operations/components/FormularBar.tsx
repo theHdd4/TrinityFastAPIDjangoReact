@@ -23,16 +23,19 @@ interface FormularBarProps {
   data: DataFrameData | null;
   selectedCell: { row: number; col: string } | null;
   selectedColumn: string | null;
+  columnFormulas: Record<string, string>;
   formulaInput: string;
   isFormulaMode: boolean;
   isFormulaBarFrozen?: boolean;
   formulaValidationError?: string | null;
+  isEditingFormula: boolean;
   onSelectedCellChange: (cell: { row: number; col: string } | null) => void;
   onSelectedColumnChange: (col: string | null) => void;
   onFormulaInputChange: (value: string) => void;
   onFormulaModeChange: (mode: boolean) => void;
   onFormulaSubmit: () => void;
   onValidationError?: (message: string | null) => void;
+  onEditingStateChange: (editing: boolean) => void;
 }
 
 function safeToString(val: unknown): string {
@@ -281,7 +284,7 @@ const validateFormulaColumns = (expression: string, availableColumns: string[]):
   const matches = expressionWithoutQuotes.match(columnPattern) || [];
   
   // Filter out function names, numbers, and other non-column references
-  const functionNames = ['SUM', 'AVG', 'MAX', 'MIN', 'DIV', 'PROD', 'ABS', 'ROUND', 'FLOOR', 'CEIL', 'EXP', 'LOG', 'SQRT', 'MEAN', 'CORR', 'ZSCORE', 'NORM', 'IF', 'ISNULL', 'LOWER', 'UPPER', 'LEN', 'SUBSTR', 'STR_REPLACE', 'YEAR', 'MONTH', 'DAY', 'WEEKDAY', 'DATE_DIFF', 'MAP', 'FILLNA', 'FILLBLANK', 'BIN', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE'];
+  const functionNames = ['SUM', 'AVG', 'MAX', 'MIN', 'DIV', 'PROD', 'ABS', 'ROUND', 'FLOOR', 'CEIL', 'EXP', 'LOG', 'SQRT', 'MEAN', 'CORR', 'COV', 'ZSCORE', 'NORM', 'COUNT', 'MEDIAN', 'PERCENTILE', 'STD', 'VAR', 'CUMSUM', 'CUMPROD', 'CUMMAX', 'CUMMIN', 'DIFF', 'PCT_CHANGE', 'LAG', 'IF', 'ISNULL', 'LOWER', 'UPPER', 'LEN', 'SUBSTR', 'STR_REPLACE', 'YEAR', 'MONTH', 'DAY', 'WEEKDAY', 'DATE_DIFF', 'MAP', 'FILLNA', 'FILLBLANK', 'BIN', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE'];
   
   const columnReferences = matches.filter(match => 
     !functionNames.includes(match.toUpperCase()) && 
@@ -375,6 +378,17 @@ const validateFormula = (expression: string, availableColumns: string[]): Valida
   const syntaxResult = validateFormulaSyntax(expression);
   if (!syntaxResult.isValid) {
     return syntaxResult;
+  }
+
+  const disallowedRowFunctions = ['IF', 'AND', 'OR', 'NOT'];
+  const disallowedPattern = new RegExp(`\\b(${disallowedRowFunctions.join('|')})\\s*\\(`, 'i');
+  if (disallowedPattern.test(expression)) {
+    return {
+      isValid: false,
+      error: 'Row-level functions like IF/AND/OR are not supported yet. Please use column-level formulas.',
+      suggestions: [],
+      errorType: 'operation'
+    };
   }
   
   // Then check columns
@@ -563,6 +577,36 @@ const formulaLibrary: FormulaItem[] = [
     priority: 10,
   },
   {
+    key: 'median',
+    name: 'Median',
+    syntax: 'MEDIAN(column)',
+    description: 'Returns the median value for the specified column.',
+    example: '=MEDIAN(Sales)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('MEDIAN'),
+    priority: 11,
+  },
+  {
+    key: 'percentile',
+    name: 'Percentile',
+    syntax: 'PERCENTILE(column, quantile)',
+    description: 'Computes a quantile (0-1) for the column.',
+    example: '=PERCENTILE(Sales, 0.9)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('PERCENTILE'),
+    priority: 12,
+  },
+  {
+    key: 'count',
+    name: 'Count (Non-null)',
+    syntax: 'COUNT(column)',
+    description: 'Counts the number of non-null values in a column.',
+    example: '=COUNT(colA)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('COUNT'),
+    priority: 11,
+  },
+  {
     key: 'maximum',
     name: 'Maximum',
     syntax: 'MAX(colA, colB, ...)',
@@ -611,6 +655,116 @@ const formulaLibrary: FormulaItem[] = [
     category: 'statistical',
     matcher: createFunctionMatcher('NORM'),
     priority: 13,
+  },
+  {
+    key: 'std',
+    name: 'Standard Deviation',
+    syntax: 'STD(column)',
+    description: 'Population standard deviation (ddof = 0).',
+    example: '=STD(colA)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('STD'),
+    priority: 14,
+  },
+  {
+    key: 'var',
+    name: 'Variance',
+    syntax: 'VAR(column)',
+    description: 'Population variance (ddof = 0) for the column.',
+    example: '=VAR(colA)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('VAR'),
+    priority: 15,
+  },
+  {
+    key: 'cov',
+    name: 'Covariance',
+    syntax: 'COV(colX, colY)',
+    description: 'Calculates covariance between two numeric columns.',
+    example: '=COV(colA,colB)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('COV'),
+    priority: 16,
+  },
+  {
+    key: 'corr',
+    name: 'Correlation',
+    syntax: 'CORR(colX, colY)',
+    description: 'Computes Pearson correlation between two columns.',
+    example: '=CORR(colA,colB)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('CORR'),
+    priority: 17,
+  },
+  {
+    key: 'cumsum',
+    name: 'Cumulative Sum',
+    syntax: 'CUMSUM(column)',
+    description: 'Running total down the column based on current row order.',
+    example: '=CUMSUM(Sales)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('CUMSUM'),
+    priority: 18,
+  },
+  {
+    key: 'cumprod',
+    name: 'Cumulative Product',
+    syntax: 'CUMPROD(column)',
+    description: 'Running product of the column values.',
+    example: '=CUMPROD(GrowthFactor)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('CUMPROD'),
+    priority: 19,
+  },
+  {
+    key: 'cummax',
+    name: 'Cumulative Max',
+    syntax: 'CUMMAX(column)',
+    description: 'Tracks the maximum observed so far down the column.',
+    example: '=CUMMAX(Margin)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('CUMMAX'),
+    priority: 20,
+  },
+  {
+    key: 'cummin',
+    name: 'Cumulative Min',
+    syntax: 'CUMMIN(column)',
+    description: 'Tracks the minimum observed so far down the column.',
+    example: '=CUMMIN(Margin)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('CUMMIN'),
+    priority: 21,
+  },
+  {
+    key: 'diff',
+    name: 'Difference',
+    syntax: 'DIFF(column, periods)',
+    description: 'Subtracts the value from a previous row (default 1 period).',
+    example: '=DIFF(Sales)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('DIFF'),
+    priority: 22,
+  },
+  {
+    key: 'pct-change',
+    name: 'Percent Change',
+    syntax: 'PCT_CHANGE(column, periods)',
+    description: 'Computes the percentage change vs. a prior row (default 1).',
+    example: '=PCT_CHANGE(Sales)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('PCT_CHANGE'),
+    priority: 23,
+  },
+  {
+    key: 'lag',
+    name: 'Lag',
+    syntax: 'LAG(column, periods)',
+    description: 'Shifts the column down by N rows (default 1).',
+    example: '=LAG(Sales, 1)',
+    category: 'statistical',
+    matcher: createFunctionMatcher('LAG'),
+    priority: 24,
   },
   // Logical & binning
   {
@@ -868,17 +1022,22 @@ const FormularBar: React.FC<FormularBarProps> = ({
   data,
   selectedCell,
   selectedColumn,
+  columnFormulas,
   formulaInput,
   isFormulaMode,
   isFormulaBarFrozen = false,
   formulaValidationError,
+  isEditingFormula,
   onSelectedCellChange,
   onSelectedColumnChange,
   onFormulaInputChange,
   onFormulaModeChange,
   onFormulaSubmit,
   onValidationError,
+  onEditingStateChange,
 }) => {
+  const barContainerRef = useRef<HTMLDivElement>(null);
+
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFormula, setSelectedFormula] = useState<FormulaItem | null>(null);
@@ -895,10 +1054,11 @@ const FormularBar: React.FC<FormularBarProps> = ({
     errorType: null
   });
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [autoCompleteSuggestions, setAutoCompleteSuggestions] = useState<string[]>([]);
+  const [autoCompleteSuggestions, setAutoCompleteSuggestions] = useState<SuggestionItem[]>([]);
   const [showAutoComplete, setShowAutoComplete] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const isColumnSelected = Boolean(selectedColumn);
   
   // Custom undo/redo system
   const [formulaHistory, setFormulaHistory] = useState<string[]>(['']);
@@ -970,6 +1130,17 @@ const FormularBar: React.FC<FormularBarProps> = ({
       formulaInputRef.current.focus();
     }
   }, [isFormulaMode]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (barContainerRef.current && !barContainerRef.current.contains(event.target as Node)) {
+        setShowAutoComplete(false);
+        setAutoCompleteSuggestions([]);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Real-time validation effect
   useEffect(() => {
@@ -1044,6 +1215,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     onSelectedColumnChange(null);
     onFormulaInputChange('');
     onFormulaModeChange(true);
+    onEditingStateChange(false);
     setSelectedFormula(null);
     setIsLibraryOpen(false);
     setActiveTab('all');
@@ -1141,32 +1313,79 @@ const FormularBar: React.FC<FormularBarProps> = ({
     }, 0);
   };
 
-  // Auto-completion for column names
-  const getAutoCompleteSuggestions = (text: string, cursorPos: number): string[] => {
-    const availableColumns = data?.headers || [];
-    if (!availableColumns.length) return [];
-    
-    // Find the word at cursor position
+  // Auto-completion for formulas (functions + columns)
+  interface SuggestionItem {
+    type: 'function' | 'column';
+    label: string;
+    insertText: string;
+    description?: string;
+  }
+
+  const getFunctionSuggestions = (query: string): SuggestionItem[] => {
+    const search = query.trim().toLowerCase();
+    return formulaLibrary
+      .map(item => {
+        const syntaxNameMatch = item.syntax.match(/^[A-Za-z_]+/);
+        const canonicalName = (syntaxNameMatch ? syntaxNameMatch[0] : item.name).toUpperCase();
+        return {
+          type: 'function' as const,
+          label: item.name,
+          insertText: canonicalName,
+          description: item.syntax,
+          keywords: [
+            item.name.toLowerCase(),
+            canonicalName.toLowerCase(),
+            item.syntax.toLowerCase(),
+            item.example.toLowerCase(),
+            item.description.toLowerCase(),
+          ],
+        };
+      })
+      .filter(item => {
+        if (!search) return true;
+        return item.keywords.some(keyword => keyword.startsWith(search));
+      })
+      .map(({ type, label, insertText, description }) => ({ type, label, insertText, description }));
+  };
+
+  const getColumnSuggestions = (query: string): SuggestionItem[] => {
+    const columns = data?.headers || [];
+    const search = query.trim().toLowerCase();
+    return columns
+      .filter(col => !search || col.toLowerCase().startsWith(search))
+      .map(col => ({
+        type: 'column' as const,
+        label: col,
+        insertText: col,
+      }));
+  };
+
+  const getAutoCompleteSuggestions = (text: string, cursorPos: number): SuggestionItem[] => {
     const beforeCursor = text.slice(0, cursorPos);
-    const afterCursor = text.slice(cursorPos);
-    
-    // Match word boundaries
-    const wordMatch = beforeCursor.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
-    if (!wordMatch) return [];
-    
-    const partialWord = wordMatch[1].toLowerCase();
-    if (partialWord.length < 1) return [];
-    
-    // Filter columns that start with the partial word
-    return availableColumns
-      .filter(col => col.toLowerCase().startsWith(partialWord))
-      .slice(0, 5); // Limit to 5 suggestions
+    const wordMatch = beforeCursor.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+    const partialWord = wordMatch ? wordMatch[1].toLowerCase() : '';
+    const isAtStart = beforeCursor.trim() === partialWord;
+    const afterOperator = /[\s(]$/.test(beforeCursor);
+
+    const functions = getFunctionSuggestions(partialWord);
+    const columns = getColumnSuggestions(partialWord);
+
+    if (isAtStart || afterOperator) {
+      return [...functions, ...columns].slice(0, 10);
+    }
+    return [...functions, ...columns].slice(0, 10);
   };
 
   const handleInputChange = (value: string) => {
     const inputElement = formulaInputRef.current;
     const cursorPosition = inputElement?.selectionStart || 0;
     setCursorPosition(cursorPosition);
+
+    if (!selectedColumn) {
+      return;
+    }
+
+    const leadingEquals = value.trimStart().startsWith('=');
     
     // Check if we're replacing a ColX placeholder (Excel-like behavior)
     if (formulaInput.includes('Col') && value.length > formulaInput.length) {
@@ -1186,17 +1405,22 @@ const FormularBar: React.FC<FormularBarProps> = ({
       }, 0);
       return;
     }
-    
-    // Check for auto-completion
-    const suggestions = getAutoCompleteSuggestions(value, cursorPosition);
-    if (suggestions.length > 0) {
-      setAutoCompleteSuggestions(suggestions);
-      setShowAutoComplete(true);
-      setSelectedSuggestionIndex(0); // Reset selection
-    } else {
+
+    if (!leadingEquals || !isEditingFormula) {
       setShowAutoComplete(false);
       setAutoCompleteSuggestions([]);
       setSelectedSuggestionIndex(0);
+    } else {
+      const suggestions = getAutoCompleteSuggestions(value, cursorPosition);
+      if (suggestions.length > 0) {
+        setAutoCompleteSuggestions(suggestions);
+        setShowAutoComplete(true);
+        setSelectedSuggestionIndex(0); // Reset selection
+      } else {
+        setShowAutoComplete(false);
+        setAutoCompleteSuggestions([]);
+        setSelectedSuggestionIndex(0);
+      }
     }
     
     
@@ -1207,32 +1431,33 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
 
   // Handle auto-completion selection
-  const selectAutoCompleteSuggestion = (suggestion: string) => {
+  const selectAutoCompleteSuggestion = (suggestion: SuggestionItem) => {
     const inputElement = formulaInputRef.current;
     if (!inputElement) return;
-    
+
     const beforeCursor = formulaInput.slice(0, cursorPosition);
-    const afterCursor = formulaInput.slice(cursorPosition);
-    
-    // Find the partial word to replace
-    const wordMatch = beforeCursor.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
-    if (!wordMatch) return;
-    
-    const partialWord = wordMatch[1];
-    const wordStart = beforeCursor.lastIndexOf(partialWord);
-    
-    const newValue = 
-      formulaInput.slice(0, wordStart) + 
-      suggestion + 
+    const wordMatch = beforeCursor.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+    const partialWord = wordMatch ? wordMatch[1] : '';
+    const wordStart = wordMatch ? beforeCursor.lastIndexOf(partialWord) : cursorPosition;
+
+    const insertText = suggestion.type === 'function'
+      ? `${suggestion.insertText.toUpperCase()}()`
+      : suggestion.insertText;
+
+    const newValue =
+      formulaInput.slice(0, wordStart) +
+      insertText +
       formulaInput.slice(wordStart + partialWord.length);
-    
+
     onFormulaInputChange(newValue);
+    onEditingStateChange(true);
     setShowAutoComplete(false);
     setAutoCompleteSuggestions([]);
-    
-    // Set cursor position after the inserted suggestion
+
     setTimeout(() => {
-      const newCursorPosition = wordStart + suggestion.length;
+      const newCursorPosition = suggestion.type === 'function'
+        ? wordStart + insertText.length - 1
+        : wordStart + insertText.length;
       inputElement.setSelectionRange(newCursorPosition, newCursorPosition);
       inputElement.focus();
     }, 0);
@@ -1313,6 +1538,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     console.log('[FormularBar] Submitting formula');
     onValidationError?.(null);
     onFormulaSubmit();
+    onEditingStateChange(false);
   };
 
   const renderFormulaCard = (formula: FormulaItem) => {
@@ -1357,8 +1583,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
   };
 
   return (
-    <div className='flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card shadow-sm w-full relative'>
-      <div className='flex items-center h-12 px-4 space-x-3 w-full min-w-0 relative'>
+    <div ref={barContainerRef} className='flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card shadow-sm w-full relative z-[1400]'>
+      <div className='flex items-center h-12 px-4 space-x-3 w-full min-w-0 relative overflow-visible'>
         <div className='flex items-center space-x-2 flex-shrink-0 z-30'>
           <div 
             className='flex items-center space-x-2 bg-primary/10 rounded-lg px-3 py-1.5 border border-primary/20 shadow-sm cursor-pointer hover:bg-primary/15 transition-colors'
@@ -1557,15 +1783,31 @@ const FormularBar: React.FC<FormularBarProps> = ({
                   value={formulaInput}
                   onChange={(e) => handleInputChange(e.target.value)}
                   onClick={(e) => {
-                    e.stopPropagation();
-                    console.log('[FormularBar] Formula input clicked, state:', { selectedColumn, isFormulaMode });
-                    // Always activate formula bar when input is clicked
-                    if (selectedColumn) {
-                      onFormulaModeChange(true);
+                    if (!isColumnSelected) {
+                      e.preventDefault();
+                      setShowAutoComplete(false);
+                      setAutoCompleteSuggestions([]);
+                      return;
                     }
+                    if (!isEditingFormula) {
+                      e.preventDefault();
+                      onEditingStateChange(true);
+                      setTimeout(() => {
+                        onFormulaModeChange(true);
+                        formulaInputRef.current?.focus();
+                      }, 0);
+                      return;
+                    }
+                    e.stopPropagation();
+                    onFormulaModeChange(true);
                     formulaInputRef.current?.focus();
                   }}
-                  placeholder='=SUM(Col1,Col2), =IF(Col1 > 10, Col2, Col3), =DATE_DIFF(Col1, Col2)'
+                  readOnly={!isColumnSelected || !isEditingFormula}
+                  placeholder={
+                    isColumnSelected
+                      ? '=SUM(Col1,Col2), =IF(Col1 > 10, Col2, Col3), =DATE_DIFF(Col1, Col2)'
+                      : 'Select a column to start writing formulas'
+                  }
                   className={`h-8 shadow-sm pl-10 font-mono transition-all duration-200 w-full min-w-0 focus:ring-2 ${
                     !validationResult.isValid
                       ? validationResult.errorType === 'column'
@@ -1574,8 +1816,12 @@ const FormularBar: React.FC<FormularBarProps> = ({
                       : formulaValidationError 
                         ? 'border-red-500 bg-red-50 focus:ring-red-200 focus:border-red-500' 
                         : 'border-primary/50 bg-primary/5 focus:ring-primary/20 focus:border-primary'
-                  }`}
+                  } ${!isColumnSelected ? 'bg-slate-100 text-slate-400 cursor-not-allowed placeholder:text-slate-400' : ''} ${isColumnSelected && !isEditingFormula ? 'cursor-pointer' : ''}`}
                 onKeyDown={(e) => {
+                  if (!isColumnSelected || !isEditingFormula) {
+                    e.preventDefault();
+                    return;
+                  }
                   // Handle auto-completion navigation
                   if (showAutoComplete && autoCompleteSuggestions.length > 0) {
                     if (e.key === 'ArrowDown') {
@@ -1594,7 +1840,10 @@ const FormularBar: React.FC<FormularBarProps> = ({
                     }
                     if (e.key === 'Enter' || e.key === 'Tab') {
                       e.preventDefault();
-                      selectAutoCompleteSuggestion(autoCompleteSuggestions[selectedSuggestionIndex]);
+                      const selected = autoCompleteSuggestions[selectedSuggestionIndex];
+                      if (selected) {
+                        selectAutoCompleteSuggestion(selected);
+                      }
                       return;
                     }
                     if (e.key === 'Escape') {
@@ -1649,7 +1898,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
               </div>
               {/* Enhanced error message and suggestions display */}
               {(formulaValidationError || !validationResult.isValid) && (
-                <div className="absolute top-full left-0 right-0 mt-1 z-50">
+                <div className="absolute top-full left-0 right-0 mt-1 z-[1300]">
                   <div className={`px-3 py-2 rounded-lg border shadow-lg ${
                     validationResult.errorType === 'column' 
                       ? 'bg-yellow-50 border-yellow-200 text-yellow-800'
@@ -1674,21 +1923,36 @@ const FormularBar: React.FC<FormularBarProps> = ({
               
               {/* Auto-completion dropdown */}
               {showAutoComplete && autoCompleteSuggestions.length > 0 && (
-                <div className="absolute top-full left-0 right-0 mt-1 z-50">
-                  <div className="bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
-                    {autoCompleteSuggestions.map((suggestion, index) => (
+                isEditingFormula && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-[1300]">
+                  <div className="bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {autoCompleteSuggestions.map((item, index) => (
                       <div
-                        key={suggestion}
-                        className={`px-3 py-2 text-sm cursor-pointer hover:bg-gray-100 ${
+                        key={`${item.type}-${item.insertText}-${index}`}
+                        className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between hover:bg-gray-100 ${
                           index === selectedSuggestionIndex ? 'bg-blue-100 text-blue-800' : 'text-gray-700'
                         }`}
-                        onClick={() => selectAutoCompleteSuggestion(suggestion)}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectAutoCompleteSuggestion(item)}
                       >
-                        <span className="font-mono">{suggestion}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-semibold ${item.type === 'function' ? 'text-purple-600' : 'text-slate-500'}`}>
+                            {item.type === 'function' ? 'fx' : '#'}
+                          </span>
+                          <span className="font-mono">
+                            {item.type === 'function' ? item.insertText.toUpperCase() : item.insertText}
+                          </span>
+                        </div>
+                        {item.description && item.type === 'function' && (
+                          <span className="text-xs text-slate-500 ml-4 truncate max-w-[200px]">
+                            {item.description}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
                 </div>
+                )
               )}
             </div>
           </div>

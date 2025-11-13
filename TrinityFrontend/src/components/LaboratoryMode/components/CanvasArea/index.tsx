@@ -54,6 +54,7 @@ import {
   useLaboratoryStore,
   LayoutCard,
   DroppedAtom,
+  CardVariable,
   DEFAULT_TEXTBOX_SETTINGS,
   createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
@@ -103,6 +104,64 @@ const hydrateDroppedAtom = (atom: any): DroppedAtom => {
   };
 };
 
+const resolveCardTitle = (layoutCard?: LayoutCard): string => {
+  if (!layoutCard) {
+    return 'Card';
+  }
+
+  if (layoutCard.moleculeTitle) {
+    return layoutCard.atoms.length > 0
+      ? `${layoutCard.moleculeTitle} - ${layoutCard.atoms[0].title}`
+      : layoutCard.moleculeTitle;
+  }
+
+  return layoutCard.atoms.length > 0 ? layoutCard.atoms[0].title : 'Card';
+};
+
+const normalizeCardVariables = (variables: any, fallbackCardId: string): CardVariable[] => {
+  if (!Array.isArray(variables)) {
+    return [];
+  }
+
+  const newId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `variable-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  };
+
+  return variables
+    .filter(Boolean)
+    .map((variable: any) => {
+      const resolvedId = variable.id ?? variable._id ?? newId();
+      const resolvedName = variable.name ?? variable.variableName ?? 'Variable';
+      const resolvedValue =
+        typeof variable.value === 'string'
+          ? variable.value
+          : variable.value != null
+          ? String(variable.value)
+          : undefined;
+
+      return {
+        id: resolvedId,
+        name: resolvedName,
+        formula: variable.formula,
+        value: resolvedValue,
+        description: variable.description,
+        usageSummary: variable.usageSummary,
+        appended: Boolean(variable.appended),
+        originCardId: variable.originCardId ?? fallbackCardId,
+        originVariableId: variable.originVariableId,
+        originAtomId: variable.originAtomId ?? variable.atomId,
+        clientId: variable.clientId,
+        appId: variable.appId,
+        projectId: variable.projectId,
+        createdAt: variable.createdAt,
+        updatedAt: variable.updatedAt,
+      } satisfies CardVariable;
+    });
+};
+
 const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
   if (!Array.isArray(rawCards)) {
     return null;
@@ -116,6 +175,7 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     isExhibited: !!card.isExhibited,
     moleculeId: card.moleculeId,
     moleculeTitle: card.moleculeTitle,
+    variables: normalizeCardVariables(card.variables, card.id),
   }));
 };
 
@@ -178,6 +238,7 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
           moleculeTitle: card.moleculeTitle,
           collapsed: card.collapsed || false,
           scroll_position: card.scroll_position || 0,
+          variables: normalizeCardVariables(card.variables, card.id),
         };
       });
 
@@ -1502,6 +1563,7 @@ const addNewCard = (moleculeId?: string, position?: number) => {
     isExhibited: false,
     moleculeId,
     moleculeTitle: info?.title,
+    variables: [],
   };
   if (position === undefined || position >= (Array.isArray(layoutCards) ? layoutCards.length : 0)) {
     setLayoutCards([...(Array.isArray(layoutCards) ? layoutCards : []), newCard]);
@@ -1607,6 +1669,7 @@ const buildCardFromApiPayload = (
     isExhibited: Boolean(payload?.isExhibited),
     moleculeId,
     moleculeTitle: payload?.moleculeTitle ?? moleculeInfo?.title,
+    variables: normalizeCardVariables(payload?.variables, cardId),
   };
 };
 
@@ -1632,6 +1695,7 @@ const createFallbackCard = (atomId: string, moleculeId?: string): LayoutCard => 
     isExhibited: false,
     moleculeId,
     moleculeTitle: cardInfo?.title,
+    variables: [],
   };
 };
 
@@ -1953,6 +2017,32 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     }
   };
 
+const handleCardDoubleClick = (
+  e: React.MouseEvent,
+  cardId: string,
+  exhibited: boolean
+) => {
+  e.stopPropagation();
+  const target = e.target as HTMLElement | null;
+  const atomNode = target?.closest('[data-atom-id]');
+
+  if (atomNode) {
+    const atomId = atomNode.getAttribute('data-atom-id');
+    if (atomId) {
+      if (onAtomSelect) {
+        onAtomSelect(atomId);
+      }
+      onToggleSettingsPanel?.();
+      return;
+    }
+  }
+
+  if (onCardSelect) {
+    onCardSelect(cardId, exhibited);
+  }
+  onToggleSettingsPanel?.();
+  };
+
   const toggleCardCollapse = (id: string) => {
     setCollapsedCards(prev => ({ ...prev, [id]: !prev[id] }));
   };
@@ -2219,6 +2309,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           }`}
                           draggable={canEdit}
                           onDragStart={(e) => handleCardDragStart(e, card.id)}
+                          onDoubleClick={(e) => handleCardDoubleClick(e, card.id, card.isExhibited)}
                           onDragOver={(e) => {
                             handleCardDragOver(e, card.id);
                             handleDragOver(e, card.id); // Keep existing functionality
@@ -2252,6 +2343,13 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 onAddAtom={(id, atom) => addAtomByName(id, atom)}
                                 disabled={card.atoms.length > 0}
                               />
+                              <button
+                                onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Card Settings"
+                              >
+                                <Settings className="w-4 h-4 text-gray-400" />
+                              </button>
                             </div>
                             <div className="flex items-center space-x-2">
                               <button
@@ -2307,6 +2405,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 {card.atoms.map(atom => (
                                   <AtomBox
                                     key={atom.id}
+                                    data-atom-id={atom.id}
                                     className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                     onClick={(e) => handleAtomClick(e, atom.id)}
                                   >
@@ -2388,6 +2487,55 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 ))}
                               </div>
                             )}
+
+                              {(() => {
+                                const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
+                                if (appendedVariables.length === 0) {
+                                  return null;
+                                }
+
+                                return (
+                                  <div className="mt-4 space-y-3">
+                                    {appendedVariables.map(variable => {
+                                      const originCard = Array.isArray(layoutCards)
+                                        ? layoutCards.find(c => c.id === variable.originCardId)
+                                        : undefined;
+                                      const originTitle =
+                                        variable.originCardId === card.id ? 'This card' : resolveCardTitle(originCard);
+                                      const originAtomTitle = variable.originAtomId
+                                        ? originCard?.atoms.find(a => a.id === variable.originAtomId)?.title
+                                        : undefined;
+                                      const infoText = originAtomTitle
+                                        ? `Origin atom: ${originAtomTitle}`
+                                        : variable.originCardId !== card.id
+                                        ? 'Global'
+                                        : '';
+
+                                      return (
+                                        <div
+                                          key={variable.id}
+                                          className="border border-blue-200 bg-blue-50/70 rounded-xl p-4 shadow-sm flex flex-col gap-2"
+                                        >
+                                          <div className="flex items-start justify-between">
+                                            <div>
+                                              <p className="text-xs uppercase tracking-wide text-blue-600 font-medium">
+                                                Variable
+                                              </p>
+                                              <h4 className="text-base font-semibold text-gray-900">{variable.name}</h4>
+                                            </div>
+                                            <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">
+                                              Appended
+                                            </span>
+                                          </div>
+                                          {infoText && (
+                                            <div className="text-xs text-gray-500">{infoText}</div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
                           </div>
                         </Card>
                         );
@@ -2431,6 +2579,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           }`}
                           draggable={canEdit}
                           onDragStart={(e) => handleCardDragStart(e, card.id)}
+                          onDoubleClick={(e) => handleCardDoubleClick(e, card.id, card.isExhibited)}
                           onDragOver={(e) => {
                             handleCardDragOver(e, card.id);
                             handleDragOver(e, card.id); // Keep existing functionality
@@ -2464,6 +2613,13 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 onAddAtom={(id, atom) => addAtomByName(id, atom)}
                                 disabled={card.atoms.length > 0}
                               />
+                              <button
+                                onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                                className="p-1 hover:bg-gray-100 rounded"
+                                title="Card Settings"
+                              >
+                                <Settings className="w-4 h-4 text-gray-400" />
+                              </button>
                             </div>
                             <div className="flex items-center space-x-2">
                               <button
@@ -2520,6 +2676,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 {card.atoms.map((atom) => (
                                   <AtomBox
                                     key={atom.id}
+                                    data-atom-id={atom.id}
                                     className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                     onClick={(e) => handleAtomClick(e, atom.id)}
                                   >
@@ -2620,6 +2777,55 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 ))}
                               </div>
                             )}
+
+                            {(() => {
+                              const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
+                              if (appendedVariables.length === 0) {
+                                return null;
+                              }
+
+                              return (
+                                <div className="mt-4 space-y-3">
+                                  {appendedVariables.map(variable => {
+                                    const originCard = Array.isArray(layoutCards)
+                                      ? layoutCards.find(c => c.id === variable.originCardId)
+                                      : undefined;
+                                    const originTitle =
+                                      variable.originCardId === card.id ? 'This card' : resolveCardTitle(originCard);
+                                    const originAtomTitle = variable.originAtomId
+                                      ? originCard?.atoms.find(a => a.id === variable.originAtomId)?.title
+                                      : undefined;
+                                    const infoText = originAtomTitle
+                                      ? `Origin atom: ${originAtomTitle}`
+                                      : variable.originCardId !== card.id
+                                      ? 'Global'
+                                      : '';
+
+                                    return (
+                                      <div
+                                        key={variable.id}
+                                        className="border border-blue-200 bg-blue-50/70 rounded-xl p-4 shadow-sm flex flex-col gap-2"
+                                      >
+                                        <div className="flex items-start justify-between">
+                                          <div>
+                                            <p className="text-xs uppercase tracking-wide text-blue-600 font-medium">
+                                              Variable
+                                            </p>
+                                            <h4 className="text-base font-semibold text-gray-900">{variable.name}</h4>
+                                          </div>
+                                          <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">
+                                            Appended
+                                          </span>
+                                        </div>
+                                        {infoText && (
+                                          <div className="text-xs text-gray-500">{infoText}</div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </Card>
                         {index < standaloneCards.length - 1 && (
@@ -2868,6 +3074,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 : 'border-gray-200 shadow-sm hover:shadow-md'
             }`}
             onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
+            onDoubleClick={(e) => handleCardDoubleClick(e, card.id, card.isExhibited)}
             onDragOver={(e) => handleDragOver(e, card.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
@@ -2883,7 +3090,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   onAddAtom={(id, atom) => addAtomByName(id, atom)}
                   disabled={card.atoms.length > 0}
                 />
-                {card.atoms.length > 0 && (
                   <button
                     onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                     className="p-1 hover:bg-gray-100 rounded"
@@ -2891,7 +3097,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   >
                     <Settings className="w-4 h-4 text-gray-400" />
                   </button>
-                )}
                 <button
                   onClick={e => {
                     e.stopPropagation();
@@ -2959,6 +3164,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   {card.atoms.map((atom) => (
                     <AtomBox
                       key={atom.id}
+                      data-atom-id={atom.id}
                       className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                       onClick={(e) => handleAtomClick(e, atom.id)}
                     >
@@ -3061,6 +3267,55 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   ))}
                 </div>
               )}
+
+              {(() => {
+                const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
+                if (appendedVariables.length === 0) {
+                  return null;
+                }
+
+                return (
+                  <div className="mt-4 space-y-3">
+                    {appendedVariables.map(variable => {
+                      const originCard = Array.isArray(layoutCards)
+                        ? layoutCards.find(c => c.id === variable.originCardId)
+                        : undefined;
+                      const originTitle =
+                        variable.originCardId === card.id ? 'This card' : resolveCardTitle(originCard);
+                      const originAtomTitle = variable.originAtomId
+                        ? originCard?.atoms.find(a => a.id === variable.originAtomId)?.title
+                        : undefined;
+                      const infoText = originAtomTitle
+                        ? `Origin atom: ${originAtomTitle}`
+                        : variable.originCardId !== card.id
+                        ? 'Global'
+                        : '';
+
+                      return (
+                        <div
+                          key={variable.id}
+                          className="border border-blue-200 bg-blue-50/70 rounded-xl p-4 shadow-sm flex flex-col gap-2"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="text-xs uppercase tracking-wide text-blue-600 font-medium">
+                                Variable
+                              </p>
+                              <h4 className="text-base font-semibold text-gray-900">{variable.name}</h4>
+                            </div>
+                            <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">
+                              Appended
+                            </span>
+                          </div>
+                          {infoText && (
+                            <div className="text-xs text-gray-500">{infoText}</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           </Card>
           {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (

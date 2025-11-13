@@ -502,6 +502,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [formulaInput, setFormulaInput] = useState('');
+  const [isEditingFormula, setIsEditingFormula] = useState(false);
   const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>(settings.columnFormulas || {});
   const [formulaValidationError, setFormulaValidationError] = useState<string | null>(null);
   const errorTimeoutRef = useRef<number | null>(null);
@@ -816,22 +817,29 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [data?.headers, selectedColumn]);
 
   useEffect(() => {
-    // Only clear formula input when column changes, don't restore previous formulas
+    const storedFormula = selectedColumn ? columnFormulas[selectedColumn] : undefined;
+
     if (selectedColumn !== previousSelectedColumnRef.current) {
       previousSelectedColumnRef.current = selectedColumn;
       if (selectedColumn) {
-        // Always start with empty formula input when selecting a new column
-        setFormulaInput('');
+        const nextFormula = storedFormula ?? '';
+        if (nextFormula !== formulaInput) {
+          setFormulaInput(nextFormula);
+        }
+        setIsEditingFormula(storedFormula === undefined);
+        setFormulaValidationError(null);
+      } else {
+        setIsEditingFormula(false);
         setFormulaValidationError(null);
       }
       return;
     }
 
-    if (!selectedColumn) {
-      previousSelectedColumnRef.current = undefined;
-      setFormulaValidationError(null);
+    if (selectedColumn && storedFormula !== undefined && storedFormula !== formulaInput) {
+      setFormulaInput(storedFormula);
+      setIsEditingFormula(false);
     }
-  }, [selectedColumn]);
+  }, [selectedColumn, columnFormulas, formulaInput]);
   
   // Initialize column order when data changes
   useEffect(() => {
@@ -3777,6 +3785,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     onFormulaSubmit={handleFormulaSubmit}
                     onValidationError={showValidationError}
                     formulaLoading={formulaLoading}
+                    columnFormulas={columnFormulas}
+                    isEditingFormula={isEditingFormula}
+                    onEditingStateChange={setIsEditingFormula}
                   />
                 </div>
                 <button

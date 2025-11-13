@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ChevronRight, Sliders } from 'lucide-react';
 
@@ -44,6 +44,7 @@ import ExploreProperties from '@/components/AtomList/atoms/explore/components/pr
 import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-models-feature/components/properties/SelectModelsFeatureProperties';
 import EvaluateModelsFeatureProperties from '@/components/AtomList/atoms/evaluate-models-feature/components/properties/EvaluateModelsFeatureProperties';
 import AtomSettingsTabs from './AtomSettingsTabs';
+import CardSettingsTabs from './CardSettingsTabs';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -60,12 +61,24 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   selectedCardId,
   cardExhibited,
 }) => {
-  const [tab, setTab] = useState<'settings' | 'exhibition'>('settings');
+  const [tab, setTab] = useState<'variables' | 'settings' | 'visual' | 'exhibition'>(
+    'variables',
+  );
 
   const atom = useLaboratoryStore((state) =>
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+  const cards = useLaboratoryStore(state => state.cards);
+  const addCardVariable = useLaboratoryStore(state => state.addCardVariable);
+  const updateCardVariable = useLaboratoryStore(state => state.updateCardVariable);
+  const deleteCardVariable = useLaboratoryStore(state => state.deleteCardVariable);
+  const toggleCardVariableAppend = useLaboratoryStore(state => state.toggleCardVariableAppend);
+
+  const selectedCard = useMemo(
+    () => (selectedCardId ? cards.find(card => card.id === selectedCardId) : undefined),
+    [cards, selectedCardId],
+  );
 
   const settings:
     | TextBoxSettings
@@ -100,10 +113,14 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     if (!cardExhibited && tab === 'exhibition') {
       setTab('settings');
     }
-  }, [cardExhibited]);
+  }, [cardExhibited, tab]);
 
   useEffect(() => {
-    setTab('settings');
+    if (selectedAtomId) {
+      setTab(current => (current === 'visual' || current === 'exhibition' ? current : 'settings'));
+    } else if (selectedCardId) {
+      setTab('variables');
+    }
   }, [selectedAtomId, selectedCardId]);
 
 
@@ -131,6 +148,18 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
           {!selectedAtomId && !selectedCardId ? (
             <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
+          ) : selectedCardId && !selectedAtomId && selectedCard ? (
+            <CardSettingsTabs
+              card={selectedCard}
+              tab={tab}
+              setTab={setTab}
+              onAddVariable={addCardVariable}
+              onUpdateVariable={updateCardVariable}
+              onDeleteVariable={deleteCardVariable}
+              onToggleVariable={toggleCardVariableAppend}
+            />
+          ) : selectedCardId && !selectedAtomId && !selectedCard ? (
+            <div className="p-4 text-gray-600 text-sm">Card not found. Try selecting another card.</div>
           ) : selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
             <DataUploadValidateProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (

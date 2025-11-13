@@ -1588,12 +1588,31 @@ export interface DroppedAtom {
   settings?: any;
 }
 
+export interface CardVariable {
+  id: string;
+  name: string;
+  formula?: string;
+  value?: string;
+  description?: string;
+  usageSummary?: string;
+  appended: boolean;
+  originCardId: string;
+  originVariableId?: string;
+  originAtomId?: string;
+  clientId?: string;
+  appId?: string;
+  projectId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface LayoutCard {
   id: string;
   atoms: DroppedAtom[];
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
+  variables?: CardVariable[];
 }
 
 // GroupBy Atom Settings
@@ -1677,6 +1696,14 @@ interface LaboratoryStore {
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
+  addCardVariable: (cardId: string, variable: CardVariable) => void;
+  updateCardVariable: (
+    cardId: string,
+    variableId: string,
+    update: Partial<Omit<CardVariable, 'id' | 'originCardId'>>
+  ) => void;
+  deleteCardVariable: (cardId: string, variableId: string) => void;
+  toggleCardVariableAppend: (cardId: string, variableId: string, appended: boolean) => void;
   reset: () => void;
 }
 
@@ -1719,6 +1746,68 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   getAtom: (atomId: string) => {
     const state = get();
     return state.cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
+  },
+
+  addCardVariable: (cardId: string, variable: CardVariable) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              variables: [...(card.variables ?? []), variable],
+            }
+          : card,
+      ),
+    }));
+  },
+
+  updateCardVariable: (cardId: string, variableId: string, update: Partial<Omit<CardVariable, 'id' | 'originCardId'>>) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              variables: (card.variables ?? []).map(variable =>
+                variable.id === variableId
+                  ? {
+                      ...variable,
+                      ...update,
+                      updatedAt: update.updatedAt ?? new Date().toISOString(),
+                    }
+                  : variable,
+              ),
+            }
+          : card,
+      ),
+    }));
+  },
+
+  deleteCardVariable: (cardId: string, variableId: string) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              variables: (card.variables ?? []).filter(variable => variable.id !== variableId),
+            }
+          : card,
+      ),
+    }));
+  },
+
+  toggleCardVariableAppend: (cardId: string, variableId: string, appended: boolean) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              variables: (card.variables ?? []).map(variable =>
+                variable.id === variableId ? { ...variable, appended } : variable,
+              ),
+            }
+          : card,
+      ),
+    }));
   },
 
   reset: () => {
