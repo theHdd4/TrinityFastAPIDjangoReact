@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,7 @@ from .schemas import (
     PivotComputeRequest,
     PivotComputeResponse,
     PivotRefreshResponse,
+    PivotSaveRequest,
     PivotSaveResponse,
     PivotStatusResponse,
 )
@@ -97,11 +99,15 @@ async def refresh_pivot_endpoint(config_id: str) -> PivotRefreshResponse:
 
 
 @router.post("/{config_id}/save", response_model=PivotSaveResponse)
-async def save_pivot_endpoint(config_id: str) -> PivotSaveResponse:
-    """Persist the latest pivot data to project storage in MinIO."""
+async def save_pivot_endpoint(config_id: str, payload: Optional[PivotSaveRequest] = None) -> PivotSaveResponse:
+    """Persist the latest pivot data to project storage in MinIO.
+    
+    If payload.filename is provided, creates a new file (save_as).
+    If payload is None or filename is not provided, overwrites existing saved file (save).
+    """
 
     logger.info("pivot.save config_id=%s", config_id)
-    response = await save_pivot(config_id)
+    response = await save_pivot(config_id, payload)
     logger.info("pivot.save.completed config_id=%s status=%s", config_id, response.status)
     return response
 
@@ -115,5 +121,3 @@ async def pivot_status_endpoint(config_id: str) -> PivotStatusResponse:
         "pivot.status config_id=%s status=%s", config_id, status.status
     )
     return status
-
-

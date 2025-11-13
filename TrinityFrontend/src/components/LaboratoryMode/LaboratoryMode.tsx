@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Undo2, List } from 'lucide-react';
+import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -29,6 +29,7 @@ import {
   LAB_PREP_CLASS,
   LAB_ENTRANCE_PREP_DELAY_MS,
 } from '@/utils/projectTransition';
+import { useCollaborativeSync } from '@/hooks/useCollaborativeSync';
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 const useIsomorphicInsertionEffect =
@@ -55,6 +56,25 @@ const LaboratoryMode = () => {
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
   // Ref for CanvasArea to access sync function
   const canvasAreaRef = useRef<CanvasAreaRef>(null);
+  
+  // Real-time collaborative sync
+  const { isConnected: isSyncConnected, activeUsers, cardEditors, notifyCardFocus, notifyCardBlur } = useCollaborativeSync({
+    enabled: canEdit, // Only enable for users with edit permissions
+    debounceMs: 2000, // 2 seconds debounce
+    fullSyncIntervalMs: 30000, // 30 seconds full sync
+    onError: (error) => {
+      console.error('[CollaborativeSync] Error:', error);
+    },
+    onConnected: () => {
+      console.log('[CollaborativeSync] Connected to real-time sync');
+    },
+    onDisconnected: () => {
+      console.log('[CollaborativeSync] Disconnected from real-time sync');
+    },
+    onUsersChanged: (users) => {
+      console.log('[CollaborativeSync] Active users:', users);
+    },
+  });
 
   useIsomorphicInsertionEffect(() => {
     const reduceMotion = prefersReducedMotion();
@@ -521,6 +541,39 @@ const LaboratoryMode = () => {
           </div>
 
           <div data-lab-toolbar="true" className="flex items-center space-x-3">
+            {canEdit && activeUsers.length > 0 && (
+              <div
+                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-gray-200 shadow-sm"
+                title={activeUsers.map(user => user.email).join('\n')}
+              >
+                <div className="flex -space-x-2">
+                  {activeUsers.slice(0, 3).map((activeUser, index) => (
+                    <div
+                      key={activeUser.client_id}
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold border-2 border-white shadow-sm"
+                      title={`${activeUser.name} (${activeUser.email})`}
+                      style={{ 
+                        zIndex: 10 - index,
+                        backgroundColor: activeUser.color || '#3B82F6'
+                      }}
+                    >
+                      {activeUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                    </div>
+                  ))}
+                  {activeUsers.length > 3 && (
+                    <div
+                      className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-xs font-semibold border-2 border-white shadow-sm"
+                      title={`+${activeUsers.length - 3} more`}
+                    >
+                      +{activeUsers.length - 3}
+                    </div>
+                  )}
+                </div>
+                <span className="text-xs text-gray-600 font-medium ml-1">
+                  {activeUsers.length} {activeUsers.length === 1 ? 'user' : 'users'} editing
+                </span>
+              </div>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -562,6 +615,21 @@ const LaboratoryMode = () => {
               <Share2 className="w-4 h-4 mr-2" />
               Share
             </Button>
+            {/* {canEdit && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
+                {isSyncConnected ? (
+                  <>
+                    <Wifi className="w-4 h-4 text-green-600" />
+                    <span className="text-xs text-gray-600 font-medium">Live</span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="w-4 h-4 text-gray-400" />
+                    <span className="text-xs text-gray-500 font-medium">Offline</span>
+                  </>
+                )}
+              </div>
+            )} */}
             <Button
               className={`bg-gradient-to-r from-[#41C185] to-[#3ba876] text-white shadow-lg font-medium ${canEdit ? 'hover:from-[#3ba876] to-[#339966]' : 'opacity-50 cursor-not-allowed'}`}
               disabled={!canEdit}
@@ -600,6 +668,9 @@ const LaboratoryMode = () => {
                 onToggleSettingsPanel={toggleSettingsPanel}
                 onToggleHelpPanel={toggleHelpPanel}
                 canEdit={canEdit}
+                cardEditors={cardEditors}
+                onCardFocus={notifyCardFocus}
+                onCardBlur={notifyCardBlur}
               />
           </div>
 

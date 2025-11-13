@@ -3,10 +3,21 @@ import { Card } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { X, GripVertical } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ChevronDown, GripVertical } from 'lucide-react';
 import { PivotTableSettings as PivotTableSettingsType } from '@/components/LaboratoryMode/store/laboratoryStore';
 
-const AGGREGATION_OPTIONS = ['sum', 'average', 'count', 'max', 'min'];
+const AGGREGATION_OPTIONS = ['sum', 'average', 'count', 'max', 'min', 'weighted_average'];
 
 interface PivotTableSettingsProps {
   data: PivotTableSettingsType;
@@ -217,9 +228,30 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
   };
 
   const updateAggregation = (field: string, aggregation: string) => {
-    const valueFields = data.valueFields.map(v =>
-      v.field === field ? { ...v, aggregation } : v,
-    );
+    const valueFields = data.valueFields.map((v) => {
+      if (v.field !== field) {
+        return v;
+      }
+      if (aggregation === 'weighted_average') {
+        return { ...v, aggregation };
+      }
+      const { weightColumn, ...rest } = v as typeof v & { weightColumn?: string };
+      return { ...rest, aggregation };
+    });
+    onDataChange({ valueFields });
+  };
+
+  const updateWeightColumn = (field: string, weightColumn: string) => {
+    const valueFields = data.valueFields.map((v) => {
+      if (v.field !== field) {
+        return v;
+      }
+      return {
+        ...v,
+        aggregation: v.aggregation === 'weighted_average' ? v.aggregation : 'weighted_average',
+        weightColumn,
+      };
+    });
     onDataChange({ valueFields });
   };
 
@@ -253,37 +285,121 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
               {items.map(item => {
                 const field = isValues ? (item as { field: string }).field : (item as string);
                 const aggregation = isValues ? (item as { field: string; aggregation: string }).aggregation : undefined;
+                const weightColumn = isValues ? (item as { field: string; aggregation: string; weightColumn?: string }).weightColumn : undefined;
 
                 return (
-                  <div
-                    key={`${area}-${field}`}
-                    className="flex items-center gap-2 rounded border border-border/60 bg-white px-2 py-1 text-xs shadow-sm"
-                    draggable
-                    onDragStart={event => handleDragStart(event, field, area, aggregation)}
-                  >
-                    <GripVertical className="h-3 w-3 text-muted-foreground" />
-                    <span className="flex-1 text-foreground font-medium">{field}</span>
-                    {isValues ? (
-                      <select
-                        className="h-6 rounded border border-border bg-background px-1 text-[11px] capitalize"
-                        value={aggregation}
-                        onChange={event => updateAggregation(field, event.target.value)}
+                  <DropdownMenu key={`${area}-${field}`}>
+                    <DropdownMenuTrigger asChild>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        className="flex items-center gap-2 rounded border border-border/60 bg-white px-2 py-1 text-xs shadow-sm cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary"
+                        draggable
+                        onDragStart={event => handleDragStart(event, field, area, aggregation)}
                       >
-                        {AGGREGATION_OPTIONS.map(option => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="ml-1 text-muted-foreground hover:text-foreground"
-                      onClick={() => removeFieldFromArea(field, area)}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-        </div>
+                        <GripVertical className="h-3 w-3 text-muted-foreground" />
+                        <span className="flex-1 text-foreground font-medium">{field}</span>
+                        <ChevronDown className="h-3 w-3 text-muted-foreground" />
+                      </div>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48">
+                      {isValues ? (
+                        <>
+                          <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">
+                            Value Settings
+                          </DropdownMenuLabel>
+                          {AGGREGATION_OPTIONS.map((option) => {
+                            const isActive = option === aggregation;
+                            const label =
+                              option === 'sum'
+                                ? 'Sum'
+                                : option === 'average'
+                                ? 'Average'
+                                : option === 'count'
+                                ? 'Count'
+                                : option === 'min'
+                                ? 'Min'
+                                : option === 'max'
+                                ? 'Max'
+                                : 'Weighted Average';
+                            
+
+                            if (option === 'weighted_average') {
+                              return (
+                                <DropdownMenuSub
+                                  key={option}
+                                  onOpenChange={(open) => {
+                                    if (open) {
+                                      updateAggregation(field, option);
+                                    }
+                                  }}
+                                >
+                                  <DropdownMenuSubTrigger
+                                    onClick={(event) => {
+                                      event.preventDefault();
+                                      updateAggregation(field, option);
+                                    }}
+                                    className={cn(
+                                      'text-xs',
+                                      isActive ? 'font-semibold text-primary' : '',
+                                    )}
+                                  >
+                                    {label}
+                                  </DropdownMenuSubTrigger>
+                                  <DropdownMenuSubContent side="right" align="start" className="w-40">
+                                    <DropdownMenuLabel className="text-[10px] uppercase tracking-wide">
+                                      Weight Column
+                                    </DropdownMenuLabel>
+                                    {fieldOptions.map((col) => (
+                                      <DropdownMenuItem
+                                        key={col}
+                                        onSelect={(event) => {
+                                          event.preventDefault();
+                                          updateWeightColumn(field, col);
+                                        }}
+                                        className={cn(
+                                          'text-xs',
+                                          weightColumn === col ? 'font-semibold text-primary' : '',
+                                        )}
+                                      >
+                                        {col}
+                                      </DropdownMenuItem>
+                                    ))}
+                                  </DropdownMenuSubContent>
+                                </DropdownMenuSub>
+                              );
+                            }
+
+                            return (
+                              <DropdownMenuItem
+                                key={option}
+                                onSelect={(event) => {
+                                  event.preventDefault();
+                                  updateAggregation(field, option);
+                                }}
+                                className={cn(
+                                  'text-xs capitalize',
+                                  isActive ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                {label}
+                              </DropdownMenuItem>
+                            );
+                          })}
+                          <DropdownMenuSeparator />
+                        </>
+                      ) : null}
+                      <DropdownMenuItem
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          removeFieldFromArea(field, area);
+                        }}
+                        className="text-xs"
+                      >
+                        Remove Field
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 );
               })}
       </div>
@@ -306,13 +422,14 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
           onChange={event => setSearchTerm(event.target.value)}
           className="h-8 text-sm"
         />
-        <div className="max-h-48 overflow-y-auto rounded-md border border-border/60 bg-background">
-          {filteredFields.map(field => {
+        <div className="max-h-48 overflow-y-auto rounded-md border border-border/60 bg-background px-2 py-1">
+          <div className="grid grid-cols-2 gap-1">
+            {filteredFields.map(field => {
             const checked = unifiedSelectedFields.includes(field);
             return (
               <label
                 key={field}
-                className="flex items-center justify-between gap-3 border-b border-border/40 px-3 py-2 text-sm last:border-b-0"
+                className="flex items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/40 transition-colors"
                 draggable
                 onDragStart={event => handleDragStart(event, field, 'fields')}
               >
@@ -324,11 +441,14 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
                     }
                     className="h-4 w-4"
                   />
-                  <span className="text-foreground font-medium">{field}</span>
+                  <span className="text-foreground font-medium truncate" title={field}>
+                    {field.length > 4 ? `${field.slice(0, 4)}...` : field}
+                  </span>
                 </div>
               </label>
             );
           })}
+          </div>
           {filteredFields.length === 0 && (
             <div className="px-3 py-4 text-xs text-muted-foreground">No fields match your search.</div>
           )}
@@ -337,7 +457,7 @@ const PivotTableSettings: React.FC<PivotTableSettingsProps> = ({ data, onDataCha
 
       <Card className="p-4 space-y-3">
         <p className="text-sm font-semibold text-foreground">Drag fields between areas below</p>
-        <div className="grid grid-cols-1 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {renderZone('Filters', 'filters', data.filterFields)}
           {renderZone('Columns', 'columns', data.columnFields)}
           {renderZone('Rows', 'rows', data.rowFields)}

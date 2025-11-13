@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, SCOPE_SELECTOR_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 interface Props {
@@ -98,7 +99,8 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
       // Fetch column summary
       const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(val)}`);
       if (res.ok) {
-        const data = await res.json();
+        const raw = await res.json();
+        const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
         const allColumns = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
 
         // Determine all categorical identifiers

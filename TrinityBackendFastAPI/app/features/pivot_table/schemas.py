@@ -15,6 +15,7 @@ AggregationLiteral = Literal[
     "min",
     "max",
     "median",
+    "weighted_average",
 ]
 
 
@@ -22,6 +23,10 @@ class PivotValueConfig(BaseModel):
     field: str = Field(..., description="Column to aggregate")
     aggregation: AggregationLiteral = Field(
         "sum", description="Aggregation function to apply to the field"
+    )
+    weight_column: Optional[str] = Field(
+        default=None,
+        description="Weight column for weighted_average aggregation. Required when aggregation is 'weighted_average'.",
     )
 
 
@@ -106,6 +111,13 @@ class PivotRefreshResponse(BaseModel):
     status: Literal["success", "failed"]
     updated_at: datetime
     rows: int
+
+
+class PivotSaveRequest(BaseModel):
+    filename: Optional[str] = Field(
+        default=None,
+        description="Optional filename for save_as. If not provided, overwrites existing saved file.",
+    )
 
 
 class PivotSaveResponse(BaseModel):

@@ -11,6 +11,7 @@ import {
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { cn } from '@/lib/utils';
 import { VALIDATE_API, FEATURE_OVERVIEW_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 
 interface PivotTableInputFilesProps {
   atomId: string;
@@ -94,7 +95,8 @@ const PivotTableInputFiles: React.FC<PivotTableInputFilesProps> = ({ atomId }) =
       if (!res.ok) {
         throw new Error(`Failed to load column summary (${res.status})`);
       }
-      const json = await res.json();
+      const raw = await res.json();
+      const json = await resolveTaskResponse<{ summary?: any[] }>(raw);
       const summary = Array.isArray(json.summary) ? json.summary.filter(Boolean) : [];
       const columns = summary.map(col => col.column).filter(Boolean);
       const filterOptions: Record<string, string[]> = {};

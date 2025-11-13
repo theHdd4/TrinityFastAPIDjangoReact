@@ -54,8 +54,13 @@ function stripCards(cards: any[]): any[] {
     ...card,
     atoms: card.atoms.map((atom: any) => {
       const info = allAtoms.find(a => a.id === atom.atomId);
-      if (atom.type === 'dataframe-operations' && atom.settings) {
+      // Handle dataframe-operations atoms - strip large data but preserve pivotResults
+      // Check both atom.type and atom.atomId for compatibility
+      if ((atom.type === 'dataframe-operations' || atom.atomId === 'dataframe-operations') && atom.settings) {
         const { tableData, data, ...rest } = atom.settings;
+        // Note: pivotResults is preserved in 'rest' - it's part of pivotSettings
+        // pivotResults can be large but is needed for session restoration
+        // If it becomes too large, we can reload from backend cache (see DataFrameOperationsCanvas)
         return {
           ...atom,
           settings: rest,

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 
 import type { ExploreData, ExploreSettings } from "../ExploreAtom"
 import { VALIDATE_API, EXPLORE_API } from "@/lib/api"
+import { resolveTaskResponse } from "@/lib/taskQueue";
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning'
 
 interface ExploreInputProps {
@@ -121,7 +122,8 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
       const response = await fetch(`${EXPLORE_API}/column-classifier/config/${encodeURIComponent(client_name)}/${encodeURIComponent(app_name)}/${encodeURIComponent(project_name)}`)
       
       if (response.ok) {
-        const result = await response.json()
+        const raw = await response.json()
+        const result = await resolveTaskResponse<Record<string, any>>(raw)
 
         if (result.status === 'success' && (result.config || result.data)) {
           const rawConfig = result.config || result.data
@@ -180,7 +182,8 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
         clearTimeout(timeoutId)
         
         if (response.ok) {
-          const result = await response.json()
+          const raw = await response.json()
+          const result = await resolveTaskResponse<Record<string, any>>(raw)
 
           if (result.status === 'success' && (result.config || result.data)) {
             const rawConfig = result.config || result.data
@@ -232,8 +235,9 @@ const ExploreInput: React.FC<ExploreInputProps> = ({ data, settings, onDataChang
       // Ensure proper file extension
       const objectName = fileKey.endsWith('.arrow') ? fileKey : `${fileKey}.arrow`
       const response = await fetch(`${EXPLORE_API}/column_summary?object_name=${encodeURIComponent(objectName)}`)
-      if (response.ok) {
-        const summary = await response.json()
+    if (response.ok) {
+      const raw = await response.json()
+      const summary = await resolveTaskResponse<{ summary?: any[] }>(raw)
         const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : []
         setColumnSummary(summaryData)
         setOriginalColumnSummary(summaryData) // Store original for filtering

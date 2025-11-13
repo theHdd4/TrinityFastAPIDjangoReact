@@ -16,6 +16,7 @@ import {
   ColumnClassifierFile,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API, CLASSIFIER_API } from '@/lib/api';
+import { waitForTaskResult } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { logSessionState, updateSessionState, addNavigationItem } from '@/lib/session';
@@ -213,45 +214,52 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           body: form,
           credentials: 'include',
         });
-        if (res.ok) {
-          const data = await res.json();
-          uploaded.push({ name: file.name, path: data.file_path, size: file.size });
-          
-          // Check for data quality warnings
-          if (data.has_data_quality_issues && data.warnings && data.warnings.length > 0) {
-            // Display warning toast with mixed data type information
-            if (data.mixed_dtype_columns && data.mixed_dtype_columns.length > 0) {
-              const colList = data.mixed_dtype_columns.slice(0, 5).join(', ');
-              const moreText = data.mixed_dtype_columns.length > 5 
-                ? ` and ${data.mixed_dtype_columns.length - 5} more` 
-                : '';
-              
-              toast({
-                title: `⚠️ Data Quality Warning - ${file.name}`,
-                description: `File has mixed data types in columns: ${colList}${moreText}. This may lead to unstable results. Please use Dataframe Operations atom to fix column data types.`,
-                variant: 'default',
-                duration: 10000, // Show for 10 seconds
-              });
-            } else {
-              // Generic warning
-              toast({
-                title: `⚠️ ${file.name} uploaded with warnings`,
-                description: data.warnings[0] || 'Some atoms may need data type conversion.',
-                variant: 'default',
-                duration: 8000,
-              });
-            }
-          } else {
-            // Success without warnings
-            toast({ title: `${file.name} uploaded successfully` });
-          }
-        } else {
+        if (!res.ok) {
           const errorData = await res.json().catch(() => ({}));
           const errorMessage = errorData.detail || `Failed to upload ${file.name}`;
           toast({ title: errorMessage, variant: 'destructive' });
+          continue;
         }
-      } catch (error) {
-        toast({ title: `Failed to upload ${file.name}`, variant: 'destructive' });
+
+        const payload = await res.json();
+        const data = await waitForTaskResult(payload);
+        const filePath = (data as any).file_path as string | undefined;
+        if (!filePath) {
+          toast({ title: `Upload response missing file path for ${file.name}`, variant: 'destructive' });
+          continue;
+        }
+
+        uploaded.push({ name: file.name, path: filePath, size: file.size });
+
+        if ((data as any).has_data_quality_issues && Array.isArray((data as any).warnings) && (data as any).warnings.length > 0) {
+          const warnings = (data as any).warnings as string[];
+          const mixedCols = Array.isArray((data as any).mixed_dtype_columns) ? (data as any).mixed_dtype_columns as string[] : [];
+          if (mixedCols.length > 0) {
+            const colList = mixedCols.slice(0, 5).join(', ');
+            const moreText = mixedCols.length > 5 ? ` and ${mixedCols.length - 5} more` : '';
+            toast({
+              title: `⚠️ Data Quality Warning - ${file.name}`,
+              description: `File has mixed data types in columns: ${colList}${moreText}. This may lead to unstable results. Please use Dataframe Operations atom to fix column data types.`,
+              variant: 'default',
+              duration: 10000,
+            });
+          } else {
+            toast({
+              title: `⚠️ ${file.name} uploaded with warnings`,
+              description: warnings[0] || 'Some atoms may need data type conversion.',
+              variant: 'default',
+              duration: 8000,
+            });
+          }
+        } else {
+          toast({ title: `${file.name} uploaded successfully` });
+        }
+      } catch (error: any) {
+        toast({
+          title: `Failed to upload ${file.name}`,
+          description: error?.message,
+          variant: 'destructive',
+        });
       }
     }
 
@@ -455,9 +463,21 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       file_paths: paths,
       file_keys: keys,
     });
-    const res = await fetch(`${VALIDATE_API}/validate`, { method: 'POST', body: form });
-    if (res.ok) {
-      const data = await res.json();
+    try {
+      const res = await fetch(`${VALIDATE_API}/validate`, { method: 'POST', body: form });
+      if (!res.ok) {
+        const errorText = await res.text();
+        toast({
+          title: 'Failed to validate files',
+          description: errorText || undefined,
+          variant: 'destructive',
+        });
+        logSessionState(user?.id);
+        return;
+      }
+
+      const payload = await res.json();
+      const data = await waitForTaskResult(payload);
       const cfgRes = await fetch(`${VALIDATE_API}/get_validator_config/${settings.validatorId}`);
       const cfg = cfgRes.ok ? await cfgRes.json() : { validations: {} };
 
@@ -544,9 +564,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       setValidationResults(results);
       setValidationDetails(details);
       logSessionState(user?.id);
-    } else {
-      const err = await res.text();
-      console.error('Validation failed', res.status, err);
+      toast({ title: 'Validation completed successfully' });
+    } catch (error: any) {
+      toast({
+        title: 'Failed to validate files',
+        description: error?.message,
+        variant: 'destructive',
+      });
       logSessionState(user?.id);
     }
   };

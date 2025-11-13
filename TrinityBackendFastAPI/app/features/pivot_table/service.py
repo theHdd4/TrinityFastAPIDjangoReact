@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -20,6 +21,7 @@ from .schemas import (
     PivotComputeRequest,
     PivotComputeResponse,
     PivotRefreshResponse,
+    PivotSaveRequest,
     PivotSaveResponse,
     PivotStatusResponse,
 )
@@ -41,6 +43,7 @@ AGGREGATION_MAP: Dict[str, str] = {
     "min": "min",
     "max": "max",
     "median": "median",
+    "weighted_average": "weighted_average",
 }
 
 
@@ -184,6 +187,7 @@ def _build_hierarchy_nodes(
     leaf_columns: List[str],
     column_meta: Dict[str, Dict[str, Any]],
     include_grand_total: bool = False,
+    grand_total_values: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     if not row_fields:
         return []
@@ -352,13 +356,15 @@ def _build_hierarchy_nodes(
         labels: List[Dict[str, Any]] = [
             {"field": row_fields[0], "value": "Grand Total"}
         ]
+        # Use provided grand_total_values or empty dict
+        grand_total_vals = grand_total_values if grand_total_values is not None else {}
         grand_total_node = {
             "key": "__grand_total__",
             "parent_key": None,
             "level": 0,
             "order": next_order,
             "labels": labels,
-            "values": {},
+            "values": grand_total_vals,
         }
         nodes.append(grand_total_node)
 
@@ -536,29 +542,41 @@ def _store_status(config_id: str, status: str, message: Optional[str], rows: Opt
     if rows is not None:
         payload["rows"] = rows
 
-    redis_client.setex(_ns_key(config_id, "status"), PIVOT_CACHE_TTL, _ensure_redis_json(payload))
+    # Pass parts separately so cache router can normalize them properly
+    # The cache router already adds the feature name, so we just need config_id and suffix
+    redis_client.setex((config_id, "status"), PIVOT_CACHE_TTL, _ensure_redis_json(payload))
 
 
 def _store_data(config_id: str, data: Dict[str, Any]) -> None:
-    redis_client.setex(_ns_key(config_id, "data"), PIVOT_CACHE_TTL, _ensure_redis_json(data))
+    # Pass parts separately so cache router can normalize them properly
+    # The cache router already adds the feature name, so we just need config_id and suffix
+    redis_client.setex((config_id, "data"), PIVOT_CACHE_TTL, _ensure_redis_json(data))
 
 
 def _store_config(config_id: str, config: Dict[str, Any]) -> None:
-    redis_client.setex(_ns_key(config_id, "config"), PIVOT_CACHE_TTL, _ensure_redis_json(config))
+    # Pass parts separately so cache router can normalize them properly
+    # The cache router already adds the feature name, so we just need config_id and suffix
+    redis_client.setex((config_id, "config"), PIVOT_CACHE_TTL, _ensure_redis_json(config))
 
 
 def _load_config(config_id: str) -> Optional[Dict[str, Any]]:
-    raw = redis_client.get(_ns_key(config_id, "config"))
+    # Pass parts separately so cache router can normalize them properly
+    # The cache router already adds the feature name, so we just need config_id and suffix
+    raw = redis_client.get((config_id, "config"))
     return _decode_redis_json(raw)
 
 
 def _load_data(config_id: str) -> Optional[Dict[str, Any]]:
-    raw = redis_client.get(_ns_key(config_id, "data"))
+    # Pass parts separately so cache router can normalize them properly
+    # The cache router already adds the feature name, so we just need config_id and suffix
+    raw = redis_client.get((config_id, "data"))
     return _decode_redis_json(raw)
 
 
 def _load_status(config_id: str) -> PivotStatusResponse:
-    data = _decode_redis_json(redis_client.get(_ns_key(config_id, "status"))) or {}
+    # Pass parts separately so cache router can normalize them properly
+    # The cache router already adds the feature name, so we just need config_id and suffix
+    data = _decode_redis_json(redis_client.get((config_id, "status"))) or {}
     status = data.get("status", "unknown")
     updated_at_raw = data.get("updated_at")
     updated_at = None
@@ -616,17 +634,79 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
 
     value_columns = _resolve_columns(filtered_df, [value.field for value in payload.values])
 
+    # Validate weighted average configurations
+    weight_column_map = {}
+    for value_cfg, col in zip(payload.values, value_columns):
+        if value_cfg.aggregation.lower() == "weighted_average":
+            if not value_cfg.weight_column:
+                message = f"Weight column is required for weighted_average aggregation on field '{col}'"
+                _store_status(config_id, "failed", message, None)
+                raise HTTPException(status_code=400, detail=message)
+            
+            weight_col_resolved = _resolve_columns(filtered_df, [value_cfg.weight_column])
+            if not weight_col_resolved:
+                message = f"Weight column '{value_cfg.weight_column}' not found in dataset"
+                _store_status(config_id, "failed", message, None)
+                raise HTTPException(status_code=404, detail=message)
+            
+            weight_col = weight_col_resolved[0]
+            
+            # Validate weight column is numeric
+            if not pd.api.types.is_numeric_dtype(filtered_df[weight_col]):
+                message = f"Weight column '{weight_col}' must contain numeric values"
+                _store_status(config_id, "failed", message, None)
+                raise HTTPException(status_code=400, detail=message)
+            
+            weight_column_map[col] = weight_col
+
+    def make_weighted_avg_func(weight_column_name: str, df: pd.DataFrame):
+        """Factory function to create weighted average aggregator with proper closure."""
+        def weighted_avg(values):
+            # Get the corresponding weights for these values
+            # In pandas groupby context, values is a Series with an index
+            try:
+                weights = df.loc[values.index, weight_column_name]
+            except KeyError:
+                return np.nan
+            
+            # Filter out null/nan values and non-positive weights
+            mask = values.notna() & weights.notna() & (weights > 0)
+            valid_values = values[mask]
+            valid_weights = weights[mask]
+            
+            if len(valid_values) == 0 or valid_weights.sum() == 0:
+                return np.nan
+            
+            return (valid_values * valid_weights).sum() / valid_weights.sum()
+        
+        return weighted_avg
+
     agg_map = {}
     for value_cfg, col in zip(payload.values, value_columns):
         agg_name = AGGREGATION_MAP.get(value_cfg.aggregation.lower())
         if not agg_name:
             _store_status(config_id, "failed", f"Unsupported aggregation {value_cfg.aggregation}", None)
             raise HTTPException(status_code=400, detail=f"Unsupported aggregation '{value_cfg.aggregation}'")
-        agg_map[col] = agg_name
+        
+        if agg_name == "weighted_average":
+            # Create custom weighted average function for this column
+            weight_col = weight_column_map[col]
+            agg_map[col] = make_weighted_avg_func(weight_col, filtered_df)
+        else:
+            agg_map[col] = agg_name
 
     try:
         include_margins = payload.grand_totals != "off"
 
+        # Create pivot table with margins
+        # When margins=True, pandas calculates grand totals by applying the aggregation
+        # function to the ENTIRE dataset (not to the aggregated group values):
+        # - For 'min': grand total = min(all values in dataset) = overall minimum (CORRECT)
+        # - For 'max': grand total = max(all values in dataset) = overall maximum (CORRECT)
+        # - For 'sum': grand total = sum(all values in dataset) = overall sum (CORRECT)
+        # - For 'mean': grand total = mean(all values in dataset) = overall mean (CORRECT)
+        # - For 'count': grand total = count(all values in dataset) = overall count (CORRECT)
+        # This ensures grand totals accurately represent the aggregation across all data
         pivot_df = pd.pivot_table(
             filtered_df,
             index=row_fields if row_fields else None,
@@ -654,12 +734,61 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         pivot_df = pivot_df.to_frame(name=list(agg_map.keys())[0])
         series_converted = True
 
+    # Add column grand totals when requested and there are no column fields
+    include_column_totals = include_margins and payload.grand_totals in ("columns", "both")
+    value_columns_list = list(agg_map.keys())
+    
+    if include_column_totals and not column_fields:
+        # Create Grand Total column for all aggregations
+        # For column totals, we calculate the total across value columns for each row
+        # For sum/mean/count: sum the value columns
+        # For min: take the minimum across value columns
+        # For max: take the maximum across value columns
+        
+        # Check if all columns use the same aggregation type
+        agg_types = set(agg_map.get(col) for col in value_columns_list if col in pivot_df.columns)
+        
+        if len(agg_types) == 1:
+            # All same aggregation type - create one Grand Total column
+            agg_type = next(iter(agg_types))
+            available_cols = [col for col in value_columns_list if col in pivot_df.columns]
+            
+            if available_cols and (agg_type == "sum" or (isinstance(agg_type, str) and agg_type in ["sum", "mean", "count", "min", "max"])):
+                # Sum across value columns for each row
+                pivot_df["Grand Total"] = pivot_df[available_cols].sum(axis=1, numeric_only=True)
+                value_columns_list.append("Grand Total")
+            # Note: For callable aggregations (like weighted_average), we skip creating column totals
+            # as they require the original data and weights, not just the aggregated values
+        else:
+            # Mixed aggregation types - create separate Grand Total columns for each aggregation type
+            # Group columns by aggregation type
+            cols_by_agg = {}
+            for col in value_columns_list:
+                if col in pivot_df.columns:
+                    agg_func = agg_map.get(col)
+                    if agg_func not in cols_by_agg:
+                        cols_by_agg[agg_func] = []
+                    cols_by_agg[agg_func].append(col)
+            
+            # Create a Grand Total column for each aggregation type
+            for agg_func, cols in cols_by_agg.items():
+                if not cols:
+                    continue
+                
+                grand_total_col_name = None
+                if agg_func == "sum" or (isinstance(agg_func, str) and agg_func in ["sum", "mean", "count", "min", "max"]):
+                    grand_total_col_name = "Grand Total (Sum)" if len(cols_by_agg) > 1 else "Grand Total"
+                    pivot_df[grand_total_col_name] = pivot_df[cols].sum(axis=1, numeric_only=True)
+                    value_columns_list.append(grand_total_col_name)
+                # Note: For callable aggregations (like weighted_average), we skip creating column totals
+                # as they require the original data and weights, not just the aggregated values
+
     (
         column_hierarchy_nodes,
         column_leaf_columns,
         column_leaf_meta,
     ) = _build_column_hierarchy_nodes(
-        pivot_df, column_fields, list(agg_map.keys())
+        pivot_df, column_fields, value_columns_list
     )
 
     if row_fields:
@@ -674,8 +803,74 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
 
     records = [_convert_numpy(record) for record in pivot_df.to_dict(orient="records")]
 
+    effective_leaf_columns = (
+        column_leaf_columns if column_leaf_columns else value_columns_list
+    )
+
+    include_grand_total_row = include_margins and payload.grand_totals in ("rows", "both")
+
+    # Extract grand total row values from pivot_df BEFORE applying limit
+    # (See comment above for how pandas calculates margins for min/max)
+    grand_total_values = {}
+    grand_total_record = None
+    if include_grand_total_row and row_fields:
+        # After reset_index, the Grand Total row should be in the records
+        # Find it and extract its values BEFORE applying any limit
+        for record in records:
+            # Check if this is the Grand Total row
+            # The Grand Total row will have "Grand Total" in at least one row field
+            # (typically the first one, but check all to be safe)
+            is_grand_total = any(
+                record.get(field) == "Grand Total" for field in row_fields
+            )
+            if is_grand_total:
+                grand_total_record = record
+                break
+        
+        if grand_total_record:
+            # Extract all value columns from the Grand Total row
+            for col in effective_leaf_columns:
+                if col in grand_total_record and col not in row_fields:
+                    grand_total_values[col] = grand_total_record[col]
+            
+            # Log the aggregations being used for verification
+            agg_info = {}
+            for col in effective_leaf_columns:
+                if col in grand_total_values:
+                    if column_leaf_meta and col in column_leaf_meta:
+                        value_field = column_leaf_meta[col].get("value_field", col)
+                        agg_info[col] = agg_map.get(value_field, "unknown")
+                    else:
+                        agg_info[col] = agg_map.get(col, "unknown")
+            logger.debug(
+                "Extracted grand total values for config_id=%s (aggregations: %s): %s",
+                config_id,
+                agg_info,
+                grand_total_values,
+            )
+        else:
+            logger.warning(
+                "Grand total row requested but not found in records for config_id=%s. "
+                "Total records: %d, Row fields: %s",
+                config_id,
+                len(records),
+                row_fields,
+            )
+
+    # Apply limit AFTER extracting grand total row (if limit would cut it off, exclude grand total from limit)
     if payload.limit and len(records) > payload.limit:
-        records = records[: payload.limit]
+        # If we have a grand total row, we need to preserve it even if it's beyond the limit
+        if grand_total_record:
+            # Remove grand total from records, apply limit, then add it back at the end
+            records_without_total = [
+                r for r in records
+                if not any(r.get(field) == "Grand Total" for field in row_fields)
+            ]
+            records = records_without_total[: payload.limit]
+            # Add grand total row at the end
+            records.append(grand_total_record)
+        else:
+            records = records[: payload.limit]
 
     order_lookup: Dict[str, int] = {}
     if row_fields:
@@ -690,12 +885,6 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
                     order_lookup[key] = order_counter
                     order_counter += 1
 
-    effective_leaf_columns = (
-        column_leaf_columns if column_leaf_columns else list(agg_map.keys())
-    )
-
-    include_grand_total_row = include_margins and payload.grand_totals in ("rows", "both")
-
     hierarchy_nodes = _build_hierarchy_nodes(
         filtered_df,
         row_fields,
@@ -705,22 +894,28 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         effective_leaf_columns,
         column_leaf_meta,
         include_grand_total=include_grand_total_row,
+        grand_total_values=grand_total_values,
     )
 
     updated_at = datetime.now(timezone.utc)
 
-    _store_data(
-        config_id,
-        {
-            "config_id": config_id,
-            "status": "success",
-            "updated_at": updated_at.isoformat(),
-            "rows": len(records),
-            "data": records,
-            "hierarchy": hierarchy_nodes,
-            "column_hierarchy": column_hierarchy_nodes,
-        },
-    )
+    data_to_store = {
+        "config_id": config_id,
+        "status": "success",
+        "updated_at": updated_at.isoformat(),
+        "rows": len(records),
+        "data": records,
+        "hierarchy": hierarchy_nodes,
+        "column_hierarchy": column_hierarchy_nodes,
+    }
+    logger.info("compute_pivot: Storing data for config_id=%s with key parts=(%s, data)", config_id, config_id)
+    _store_data(config_id, data_to_store)
+    # Verify data was stored correctly
+    verification = _load_data(config_id)
+    if verification:
+        logger.info("compute_pivot: Data verified in cache for config_id=%s, rows=%s", config_id, verification.get("rows", 0))
+    else:
+        logger.error("compute_pivot: WARNING - Data was not found in cache immediately after storing for config_id=%s", config_id)
 
     existing_config = _load_config(config_id) or {}
     config_to_save = {**existing_config, **payload.dict()}
@@ -771,10 +966,24 @@ def get_pivot_status(config_id: str) -> PivotStatusResponse:
     return _load_status(config_id)
 
 
-async def save_pivot(config_id: str) -> PivotSaveResponse:
+async def save_pivot(config_id: str, payload: Optional[PivotSaveRequest] = None) -> PivotSaveResponse:
+    logger.info("save_pivot called with config_id=%s", config_id)
     cached = _load_data(config_id)
+    logger.info("save_pivot: cached data exists=%s", cached is not None)
     if not cached:
-        raise HTTPException(status_code=404, detail="No pivot data available to save")
+        # Try to get more info about what's in Redis
+        import urllib.parse
+        decoded_config_id = urllib.parse.unquote(config_id)
+        if decoded_config_id != config_id:
+            logger.info("save_pivot: trying decoded config_id=%s", decoded_config_id)
+            cached = _load_data(decoded_config_id)
+            if cached:
+                config_id = decoded_config_id
+        if not cached:
+            # Log what keys exist in Redis for debugging
+            # Note: FeatureCacheRouter doesn't have a keys() method, so we can't list keys
+            logger.warning("save_pivot: No data found for config_id=%s. Key parts used: (%s, data)", config_id, config_id)
+            raise HTTPException(status_code=404, detail="No pivot data available to save")
 
     records = cached.get("data")
     if not records:
@@ -790,7 +999,19 @@ async def save_pivot(config_id: str) -> PivotSaveResponse:
         prefix = f"{prefix}/"
     object_prefix = f"{prefix}pivot/"
 
-    file_name = f"{config_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.arrow"
+    # Determine filename: use provided filename for save_as, or standard filename for save (always overwrites)
+    config = _load_config(config_id) or {}
+    
+    if payload and payload.filename:
+        # Save As: create new file with provided filename
+        file_name = payload.filename.strip()
+        if not file_name.endswith('.arrow'):
+            file_name = f"{file_name}.arrow"
+    else:
+        # Save: always use the same filename (creates or overwrites)
+        # Remove numbers from config_id for cleaner filename
+        clean_config_id = re.sub(r'\d+', '', config_id).strip('-').strip('_')
+        file_name = f"{clean_config_id}.arrow" if clean_config_id else f"pivot_{config_id}.arrow"
 
     table = pa.Table.from_pandas(df)
     sink = pa.BufferOutputStream()
@@ -808,9 +1029,16 @@ async def save_pivot(config_id: str) -> PivotSaveResponse:
 
     object_name = upload_result["object_name"]
 
-    config = _load_config(config_id) or {}
+    # Update config with saved path
+    # Always update last_saved_path
     config["pivot_last_saved_path"] = object_name
     config["pivot_last_saved_at"] = timestamp.isoformat()
+    
+    # Update first_saved_path only if this is a Save operation (not Save As)
+    if not (payload and payload.filename):
+        config["pivot_first_saved_path"] = object_name
+        config["pivot_first_saved_at"] = timestamp.isoformat()
+    
     _store_config(config_id, config)
 
     rows = cached.get("rows") or len(records)
@@ -821,5 +1049,3 @@ async def save_pivot(config_id: str) -> PivotSaveResponse:
         updated_at=timestamp,
         rows=rows,
     )
-
-

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, CREATECOLUMN_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
@@ -131,7 +132,8 @@ const CreateColumnInputFiles: React.FC<Props> = ({ atomId, selectedIdentifiers, 
     );
     let summary: ColumnInfo[] = [];
     if (res.ok) {
-      const data = await res.json();
+      const raw = await res.json();
+      const data = await resolveTaskResponse<{ summary?: ColumnInfo[] }>(raw);
       summary = (data.summary || []).filter(Boolean);
       setColumns(summary);
     }

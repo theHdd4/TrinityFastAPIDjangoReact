@@ -12,7 +12,10 @@ production-like and local environments.
    `monitoring/prometheus/alerts/redis.rules.yml`.
 3. **Promtail + Loki** tail the Django, Celery, FastAPI, and Trinity AI containers for
    structured `redis_cache_event` log lines and persist them for seven days so cache hit
-   behaviour can be audited in real time.
+   behaviour can be audited in real time. The emitters now surface read, write, expiry,
+   and scan operations (including TTL lookups and deletes) so the **Redis Cache Activity
+   Logs** panel in Grafana provides a complete picture of how applications interact with
+   the cache.
 4. **Grafana** is provisioned with the *Redis Cache Overview* dashboard that visualises
    the key metrics required by support and engineering teams (hit rate, latency,
    fragmentation, memory usage, connection counts) and now includes a live Redis activity

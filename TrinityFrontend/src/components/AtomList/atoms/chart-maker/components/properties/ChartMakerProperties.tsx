@@ -127,6 +127,8 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         chartMakerApi.getColumns(fileId)
       ]);
 
+      const resolvedFileId = columnsResponse.file_id || allColumnsResponse.file_id || fileId;
+
       // Fetch unique values for ALL columns (both categorical and numeric)
       // This ensures that any column can be used as a filter with full unique values
       const allColumns = allColumnsResponse.columns || [];
@@ -149,18 +151,20 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
       // Get unique values for ALL columns (both categorical and numeric)
       if (columnsToFetch.length > 0) {
         setLoading({ fetchingUniqueValues: true, fetchingColumns: false });
-        const uniqueValuesResponse = await chartMakerApi.getUniqueValues(fileId, columnsToFetch);
-        
+        const uniqueValuesResponse = await chartMakerApi.getUniqueValues(resolvedFileId, columnsToFetch);
+        const finalFileId = uniqueValuesResponse.file_id || resolvedFileId;
+
         // Update uploaded data with comprehensive information
         handleSettingsChange({
           uploadedData: {
             ...data,
+            file_id: finalFileId,
             allColumns: allColumnsResponse.columns,
             numericColumns: columnsResponse.numeric_columns,
             categoricalColumns: columnsResponse.categorical_columns,
             uniqueValuesByColumn: uniqueValuesResponse.values
           },
-          fileId: fileId,
+          fileId: finalFileId,
           dataSource: dataSource || settings.dataSource,
           charts: updatedCharts
         });
@@ -169,12 +173,13 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         handleSettingsChange({
           uploadedData: {
             ...data,
+            file_id: resolvedFileId,
             allColumns: allColumnsResponse.columns,
             numericColumns: columnsResponse.numeric_columns,
             categoricalColumns: columnsResponse.categorical_columns,
             uniqueValuesByColumn: {}
           },
-          fileId: fileId,
+          fileId: resolvedFileId,
           dataSource: dataSource || settings.dataSource,
           charts: updatedCharts
         });

@@ -8,6 +8,8 @@ from kombu import Queue
 
 DEFAULT_QUEUE = os.getenv("CELERY_TASK_DEFAULT_QUEUE", "trinity.tasks")
 DEFAULT_BEAT_QUEUE = os.getenv("CELERY_BEAT_QUEUE", f"{DEFAULT_QUEUE}.beat")
+CPU_QUEUE = os.getenv("CELERY_CPU_QUEUE", f"{DEFAULT_QUEUE}.cpu")
+IO_QUEUE = os.getenv("CELERY_IO_QUEUE", f"{DEFAULT_QUEUE}.io")
 
 CELERY_CONFIG: Dict[str, Any] = {
     "broker_url": os.getenv("CELERY_BROKER_URL") or os.getenv("REDIS_URL", "redis://localhost:6379/0"),
@@ -21,7 +23,19 @@ CELERY_CONFIG: Dict[str, Any] = {
     "task_queues": (
         Queue(DEFAULT_QUEUE, routing_key=DEFAULT_QUEUE),
         Queue(DEFAULT_BEAT_QUEUE, routing_key=DEFAULT_BEAT_QUEUE),
+        Queue(CPU_QUEUE, routing_key=CPU_QUEUE),
+        Queue(IO_QUEUE, routing_key=IO_QUEUE),
     ),
+    "task_routes": {
+        "apps.orchestration.tasks.execute_task": {
+            "queue": IO_QUEUE,
+            "routing_key": IO_QUEUE,
+        },
+        "apps.orchestration.tasks.persist_task_result": {
+            "queue": IO_QUEUE,
+            "routing_key": IO_QUEUE,
+        },
+    },
     "worker_concurrency": int(os.getenv("CELERY_WORKER_CONCURRENCY", "2")),
 }
 
