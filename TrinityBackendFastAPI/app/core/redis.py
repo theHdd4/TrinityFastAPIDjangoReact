@@ -28,13 +28,19 @@ from redis.connection import (
 
 logger = logging.getLogger("app.core.redis")
 activity_logger = logging.getLogger("redis.activity")
+activity_logger.setLevel(logging.INFO)
+activity_logger.propagate = False
+
+_activity_formatter = logging.Formatter("%(message)s")
+
 if not activity_logger.handlers:
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setFormatter(_activity_formatter)
     activity_logger.addHandler(handler)
-activity_logger.setLevel(logging.INFO)
-activity_logger.propagate = False
+else:
+    for handler in activity_logger.handlers:
+        handler.setFormatter(_activity_formatter)
 
 
 def _service_name() -> str:
