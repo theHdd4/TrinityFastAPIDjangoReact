@@ -1902,7 +1902,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 throw new Error(`Failed to create explore atom for chart ${i + 1}: ${createResponse.status} - ${errorText}`);
               }
               
-              const createResult = await createResponse.json();
+              const rawCreate = await createResponse.json();
+              const createResult = await resolveTaskResponse<{ explore_atom_id: string }>(rawCreate);
               const exploreAtomId = createResult.explore_atom_id;
               console.log('✅ Step 2 - Explore atom created:', exploreAtomId);
               
@@ -1950,6 +1951,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 });
                 throw new Error(`Operations specification failed for chart ${i + 1}: ${operationsResponse.status} - ${errorText}`);
               }
+              const rawOperations = await operationsResponse.json();
+              await resolveTaskResponse(rawOperations);
               console.log('✅ Step 4 - Operations specified');
               
               // 🎯 STEP 5: Call /chart-data-multidim (SAME as manual)
@@ -1967,7 +1970,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 throw new Error(`Chart data fetch failed for chart ${i + 1}: ${chartResponse.status} - ${errorText}`);
               }
               
-              const chartResult = await chartResponse.json();
+              const rawChart = await chartResponse.json();
+              const chartResult = await resolveTaskResponse<Record<string, any>>(rawChart);
               console.log(`✅ Step 5 - Chart data received for chart ${i + 1}:`, chartResult);
               
               // Store result in same format as manual
@@ -2016,7 +2020,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               
               let columnClassifierConfig = null;
               if (classifierResponse.ok) {
-                columnClassifierConfig = await classifierResponse.json();
+                const rawClassifier = await classifierResponse.json();
+                columnClassifierConfig = await resolveTaskResponse<Record<string, any>>(rawClassifier);
                 console.log('✅ Got REAL column classifier config:', columnClassifierConfig);
               }
               
@@ -2024,7 +2029,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               const summaryResponse = await fetch(`${EXPLORE_API}/column_summary?object_name=${encodeURIComponent(targetFile)}`);
               let columnSummary = [];
               if (summaryResponse.ok) {
-                const summary = await summaryResponse.json();
+                const rawSummary = await summaryResponse.json();
+                const summary = await resolveTaskResponse<{ summary?: any[] }>(rawSummary);
                 columnSummary = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
                 console.log('✅ Got REAL column summary:', columnSummary.length, 'columns');
               }

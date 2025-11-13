@@ -7,6 +7,7 @@ import { CheckboxTemplate } from '@/templates/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { DateRange } from 'react-day-picker';
 import { EXPLORE_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { CalendarIcon, Database, BarChart3, Info, Filter, ChevronDown, ChevronUp, ChevronRight, Plus, Minus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -157,7 +158,8 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     try {
       const response = await fetch(`${EXPLORE_API}/columns?object_name=${encodeURIComponent(data.dataframe)}`);
       if (response.ok) {
-        const result = await response.json();
+        const raw = await response.json();
+        const result = await resolveTaskResponse<{ columns?: string[] }>(raw);
         if (result.columns) {
           setColumnNames(result.columns);
         }
@@ -173,11 +175,12 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     
     setIsLoadingDateRange(true);
     try {
-      const response = await fetch(`${EXPLORE_API}/get-date-range?data_source=${encodeURIComponent(data.dataframe)}`);
+      const response = await fetch(`${EXPLORE_API}/date-range?object_name=${encodeURIComponent(data.dataframe)}`);
       if (response.ok) {
-        const result = await response.json();
-        if (result.status === 'success' && result.date_range) {
-          setAvailableDateRange(result.date_range);
+        const raw = await response.json();
+        const result = await resolveTaskResponse<{ status?: string; min_date?: string; max_date?: string }>(raw);
+        if (result.status === 'success' && result.min_date && result.max_date) {
+          setAvailableDateRange({ min_date: result.min_date, max_date: result.max_date });
         }
       }
     } catch (error) {
