@@ -38,12 +38,18 @@ browser's `localStorage`. The new memory endpoints live under
   in bytes (defaults to 2 MB).
 
 Chats are stored under
-`{PREFIX}/{PROJECT_NAME}/chats/{chatId}/messages.json`.
+`{PREFIX}/{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/chats/{chatId}/messages.json`.
 Session state is persisted alongside the chat transcripts in the same
-project-aware hierarchy: `{PREFIX}/{PROJECT_NAME}/sessions/{sessionId}/context.json`.
+project-aware hierarchy: `{PREFIX}/{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/sessions/{sessionId}/context.json`.
 
-The path structure is simplified to match the project structure:
-- `trinity/trinity_ai_memory/[PROJECT_NAME]/chats/` - for chat history
-- `trinity/trinity_ai_memory/[PROJECT_NAME]/sessions/` - for session context
+The path structure matches the project structure:
+- `trinity/trinity_ai_memory/[CLIENT_NAME]/[APP_NAME]/[PROJECT_NAME]/chats/` - for chat history
+- `trinity/trinity_ai_memory/[CLIENT_NAME]/[APP_NAME]/[PROJECT_NAME]/sessions/` - for session context
 
-Where `PROJECT_NAME` comes from the `PROJECT_NAME` environment variable, or defaults to "default" if not set.
+Where the path components come from environment variables:
+- `CLIENT_NAME` - from `CLIENT_NAME` environment variable
+- `APP_NAME` - from `APP_NAME` environment variable  
+- `PROJECT_NAME` - from `PROJECT_NAME` environment variable
+
+If any component is missing, it's skipped. If all are missing, defaults to "default".
+Example: `trinity/trinity_ai_memory/Quant_Matrix_AI_Schema/blank/New Custom Project/chats/...`

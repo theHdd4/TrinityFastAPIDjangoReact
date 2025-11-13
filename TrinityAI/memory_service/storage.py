@@ -85,30 +85,65 @@ def _sanitize_identifier(value: str) -> str:
     return sanitized[:256]
 
 
-def _get_project_name() -> str:
-    """Get project name from environment, fallback to 'default' if not set."""
-    project_name = os.getenv("PROJECT_NAME", "").strip()
-    if not project_name:
-        project_name = "default"
-    return _sanitize_identifier(project_name)
+def _get_project_path(
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> str:
+    """Get full project path from parameters or environment: CLIENT_NAME/APP_NAME/PROJECT_NAME"""
+    # Use provided parameters or fall back to environment variables
+    client = (client_name or os.getenv("CLIENT_NAME", "")).strip()
+    app = (app_name or os.getenv("APP_NAME", "")).strip()
+    project = (project_name or os.getenv("PROJECT_NAME", "")).strip()
+    
+    # Build path components, skipping empty parts
+    path_parts = []
+    if client:
+        path_parts.append(_sanitize_identifier(client))
+    if app:
+        path_parts.append(_sanitize_identifier(app))
+    if project:
+        path_parts.append(_sanitize_identifier(project))
+    
+    # If no path components, use default
+    if not path_parts:
+        path_parts = ["default"]
+    
+    return "/".join(path_parts)
 
 
-def _context_prefix() -> str:
-    """Generate simplified path: trinity_ai_memory/[PROJECT_NAME]"""
-    project = _get_project_name()
-    return f"{MEMORY_PREFIX}/{project}"
+def _context_prefix(
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> str:
+    """Generate path: trinity_ai_memory/[CLIENT_NAME]/[APP_NAME]/[PROJECT_NAME]"""
+    project_path = _get_project_path(client_name, app_name, project_name)
+    return f"{MEMORY_PREFIX}/{project_path}"
 
 
-def _chat_object_name(chat_id: str) -> str:
-    """Generate chat object path: trinity_ai_memory/[PROJECT_NAME]/chats/[chat_id]/messages.json"""
+def _chat_object_name(
+    chat_id: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> str:
+    """Generate chat object path: trinity_ai_memory/[CLIENT]/[APP]/[PROJECT]/chats/[chat_id]/messages.json"""
     safe_id = _sanitize_identifier(chat_id)
-    return f"{_context_prefix()}/chats/{safe_id}/messages.json"
+    prefix = _context_prefix(client_name, app_name, project_name)
+    return f"{prefix}/chats/{safe_id}/messages.json"
 
 
-def _session_object_name(session_id: str) -> str:
-    """Generate session object path: trinity_ai_memory/[PROJECT_NAME]/sessions/[session_id]/context.json"""
+def _session_object_name(
+    session_id: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> str:
+    """Generate session object path: trinity_ai_memory/[CLIENT]/[APP]/[PROJECT]/sessions/[session_id]/context.json"""
     safe_id = _sanitize_identifier(session_id)
-    return f"{_context_prefix()}/sessions/{safe_id}/context.json"
+    prefix = _context_prefix(client_name, app_name, project_name)
+    return f"{prefix}/sessions/{safe_id}/context.json"
 
 
 def _ensure_bucket(client: Minio) -> None:
@@ -228,10 +263,15 @@ def _default_retain_limit(requested: Optional[int]) -> int:
     return requested
 
 
-def load_chat(chat_id: str) -> Optional[Dict[str, Any]]:
+def load_chat(
+    chat_id: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     client = get_client()
     _ensure_bucket(client)
-    object_name = _chat_object_name(chat_id)
+    object_name = _chat_object_name(chat_id, client_name, app_name, project_name)
     payload = _load_json_object(client, object_name)
     if payload is None:
         return None
@@ -246,11 +286,14 @@ def save_chat(
     append: bool = False,
     retain_last: Optional[int] = None,
     max_bytes: int = MAX_BYTES_DEFAULT,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     client = get_client()
     _ensure_bucket(client)
 
-    object_name = _chat_object_name(chat_id)
+    object_name = _chat_object_name(chat_id, client_name, app_name, project_name)
     existing_payload = _load_json_object(client, object_name) or {}
 
     base_messages: List[Dict[str, Any]] = existing_payload.get("messages", []) or []
@@ -285,17 +328,26 @@ def save_chat(
     return _build_chat_response(chat_id, payload)
 
 
-def delete_chat(chat_id: str) -> None:
+def delete_chat(
+    chat_id: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> None:
     client = get_client()
     _ensure_bucket(client)
-    object_name = _chat_object_name(chat_id)
+    object_name = _chat_object_name(chat_id, client_name, app_name, project_name)
     _remove_object(client, object_name)
 
 
-def list_chats() -> List[Dict[str, Any]]:
+def list_chats(
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     client = get_client()
     _ensure_bucket(client)
-    prefix = f"{_context_prefix()}/chats/"
+    prefix = f"{_context_prefix(client_name, app_name, project_name)}/chats/"
     results: List[Dict[str, Any]] = []
     try:
         objects: Iterable = client.list_objects(MEMORY_BUCKET, prefix=prefix, recursive=True)
@@ -319,10 +371,15 @@ def list_chats() -> List[Dict[str, Any]]:
     return results
 
 
-def load_session(session_id: str) -> Optional[Dict[str, Any]]:
+def load_session(
+    session_id: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     client = get_client()
     _ensure_bucket(client)
-    object_name = _session_object_name(session_id)
+    object_name = _session_object_name(session_id, client_name, app_name, project_name)
     payload = _load_json_object(client, object_name)
     if payload is None:
         return None
@@ -335,11 +392,14 @@ def save_session(
     data: Dict[str, Any],
     metadata: Optional[Dict[str, Any]] = None,
     max_bytes: int = MAX_BYTES_DEFAULT,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     client = get_client()
     _ensure_bucket(client)
 
-    object_name = _session_object_name(session_id)
+    object_name = _session_object_name(session_id, client_name, app_name, project_name)
     existing_payload = _load_json_object(client, object_name) or {}
 
     timestamp = datetime.now(timezone.utc)
@@ -355,9 +415,14 @@ def save_session(
     return _build_session_response(session_id, payload)
 
 
-def delete_session(session_id: str) -> None:
+def delete_session(
+    session_id: str,
+    client_name: Optional[str] = None,
+    app_name: Optional[str] = None,
+    project_name: Optional[str] = None,
+) -> None:
     client = get_client()
     _ensure_bucket(client)
-    object_name = _session_object_name(session_id)
+    object_name = _session_object_name(session_id, client_name, app_name, project_name)
     _remove_object(client, object_name)
 

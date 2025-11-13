@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Optional
+import os
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
@@ -17,13 +18,87 @@ from .schemas import (
 router = APIRouter(prefix="/memory", tags=["Trinity AI Memory"])
 
 
+def _get_project_context(
+    client: Optional[str] = None,
+    app: Optional[str] = None,
+    project: Optional[str] = None,
+) -> Tuple[str, str, str]:
+    """Get client/app/project from parameters, Redis, or database."""
+    import logging
+    logger = logging.getLogger("trinity.ai.memory.router")
+    
+    # First try to load from Redis (this is what main_api.py does)
+    try:
+        from DataStorageRetrieval.arrow_client import load_env_from_redis
+        load_env_from_redis()
+    except Exception as e:
+        logger.debug(f"load_env_from_redis failed: {e}")
+    
+    # Use provided parameters or check environment variables
+    client_name = (client or os.getenv("CLIENT_NAME", "")).strip()
+    app_name = (app or os.getenv("APP_NAME", "")).strip()
+    project_name = (project or os.getenv("PROJECT_NAME", "")).strip()
+    
+    # If all are set, use them
+    if client_name and app_name and project_name:
+        logger.debug(f"Using provided/env vars: client={client_name}, app={app_name}, project={project_name}")
+        return client_name, app_name, project_name
+    
+    # Otherwise, try to fetch from database
+    try:
+        # Import the function from main_api
+        from main_api import _fetch_names_from_db
+        
+        # Fetch from database
+        client_name, app_name, project_name, debug = _fetch_names_from_db(
+            client_name or None,
+            app_name or None,
+            project_name or None
+        )
+        
+        # Update environment variables for future calls
+        if client_name:
+            os.environ["CLIENT_NAME"] = client_name
+        if app_name:
+            os.environ["APP_NAME"] = app_name
+        if project_name:
+            os.environ["PROJECT_NAME"] = project_name
+        
+        logger.info(f"Fetched from DB: client={client_name}, app={app_name}, project={project_name}, source={debug.get('source', 'unknown')}")
+        
+        return client_name or "", app_name or "", project_name or ""
+    except Exception as e:
+        logger.warning(f"Failed to fetch project context from DB: {e}, using defaults")
+        # Fallback to environment or empty strings (which will result in "default" path)
+        return client_name or "", app_name or "", project_name or ""
+
+
 @router.get("/health")
-def health_check() -> dict:
+def health_check(
+    client: Optional[str] = Query(None, description="Client name"),
+    app: Optional[str] = Query(None, description="App name"),
+    project: Optional[str] = Query(None, description="Project name"),
+) -> dict:
     """Check if the memory service is available."""
     try:
         # Try to list chats to verify storage is working
-        storage.list_chats()
-        return {"status": "healthy", "service": "memory"}
+        client_name, app_name, project_name = _get_project_context(client, app, project)
+        storage.list_chats(client_name, app_name, project_name)
+        
+        # Get the actual path being used
+        from .storage import _context_prefix
+        path_prefix = _context_prefix(client_name, app_name, project_name)
+        
+        return {
+            "status": "healthy",
+            "service": "memory",
+            "context": {
+                "client": client_name or "default",
+                "app": app_name or "default",
+                "project": project_name or "default"
+            },
+            "storage_path": path_prefix
+        }
     except Exception as e:
         return {"status": "unhealthy", "service": "memory", "error": str(e)}
 
@@ -55,10 +130,15 @@ def _slice_messages(
 
 
 @router.get("/chats", response_model=ChatListResponse)
-def list_chat_histories() -> ChatListResponse:
+def list_chat_histories(
+    client: Optional[str] = Query(None, description="Client name"),
+    app: Optional[str] = Query(None, description="App name"),
+    project: Optional[str] = Query(None, description="Project name"),
+) -> ChatListResponse:
     """Return summaries of stored chat transcripts."""
     try:
-        records = storage.list_chats()
+        client_name, app_name, project_name = _get_project_context(client, app, project)
+        records = storage.list_chats(client_name, app_name, project_name)
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -87,7 +167,8 @@ def get_chat_history(
 ) -> ChatResponse:
     """Fetch a persisted chat transcript."""
     try:
-        data = storage.load_chat(chat_id)
+        client_name, app_name, project_name = _get_project_context()
+        data = storage.load_chat(chat_id, client_name, app_name, project_name)
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -103,10 +184,14 @@ def upsert_chat_history(
     chat_id: str,
     payload: ChatUpsertRequest,
     response: Response,
+    client: Optional[str] = Query(None, description="Client name"),
+    app: Optional[str] = Query(None, description="App name"),
+    project: Optional[str] = Query(None, description="Project name"),
 ) -> ChatResponse:
     """Create or update a chat transcript."""
+    client_name, app_name, project_name = _get_project_context(client, app, project)
     try:
-        existing = storage.load_chat(chat_id)
+        existing = storage.load_chat(chat_id, client_name, app_name, project_name)
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -117,6 +202,9 @@ def upsert_chat_history(
             metadata=payload.metadata,
             append=payload.append,
             retain_last=payload.retain_last,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
         )
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -133,7 +221,8 @@ def upsert_chat_history(
 def delete_chat_history(chat_id: str) -> None:
     """Remove a stored chat transcript."""
     try:
-        storage.delete_chat(chat_id)
+        client_name, app_name, project_name = _get_project_context()
+        storage.delete_chat(chat_id, client_name, app_name, project_name)
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -142,7 +231,8 @@ def delete_chat_history(chat_id: str) -> None:
 def get_session_context(session_id: str) -> SessionResponse:
     """Retrieve persisted session context."""
     try:
-        record = storage.load_session(session_id)
+        client_name, app_name, project_name = _get_project_context()
+        record = storage.load_session(session_id, client_name, app_name, project_name)
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -160,10 +250,14 @@ def get_session_context(session_id: str) -> SessionResponse:
 def upsert_session_context(session_id: str, payload: SessionPayload) -> SessionResponse:
     """Persist session context payload."""
     try:
+        client_name, app_name, project_name = _get_project_context()
         record = storage.save_session(
             session_id,
             data=payload.data,
             metadata=payload.metadata,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
         )
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -175,7 +269,8 @@ def upsert_session_context(session_id: str, payload: SessionPayload) -> SessionR
 def delete_session_context(session_id: str) -> None:
     """Delete persisted session context."""
     try:
-        storage.delete_session(session_id)
+        client_name, app_name, project_name = _get_project_context()
+        storage.delete_session(session_id, client_name, app_name, project_name)
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 

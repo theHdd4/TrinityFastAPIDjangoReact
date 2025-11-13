@@ -521,14 +521,6 @@ class WorkflowOrchestrator:
                     step_context["previous_result"] = results[dep_key]["result"]
                     logger.info(f"   Dependency: Using result from step {step.depends_on}")
             
-            # Execute agent
-            print(f"\n📍 Executing Step {step.step}/{workflow_plan.total_steps}: {step_agent}")
-            print(f"   Action: {step_action}")
-            if step.prompt:
-                print(f"   Prompt: {step.prompt[:80]}..." if len(step.prompt) > 80 else f"   Prompt: {step.prompt}")
-            else:
-                print(f"   Prompt: (none)")
-            
             result = await self.agent_executor.execute_agent(
                 endpoint=step.endpoint,
                 prompt=step.prompt or "",
@@ -549,16 +541,26 @@ class WorkflowOrchestrator:
                 # Log detailed result info
                 result_data = result.get("result", {})
                 logger.info(f"📊 Step {step.step} result data: {list(result_data.keys()) if isinstance(result_data, dict) else result_data}")
-                
-                print(f"   ✅ Step {step.step} complete")
-                
+
+                user_message = self._extract_user_message(result)
+                if not user_message and step_action == "CARD_CREATION":
+                    card_id = result_data.get("id")
+                    if card_id:
+                        user_message = f"Card '{card_id}' created successfully."
+                if not user_message:
+                    user_message = self._summarize_result(result)
+                if user_message:
+                    user_message = user_message.strip()
+                    if len(user_message) > 300:
+                        user_message = user_message[:297] + "..."
+                    print(f"💡 Step {step.step} ({step_agent}): {user_message}")
+
                 # Log agent execution result for debugging
                 if step_action == "AGENT_EXECUTION":
                     if isinstance(result_data, dict):
                         success = result_data.get("success", False)
                         agent_response = result_data.get("smart_response", result_data.get("message", "No message"))
                         logger.info(f"🔍 Agent execution result - success: {success}, response: {agent_response[:100]}")
-                        print(f"   📊 Agent result: success={success}")
                 
                 # If this is a successful card creation step, trigger frontend refresh
                 if (step_action == "CARD_CREATION" and 
@@ -566,7 +568,6 @@ class WorkflowOrchestrator:
                     card_id = result_data["id"]
                     logger.info(f"🎉 Card created successfully: {card_id}")
                     logger.info(f"🔄 Triggering frontend refresh for card: {card_id}")
-                    print(f"   🎉 Card created: {card_id}")
                     
                     # Add refresh trigger to result
                     result["_trigger_refresh"] = True
@@ -574,7 +575,11 @@ class WorkflowOrchestrator:
             else:
                 errors.append(f"Step {step.step} ({step_agent}) failed: {result.get('error')}")
                 logger.error(f"❌ Step {step.step} failed: {result.get('error')}")
-                print(f"   ❌ Step {step.step} failed: {result.get('error')}")
+                error_message = result.get("error") or self._extract_user_message(result) or "Unknown error"
+                error_message = error_message.strip() if isinstance(error_message, str) else str(error_message)
+                if len(error_message) > 300:
+                    error_message = error_message[:297] + "..."
+                print(f"❌ Step {step.step} ({step_agent}): {error_message}")
                 # Continue or break based on criticality
                 # For now, continue to next step
         
@@ -591,7 +596,9 @@ class WorkflowOrchestrator:
         # Convert results to steps_results format for frontend
         steps_results = []
         for step in sorted_workflow:
-            step_id = f"step_{step.step}_{step.agent}"
+            step_action = getattr(step, 'action', None)
+            step_agent_name = step.agent or step_action or "unknown"
+            step_id = f"step_{step.step}_{step_agent_name}"
             if step_id in results:
                 step_result = results[step_id]
                 steps_results.append({
@@ -676,6 +683,65 @@ class WorkflowOrchestrator:
         else:
             return "Completed"
     
+    def _extract_user_message(self, result: Dict[str, Any]) -> Optional[str]:
+        """Extract user-facing message (smart_response/message) from agent result"""
+        
+        if not isinstance(result, dict):
+            return None
+
+        preferred_keys = ["smart_response", "message", "final_response", "insight", "insights", "summary", "next_steps"]
+
+        def coerce_to_text(value: Any) -> Optional[str]:
+            if isinstance(value, str):
+                text = value.strip()
+                return text or None
+            if isinstance(value, (int, float)):
+                return str(value)
+            if isinstance(value, list):
+                parts = []
+                for item in value:
+                    text = coerce_to_text(item)
+                    if text:
+                        parts.append(text)
+                if parts:
+                    return "\n".join(parts)
+                return None
+            if isinstance(value, dict):
+                return extract_from_dict(value)
+            return None
+
+        def extract_from_dict(data: Dict[str, Any]) -> Optional[str]:
+            for key in preferred_keys:
+                if key in data:
+                    text = coerce_to_text(data[key])
+                    if text:
+                        return text
+            for value in data.values():
+                if isinstance(value, (dict, list)):
+                    text = coerce_to_text(value)
+                    if text:
+                        return text
+            return None
+
+        # First look into nested result payload if present
+        payload = result.get("result")
+        if isinstance(payload, dict):
+            extracted = extract_from_dict(payload)
+            if extracted:
+                return extracted
+
+        # Fall back to top-level keys
+        extracted = extract_from_dict(result)
+        if extracted:
+            return extracted
+
+        # As a last resort, return error message if available
+        error_value = result.get("error") or result.get("detail")
+        if isinstance(error_value, str):
+            return error_value.strip() or None
+
+        return None
+    
     def _build_final_response(
         self,
         workflow_plan: WorkflowPlan,
@@ -686,17 +752,43 @@ class WorkflowOrchestrator:
         """Build user-friendly final response"""
         
         if workflow_completed:
-            response = f"✅ Workflow completed successfully!\n\n"
-            response += f"Executed {steps_completed} steps:\n"
-            
-            for step in sorted(workflow_plan.workflow, key=lambda x: x.step):
-                step_id = f"step_{step.step}_{step.agent}"
-                if step_id in results and results[step_id]["success"]:
-                    response += f"  {step.step}. {step.agent.upper()}: ✓\n"
-            
-            return response
+            header = "✅ Workflow completed successfully!"
         else:
-            return f"⚠️ Workflow partially completed: {steps_completed}/{workflow_plan.total_steps} steps"
+            header = f"⚠️ Workflow partially completed: {steps_completed}/{workflow_plan.total_steps} steps"
+
+        insight_lines: List[str] = []
+
+        for step in sorted(workflow_plan.workflow, key=lambda x: x.step):
+            step_action = getattr(step, "action", "Step")
+            step_agent_name = step.agent or step_action or "unknown"
+            step_label = step_agent_name.replace("_", " ").strip().title()
+            step_id = f"step_{step.step}_{step_agent_name}"
+            if step_id not in results:
+                continue
+
+            step_result = results[step_id]
+            if step_result.get("success"):
+                message = self._extract_user_message(step_result) or self._summarize_result(step_result)
+                if message:
+                    message = message.strip()
+                    if len(message) > 300:
+                        message = message[:297] + "..."
+                    insight_lines.append(f"{step.step}. {step_label}: {message}")
+            else:
+                error_message = step_result.get("error") or self._extract_user_message(step_result)
+                if error_message:
+                    error_message = error_message.strip()
+                    if len(error_message) > 300:
+                        error_message = error_message[:297] + "..."
+                    insight_lines.append(f"{step.step}. {step_label} failed: {error_message}")
+
+        response_parts = [header]
+
+        if insight_lines:
+            response_parts.append("\nKey updates:")
+            response_parts.extend(f"- {line}" for line in insight_lines)
+
+        return "\n".join(response_parts).strip()
 
 # ============================================================================
 # SuperAgent Workflow Analyzer (LLM-based)
