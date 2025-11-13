@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -11,6 +11,7 @@ import StreamWorkflowPreview from './StreamWorkflowPreview';
 import StreamStepMonitor from './StreamStepMonitor';
 import StreamStepApproval from './StreamStepApproval';
 import { autoSaveStepResult } from '../TrinityAI/handlers/utils';
+import { AgentModeProvider, useAgentMode } from './context/AgentModeContext';
 
 const BRAND_GREEN = '#50C878';
 const BRAND_PURPLE = '#7C3AED';
@@ -96,7 +97,7 @@ interface TrinityAIPanelProps {
   onBackgroundStatusChange?: (status: TrinityAIBackgroundStatus) => void;
 }
 
-export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle, onBackgroundStatusChange }) => {
+const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle, onBackgroundStatusChange }) => {
   // Chat management
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -127,9 +128,145 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
   const [originalPrompt, setOriginalPrompt] = useState('');
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [completedStepNumber, setCompletedStepNumber] = useState(0);
+  const [isAutoRunning, setIsAutoRunning] = useState(false);
+  const autoRunRef = useRef(false);
+  const { isAgentMode, setAgentMode } = useAgentMode();
+  const agentModeTrackerRef = useRef<{ workflowSequences: Set<string>; stepMessageIds: Set<string> }>({
+    workflowSequences: new Set<string>(),
+    stepMessageIds: new Set<string>()
+  });
+  const agentModeEnabledRef = useRef(isAgentMode);
   
   // Laboratory store
   const { setCards, updateCard } = useLaboratoryStore();
+
+  const startAutoRun = useCallback(() => {
+    if (!autoRunRef.current) {
+      autoRunRef.current = true;
+      setIsAutoRunning(true);
+    }
+  }, []);
+
+  const stopAutoRun = useCallback(() => {
+    if (autoRunRef.current || isAutoRunning) {
+      autoRunRef.current = false;
+      setIsAutoRunning(false);
+    }
+  }, [isAutoRunning]);
+
+  const queueAutoApprove = useCallback((stepNumber: number, sequenceId?: string) => {
+    if (!autoRunRef.current) {
+      return;
+    }
+
+    console.log('⏩ Auto-run queue triggered for step', stepNumber, 'sequence', sequenceId);
+
+    window.setTimeout(() => {
+      const socket = wsRef.current;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        try {
+          socket.send(JSON.stringify({
+            type: 'approve_step',
+            step_number: stepNumber
+          }));
+
+          const autoApproveMsg: Message = {
+            id: `auto-approve-${stepNumber}-${Date.now()}`,
+            content: `⏩ Auto-approved step ${stepNumber}. Continuing workflow...`,
+            sender: 'ai',
+            timestamp: new Date()
+          };
+
+          setMessages(prev => [...prev, autoApproveMsg]);
+          setIsLoading(true);
+        } catch (err) {
+          console.error('❌ Failed to auto-approve step:', err);
+          stopAutoRun();
+        }
+      } else {
+        console.warn('⚠️ Auto-run active but WebSocket not ready. Stopping auto-run.');
+        stopAutoRun();
+      }
+    }, 200);
+  }, [setMessages, stopAutoRun]);
+
+  useEffect(() => {
+    agentModeEnabledRef.current = isAgentMode;
+    if (isAgentMode) {
+      autoRunRef.current = true;
+    } else {
+      agentModeTrackerRef.current.workflowSequences.clear();
+      agentModeTrackerRef.current.stepMessageIds.clear();
+      stopAutoRun();
+    }
+  }, [isAgentMode]);
+
+  useEffect(() => {
+    if (!isAgentMode) {
+      return;
+    }
+
+    const connection = wsConnection;
+    if (!connection || connection.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const tracker = agentModeTrackerRef.current;
+
+    const pendingPreviews = messages.filter((msg) => {
+      if (msg.type !== 'workflow_preview') {
+        return false;
+      }
+      const sequenceKey = msg.data?.sequence_id ?? msg.id;
+      return !tracker.workflowSequences.has(sequenceKey);
+    });
+
+    if (pendingPreviews.length > 0) {
+      pendingPreviews.forEach((msg) => {
+        const sequenceId = msg.data?.sequence_id ?? msg.id;
+        tracker.workflowSequences.add(sequenceId);
+        if (!autoRunRef.current) {
+          autoRunRef.current = true;
+        }
+        if (!isAutoRunning) {
+          setIsAutoRunning(true);
+        }
+        setIsLoading(true);
+        connection.send(
+          JSON.stringify({
+            type: 'approve_plan'
+          })
+        );
+      });
+    }
+
+    const pendingSteps = messages.filter(
+      (msg) =>
+        msg.type === 'step_approval' &&
+        !tracker.stepMessageIds.has(msg.id) &&
+        typeof msg.data?.stepNumber === 'number'
+    );
+
+    pendingSteps.forEach((msg) => {
+      tracker.stepMessageIds.add(msg.id);
+      if (!autoRunRef.current) {
+        autoRunRef.current = true;
+      }
+      if (!isAutoRunning) {
+        setIsAutoRunning(true);
+      }
+      if (connection.readyState === WebSocket.OPEN) {
+        setIsLoading(true);
+        connection.send(
+          JSON.stringify({
+            type: 'approve_step',
+            step_number: msg.data?.stepNumber
+          })
+        );
+      }
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+    });
+  }, [isAgentMode, isAutoRunning, messages, wsConnection]);
   
   // Create new chat
   const createNewChat = () => {
@@ -668,6 +805,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
             console.log('📋 Plan generated:', data.plan);
             
             setIsLoading(false);
+            stopAutoRun();
             
             // Add workflow preview as a message bubble
             const workflowPreviewMsg: Message = {
@@ -921,6 +1059,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
             console.log('✅ Step completed:', data.step, 'for sequence:', data.sequence_id);
             
             // Find and update the correct workflow message by sequence_id
+            let hasNextStep = false;
             setMessages(prev => {
               const updated = prev.map(msg => 
                 msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id
@@ -938,20 +1077,21 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                   : msg
               );
               
-              // Check if we need step approval for THIS workflow (by sequence_id)
               const workflowMsg = updated.find(m => 
                 m.type === 'workflow_monitor' && m.data?.sequence_id === data.sequence_id
               );
               
               if (workflowMsg && data.step < workflowMsg.data.steps.length) {
-                console.log(`⏸️ Adding step approval for step ${data.step} (sequence: ${data.sequence_id})`);
-                
-                // Set completed step number for handlers
+                hasNextStep = true;
                 setCompletedStepNumber(data.step);
                 
+                if (autoRunRef.current) {
+                  console.log('⏩ Auto-run detected completed step', data.step, '- scheduling approval');
+                  return updated;
+                }
+                
+                console.log(`⏸️ Adding step approval for step ${data.step} (sequence: ${data.sequence_id})`);
                 const stepInfo = workflowMsg.data.steps.find((s: any) => s.step_number === data.step);
-
-                // Add step approval message after workflow monitor
                 const approvalMsg: Message = {
                   id: `step-approval-${data.sequence_id}-${data.step}-${Date.now()}`,
                   content: '',
@@ -966,7 +1106,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                     filesUsed: stepInfo?.files_used || [],
                     inputs: stepInfo?.inputs || [],
                     outputAlias: stepInfo?.output_alias || '',
-                    sequence_id: data.sequence_id  // Store sequence ID for routing
+                    sequence_id: data.sequence_id
                   }
                 };
                 return [...updated, approvalMsg];
@@ -974,18 +1114,42 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
               
               return updated;
             });
-            setIsLoading(false);
+
+            if (autoRunRef.current && hasNextStep) {
+              queueAutoApprove(data.step, data.sequence_id);
+            } else if (autoRunRef.current && !hasNextStep) {
+              setIsLoading(false);
+            } else {
+              setIsLoading(false);
+            }
             break;
             
           case 'workflow_completed':
             updateProgress('\n\n🎉 Workflow complete!');
             setIsLoading(false);
+            stopAutoRun();
+            if (agentModeEnabledRef.current) {
+              autoRunRef.current = true;
+            }
             ws.close();
+            break;
+
+          case 'workflow_rejected':
+            stopAutoRun();
+            setIsLoading(false);
+            updateProgress(`\n\n❌ Workflow stopped: ${data?.message || 'Rejected by backend'}`);
+            if (agentModeEnabledRef.current) {
+              autoRunRef.current = true;
+            }
             break;
             
           case 'error':
             updateProgress(`\n\n❌ Error: ${data.error}`);
             setIsLoading(false);
+            stopAutoRun();
+            if (agentModeEnabledRef.current) {
+              autoRunRef.current = true;
+            }
             ws.close();
             break;
         }
@@ -995,10 +1159,12 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
         console.error('❌ WebSocket error:', error);
         updateProgress('\n\n❌ Connection error');
         setIsLoading(false);
+        stopAutoRun();
       };
       
       ws.onclose = () => {
         console.log('🔌 WebSocket closed');
+        stopAutoRun();
         setWsConnection(null);
       };
       
@@ -1253,64 +1419,111 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
             </div>
           </div>
         </div>
-        <div className="flex items-center space-x-1 relative z-10">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 w-9 p-0 transition-all duration-200 rounded-xl"
-            style={{ color: showChatHistory ? BRAND_GREEN : undefined }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
-            onClick={() => setShowChatHistory(!showChatHistory)}
-            title="Chat History"
-          >
-            <Clock className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 w-9 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl"
-            onClick={deleteCurrentChat}
-            title="Delete Current Chat"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 w-9 p-0 transition-all duration-200 rounded-xl"
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
-            onClick={createNewChat}
-            title="New Chat"
-          >
-            <Plus className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 w-9 p-0 hover:bg-blue-100 hover:text-blue-500 transition-all duration-200 rounded-xl"
-            onClick={onToggle}
-            title="Minimize Panel"
-          >
-            <Minus className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 w-9 p-0 hover:bg-red-100 hover:text-red-500 transition-all duration-200 rounded-xl"
-            onClick={() => {
-              // Cancel any ongoing requests
-              if (wsConnection) {
-                wsConnection.close();
-              }
-              setIsLoading(false);
-              onToggle();
-            }}
-            title="Close Panel (Cancel Requests)"
-          >
-            <X className="w-4 h-4" />
-          </Button>
+        <div className="flex items-center gap-4 relative z-10">
+          <div className="flex items-center gap-3">
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-2">
+                <div
+                  className={`relative flex h-2.5 w-2.5 items-center justify-center transition-opacity duration-300 ${
+                    isAgentMode ? 'opacity-100' : 'opacity-0'
+                  }`}
+                >
+                  <span className="absolute inline-flex h-full w-full rounded-full bg-[#41C185]/50 animate-ping" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#41C185]" />
+                </div>
+                <span className="text-xs font-semibold text-gray-600 font-inter tracking-wide uppercase">
+                  Agent Mode
+                </span>
+              </div>
+              <span
+                className={`text-xs font-medium font-inter transition-colors duration-300 ${
+                  isAgentMode ? 'text-[#1f6b4a]' : 'text-gray-500'
+                }`}
+              >
+                {isAgentMode ? 'Auto-run enabled' : 'Manual approval'}
+              </span>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isAgentMode}
+              aria-label="Toggle Agent Mode"
+              onClick={() => setAgentMode(!isAgentMode)}
+              className={`relative inline-flex h-8 w-14 items-center rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                isAgentMode ? 'bg-[#41C185] focus:ring-[#41C185]/40' : 'bg-gray-300 focus:ring-gray-400/40'
+              }`}
+            >
+              <span
+                className={`absolute inset-0 rounded-full transition-opacity duration-300 ${
+                  isAgentMode ? 'bg-[#41C185]/30' : 'bg-transparent'
+                }`}
+              />
+              <span
+                className={`relative inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition-transform duration-300 ${
+                  isAgentMode ? 'translate-x-7' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+          <div className="flex items-center space-x-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 p-0 transition-all duration-200 rounded-xl"
+              style={{ color: showChatHistory ? BRAND_GREEN : undefined }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
+              onClick={() => setShowChatHistory(!showChatHistory)}
+              title="Chat History"
+            >
+              <Clock className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl"
+              onClick={deleteCurrentChat}
+              title="Delete Current Chat"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 p-0 transition-all duration-200 rounded-xl"
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
+              onClick={createNewChat}
+              title="New Chat"
+            >
+              <Plus className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 p-0 hover:bg-blue-100 hover:text-blue-500 transition-all duration-200 rounded-xl"
+              onClick={onToggle}
+              title="Minimize Panel"
+            >
+              <Minus className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 w-9 p-0 hover:bg-red-100 hover:text-red-500 transition-all duration-200 rounded-xl"
+              onClick={() => {
+                // Cancel any ongoing requests
+                if (wsConnection) {
+                  wsConnection.close();
+                }
+                setIsLoading(false);
+                onToggle();
+              }}
+              title="Close Panel (Cancel Requests)"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
       </div>
       
@@ -1395,12 +1608,14 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                     <StreamWorkflowPreview
                       workflow={msg.data.plan}
                       onAccept={() => {
+                        stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
                           setIsLoading(true);
                         }
                       }}
                       onReject={() => {
+                        stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           wsConnection.send(JSON.stringify({ type: 'reject_plan' }));
                           wsConnection.close();
@@ -1409,6 +1624,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                         setIsLoading(false);
                       }}
                       onAdd={(info) => {
+                        stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           wsConnection.send(JSON.stringify({
                             type: 'add_info',
@@ -1419,6 +1635,21 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                           setIsLoading(true);
                         }
                       }}
+                      onRunAll={() => {
+                        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+                          startAutoRun();
+                          wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+                          setIsLoading(true);
+                          const autoRunMsg: Message = {
+                            id: `auto-run-${Date.now()}`,
+                            content: '⏩ Accepting workflow and auto-running all steps...',
+                            sender: 'ai',
+                            timestamp: new Date()
+                          };
+                          setMessages(prev => [...prev, autoRunMsg]);
+                        }
+                      }}
+                      isAutoRunning={isAutoRunning}
                     />
                   </div>
                 )}
@@ -1446,6 +1677,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                       inputs={msg.data.inputs}
                       outputAlias={msg.data.outputAlias}
                       onAccept={() => {
+                        stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           wsConnection.send(JSON.stringify({
                             type: 'approve_step',
@@ -1457,6 +1689,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                         }
                       }}
                       onReject={() => {
+                        stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           wsConnection.send(JSON.stringify({
                             type: 'reject_workflow',
@@ -1470,6 +1703,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                         setIsLoading(false);
                       }}
                       onAdd={(info) => {
+                        stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           wsConnection.send(JSON.stringify({
                             type: 'add_info',
@@ -1482,6 +1716,22 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                           setIsLoading(true);
                         }
                       }}
+                      onRunAll={() => {
+                        if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+                          startAutoRun();
+                          setMessages(prev => prev.filter(m => m.id !== msg.id));
+                          queueAutoApprove(msg.data.stepNumber, msg.data.sequence_id);
+                          const autoRunMsg: Message = {
+                            id: `auto-run-${Date.now()}`,
+                            content: `⏩ Auto-running remaining steps from step ${msg.data.stepNumber + 1}...`,
+                            sender: 'ai',
+                            timestamp: new Date()
+                          };
+                          setMessages(prev => [...prev, autoRunMsg]);
+                          setIsLoading(true);
+                        }
+                      }}
+                      isAutoRunning={isAutoRunning}
                     />
                   </div>
                 )}
@@ -1688,6 +1938,12 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
     </div>
   );
 };
+
+export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = (props) => (
+  <AgentModeProvider>
+    <TrinityAIPanelInner {...props} />
+  </AgentModeProvider>
+);
 
 export default TrinityAIPanel;
 
