@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { AUTO_REGRESSIVE_API, calculateFiscalGrowth, calculateHalfYearlyGrowth, calculateQuarterlyGrowth } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import './AutoRegressiveModelsCanvas.css';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart, ReferenceLine, ReferenceArea, LabelList } from 'recharts';
 import { AutoRegressiveModelsData } from '../AutoRegressiveModelsAtom';
@@ -1253,7 +1254,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
           
           
           if (response.ok) {
-            const data = await response.json();
+            const raw = await response.json();
+            const data = await resolveTaskResponse(raw);
             
             
             // Use the numerical_columns directly from the backend response
@@ -1294,32 +1296,25 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
           // Use the first selected combination for frequency detection
           const firstCombination = finalData.selectedCombinations[0];
           
-          // Create URLSearchParams for form data
-          const formData = new URLSearchParams();
-          formData.append('scope', finalData.selectedScope);
-          formData.append('combination', firstCombination);
-          
           // Try to detect frequency with common date column names
           const commonDateColumns = ['PrepDate', 'Date', 'date', 'prep_date', 'timestamp', 'time'];
           let frequencyDetected = false;
           
           for (const dateCol of commonDateColumns) {
             try {
-              const testFormData = new URLSearchParams();
-              testFormData.append('scope', finalData.selectedScope);
-              testFormData.append('combination', firstCombination);
-              testFormData.append('date_column', dateCol);
-              
-              
-              
               const response = await fetch(`${AUTO_REGRESSIVE_API}/detect_frequency`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: testFormData
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  scope: finalData.selectedScope,
+                  combination: firstCombination,
+                  date_column: dateCol
+                })
               });
-              
+
               if (response.ok) {
-                const data = await response.json();
+                const raw = await response.json();
+                const data = await resolveTaskResponse(raw);
                 
                 
                 if (data.frequency && data.frequency !== "Unknown") {
@@ -1570,7 +1565,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
         });
         
         if (validationResponse.ok) {
-          const validationResult = await validationResponse.json();
+          const rawValidation = await validationResponse.json();
+          const validationResult = await resolveTaskResponse(rawValidation);
             console.log(`🔧 Validation result for combination ${i + 1}:`, validationResult);
         }
       } catch (validationError) {
@@ -1616,7 +1612,8 @@ const AutoRegressiveModelsCanvas: React.FC<AutoRegressiveModelsCanvasProps> = ({
           throw new Error(errorMessage);
         }
 
-            const result = await response.json();
+            const raw = await response.json();
+            const result = await resolveTaskResponse(raw);
             console.log(`🔧 AutoRegressiveModelsCanvas: Combination ${i + 1} completed:`, result);
             
             if (result.results) {
