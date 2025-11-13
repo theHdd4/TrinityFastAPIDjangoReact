@@ -11,6 +11,7 @@ import { Plus, Play, X, Target, Zap, ChevronDown, ChevronRight, BarChart3, Trend
 import { BuildModelFeatureBasedData, VariableTransformation, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { BUILD_MODEL_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { MultiSelectDropdown } from '@/templates/dropdown/multiselect';
 import { SingleSelectDropdown } from '@/templates/dropdown/single-select';
 import ROIConfiguration, { ROIConfig } from './ROIConfiguration';
@@ -463,7 +464,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       });
 
       if (response.ok) {
-        const result = await response.json();
+        const payload = await response.json();
+        const result = await resolveTaskResponse(payload);
         
         // Extract run_id from response if available and update if different
         const responseRunId = result.summary?.run_id;
@@ -555,7 +557,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
       });
       
       if (response.ok) {
-        const data = await response.json();
+        const payload = await response.json();
+        const data = await resolveTaskResponse(payload);
         // Use the actual file path returned by the backend
         window.open(`/dataframe?name=${encodeURIComponent(data.file_path)}`, '_blank');
       } else {
@@ -656,7 +659,8 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
           });
           
           if (response.ok) {
-            const data = await response.json();
+            const payload = await response.json();
+            const data = await resolveTaskResponse(payload);
             
             // Use the numerical_columns directly from the backend response
             const numericalCols = data.numerical_columns || [];

@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Database } from 'lucide-react';
 import { BUILD_MODEL_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { BuildModelFeatureBasedData } from '../BuildModelFeatureBasedAtom';
 
 interface BuildModelFeatureBasedInputProps {
@@ -56,8 +57,9 @@ const BuildModelFeatureBasedInput: React.FC<BuildModelFeatureBasedInputProps> = 
           throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
         }
         
-        const result = await response.json();
-        
+        const payload = await response.json();
+        const result = await resolveTaskResponse(payload);
+
         if (result.success) {
           setScopes(result.scopes);
         } else {
