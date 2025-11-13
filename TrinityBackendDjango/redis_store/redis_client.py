@@ -14,13 +14,19 @@ from redis.connection import BlockingConnectionPool, ConnectionPool
 
 
 logger = logging.getLogger("redis.activity")
+logger.setLevel(logging.INFO)
+logger.propagate = False
+
+_activity_formatter = logging.Formatter("%(message)s")
+
 if not logger.handlers:
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
-    handler.setFormatter(logging.Formatter("%(message)s"))
+    handler.setFormatter(_activity_formatter)
     logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-logger.propagate = False
+else:
+    for handler in logger.handlers:
+        handler.setFormatter(_activity_formatter)
 
 
 def _service_name() -> str:
