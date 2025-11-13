@@ -107,10 +107,66 @@ interface ChartData {
   metadata: any;
 }
 
+const normaliseChartTaskResult = (payload: any): { rows: any[]; full: ChartData | null } => {
+  if (!payload) {
+    return { rows: [], full: null };
+  }
+
+  let current = payload;
+  const seen = new Set<object>();
+  while (current && typeof current === 'object' && 'result' in current && typeof current.result === 'object') {
+    const next = (current as { result: any }).result;
+    if (!next || typeof next !== 'object' || seen.has(next)) {
+      break;
+    }
+    seen.add(next);
+    current = next;
+  }
+
+  const candidateData = [
+    current?.data,
+    current?.chart_data,
+    current?.result?.data,
+    current?.result?.chart_data,
+    Array.isArray(current) ? current : undefined,
+  ];
+
+  const resolvedRows = candidateData.find((entry) => Array.isArray(entry)) ?? [];
+
+  const metadata =
+    current?.chart_metadata ||
+    current?.metadata ||
+    current?.result?.chart_metadata ||
+    current?.result?.metadata ||
+    null;
+
+  const fullResult: ChartData = {
+    status: current?.status || payload?.status || 'success',
+    chart_type: current?.chart_type || payload?.chart_type || 'bar_chart',
+    data: resolvedRows,
+    metadata,
+  };
+
+  return { rows: resolvedRows, full: fullResult };
+};
+
 const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataChange, onChartDataChange }) => {
   const [chartDataSets, setChartDataSets] = useState<{ [idx: number]: any }>(data.chartDataSets || {});
   const svgRef = useRef<SVGSVGElement>(null);
   const [chartData, setChartData] = useState<ChartData | null>(null);
+  const [chartResultsByIndex, setChartResultsByIndex] = useState<Record<number, ChartData>>({});
+
+  const resolveChartRows = (chartIndex: number): any[] => {
+    const direct = chartDataSets[chartIndex];
+    if (Array.isArray(direct)) {
+      return direct;
+    }
+    const fallback = chartResultsByIndex[chartIndex]?.data;
+    if (Array.isArray(fallback)) {
+      return fallback;
+    }
+    return Array.isArray(direct) ? direct : [];
+  };
   const [isLoading, setIsLoading] = useState<{ [chartIndex: number]: boolean }>({});
   const [error, setError] = useState<string | null>(null);
   
@@ -727,7 +783,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   // Auto-generate charts on mount if data and configs exist
   useEffect(() => {
     chartConfigs.forEach((cfg, index) => {
-      if (!chartDataSets[index] && cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
+      if (resolveChartRows(index).length === 0 && cfg.xAxis && hasValidYAxes(cfg.yAxes)) {
         safeTriggerChartGeneration(index, cfg, 0);
       }
     });
@@ -953,6 +1009,17 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       
       // Clean up chart data for removed charts
       setChartDataSets(prev => {
+        const newState = { ...prev };
+        Object.keys(newState).forEach(key => {
+          const keyNum = parseInt(key);
+          if (keyNum > 0) {
+            delete newState[keyNum];
+          }
+        });
+        return newState;
+      });
+
+      setChartResultsByIndex(prev => {
         const newState = { ...prev };
         Object.keys(newState).forEach(key => {
           const keyNum = parseInt(key);
@@ -1282,6 +1349,19 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       const newState = { ...prev };
       delete newState[index];
       // Shift down the indices for charts after the deleted one
+      Object.keys(newState).forEach(key => {
+        const keyNum = parseInt(key);
+        if (keyNum > index) {
+          newState[keyNum - 1] = newState[keyNum];
+          delete newState[keyNum];
+        }
+      });
+      return newState;
+    });
+
+    setChartResultsByIndex((prev) => {
+      const newState = { ...prev };
+      delete newState[index];
       Object.keys(newState).forEach(key => {
         const keyNum = parseInt(key);
         if (keyNum > index) {
@@ -1862,36 +1942,44 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
       }
 
       const rawResult = await chartResponse.json();
-      const result = await resolveTaskResponse<Record<string, any>>(rawResult);
-      
-      const chartData = result.data || [];
-
+      const resolved = await resolveTaskResponse<Record<string, any>>(rawResult);
+      const { rows: chartRows, full: normalisedResult } = normaliseChartTaskResult(resolved);
 
       setChartDataSets(prev => {
         const newData = {
           ...prev,
-          [index]: chartData
+          [index]: chartRows,
         };
-        // Store original data if no filters are applied
+
         const hasFilters = chartFilters[index] && Object.keys(chartFilters[index]).some(key =>
           Array.isArray(chartFilters[index][key]) && chartFilters[index][key].length > 0
         );
 
         if (!hasFilters) {
-          setOriginalChartData(prev => ({
-            ...prev,
-            [index]: chartData
+          setOriginalChartData(prevOriginal => ({
+            ...prevOriginal,
+            [index]: chartRows,
           }));
         }
 
-        // Force a re-render by updating the chart data state as well
-        setChartData(result);
-
         return newData;
       });
-      
-      setChartData(result);
-      
+
+      if (normalisedResult) {
+        setChartData(normalisedResult);
+        setChartResultsByIndex(prev => ({
+          ...prev,
+          [index]: normalisedResult,
+        }));
+      } else {
+        setChartData(null);
+        setChartResultsByIndex(prev => {
+          const next = { ...prev };
+          delete next[index];
+          return next;
+        });
+      }
+
       // Mark chart as generated
       setChartGenerated(prev => ({ ...prev, [index]: true }));
       
@@ -2096,10 +2184,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
   const renderChartComponent = (index: number) => {
     const config = chartConfigs[index] || chartConfigs[0];
     const isSettingsVisible = chartSettingsVisible[index] || false;
+    const chartRows = resolveChartRows(index);
+
     const rendererProps = {
-      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartDataSets[index]?.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-yaxes-${(config.yAxes || []).join('-')}-sortcol-${config.sortColumn || 'none'}-sortorder-${config.sortOrder || 'none'}`,
+      key: `chart-${index}-${config.chartType}-${chartThemes[index] || 'default'}-${chartRows.length || 0}-${Object.keys(chartFilters[index] || {}).length}-${appliedFilters[index] ? 'filtered' : 'unfiltered'}-theme-${chartThemes[index] || 'default'}-yaxes-${(config.yAxes || []).join('-')}-sortcol-${config.sortColumn || 'none'}-sortorder-${config.sortOrder || 'none'}`,
       type: config.chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
-      data: chartDataSets[index] || [],
+      data: chartRows,
       xField: config.xAxis || undefined,
       yField: (config.yAxes && config.yAxes[0]) || undefined,
       title: config.title,
@@ -2660,7 +2750,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
             )}
 
             {/* Chart Status Indicator */}
-                            {config.xAxis && hasValidYAxes(config.yAxes) && !isChartLoading(index) && !chartDataSets[index] && !error && (
+                {config.xAxis && hasValidYAxes(config.yAxes) && !isChartLoading(index) && chartRows.length === 0 && !error && (
               <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded-lg min-w-0">
                 <div className="flex items-center space-x-2 text-xs text-blue-700 min-w-0">
                   <div className="w-3 h-3 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></div>
@@ -2674,7 +2764,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
               className="bg-white border border-gray-200 rounded-lg p-6 cursor-pointer hover:border-pink-300 transition-colors relative flex-1 overflow-y-auto flex-shrink-0 flex items-start justify-center"
               style={{
                 minHeight: '300px',
-                height: chartDataSets[index] ? 'auto' : '300px',
+                height: chartRows.length > 0 ? 'auto' : '300px',
                 maxHeight: '500px'
               }}
             >
@@ -2697,11 +2787,11 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                   <>
                   <div className="w-full h-full min-w-0 flex-shrink-0" style={{ height: 'calc(100% - 60px)' }}>
                     {/* Check if chart data exists and has valid structure */}
-                    {(!chartDataSets[index] || (Array.isArray(chartDataSets[index]) && chartDataSets[index].length === 0)) ? (
+                    {(chartRows.length === 0) ? (
                       <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
                         <div className="text-gray-500 text-sm">
                           {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ?
-                            (chartDataSets[index] && chartDataSets[index].length === 0 ?
+                            (chartRows.length === 0 ?
                               'No data available for the selected filters. Try adjusting your filter criteria.' :
                               `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
                             ) :
@@ -2734,7 +2824,7 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                               <div className="text-center p-4 border-2 border-dashed border-gray-300 rounded-lg h-full flex items-center justify-center">
                                 <div className="text-gray-500 text-sm">
                                   {config.xAxis && config.yAxes && config.yAxes.length > 0 && config.yAxes.every(y => y) ? (
-                                    chartDataSets[index] && chartDataSets[index].length === 0 ? (
+                                    chartRows.length === 0 ? (
                                       'No data available for the selected filters. Try adjusting your filter criteria.'
                                     ) : (
                                       `Chart ready: ${config.xAxis} vs ${config.yAxes.filter(y => y).join(', ')}`
