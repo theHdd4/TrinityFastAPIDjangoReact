@@ -149,7 +149,8 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                     `${SCOPE_SELECTOR_API}/unique_values?object_name=${encodeURIComponent(val)}&column_name=${encodeURIComponent(identifier)}`
                   );
                   if (res.ok) {
-                    const json = await res.json();
+                    const raw = await res.json();
+                    const json = await resolveTaskResponse<{ unique_values?: string[] }>(raw);
                     if (Array.isArray(json.unique_values) && json.unique_values.length > 1) {
                       filteredIdentifiers.push(identifier);
                     }
@@ -313,9 +314,10 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                 data.dataSource || ''
               )}&column_name=${encodeURIComponent(identifier)}`
             )
-              .then(response => {
+              .then(async response => {
                 if (response.ok) {
-                  return response.json();
+                  const raw = await response.json();
+                  return resolveTaskResponse<{ unique_values?: string[] }>(raw);
                 }
                 throw new Error('Failed to fetch unique values');
               })
@@ -460,7 +462,9 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                     end_date: scope.timeframe.to || null
                   })
                 });
-                const rowJson = rowRes.ok ? await rowRes.json() : { record_count: 0 };
+                const rowJson = rowRes.ok
+                  ? await resolveTaskResponse<{ record_count?: number }>(await rowRes.json())
+                  : { record_count: 0 };
 
                 let pctPass: boolean | undefined = undefined;
                 if (data.criteria?.pct90Enabled) {
@@ -481,7 +485,9 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
                       end_date: scope.timeframe.to || null
                     })
                   });
-                  const pctJson = pctRes.ok ? await pctRes.json() : { pass: false };
+                  const pctJson = pctRes.ok
+                    ? await resolveTaskResponse<{ pass?: boolean }>(await pctRes.json())
+                    : { pass: false };
                   pctPass = pctJson.pass;
                 }
 
@@ -550,8 +556,8 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
         if (!res.ok) {
           throw new Error(`Status ${res.status}`);
         }
-        const json = await res.json();
-        const fetchedRange = { min: json.min_date, max: json.max_date, available: true };
+        const json = await resolveTaskResponse<{ min_date?: string | null; max_date?: string | null }>(await res.json());
+        const fetchedRange = { min: json.min_date ?? null, max: json.max_date ?? null, available: true };
         setDateRange(fetchedRange);
         if (data.scopes?.length) {
           const updatedScopes = data.scopes.map(scope => ({
@@ -644,12 +650,13 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
             // Response status received
             
             if (response.ok) {
-              const result = await response.json();
+              const raw = await response.json();
+              const result = await resolveTaskResponse<{ unique_values?: string[] }>(raw);
               // API Response received
-              
+
               if (result.unique_values && isMounted) {
                 // Successfully received unique values
-                
+
                 // Update the unique values in state
                 setUniqueValues(prev => ({
                   ...prev,
@@ -787,7 +794,8 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
             );
             
             if (response.ok) {
-              const result = await response.json();
+              const raw = await response.json();
+              const result = await resolveTaskResponse<{ unique_values?: string[] }>(raw);
               if (result.unique_values) {
                 setUniqueValues(prev => ({
                   ...prev,
