@@ -13,7 +13,7 @@ import pyarrow.ipc as ipc
 import polars as pl
 from datetime import date, datetime
 from time import perf_counter
-from typing import Any, List
+from typing import Any, Dict, List
 from fastapi import Depends
 from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorCollection
@@ -25,11 +25,7 @@ from .deps import (
     redis_client,
 )
 
-from .mongodb_saver import (
-    save_feature_overview_results,
-    save_feature_overview_unique_results,
-    fetch_dimensions_dict,
-)
+from .mongodb_saver import fetch_dimensions_dict
 from app.features.data_upload_validate.app.routes import get_object_prefix
 from app.core.binary_cache import binary_cache
 
@@ -51,6 +47,14 @@ def _parse_numeric_id(value: str | int | None) -> int:
         return 0
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 from app.DataStorageRetrieval.arrow_client import (
     download_dataframe,
     download_table_bytes,
@@ -66,6 +70,8 @@ from app.features.column_classifier.database import (
     get_classifier_config_from_mongo,
 )
 import asyncio
+
+from app.core.task_queue import celery_task_client, format_task_response
 
 
 # MinIO client initialization
@@ -718,49 +724,36 @@ async def feature_overview_uniquecountendpoint(
         get_validator_atoms_collection
     ),
 ):
-    try:
-        dimensions = await fetch_dimensions_dict(
-            validator_atom_id, file_key, validator_collection
-        )
+    dimensions = await fetch_dimensions_dict(
+        validator_atom_id, file_key, validator_collection
+    )
 
-        dataframes = []
-        for object_name in object_names:
-            response = minio_client.get_object(bucket_name, object_name)
-            content = response.read()
-            if object_name.endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
-            elif object_name.endswith((".xls", ".xlsx")):
-                df = pd.read_excel(io.BytesIO(content))
-            elif object_name.endswith(".arrow"):
-                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-                df = reader.read_all().to_pandas()
-            else:
-                raise ValueError(f"Unsupported file format: {object_name}")
-            df.columns = df.columns.str.lower()
-            dataframes.append(df)
+    collection_name = results_collection.name
+    database_name = results_collection.database.name
 
-        if not dataframes:
-            raise ValueError("No valid files fetched from MinIO")
+    submission = celery_task_client.submit_callable(
+        name="feature_overview.uniquecount",
+        dotted_path="app.features.feature_overview.service.run_unique_count_task",
+        kwargs={
+            "bucket_name": bucket_name,
+            "object_names": object_names,
+            "dimensions": dimensions,
+            "validator_atom_id": validator_atom_id,
+            "file_key": file_key,
+            "mongo_db": database_name,
+            "collection_name": collection_name,
+        },
+        metadata={
+            "atom": "feature_overview",
+            "operation": "unique_count",
+            "bucket_name": bucket_name,
+            "object_names": list(object_names),
+            "validator_atom_id": validator_atom_id,
+            "file_key": file_key,
+        },
+    )
 
-        combined_df = pd.concat(dataframes, ignore_index=True)
-        result = run_unique_count(combined_df, dimensions)
-
-        # Save the results
-        await save_feature_overview_unique_results(
-            unique_count, results_collection, validator_atom_id, file_key
-        )
-
-        return JSONResponse(content={"status": result, "dimensions": dimensions})
-
-    except S3Error as e:
-        return JSONResponse(
-            status_code=500, content={"status": "FAILURE", "error": str(e)}
-        )
-
-    except Exception as e:
-        return JSONResponse(
-            status_code=400, content={"status": "FAILURE", "error": str(e)}
-        )
+    return format_task_response(submission)
 
 
 @router.post("/summary")
@@ -779,64 +772,53 @@ async def feature_overview_summaryendpoint(
         get_validator_atoms_collection
     ),
 ):
-    try:
-        dimensions = await fetch_dimensions_dict(
-            validator_atom_id, file_key, validator_collection
-        )
+    dimensions = await fetch_dimensions_dict(
+        validator_atom_id, file_key, validator_collection
+    )
 
-        combination_dict = None
-        if combination:
-            try:
-                combination_dict = json.loads(combination)
-                if not isinstance(combination_dict, dict):
-                    raise ValueError("Combination must be a dictionary")
-            except Exception as e:
-                raise ValueError(f"Invalid combination format: {str(e)}")
+    combination_dict: Dict[str, Any] | None = None
+    if combination:
+        try:
+            parsed = json.loads(combination)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid combination: {exc}")
+        if not isinstance(parsed, dict):
+            raise HTTPException(
+                status_code=400, detail="Combination must be a dictionary"
+            )
+        combination_dict = parsed
 
-        dataframes = []
-        for object_name in object_names:
-            response = minio_client.get_object(bucket_name, object_name)
-            content = response.read()
-            if object_name.endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(content))
-            elif object_name.endswith((".xls", ".xlsx")):
-                df = pd.read_excel(io.BytesIO(content))
-            elif object_name.endswith(".arrow"):
-                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-                df = reader.read_all().to_pandas()
-            else:
-                raise ValueError(f"Unsupported file format: {object_name}")
-            df.columns = df.columns.str.lower()
-            dataframes.append(df)
+    collection_name = results_collection.name
+    database_name = results_collection.database.name
 
-        if not dataframes:
-            raise ValueError("No valid files fetched from MinIO")
+    submission = celery_task_client.submit_callable(
+        name="feature_overview.summary",
+        dotted_path="app.features.feature_overview.service.run_feature_overview_summary_task",
+        kwargs={
+            "bucket_name": bucket_name,
+            "object_names": object_names,
+            "dimensions": dimensions,
+            "validator_atom_id": validator_atom_id,
+            "file_key": file_key,
+            "create_hierarchy": _as_bool(create_hierarchy),
+            "create_summary": _as_bool(create_summary),
+            "selected_combination": combination_dict,
+            "mongo_db": database_name,
+            "collection_name": collection_name,
+        },
+        metadata={
+            "atom": "feature_overview",
+            "operation": "summary",
+            "bucket_name": bucket_name,
+            "object_names": list(object_names),
+            "validator_atom_id": validator_atom_id,
+            "file_key": file_key,
+            "create_hierarchy": _as_bool(create_hierarchy),
+            "create_summary": _as_bool(create_summary),
+        },
+    )
 
-        combined_df = pd.concat(dataframes, ignore_index=True)
-        result = run_feature_overview(
-            combined_df,
-            dimensions,
-            create_hierarchy=create_hierarchy,
-            selected_combination=combination_dict,
-            create_summary=create_summary,
-        )
-
-        # Save the results
-        await save_feature_overview_results(
-            output_store, results_collection, validator_atom_id, file_key
-        )
-
-        return JSONResponse(content={"status": result, "dimensions": dimensions})
-
-    except S3Error as e:
-        return JSONResponse(
-            status_code=500, content={"status": "FAILURE", "error": str(e)}
-        )
-
-    except Exception as e:
-        return JSONResponse(
-            status_code=400, content={"status": "FAILURE", "error": str(e)}
-        )
+    return format_task_response(submission)
 
 
 @router.get("/unique_dataframe_results")

@@ -19,6 +19,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { VALIDATE_API, FEATURE_OVERVIEW_API } from "@/lib/api";
+import { resolveTaskResponse } from "@/lib/taskQueue";
 import { useToast } from "@/hooks/use-toast";
 import {
   useLaboratoryStore,
@@ -638,7 +639,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         `${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(arrow)}`,
       );
       if (!sumRes.ok) return [];
-      const data = await sumRes.json();
+      const raw = await sumRes.json();
+      const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
       const info = (data.summary || []).find((c: any) => c.column === column);
       return Array.isArray(info?.unique_values)
         ? info.unique_values.map((v: any) => String(v))

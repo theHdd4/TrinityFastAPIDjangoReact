@@ -1,27 +1,27 @@
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Optional
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.observability import timing_dependency_factory
-from app.core.task_queue import celery_task_client, format_task_response
 
 from .schemas import (
     PivotComputeRequest,
     PivotComputeResponse,
     PivotRefreshResponse,
+    PivotSaveRequest,
     PivotSaveResponse,
     PivotStatusResponse,
 )
 from .service import (
-    compute_pivot_task,
+    compute_pivot,
     get_pivot_data,
     get_pivot_status,
-    refresh_pivot_task,
-    save_pivot_task,
+    refresh_pivot,
+    save_pivot,
 )
 
 
@@ -36,29 +36,19 @@ router = APIRouter(
 )
 
 
-@router.post("/{config_id}/compute")
-async def compute_pivot_endpoint(
-    config_id: str, payload: PivotComputeRequest
-) -> Dict[str, Any]:
+@router.post("/{config_id}/compute", response_model=PivotComputeResponse)
+async def compute_pivot_endpoint(config_id: str, payload: PivotComputeRequest) -> PivotComputeResponse:
     """Generate a pivot table for the supplied configuration."""
 
     logger.info("pivot.compute config_id=%s rows=%s", config_id, len(payload.rows or []))
-    submission = celery_task_client.submit_callable(
-        name="pivot_table.compute",
-        dotted_path="app.features.pivot_table.service.compute_pivot_task",
-        kwargs={
-            "config_id": config_id,
-            "payload_data": payload.dict(),
-        },
-        metadata={
-            "feature": "pivot_table",
-            "operation": "compute",
-            "config_id": config_id,
-        },
+    response = await compute_pivot(config_id, payload)
+    logger.info(
+        "pivot.compute.completed config_id=%s status=%s rows=%s",
+        config_id,
+        response.status,
+        response.rows,
     )
-    if submission.status == "failure":  # pragma: no cover - defensive
-        raise HTTPException(status_code=400, detail="Failed to compute pivot")
-    return format_task_response(submission, embed_result=True)
+    return response
 
 
 @router.get("/{config_id}/data", response_model=PivotComputeResponse)
@@ -98,44 +88,28 @@ async def get_pivot_data_endpoint(config_id: str) -> PivotComputeResponse:
     )
 
 
-@router.post("/{config_id}/refresh")
-async def refresh_pivot_endpoint(config_id: str) -> Dict[str, Any]:
+@router.post("/{config_id}/refresh", response_model=PivotRefreshResponse)
+async def refresh_pivot_endpoint(config_id: str) -> PivotRefreshResponse:
     """Force recomputation of a pivot table using the last cached configuration."""
 
     logger.info("pivot.refresh config_id=%s", config_id)
-    submission = celery_task_client.submit_callable(
-        name="pivot_table.refresh",
-        dotted_path="app.features.pivot_table.service.refresh_pivot_task",
-        kwargs={"config_id": config_id},
-        metadata={
-            "feature": "pivot_table",
-            "operation": "refresh",
-            "config_id": config_id,
-        },
-    )
-    if submission.status == "failure":  # pragma: no cover - defensive
-        raise HTTPException(status_code=400, detail="Failed to refresh pivot")
-    return format_task_response(submission, embed_result=True)
+    response = await refresh_pivot(config_id)
+    logger.info("pivot.refresh.completed config_id=%s status=%s", config_id, response.status)
+    return response
 
 
-@router.post("/{config_id}/save")
-async def save_pivot_endpoint(config_id: str) -> Dict[str, Any]:
-    """Persist the latest pivot data to project storage in MinIO."""
+@router.post("/{config_id}/save", response_model=PivotSaveResponse)
+async def save_pivot_endpoint(config_id: str, payload: Optional[PivotSaveRequest] = None) -> PivotSaveResponse:
+    """Persist the latest pivot data to project storage in MinIO.
+    
+    If payload.filename is provided, creates a new file (save_as).
+    If payload is None or filename is not provided, overwrites existing saved file (save).
+    """
 
     logger.info("pivot.save config_id=%s", config_id)
-    submission = celery_task_client.submit_callable(
-        name="pivot_table.save",
-        dotted_path="app.features.pivot_table.service.save_pivot_task",
-        kwargs={"config_id": config_id},
-        metadata={
-            "feature": "pivot_table",
-            "operation": "save",
-            "config_id": config_id,
-        },
-    )
-    if submission.status == "failure":  # pragma: no cover - defensive
-        raise HTTPException(status_code=400, detail="Failed to save pivot results")
-    return format_task_response(submission, embed_result=True)
+    response = await save_pivot(config_id, payload)
+    logger.info("pivot.save.completed config_id=%s status=%s", config_id, response.status)
+    return response
 
 
 @router.get("/{config_id}/status", response_model=PivotStatusResponse)
@@ -147,5 +121,3 @@ async def pivot_status_endpoint(config_id: str) -> PivotStatusResponse:
         "pivot.status config_id=%s status=%s", config_id, status.status
     )
     return status
-
-

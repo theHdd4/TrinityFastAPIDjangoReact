@@ -73,43 +73,14 @@ async def root():
             "/save-clustering-data-mongo",
             "/get-clustering-data-mongo",
             "/get-all-clustering-projects",
+            "/identifiers-measures",
             "/test-mongo",
             "/test-auto-save"
         ]
     }
 
-@router.get("/ping")
-async def ping():
-    """Health check endpoint for clustering backend."""
-    return {"msg": "Clustering backend is alive"}
 
-@router.post("/test")
-async def test_endpoint(request: dict = Body(...)):
-    """Test endpoint to verify request handling."""
-    return {
-        "message": "Test endpoint working",
-        "received_data": request,
-        "timestamp": datetime.datetime.now().isoformat()
-    }
 
-# # ── 1. Check if file exists in MinIO ─────────────────────────────────────
-# @router.get("/check-file/{file_path:path}")
-# async def check_file(file_path: str) -> BucketCheckResponse:
-#     """Check if a file exists in MinIO"""
-#     result = await check_bucket_and_file(file_path)
-#     return BucketCheckResponse(**result)
-
-# # ── 2. Fetch available identifiers/measures ──────────────────────────────
-# @router.get("/columns/{validator_atom_id}")
-# async def get_final_columns(validator_atom_id: str):
-#     """Get final classification columns for a validator atom"""
-#     doc = await column_coll.find_one({"validator_atom_id": validator_atom_id})
-#     if not doc:
-#         raise HTTPException(404, "validator_atom not found")
-#     return {
-#         "identifiers": doc["final_classification"]["identifiers"],
-#         "measures": doc["final_classification"]["measures"]
-#     }
 
 # ── 2.1. Fetch available dates from data file ────────────────────────────
 @router.get("/available-dates")
@@ -117,6 +88,7 @@ async def get_available_dates(object_name: str = Query(..., description="Name of
     """Get available dates from the data file for date range selection"""
     try:
         df = await load_csv_from_minio(object_name)
+        df.columns = df.columns.str.lower()
         lower_cols = {col.lower(): col for col in df.columns}
         possible_names = ["date", "Date"]
 
@@ -168,101 +140,8 @@ async def debug_columns(object_name: str = Query(..., description="Name of the d
         print(f"Error debugging columns: {e}")
         return {"error": str(e)}
 
-# # ── 3. Filter data from MinIO file ───────────────────────────────────────
-# @router.post("/filter")
-# async def filter_data(payload: FilterPayload):
-#     """Filter data from MinIO file by selected columns"""
-#     # Load data
-#     df = await load_csv_from_minio(payload.file_path)
-#     original_rows = len(df)
-    
-#     # Apply identifier filters
-#     if payload.identifier_filters:
-#         df = apply_identifier_filters(df, payload.identifier_filters)
-    
-#     # Apply measure filters
-#     if payload.measure_filters:
-#         df = apply_measure_filters(df, payload.measure_filters)
-    
-#     # Select columns
-#     cols = (payload.identifier_columns or []) + (payload.measure_columns or [])
-#     if cols:
-#         missing_cols = [c for c in cols if c not in df.columns]
-#         if missing_cols:
-#             raise HTTPException(400, f"Columns not found: {missing_cols}")
-#         df = df[cols]
-    
-#     return {
-#         "file_path": payload.file_path,
-#         "original_rows": original_rows,
-#         "filtered_rows": len(df),
-#         "columns": list(df.columns),
-#         "data": df.head(payload.limit).to_dict(orient="records")
-#     }
-
-# # ── 4. Run clustering and save results ───────────────────────────────────
-# @router.post("/cluster")
-# async def run_clustering(req: ClusteringRequest):
-#     """Run clustering algorithm on data and save results"""
-#     check = await check_bucket_and_file(req.file_path)
-#     if not check["exists"]:
-#         raise HTTPException(404, check["message"])
-    
-#     df = await load_csv_from_minio(req.file_path)
-#     labels = cluster_dataframe(df, req)
-#     output_path = save_clusters_to_minio(df, labels, req.file_path)
-    
-#     record = {
-#         "input_path": req.file_path,
-#         "output_path": output_path,
-#         "algorithm": req.algorithm,
-#         "params": req.model_dump(exclude={"file_path"}),
-#         "n_clusters_found": len(set(labels)) - (1 if -1 in labels else 0),
-#         "timestamp": datetime.datetime.utcnow()
-#     }
-#     result = await cluster_coll.insert_one(record)
-    
-#     return {
-#         "cluster_result_id": str(result.inserted_id),
-#         "input_path": req.file_path,
-#         "output_path": output_path,
-#         "n_clusters": record["n_clusters_found"],
-#         "message": "Clustering completed successfully"
-#     }
 
 
-
-# ── 6. List objects in a bucket ──────────────────────────────────────────
-@router.get("/bucket/{bucket_name}/objects")
-async def list_bucket_objects(
-    bucket_name: str, 
-    prefix: str = Query("", description="Filter objects by prefix"),
-    limit: int = Query(100, description="Maximum number of objects to return")
-):
-    """List objects in a specific bucket"""
-    if not get_minio_client().bucket_exists(bucket_name):
-        raise HTTPException(404, f"Bucket '{bucket_name}' not found")
-    
-    objects = []
-    count = 0
-    
-    for obj in get_minio_client().list_objects(bucket_name, prefix=prefix, recursive=True):
-        if count >= limit:
-            break
-        objects.append({
-            "name": obj.object_name,
-            "size": obj.size,
-            "last_modified": obj.last_modified.isoformat(),
-            "path": f"{bucket_name}/{obj.object_name}"
-        })
-        count += 1
-    
-    return {
-        "bucket": bucket_name,
-        "prefix": prefix,
-        "count": len(objects),
-        "objects": objects
-    }
 
 @router.post("/filter-and-cluster", response_model=FilterAndClusterResponse)
 async def filter_and_cluster(request: FilterAndClusterRequest):
@@ -1285,6 +1164,79 @@ async def get_all_clustering_projects_endpoint(
     except Exception as e:
         print(f"Error retrieving clustering projects: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve clustering projects: {str(e)}")
+
+
+# ── 19. Get identifiers and measures from column_classifier_configs ────────────────────────────────────────────
+@router.get("/identifiers-measures")
+async def get_identifiers_and_measures(
+    file_name: Optional[str] = Query(None, description="Optional file name for file-specific config")
+):
+    """
+    Fetch identifiers and measures from column_classifier_configs collection in MongoDB.
+    Uses _id format: client_name/app_name/project_name or client_name/app_name/project_name::file_name
+    Fetches client_name, app_name, project_name from environment variables.
+    """
+    try:
+        from .database import client
+        from urllib.parse import quote
+        
+        # Fetch client_name, app_name, project_name from environment variables
+        client_name = os.getenv("CLIENT_NAME", "default_client")
+        app_name = os.getenv("APP_NAME", "default_app")
+        project_name = os.getenv("PROJECT_NAME", "default_project")
+        
+        # Construct the base document _id
+        base_id = f"{client_name}/{app_name}/{project_name}"
+        
+        # Access the trinity_db database (where column_classifier_config is stored)
+        config_db = client["trinity_db"]
+        config_collection = config_db["column_classifier_config"]
+        
+        # Determine document_id based on whether file_name is provided
+        document = None
+        document_id = base_id
+        
+        if file_name:
+            # Try file-specific document first
+            safe_file = quote(file_name, safe="")
+            file_specific_id = f"{base_id}::{safe_file}"
+            document = await config_collection.find_one({"_id": file_specific_id})
+            
+            if document:
+                document_id = file_specific_id
+            else:
+                # Fall back to base document if file-specific not found
+                document = await config_collection.find_one({"_id": base_id})
+                if document:
+                    stored_file = document.get("file_name")
+                    # Only return if stored file matches or no file was stored
+                    if stored_file and stored_file != file_name:
+                        document = None
+        else:
+            # Query base document without file_name
+            document = await config_collection.find_one({"_id": base_id})
+        
+        if not document:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No column classifier configuration found for {document_id}"
+            )
+        
+        return {
+            "success": True,
+            "identifiers": document.get("identifiers", []),
+            "measures": document.get("measures", []),
+            "dimensions": document.get("dimensions", {}),
+            "document_id": document_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching identifiers and measures: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch identifiers and measures: {str(e)}")
 
 
 # ── 20. Test MongoDB connection ────────────────────────────────────────────

@@ -50,3 +50,18 @@ export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>): Prom
     }
   }
 }
+
+export function isTaskEnvelope<T = any>(value: unknown): value is TaskEnvelope<T> {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const envelope = value as TaskEnvelope<T>;
+  return typeof envelope.task_id === 'string' || typeof envelope.task_status === 'string';
+}
+
+export async function resolveTaskResponse<T = any>(value: unknown): Promise<T> {
+  if (isTaskEnvelope<T>(value)) {
+    return waitForTaskResult<T>(value);
+  }
+  return value as T;
+}
