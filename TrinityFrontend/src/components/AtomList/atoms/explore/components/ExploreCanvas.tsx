@@ -123,26 +123,60 @@ const normaliseChartTaskResult = (payload: any): { rows: any[]; full: ChartData 
     current = next;
   }
 
+  const extractArray = (entry: any): any[] | undefined => {
+    if (!entry || typeof entry !== 'object') {
+      return Array.isArray(entry) ? entry : undefined;
+    }
+
+    if (Array.isArray(entry)) {
+      return entry;
+    }
+
+    if (Array.isArray(entry.rows)) {
+      return entry.rows;
+    }
+
+    if (Array.isArray(entry.data)) {
+      return entry.data;
+    }
+
+    if (Array.isArray(entry.values)) {
+      return entry.values;
+    }
+
+    return undefined;
+  };
+
   const candidateData = [
-    current?.data,
-    current?.chart_data,
-    current?.result?.data,
-    current?.result?.chart_data,
+    extractArray(current?.data),
+    extractArray(current?.chart_data),
+    extractArray(current?.result?.data),
+    extractArray(current?.result?.chart_data),
     Array.isArray(current) ? current : undefined,
   ];
 
-  const resolvedRows = candidateData.find((entry) => Array.isArray(entry)) ?? [];
+  const resolvedRows = candidateData.find((entry) => Array.isArray(entry) && entry.length > 0) ?? [];
 
   const metadata =
     current?.chart_metadata ||
+    current?.chart_data?.metadata ||
     current?.metadata ||
     current?.result?.chart_metadata ||
+    current?.result?.chart_data?.metadata ||
     current?.result?.metadata ||
     null;
 
+  const chartType =
+    current?.chart_type ||
+    current?.chart_data?.chart_type ||
+    current?.result?.chart_type ||
+    current?.result?.chart_data?.chart_type ||
+    payload?.chart_type ||
+    'bar_chart';
+
   const fullResult: ChartData = {
     status: current?.status || payload?.status || 'success',
-    chart_type: current?.chart_type || payload?.chart_type || 'bar_chart',
+    chart_type: chartType,
     data: resolvedRows,
     metadata,
   };
