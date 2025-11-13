@@ -18,6 +18,10 @@ from typing import Dict, Any, List, Optional, Callable
 from pathlib import Path
 from datetime import datetime
 
+from file_loader import FileLoader
+from file_analyzer import FileAnalyzer
+from file_context_resolver import FileContextResolver, FileContextResult
+
 logger = logging.getLogger("trinity.trinityai.orchestrator")
 
 # Add parent directory to path
@@ -63,7 +67,47 @@ class StreamOrchestrator:
                 logger.info("✅ Result storage initialized")
             except Exception as e:
                 logger.warning(f"⚠️ Could not initialize result storage: {e}")
-        
+
+        # Shared file context utilities
+        self.file_loader: Optional[FileLoader] = None
+        self.file_analyzer: Optional[FileAnalyzer] = None
+        self.file_context_resolver: Optional[FileContextResolver] = None
+        self._raw_files_with_columns: Dict[str, Any] = {}
+        self._last_context_selection: Optional[FileContextResult] = None
+
+        try:
+            minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+            minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minio")
+            minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minio123")
+            minio_bucket = os.getenv("MINIO_BUCKET", "trinity")
+            minio_prefix = os.getenv("MINIO_OBJECT_PREFIX", "")
+            minio_secure = os.getenv("MINIO_SECURE", "false").lower() == "true"
+
+            self.file_loader = FileLoader(
+                minio_endpoint=minio_endpoint,
+                minio_access_key=minio_access_key,
+                minio_secret_key=minio_secret_key,
+                minio_bucket=minio_bucket,
+                object_prefix=minio_prefix
+            )
+            self.file_analyzer = FileAnalyzer(
+                minio_endpoint=minio_endpoint,
+                access_key=minio_access_key,
+                secret_key=minio_secret_key,
+                bucket=minio_bucket,
+                prefix=minio_prefix,
+                secure=minio_secure
+            )
+            self.file_context_resolver = FileContextResolver(
+                file_loader=self.file_loader,
+                file_analyzer=self.file_analyzer
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ File context utilities unavailable: {e}")
+            self.file_loader = None
+            self.file_analyzer = None
+            self.file_context_resolver = FileContextResolver()
+
         logger.info("✅ StreamOrchestrator initialized")
     
     async def execute_sequence(
@@ -89,6 +133,9 @@ class StreamOrchestrator:
         # Create session in storage
         if self.storage:
             self.storage.create_session(session_id)
+
+        # Refresh file context for this run
+        self._refresh_file_context()
         
         atoms = sequence.get("sequence", [])
         total_atoms = len(atoms)
@@ -290,6 +337,13 @@ class StreamOrchestrator:
         if self.storage and "{{" in prompt:
             prompt = self.storage.inject_results_into_prompt(session_id, prompt)
             logger.info(f"  📝 Injected results into prompt")
+
+        prompt = self._augment_prompt_with_context(prompt, atom)
+
+        logger.info("🔍 ===== STREAM AI PROMPT (BEGIN) =====")
+        logger.info(f"Atom: {atom.get('atom_id', 'unknown')} | Endpoint: {atom.get('endpoint')}")
+        logger.info(prompt)
+        logger.info("🔍 ===== STREAM AI PROMPT (END) =====")
         
         execute_result = await self._step3_execute_atom(atom, prompt)
         if not execute_result.get("success"):
@@ -300,6 +354,9 @@ class StreamOrchestrator:
             }
         
         logger.info(f"  ✅ Atom executed successfully")
+
+        # Refresh file context so subsequent atoms see newly generated files/columns
+        self._refresh_file_context()
         
         duration = time.time() - start_time
         
@@ -522,6 +579,78 @@ class StreamOrchestrator:
             "results": results,
             "result_count": len(results)
         }
+
+    def _refresh_file_context(self) -> None:
+        """Reload available files and update the shared resolver cache."""
+        if not self.file_loader or not self.file_context_resolver:
+            return
+        try:
+            files = self.file_loader.load_files()
+            self._raw_files_with_columns = files or {}
+            self.file_context_resolver.update_files(self._raw_files_with_columns)
+            self._last_context_selection = None
+            logger.info(f"📂 File context refreshed with {len(self._raw_files_with_columns)} entries")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to refresh file context: {e}")
+
+    def _ensure_file_context_loaded(self) -> None:
+        """Ensure file context is available before attempting resolution."""
+        if not self.file_context_resolver:
+            return
+        if not self._raw_files_with_columns:
+            self._refresh_file_context()
+
+    def _augment_prompt_with_context(self, prompt: str, atom: Dict[str, Any]) -> str:
+        """Append condensed file context to the prompt when relevant."""
+        if not self.file_context_resolver or not prompt or "--- STREAM FILE CONTEXT ---" in prompt:
+            return prompt
+
+        self._ensure_file_context_loaded()
+        if not self._raw_files_with_columns:
+            return prompt
+
+        search_text = prompt
+        params = atom.get("parameters") or {}
+        if params:
+            try:
+                search_text += " " + json.dumps(params)
+            except (TypeError, ValueError):
+                logger.debug("Unable to encode atom parameters for context matching")
+
+        try:
+            selection = self.file_context_resolver.resolve(
+                prompt=search_text,
+                top_k=3,
+                include_metadata=True,
+                fallback_limit=10
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ File context resolution failed: {e}")
+            return prompt
+
+        if not selection or not selection.relevant_files:
+            return prompt
+
+        self._last_context_selection = selection
+        mapping = selection.to_object_column_mapping(self._raw_files_with_columns)
+
+        context_sections: List[str] = []
+        if mapping:
+            context_sections.append("Available files:\n" + json.dumps(mapping, indent=2))
+        if selection.file_details:
+            context_sections.append("File details:\n" + json.dumps(selection.file_details, indent=2))
+        if selection.matched_columns:
+            context_sections.append("Matched columns:\n" + json.dumps(selection.matched_columns, indent=2))
+        if selection.other_files:
+            others_preview = ", ".join(selection.other_files[:10])
+            context_sections.append(f"Other files: {others_preview}")
+
+        if not context_sections:
+            return prompt
+
+        context_block = "\n\n--- STREAM FILE CONTEXT ---\n" + "\n\n".join(context_sections)
+        logger.debug("Appending STREAM file context to prompt")
+        return f"{prompt}{context_block}"
 
 
 # Global instance

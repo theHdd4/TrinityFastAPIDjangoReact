@@ -7,6 +7,10 @@ import requests
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 
+from file_loader import FileLoader
+from file_analyzer import FileAnalyzer
+from file_context_resolver import FileContextResolver, FileContextResult
+
 logger = logging.getLogger("smart.explore.llm")
 
 class ExploreAgent:
@@ -35,6 +39,29 @@ class ExploreAgent:
         self.current_file_context = None
         
         # Backend integration removed - following chart maker pattern
+        
+        self.file_loader = FileLoader(
+            minio_endpoint=minio_endpoint,
+            minio_access_key=minio_access_key,
+            minio_secret_key=minio_secret_key,
+            minio_bucket=minio_bucket,
+            object_prefix=object_prefix
+        )
+        self.file_analyzer = FileAnalyzer(
+            minio_endpoint=minio_endpoint,
+            access_key=minio_access_key,
+            secret_key=minio_secret_key,
+            bucket=minio_bucket,
+            prefix=object_prefix,
+            secure=False
+        )
+        self.file_context_resolver = FileContextResolver(
+            file_loader=self.file_loader,
+            file_analyzer=self.file_analyzer
+        )
+        self.files_metadata: Dict[str, Dict[str, Any]] = {}
+        self._raw_files_with_columns: Dict[str, Any] = {}
+        self._last_context_selection: Optional[FileContextResult] = None
         
         logger.info(f"ExploreAgent initialized with model: {model_name}")
     
@@ -108,7 +135,22 @@ class ExploreAgent:
             # Generate exploration configuration using AI
             from .ai_logic import build_explore_prompt, call_explore_llm, extract_json
             
-            prompt = build_explore_prompt(user_prompt, self.files_with_columns, context)
+            selection = self.file_context_resolver.resolve(
+                user_prompt=user_prompt,
+                top_k=3,
+                include_metadata=True
+            )
+            self._last_context_selection = selection
+
+            available_for_prompt = selection.to_object_column_mapping(self._raw_files_with_columns) if selection else self._raw_files_with_columns
+            prompt = build_explore_prompt(
+                user_prompt,
+                available_for_prompt,
+                context,
+                file_details=selection.file_details if selection else {},
+                other_files=selection.other_files if selection else [],
+                matched_columns=selection.matched_columns if selection else {}
+            )
             logger.info(f"🔍 Explore Process - Generated prompt length: {len(prompt)}")
             
             llm_response = call_explore_llm(self.api_url, self.model_name, self.bearer_token, prompt)
@@ -325,80 +367,23 @@ class ExploreAgent:
             # Keep the existing prefix if all methods fail
 
     def _load_available_files(self):
-        """Load available files from MinIO with their columns using dynamic paths"""
+        """Load available files using the shared loader and update resolver."""
         try:
-            try:
-                from minio import Minio
-                from minio.error import S3Error
-                import pyarrow as pa
-                import pyarrow.ipc as ipc
-                import pandas as pd
-                import io
-            except ImportError as ie:
-                logger.error(f"Failed to import required libraries: {ie}")
-                self.files_with_columns = {}
-                return
-            
-            # Update prefix to current path before loading files
             self._maybe_update_prefix()
-            
-            logger.info(f"Loading files with prefix: {self.object_prefix}")
-            
-            # Initialize MinIO client
-            minio_client = Minio(
-                self.minio_endpoint,
-                access_key=self.minio_access_key,
-                secret_key=self.minio_secret_key,
-                secure=False
-            )
-            
-            # List objects in bucket with current prefix
-            objects = minio_client.list_objects(self.minio_bucket, prefix=self.object_prefix, recursive=True)
-            
-            files_with_columns = {}
-            
-            for obj in objects:
-                try:
-                    if obj.object_name.endswith('.arrow'):
-                        # Get Arrow file data
-                        response = minio_client.get_object(self.minio_bucket, obj.object_name)
-                        data = response.read()
-                        
-                        # Read Arrow file
-                        with pa.ipc.open_file(pa.BufferReader(data)) as reader:
-                            table = reader.read_all()
-                            columns = table.column_names
-                            files_with_columns[obj.object_name] = {"columns": columns}
-                            
-                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
-                    
-                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
-                        # For CSV/Excel files, try to read headers
-                        response = minio_client.get_object(self.minio_bucket, obj.object_name)
-                        data = response.read()
-                        
-                        if obj.object_name.endswith('.csv'):
-                            # Read CSV headers
-                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
-                            columns = list(df_sample.columns)
-                        else:
-                            # Read Excel headers
-                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
-                            columns = list(df_sample.columns)
-                        
-                        files_with_columns[obj.object_name] = {"columns": columns}
-                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
-                    continue
-            
-            self.files_with_columns = files_with_columns
-            logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
-            
+            files_with_columns = self.file_loader.load_files()
+            self._raw_files_with_columns = files_with_columns or {}
+            self.files_with_columns = self._raw_files_with_columns
+            self.files_metadata = {}
+            self.file_context_resolver.update_files(self._raw_files_with_columns)
+            self._last_context_selection = None
+            logger.info(f"Loaded {len(self.files_with_columns)} files from MinIO")
         except Exception as e:
             logger.error(f"Error loading files from MinIO: {e}")
             self.files_with_columns = {}
+            self._raw_files_with_columns = {}
+            self.files_metadata = {}
+            self.file_context_resolver.update_files({})
+            self._last_context_selection = None
     
     def _build_conversation_context(self, session_id: str) -> str:
         """Build conversation context from session history with ChatGPT-style memory"""

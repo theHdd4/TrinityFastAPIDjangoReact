@@ -11,7 +11,7 @@ import re
 import datetime
 import math
 from bisect import bisect_right
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from numbers import Real
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
@@ -818,13 +818,15 @@ async def delete_rows_bulk(df_id: str = Body(...), indices: list = Body(...)):
 @router.post("/insert_column")
 async def insert_column(
     df_id: str = Body(...),
-    index: int = Body(...),
+    index: Optional[int] = Body(None),
     name: str = Body(...),
     default: Any = Body(None),
 ):
     df = _get_df(df_id)
     
     # Validate index
+    if index is None:
+        index = len(df.columns)
     if index < 0:
         index = 0
     elif index > len(df.columns):

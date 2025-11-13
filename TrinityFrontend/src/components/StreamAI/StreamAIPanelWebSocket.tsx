@@ -107,7 +107,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [panelWidth, setPanelWidth] = useState(384); // Default 384px (w-96)
-  const [isPanelFrozen, setIsPanelFrozen] = useState(true);
+  const [isPanelFrozen, setIsPanelFrozen] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [baseFontSize] = useState(14);
   const [smallFontSize] = useState(12);
@@ -1349,17 +1349,19 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
               )}
 
               {/* Message Bubble or Component */}
-              <div className={`flex-1 group ${
-                msg.sender === 'user' ? 'flex flex-col items-end' : ''
-              }`} style={{ 
-                maxWidth: msg.type && msg.type !== 'text' ? '100%' : '500px',
-                marginLeft: msg.type && msg.type !== 'text' ? '0' : undefined
-              }}>
+              <div
+                className={`flex-1 group ${
+                  msg.sender === 'user' ? 'flex flex-col items-end' : ''
+                } ${msg.type && msg.type !== 'text' ? 'w-full' : 'max-w-full'}`}
+                style={{
+                  marginLeft: msg.type && msg.type !== 'text' ? '0' : undefined
+                }}
+              >
                 {/* Regular text message */}
                 {(!msg.type || msg.type === 'text') && (
                   <>
                     <div
-                      className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] ${
+                      className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] max-w-full ${
                         msg.sender === 'ai'
                           ? 'text-white rounded-tl-md backdrop-blur-sm'
                           : 'bg-[#458EE2] text-white border-[#458EE2]/30 rounded-tr-md backdrop-blur-sm'
@@ -1375,7 +1377,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                       }
                     >
                         <div
-                          className="leading-relaxed font-medium font-inter text-sm"
+                          className="leading-relaxed font-medium font-inter text-sm break-words"
                           dangerouslySetInnerHTML={{
                             __html: parseMarkdown(msg.content)
                           }}
@@ -1389,7 +1391,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                 
                 {/* Workflow Preview Component */}
                 {msg.type === 'workflow_preview' && msg.data && (
-                  <div className="mt-2">
+                  <div className="mt-2 w-full">
                     <StreamWorkflowPreview
                       workflow={msg.data.plan}
                       onAccept={() => {
@@ -1423,7 +1425,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                 
                 {/* Workflow Monitor Component */}
                 {msg.type === 'workflow_monitor' && msg.data && (
-                  <div className="mt-2">
+                  <div className="mt-2 w-full">
                     <StreamStepMonitor
                       steps={msg.data.steps}
                       currentStep={msg.data.currentStep || 0}
@@ -1434,7 +1436,7 @@ export const TrinityAIPanel: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onT
                 
                 {/* Step Approval Component */}
                 {msg.type === 'step_approval' && msg.data && (
-                  <div className="mt-2">
+                  <div className="mt-2 w-full">
                     <StreamStepApproval
                       stepNumber={msg.data.stepNumber}
                       totalSteps={msg.data.totalSteps}

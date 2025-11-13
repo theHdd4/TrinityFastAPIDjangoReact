@@ -26,7 +26,14 @@ except ImportError as e:
 # See: rag/api_endpoints.json and rag/operation_examples.json
 # This makes the AI logic cleaner and easier to maintain
 
-def build_dataframe_operations_prompt(user_prompt: str, available_files_with_columns: dict, context: str, current_df_state: dict = None) -> str:
+def build_dataframe_operations_prompt(
+    user_prompt: str,
+    available_files_with_columns: dict,
+    context: str,
+    current_df_state: dict = None,
+    file_details: Optional[Dict[str, Any]] = None,
+    other_files: Optional[List[str]] = None,
+) -> str:
     """
     Build a concise prompt for the LLM to generate DataFrame operations configurations.
     Optimized for better LLM comprehension with minimal verbosity.
@@ -40,21 +47,28 @@ def build_dataframe_operations_prompt(user_prompt: str, available_files_with_col
         for file_name, file_data in available_files_with_columns.items():
             if isinstance(file_data, dict):
                 columns = file_data.get('columns', [])
+                display_name = file_data.get('display_name') or file_name.split('/')[-1] if isinstance(file_name, str) else file_name
             elif isinstance(file_data, list):
                 columns = file_data
+                display_name = file_name.split('/')[-1] if isinstance(file_name, str) and '/' in file_name else file_name
             else:
                 columns = []
-            display_name = file_name.split('/')[-1] if '/' in file_name else file_name
-            file_list.append(f"{display_name} ({len(columns)} cols)")
+                display_name = file_name
+            file_list.append(f"{display_name} → {file_name} ({len(columns)} cols)")
     file_summary = ", ".join(file_list[:5])  # Only show first 5 files
     if len(file_list) > 5:
         file_summary += f" + {len(file_list) - 5} more"
+
+    file_details_json = json.dumps(file_details, indent=2) if file_details else "None"
+    other_files_summary = ", ".join(other_files) if other_files else "None"
     
     prompt = f"""You are a DataFrame operations assistant. Generate JSON configs for data manipulation tasks.
 
 USER REQUEST: "{user_prompt}"
 AVAILABLE FILES: {file_summary}
 FILES DETAIL: {json.dumps(available_files_with_columns, indent=2)}
+FILE METADATA: {file_details_json}
+OTHER AVAILABLE FILES (REFERENCE ONLY): {other_files_summary}
 
 {f"CONVERSATION: {context[:500]}..." if len(context) > 500 else f"CONVERSATION: {context}" if context else ""}
 

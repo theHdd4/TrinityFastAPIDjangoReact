@@ -9,6 +9,7 @@ from typing import Dict, Optional, Any, List
 
 from .ai_logic import build_chart_prompt, call_chart_llm, extract_json
 from file_loader import FileLoader
+from file_context_resolver import FileContextResolver, FileContextResult
 
 # Import the file analyzer
 import sys
@@ -36,6 +37,7 @@ class ChartMakerAgent:
         # File context for intelligent chart suggestions (ACTIVE like Merge agent)
         self.files_with_columns: Dict[str, List[str]] = {}
         self.files_metadata: Dict[str, Dict[str, Any]] = {}  # Store column types, row counts, etc.
+        self._raw_files_with_columns: Dict[str, Any] = {}
         self.current_file_id: Optional[str] = None
         
         # MinIO configuration (ACTIVE like Merge agent)
@@ -63,6 +65,13 @@ class ChartMakerAgent:
             prefix=prefix,
             secure=False
         )
+
+        # Centralised resolver for matching prompts to relevant files
+        self.file_context_resolver = FileContextResolver(
+            file_loader=self.file_loader,
+            file_analyzer=self.file_analyzer
+        )
+        self._last_context_selection: Optional[FileContextResult] = None
         
         # Load files on initialization
         self._load_files()
@@ -108,6 +117,7 @@ class ChartMakerAgent:
         try:
             # First load files using the standardized FileLoader
             files_with_columns = self.file_loader.load_files()
+            self._raw_files_with_columns = files_with_columns or {}
             
             # Convert FileLoader results to the format expected by the chart maker
             self.files_with_columns = {}
@@ -144,6 +154,8 @@ class ChartMakerAgent:
                         'numeric_columns': [],
                         'categorical_columns': []
                     }
+                self.file_context_resolver.update_files(self._raw_files_with_columns, self.files_metadata)
+                self._last_context_selection = None
                 return
             
             # Convert file analyzer results to the format expected by the chart maker
@@ -199,12 +211,18 @@ class ChartMakerAgent:
                     self.files_metadata[filename]['numeric_columns'] = numeric_columns
                     self.files_metadata[filename]['categorical_columns'] = categorical_columns
             
+            self.file_context_resolver.update_files(self._raw_files_with_columns, self.files_metadata)
+            self._last_context_selection = None
+
             logger.info(f"Successfully loaded {len(self.files_with_columns)} files using FileLoader and FileAnalyzer")
             
         except Exception as e:
             logger.error(f"Error during file loading: {e}")
             self.files_with_columns = {}
             self.files_metadata = {}
+            self._raw_files_with_columns = {}
+            self.file_context_resolver.update_files({})
+            self._last_context_selection = None
 
     def set_file_context(self, file_id: str, columns: List[str], file_name: str = ""):
         """Set the current file context for chart generation"""
@@ -353,24 +371,35 @@ class ChartMakerAgent:
         if not self.files_with_columns:
             context += "\n\n--- FILE CONTEXT ---\n"
             context += "No files are currently loaded. User needs to upload data first."
+            self._last_context_selection = None
             return context
 
-        # Remove manual file matching - let the LLM handle column selection (like Merge agent)
-        # Simply provide all available files and their columns
-        context += "\n\n--- AVAILABLE FILES AND COLUMNS ---\n"
-        context += "Here are all the files available for charting with their column information:\n"
-        context += json.dumps(self.files_with_columns, indent=2)
-        
-        # Add metadata for better context (like Merge agent)
-        if self.files_metadata:
-            context += "\n\n--- COLUMN METADATA ---\n"
-            for file_name, metadata in self.files_metadata.items():
-                context += f"\n{file_name}:\n"
-                context += f"  Rows: {metadata['row_count']}\n"
-                if metadata['numeric_columns']:
-                    context += f"  Numeric columns: {', '.join(metadata['numeric_columns'][:10])}\n"
-                if metadata['categorical_columns']:
-                    context += f"  Categorical columns: {', '.join(metadata['categorical_columns'][:10])}\n"
+        selection = self.file_context_resolver.resolve(
+            user_prompt=user_prompt,
+            top_k=3,
+            include_metadata=True,
+            fallback_limit=10
+        )
+        self._last_context_selection = selection
+
+        context += "\n\n--- RELEVANT FILES AND COLUMNS ---\n"
+        if selection.relevant_files:
+            context += json.dumps(selection.relevant_files, indent=2)
+        else:
+            context += "No specific files matched the prompt. Showing default suggestions.\n"
+            context += json.dumps(self.files_with_columns, indent=2)
+
+        if selection.file_details:
+            context += "\n\n--- FILE DETAILS ---\n"
+            context += json.dumps(selection.file_details, indent=2)
+
+        if selection.matched_columns:
+            context += "\n\n--- MATCHED COLUMNS ---\n"
+            context += json.dumps(selection.matched_columns, indent=2)
+
+        if selection.other_files:
+            context += "\n\nOther available files (not included above): "
+            context += ", ".join(selection.other_files)
         
         context += "\n\n--- INSTRUCTIONS FOR LLM ---\n"
         context += "1. Analyze the user's request to identify which files they want to chart\n"
@@ -971,6 +1000,9 @@ class ChartMakerAgent:
         # Check if MinIO prefix needs an update (and files need reloading) - like Merge agent
         self._maybe_update_prefix()
         
+        # Always refresh file listing so newly created/updated files are available
+        self._load_files()
+        
         # Debug logging for file loading
         logger.info(f"🔍 Files loaded: {len(self.files_with_columns)} files")
         logger.info(f"🔍 File names: {list(self.files_with_columns.keys())}")
@@ -991,11 +1023,17 @@ class ChartMakerAgent:
         context = self._enhance_context_with_columns(context, user_prompt)
         logger.info(f"📁 Enhanced Context Built: {len(context)} characters")
         
-        # 3. Get detailed file analysis data for the LLM
-        file_analysis_data = self.file_analyzer.get_all_analyses()
+        # 3. Resolve relevant files for this prompt (reuse selection from context enhancement when possible)
+        selection = self._last_context_selection or self.file_context_resolver.resolve(
+            user_prompt=user_prompt,
+            top_k=3,
+            include_metadata=True
+        )
+        available_for_prompt = selection.to_object_column_mapping(self._raw_files_with_columns) if selection else self._raw_files_with_columns
+        file_analysis_data = selection.file_details if selection else {}
         
-        # 4. Build the final prompt for the LLM with complete file analysis
-        prompt = build_chart_prompt(user_prompt, self.files_with_columns, context, file_analysis_data)
+        # 4. Build the final prompt for the LLM with condensed file analysis
+        prompt = build_chart_prompt(user_prompt, available_for_prompt, context, file_analysis_data)
         
         # 🔍 COMPREHENSIVE LOGGING: Show what we're sending to LLM
         logger.info("🔍 ===== LLM INPUT - COMPLETE PROMPT =====")

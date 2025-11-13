@@ -566,26 +566,36 @@ export const createColumnHandler: AtomHandler = {
           
           // Try to get CSV data from cached_dataframe endpoint (like groupby)
           try {
-            const cachedRes = await fetch(`${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(result.result_file)}`);
-            if (cachedRes.ok) {
-              const cachedJson = await cachedRes.json();
-              parsedCsv = cachedJson?.data ?? '';
-              console.log('📄 Retrieved CSV data from saved file, length:', parsedCsv.length);
-              
-              // Parse CSV to get actual results if not already available
-              if (!parsedRows && parsedCsv) {
-                const lines = parsedCsv.split('\n');
-                if (lines.length > 1) {
-                  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-                  parsedRows = lines.slice(1).filter(line => line.trim()).map(line => {
+            const rawRowCount = typeof result.row_count === 'number' && Number.isFinite(result.row_count) && result.row_count > 0
+              ? Math.ceil(result.row_count)
+              : parsedRows?.length;
+            const pageSize = rawRowCount && rawRowCount > 0 ? rawRowCount : 100000;
+            const cachedUrl = `${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(result.result_file)}&page=1&page_size=${pageSize}`;
+            const cachedRes = await fetch(cachedUrl);
+            if (!cachedRes.ok) {
+              throw new Error(`cached_dataframe responded with ${cachedRes.status}`);
+            }
+
+            const cachedJson = await cachedRes.json();
+            parsedCsv = cachedJson?.data ?? '';
+            console.log('📄 Retrieved CSV data from saved file, length:', parsedCsv.length);
+            
+            // Parse CSV to get actual results if not already available
+            if (!parsedRows && parsedCsv) {
+              const lines = parsedCsv.split('\n');
+              if (lines.length > 1) {
+                const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                parsedRows = lines
+                  .slice(1)
+                  .filter(line => line.trim())
+                  .map(line => {
                     const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-                    const row: any = {};
+                    const row: Record<string, string> = {};
                     headers.forEach((header, index) => {
                       row[header] = values[index] || '';
                     });
                     return row;
                   });
-                }
               }
             }
           } catch (fetchError) {

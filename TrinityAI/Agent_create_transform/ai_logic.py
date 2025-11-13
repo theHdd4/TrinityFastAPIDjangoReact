@@ -4,7 +4,7 @@ import re
 import os
 import requests
 import logging
-from typing import Optional, Dict, Union, List
+from typing import Optional, Dict, Union, List, Any
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,10 @@ def build_prompt_create_transform(
     files_with_columns: dict,
     supported_ops_detailed: str,
     op_format: str,
-    history_string: str
+    history_string: str,
+    file_details: Optional[Dict[str, Any]] = None,
+    other_files: Optional[List[str]] = None,
+    matched_columns: Optional[Dict[str, List[str]]] = None
 ) -> str:
     """
     Build a clean, focused prompt for the create/transform agent.
@@ -23,6 +26,15 @@ def build_prompt_create_transform(
     
     # Build file information section
     file_info_section = _build_file_info_section(files_with_columns)
+    file_details_section = ""
+    if file_details:
+        file_details_section = f"\n## Relevant File Metadata:\n{json.dumps(file_details, indent=2)}\n"
+    matched_columns_section = ""
+    if matched_columns:
+        matched_columns_section = f"\n## Matched Columns From Prompt:\n{json.dumps(matched_columns, indent=2)}\n"
+    other_files_section = ""
+    if other_files:
+        other_files_section = f"\n## Other Available Files (Reference Only):\n{', '.join(other_files)}\n"
     
     # Build history context if available
     history_section = ""
@@ -33,65 +45,37 @@ def build_prompt_create_transform(
 
 ## Available Files and Columns:
 {file_info_section}
-
+{file_details_section}{matched_columns_section}{other_files_section}
 ## Supported Operations:
 {supported_ops_detailed}
 
 {history_section}
+## Session ID:
+{session_id}
+
 ## User Request:
-"{user_prompt}"
+{user_prompt}
 
-## Task:
-Analyze the user's request and generate a JSON configuration. Match file names and column names from the available files list above.
+## JSON Output Requirements:
+1. Return ONLY JSON (no markdown, no prose).
+2. JSON must contain:
+   - "success": boolean
+   - "message": string
+   - "json": array of operation configs when success=true
+   - "smart_response": human-readable summary of actions taken or next steps
+3. Each operation config MUST follow this schema exactly:
+{op_format}
 
-## Response Format:
+## Mandatory Rules:
+1. Include "bucket_name": "trinity" in every operation config.
+2. All column names MUST be lowercase in the final output (normalize them if needed).
+3. When referencing files, use the exact keys from the Available Files section (full path).
+4. Do NOT invent columns or files. Only use what is listed.
+5. Maintain operation_id as strings ("1", "2", etc.) and ensure execute_order matches the order.
+6. For derived columns, include clear descriptions and formulas when applicable.
+7. If user intent is unclear, return success=false with helpful suggestions in smart_response.
 
-**If the request is clear and executable, return:**
-```json
-{{
-  "success": true,
-  "json": [
-    {{
-      "bucket_name": "trinity",
-      "object_name": "filename.arrow",
-      "add_0": "column1,column2",
-      "add_0_rename": "new_column_name",
-      "multiply_0": "column3,column4",
-      "multiply_0_rename": "product_column"
-    }}
-  ],
-  "message": "Configuration generated successfully",
-  "smart_response": "Brief explanation of what was configured",
-  "session_id": "{session_id}"
-}}
-```
-
-**If the request needs clarification, return:**
-```json
-{{
-  "success": false,
-  "message": "What information is needed",
-  "smart_response": "Helpful response listing available files and columns",
-  "suggestions": ["Suggestion 1", "Suggestion 2"],
-  "session_id": "{session_id}"
-}}
-```
-
-## Important Rules:
-1. Use only the filename (not full path) for `object_name` - e.g., "20250813_094555_D0_KHC_UK_Mayo.arrow"
-2. Match file names and column names exactly as they appear in the Available Files section
-3. Use 0-based indexing for operations: `add_0`, `add_0_rename`, `multiply_1`, `multiply_1_rename`, etc.
-4. Column names in operations should be comma-separated: "column1,column2"
-5. Each operation must have a corresponding rename field
-6. Only return success=true when you have a valid file name, valid column names, and at least one operation
-
-## Operation Format Examples:
-- Add columns: `"add_0": "volume,salesvalue"` with `"add_0_rename": "total"`
-- Multiply columns: `"multiply_0": "price,quantity"` with `"multiply_0_rename": "revenue"`
-- Subtract columns: `"subtract_0": "revenue,cost"` with `"subtract_0_rename": "profit"`
-- Divide columns: `"divide_0": "revenue,volume"` with `"divide_0_rename": "price_per_unit"`
-
-Respond with ONLY the JSON object, no additional text.
+## Respond with JSON only.
 """
 
 def _analyze_files_for_context(files_with_columns: dict) -> str:

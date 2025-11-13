@@ -74,9 +74,9 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
   };
 
   return (
-    <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl border-2 border-gray-200 shadow-xl p-6 space-y-6 animate-fade-in">
+    <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl border-2 border-gray-200 shadow-xl p-6 space-y-6 animate-fade-in w-full">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#41C185] to-[#3AB077] flex items-center justify-center shadow-lg">
             <Sparkles className="w-6 h-6 text-white" />
@@ -94,7 +94,7 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
           <div key={step.step_number}>
             {/* Step Card */}
             <div className="bg-white rounded-xl border-2 border-gray-200 p-4 hover:border-[#41C185] transition-all duration-200 hover:shadow-md group">
-              <div className="flex items-start gap-3">
+              <div className="flex flex-wrap sm:flex-nowrap items-start gap-3">
                 {/* Step Icon */}
                 <div className={`flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br ${getAtomColor(step.atom_id)} flex items-center justify-center shadow-md group-hover:scale-110 transition-transform duration-200`}>
                   <span className="text-xl">{getAtomIcon(step.atom_id)}</span>
@@ -102,7 +102,7 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
 
                 {/* Step Content */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-gray-700 text-xs font-bold font-inter">
                       {step.step_number}
                     </span>
@@ -110,7 +110,7 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
                       {step.atom_id.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')}
                     </h4>
                   </div>
-                  <p className="text-xs text-gray-600 font-inter leading-relaxed">
+                  <p className="text-xs text-gray-600 font-inter leading-relaxed break-words">
                     {step.description}
                   </p>
 
@@ -153,25 +153,25 @@ const StreamWorkflowPreview: React.FC<StreamWorkflowPreviewProps> = ({
       </div>
 
       {/* Action Buttons */}
-      <div className="flex gap-2 pt-4 border-t-2 border-gray-200">
+      <div className="flex flex-wrap gap-3 pt-4 border-t-2 border-gray-200">
         <Button
           onClick={onReject}
           variant="outline"
-          className="flex-1 h-10 border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-medium font-inter rounded-xl transition-all duration-200 text-sm"
+          className="flex-1 min-w-[150px] h-10 border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-medium font-inter rounded-xl transition-all duration-200 text-sm"
         >
           <X className="w-4 h-4 mr-1" />
           Reject
         </Button>
         <Button
           onClick={handleAddClick}
-          className="flex-1 h-10 bg-gradient-to-r from-[#FFBD59] to-[#FFA726] hover:from-[#FFA726] hover:to-[#FF9800] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
+          className="flex-1 min-w-[150px] h-10 bg-gradient-to-r from-[#FFBD59] to-[#FFA726] hover:from-[#FFA726] hover:to-[#FF9800] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
         >
           <Plus className="w-4 h-4 mr-1" />
           Add
         </Button>
         <Button
           onClick={onAccept}
-          className="flex-1 h-10 bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
+          className="flex-1 min-w-[150px] h-10 bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
         >
           <Check className="w-4 h-4 mr-1" />
           Accept

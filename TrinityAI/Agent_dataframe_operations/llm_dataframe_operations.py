@@ -1,6 +1,7 @@
 # llm_dataframe_operations.py - DataFrame Operations Agent LLM Integration
 
 import os
+import sys
 import json
 import logging
 import requests
@@ -8,6 +9,13 @@ from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
 
 logger = logging.getLogger("smart.dataframe_operations.llm")
+
+# Add parent directory to path for shared utilities
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from file_loader import FileLoader
+from file_analyzer import FileAnalyzer
+from file_context_resolver import FileContextResolver, FileContextResult
 
 class DataFrameOperationsAgent:
     """
@@ -32,6 +40,29 @@ class DataFrameOperationsAgent:
         self.files_with_columns = {}  # {file_path: [columns]}
         self.dataframe_sessions = {}  # {df_id: dataframe_state}
         self.current_df_context = None
+        self.files_metadata: Dict[str, Dict[str, Any]] = {}
+        self._last_context_selection: Optional[FileContextResult] = None
+
+        # Shared file utilities
+        self.file_loader = FileLoader(
+            minio_endpoint=minio_endpoint,
+            minio_access_key=minio_access_key,
+            minio_secret_key=minio_secret_key,
+            minio_bucket=minio_bucket,
+            object_prefix=object_prefix
+        )
+        self.file_analyzer = FileAnalyzer(
+            minio_endpoint=minio_endpoint,
+            access_key=minio_access_key,
+            secret_key=minio_secret_key,
+            bucket=minio_bucket,
+            prefix=object_prefix,
+            secure=False
+        )
+        self.file_context_resolver = FileContextResolver(
+            file_loader=self.file_loader,
+            file_analyzer=self.file_analyzer
+        )
         
         logger.info(f"DataFrameOperationsAgent initialized with model: {model_name}")
     
@@ -102,6 +133,15 @@ class DataFrameOperationsAgent:
             # Build context from conversation history
             context = self._build_conversation_context(session_id)
             logger.info(f"📚 Session Context Built: {len(context)} characters")
+
+            # Resolve relevant files and extend context with targeted file details
+            selection = self.file_context_resolver.resolve(
+                user_prompt=user_prompt,
+                top_k=3,
+                include_metadata=True
+            )
+            self._last_context_selection = selection
+            context = self._extend_context_with_files(context, selection)
             
             # Get current dataframe state if available
             current_df_state = None
@@ -120,13 +160,25 @@ class DataFrameOperationsAgent:
                     "smart_response": "DataFrame operations AI service is currently unavailable due to import issues."
                 }
             
-            prompt = build_dataframe_operations_prompt(user_prompt, self.files_with_columns, context, current_df_state)
+            if selection:
+                available_for_prompt = selection.to_object_column_mapping(self.files_with_columns)
+            else:
+                available_for_prompt = self.files_with_columns
+
+            prompt = build_dataframe_operations_prompt(
+                user_prompt,
+                available_for_prompt,
+                context,
+                current_df_state,
+                file_details=selection.file_details if selection else {},
+                other_files=selection.other_files if selection else []
+            )
             logger.info(f"🔍 DataFrame Operations Process - Generated prompt length: {len(prompt)}")
             logger.info("="*100)
             logger.info("📤 SENDING TO LLM:")
             logger.info("="*100)
             logger.info(f"User Prompt: {user_prompt}")
-            logger.info(f"Available Files: {list(self.files_with_columns.keys())}")
+            logger.info(f"Relevant Files Sent: {list(available_for_prompt.keys())}")
             logger.info(f"Context Length: {len(context)} characters")
             logger.info("")
             logger.info("📝 FULL COMPLETE PROMPT (ALL CHARACTERS):")
@@ -346,80 +398,21 @@ class DataFrameOperationsAgent:
             logger.error(f"Failed to update prefix: {e}")
 
     def _load_available_files(self):
-        """Load available files from MinIO with their columns using dynamic paths"""
+        """Load available files using the standardized loader and update shared context."""
         try:
-            try:
-                from minio import Minio
-                from minio.error import S3Error
-                import pyarrow as pa
-                import pyarrow.ipc as ipc
-                import pandas as pd
-                import io
-            except ImportError as ie:
-                logger.error(f"Failed to import required libraries: {ie}")
-                self.files_with_columns = {}
-                return
-            
-            # Update prefix to current path before loading files
             self._maybe_update_prefix()
-            
-            logger.info(f"Loading files with prefix: {self.object_prefix}")
-            
-            # Initialize MinIO client
-            minio_client = Minio(
-                self.minio_endpoint,
-                access_key=self.minio_access_key,
-                secret_key=self.minio_secret_key,
-                secure=False
-            )
-            
-            # List objects in bucket with current prefix
-            objects = minio_client.list_objects(self.minio_bucket, prefix=self.object_prefix, recursive=True)
-            
-            files_with_columns = {}
-            
-            for obj in objects:
-                try:
-                    if obj.object_name.endswith('.arrow'):
-                        # Get Arrow file data
-                        response = minio_client.get_object(self.minio_bucket, obj.object_name)
-                        data = response.read()
-                        
-                        # Read Arrow file
-                        with pa.ipc.open_file(pa.BufferReader(data)) as reader:
-                            table = reader.read_all()
-                            columns = table.column_names
-                            files_with_columns[obj.object_name] = {"columns": columns}
-                            
-                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
-                    
-                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
-                        # For CSV/Excel files, try to read headers
-                        response = minio_client.get_object(self.minio_bucket, obj.object_name)
-                        data = response.read()
-                        
-                        if obj.object_name.endswith('.csv'):
-                            # Read CSV headers
-                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
-                            columns = list(df_sample.columns)
-                        else:
-                            # Read Excel headers
-                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
-                            columns = list(df_sample.columns)
-                        
-                        files_with_columns[obj.object_name] = {"columns": columns}
-                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
-                    continue
-            
-            self.files_with_columns = files_with_columns
-            logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
-            
+            files_with_columns = self.file_loader.load_files()
+            self.files_with_columns = files_with_columns or {}
+            self.files_metadata = {}
+            self.file_context_resolver.update_files(self.files_with_columns)
+            self._last_context_selection = None
+            logger.info(f"Loaded {len(self.files_with_columns)} files from MinIO via standardized loader")
         except Exception as e:
             logger.error(f"Error loading files from MinIO: {e}")
             self.files_with_columns = {}
+            self.files_metadata = {}
+            self.file_context_resolver.update_files({})
+            self._last_context_selection = None
     
     def _build_conversation_context(self, session_id: str) -> str:
         """Build conversation context from session history with ChatGPT-style memory"""
@@ -506,6 +499,33 @@ class DataFrameOperationsAgent:
             context_parts.append("")
         
         return "\n".join(context_parts)
+
+    def _extend_context_with_files(self, context: str, selection: Optional[FileContextResult]) -> str:
+        """Append relevant file information and metadata into the conversation context."""
+        if not selection:
+            return context
+
+        parts: List[str] = []
+        if context:
+            parts.append(context)
+
+        relevant = selection.relevant_files or self.file_context_resolver.get_available_files()
+        if relevant:
+            parts.append("\n--- RELEVANT DATA FILES AND COLUMNS ---")
+            parts.append(json.dumps(relevant, indent=2))
+
+        if selection.file_details:
+            parts.append("\n--- FILE DETAILS ---")
+            parts.append(json.dumps(selection.file_details, indent=2))
+
+        if selection.matched_columns:
+            parts.append("\n--- MATCHED COLUMNS ---")
+            parts.append(json.dumps(selection.matched_columns, indent=2))
+
+        if selection.other_files:
+            parts.append("\nOther available files (not included above): " + ", ".join(selection.other_files))
+
+        return "\n".join(part for part in parts if part)
     
     def clear_session(self, session_id: str) -> bool:
         """Clear a specific session from memory"""
