@@ -3265,6 +3265,114 @@ async def download_dataframe(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/export_csv")
+async def export_csv(object_name: str):
+    """Export the saved dataframe as CSV file."""
+    from urllib.parse import unquote
+    import pyarrow.ipc as ipc
+    
+    object_name = unquote(object_name)
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    
+    print(f"➡️ data_upload_validate export_csv request: {object_name}")
+    
+    try:
+        # Try to get from Redis first
+        content = redis_client.get(object_name)
+        if content is None:
+            # Get from MinIO
+            try:
+                response = minio_client.get_object(MINIO_BUCKET, object_name)
+                content = response.read()
+                redis_client.setex(object_name, 3600, content)
+            except S3Error as e:
+                if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+                    raise HTTPException(status_code=404, detail="File not found")
+                raise
+
+        # Convert to DataFrame
+        if object_name.endswith(".arrow"):
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
+        else:
+            df = pd.read_csv(io.BytesIO(content))
+        
+        # Convert to CSV bytes
+        csv_bytes = df.to_csv(index=False).encode("utf-8")
+        
+        filename = object_name.split('/')[-1].replace('.arrow', '').replace('.csv', '') + '.csv'
+        
+        return Response(
+            content=csv_bytes,
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"⚠️ data_upload_validate export_csv error for {object_name}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/export_excel")
+async def export_excel(object_name: str):
+    """Export the saved dataframe as Excel file."""
+    from urllib.parse import unquote
+    import pyarrow.ipc as ipc
+    
+    object_name = unquote(object_name)
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    
+    print(f"➡️ data_upload_validate export_excel request: {object_name}")
+    
+    try:
+        # Try to get from Redis first
+        content = redis_client.get(object_name)
+        if content is None:
+            # Get from MinIO
+            try:
+                response = minio_client.get_object(MINIO_BUCKET, object_name)
+                content = response.read()
+                redis_client.setex(object_name, 3600, content)
+            except S3Error as e:
+                if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+                    raise HTTPException(status_code=404, detail="File not found")
+                raise
+
+        # Convert to DataFrame
+        if object_name.endswith(".arrow"):
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            df = reader.read_all().to_pandas()
+        else:
+            df = pd.read_csv(io.BytesIO(content))
+        
+        # Convert to Excel bytes
+        excel_buffer = io.BytesIO()
+        df.to_excel(excel_buffer, index=False, engine='openpyxl')
+        excel_bytes = excel_buffer.getvalue()
+        
+        filename = object_name.split('/')[-1].replace('.arrow', '').replace('.csv', '') + '.xlsx'
+        
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"⚠️ data_upload_validate export_excel error for {object_name}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.delete("/delete_dataframe")
 async def delete_dataframe(object_name: str):
     """Delete a single saved dataframe"""

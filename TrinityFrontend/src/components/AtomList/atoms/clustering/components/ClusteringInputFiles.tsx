@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, CLUSTERING_API } from '@/lib/api';
@@ -43,22 +44,64 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
     const fetchFiles = async () => {
       setLoading(true);
       try {
-        const response = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+        // Build query parameters from localStorage 'env'
+        let query = '';
+        const envStr = localStorage.getItem('env');
+        if (envStr) {
+          try {
+            const env = JSON.parse(envStr);
+            query =
+              '?' +
+              new URLSearchParams({
+                client_id: env.CLIENT_ID || '',
+                app_id: env.APP_ID || '',
+                project_id: env.PROJECT_ID || '',
+                client_name: env.CLIENT_NAME || '',
+                app_name: env.APP_NAME || '',
+                project_name: env.PROJECT_NAME || ''
+              }).toString();
+          } catch {
+            /* ignore */
+          }
+        }
+        
+        const response = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
         
         if (response.ok) {
           const data = await response.json();
-          const files = Array.isArray(data.files) ? data.files : [];
-          setAvailableFiles(files);
+          // Filter to only show Arrow files, exclude CSV and XLSX files
+          let files = Array.isArray(data.files) ? data.files : [];
+          const arrowFiles = files.filter(f => 
+            f.object_name && f.object_name.endsWith('.arrow')
+          );
+          
+          // If settings.dataSource exists but not in list, add it manually
+          if (clusteringData.selectedDataFile && !arrowFiles.some(f => f.object_name === clusteringData.selectedDataFile)) {
+            arrowFiles.push({ 
+              object_name: clusteringData.selectedDataFile, 
+              csv_name: clusteringData.selectedDataFile 
+            });
+          }
+          
+          setAvailableFiles(arrowFiles);
         }
       } catch (error) {
-        // Error handling without console logs
+        // Fallback: if fetch fails but we have a selected file, use it
+        if (clusteringData.selectedDataFile) {
+          setAvailableFiles([{ 
+            object_name: clusteringData.selectedDataFile, 
+            csv_name: clusteringData.selectedDataFile 
+          }]);
+        } else {
+          setAvailableFiles([]);
+        }
       } finally {
         setLoading(false);
       }
     };
 
     fetchFiles();
-  }, []); // Only run once on mount
+  }, [clusteringData.selectedDataFile]); // Re-fetch if selectedDataFile changes
 
   // Manual fetch columns when file is selected - no useEffect loop
   const handleFileSelect = async (fileName: string) => {
@@ -75,21 +118,42 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
         const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
         const summaryData = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
         
-        // Auto-identify identifiers and measures based on data types (but don't auto-select)
-        const identifiers = summaryData
-          .filter((col: any) => {
-            const dataType = col.data_type?.toLowerCase() || '';
-            return (dataType === 'object' || dataType === 'category' || dataType === 'string' || 
-                   dataType === 'datetime64[ns]' || dataType === 'bool') && col.column;
-          })
-          .map((col: any) => col.column);
+        // Fetch identifiers and measures from column_classifier_configs
+        let identifiers: string[] = [];
+        let measures: string[] = [];
         
-        const measures = summaryData
-          .filter((col: any) => {
-            const dataType = col.data_type?.toLowerCase() || '';
-            return (dataType.includes('int') || dataType.includes('float') || dataType.includes('number')) && col.column;
-          })
-          .map((col: any) => col.column);
+        try {
+          // Pass file_name for file-specific lookup
+          const url = `${CLUSTERING_API}/identifiers-measures?file_name=${encodeURIComponent(fileName)}`;
+          const classifierResponse = await fetch(url);
+          
+          if (classifierResponse.ok) {
+            const classifierData = await classifierResponse.json();
+            identifiers = Array.isArray(classifierData.identifiers) ? classifierData.identifiers : [];
+            measures = Array.isArray(classifierData.measures) ? classifierData.measures : [];
+            
+            if (identifiers.length === 0 && measures.length === 0) {
+              toast({
+                title: 'No identifiers or measures found',
+                description: 'Column classifier configuration exists but contains no identifiers or measures.',
+                variant: 'destructive',
+              });
+            }
+          } else {
+            const errorText = await classifierResponse.text();
+            toast({
+              title: 'Failed to fetch identifiers and measures',
+              description: errorText || 'Column classifier configuration not found. Please configure it first.',
+              variant: 'destructive',
+            });
+          }
+        } catch (error) {
+          toast({
+            title: 'Error fetching identifiers and measures',
+            description: 'Failed to fetch column classifier configuration. Please try again or configure it first.',
+            variant: 'destructive',
+          });
+        }
         
         // Update store with selected file and available columns (but not selected ones)
         updateSettings(atomId, {

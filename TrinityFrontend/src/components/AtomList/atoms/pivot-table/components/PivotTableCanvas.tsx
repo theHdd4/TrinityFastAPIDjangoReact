@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -279,6 +279,7 @@ interface PivotTableCanvasProps {
   saveMessage: string | null;
   onRefresh: () => void;
   onSave: () => void;
+  onSaveAs: () => void;
   filterOptions: Record<string, string[]>;
   filterSelections: Record<string, string[]>;
   onGrandTotalsChange: (mode: 'off' | 'rows' | 'columns' | 'both') => void;
@@ -302,6 +303,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   saveMessage,
   onRefresh,
   onSave,
+  onSaveAs,
   filterOptions,
   filterSelections,
   onGrandTotalsChange,
@@ -363,28 +365,41 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   const grandTotalsMode = data.grandTotalsMode ?? 'off';
   const subtotalsMode = data.subtotalsMode ?? 'off';
 
-  const getAggregationLabel = (aggregation?: string) => {
+  const getAggregationLabel = (aggregation?: string, weightColumn?: string) => {
     const normalized = (aggregation ?? 'sum').toLowerCase();
+    let baseLabel: string;
+    
     switch (normalized) {
       case 'sum':
-        return 'Sum';
+        baseLabel = 'Sum';
+        break;
       case 'avg':
       case 'average':
       case 'mean':
-        return 'Average';
+        baseLabel = 'Average';
+        break;
       case 'count':
-        return 'Count';
+        baseLabel = 'Count';
+        break;
       case 'min':
-        return 'Min';
+        baseLabel = 'Min';
+        break;
       case 'max':
-        return 'Max';
+        baseLabel = 'Max';
+        break;
       case 'median':
-        return 'Median';
+        baseLabel = 'Median';
+        break;
+      case 'weighted_average':
+        baseLabel = weightColumn ? `Weighted Average (by ${weightColumn})` : 'Weighted Average';
+        break;
       default:
-        return normalized.length > 0
+        baseLabel = normalized.length > 0
           ? `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`
           : 'Value';
     }
+    
+    return baseLabel;
   };
 
   const valueFieldLabelMap = useMemo(() => {
@@ -394,7 +409,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       if (!item?.field) {
         return;
       }
-      const label = `${getAggregationLabel(item.aggregation)} of ${item.field}`;
+      const aggLabel = getAggregationLabel(item.aggregation, (item as any).weightColumn);
+      const label = `${aggLabel} of ${item.field}`;
       map.set(item.field, label);
       map.set(item.field.toLowerCase(), label);
     });
@@ -700,6 +716,57 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     [canonicalizeKey, valueColumns],
   );
 
+  const hasAutoSwitchedLayoutRef = useRef(false);
+
+  useEffect(() => {
+    const hasMultipleValueColumns = valueColumns.length > 1;
+    if (!hasMultipleValueColumns) {
+      hasAutoSwitchedLayoutRef.current = false;
+      return;
+    }
+
+    if (
+      reportLayout !== 'tabular' &&
+      !hasAutoSwitchedLayoutRef.current
+    ) {
+      hasAutoSwitchedLayoutRef.current = true;
+      onReportLayoutChange('tabular');
+    }
+  }, [onReportLayoutChange, reportLayout, valueColumns.length]);
+
+  const findRowKeyForField = useCallback((row: Record<string, any>, field: string): string | undefined => {
+    if (!row || !field) {
+      return undefined;
+    }
+    if (Object.prototype.hasOwnProperty.call(row, field)) {
+      return field;
+    }
+    const target = field.toLowerCase();
+    return Object.keys(row).find((key) => key.toLowerCase() === target);
+  }, []);
+
+  const getRowFieldValue = useCallback(
+    (row: Record<string, any>, field: string): any => {
+      const key = findRowKeyForField(row, field);
+      if (!key) {
+        return undefined;
+      }
+      return row[key];
+    },
+    [findRowKeyForField],
+  );
+
+  const findLabelForField = useCallback(
+    (labels: Array<{ field: string; value: any }> | undefined, field: string) => {
+      if (!labels || !field) {
+        return undefined;
+      }
+      const target = field.toLowerCase();
+      return labels.find((item) => (item.field ?? '').toLowerCase() === target);
+    },
+    [],
+  );
+
   const pivotRowLookup = useMemo(() => {
     if (!rowFields.length || pivotRows.length === 0) {
       return new Map<string, Record<string, any>>();
@@ -709,7 +776,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
     pivotRows.forEach((row) => {
       const key = rowFields
-        .map((field) => canonicalizeKey(row?.[field]))
+        .map((field) => canonicalizeKey(getRowFieldValue(row, field)))
         .join('|');
       if (!map.has(key)) {
         map.set(key, row);
@@ -717,7 +784,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     });
 
     return map;
-  }, [canonicalizeKey, pivotRows, rowFields]);
+  }, [canonicalizeKey, getRowFieldValue, pivotRows, rowFields]);
 
   const findMatchingPivotRow = useCallback(
     (labels: Array<{ field: string; value: any }>) => {
@@ -727,7 +794,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
       const key = rowFields
         .map((field) => {
-          const label = labels.find((item) => item.field === field);
+          const label = findLabelForField(labels, field);
           return canonicalizeKey(label?.value);
         })
         .join('|');
@@ -740,8 +807,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       return pivotRows.find((row) =>
         rowFields.every((field, index) => {
           const label = labels?.[index];
-          const rowValKey = canonicalizeKey(row?.[field]);
-          if (label && label.field === field) {
+          const rowValue = getRowFieldValue(row, field);
+          const rowValKey = canonicalizeKey(rowValue);
+          if (label && (label.field ?? '').toLowerCase() === field.toLowerCase()) {
             const labelKey = canonicalizeKey(label.value);
             return rowValKey === labelKey;
           }
@@ -749,7 +817,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         }),
       );
     },
-    [canonicalizeKey, pivotRowLookup, pivotRows, rowFields],
+    [canonicalizeKey, findLabelForField, getRowFieldValue, pivotRowLookup, pivotRows, rowFields],
   );
 
   const buildRecordForNode = useCallback(
@@ -831,16 +899,21 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
   const isRowGrandTotal = useCallback(
     (row: Record<string, any>) => {
-      const isTotalString = (value: unknown) =>
-        typeof value === 'string' && value.trim().toLowerCase().endsWith('total');
+      // Only detect Grand Total rows, not subtotal rows
+      // Grand Total rows contain "Grand Total" in their field values
+      const isGrandTotalString = (value: unknown) => {
+        if (typeof value !== 'string') return false;
+        const normalized = value.trim().toLowerCase();
+        return normalized.includes('grand total') || normalized === 'grandtotal';
+      };
       if (rowFields.length > 0) {
-        return rowFields.some((field) => isTotalString(row[field]));
+        return rowFields.some((field) => isGrandTotalString(row[field]));
       }
       const firstColumn = columns[0];
       if (!firstColumn) {
         return false;
       }
-      return isTotalString(row[firstColumn]);
+      return isGrandTotalString(row[firstColumn]);
     },
     [columns, rowFields]
   );
@@ -914,10 +987,191 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     ]
   );
 
-  const formatValue = (value: unknown) => {
+  const percentageMode = data.percentageMode ?? 'off';
+  const percentageDecimals = data.percentageDecimals ?? 2;
+
+  // Calculate totals for percentage calculations
+  const calculateTotals = useMemo(() => {
+    if (percentageMode === 'off' || !hasResults) {
+      return { rowTotals: new Map(), columnTotals: new Map(), grandTotal: 0, hierarchyRowTotals: new Map() };
+    }
+
+    const rowTotals = new Map<string, number>();
+    const columnTotals = new Map<string, number>();
+    const hierarchyRowTotals = new Map<string, number>();
+    let grandTotal = 0;
+
+    // Filter out "Grand Total" columns from percentage calculations
+    // Grand Total columns are calculated columns and shouldn't be included in totals
+    const isGrandTotalColumn = (column: string) => {
+      const normalized = column.toLowerCase();
+      return normalized.includes('grand total') || normalized === 'grandtotal';
+    };
+
+    // For row totals: exclude Grand Total columns
+    const columnsForRowCalculation = valueColumns.filter((col) => !isGrandTotalColumn(col));
+    
+    // For column totals: include Grand Total columns only when in column percentage mode
+    // (so we can calculate percentages for them, but exclude them from row totals)
+    const columnsForColumnCalculation = percentageMode === 'column' 
+      ? valueColumns  // Include all columns including Grand Total columns
+      : columnsForRowCalculation;  // Exclude Grand Total columns for other modes
+
+    // Calculate row totals and column totals from raw pivot data
+    pivotRows.forEach((row) => {
+      // Check if this is a Grand Total row - exclude it from column totals calculation
+      // Grand Total rows contain the sum of all rows, so including them would double-count
+      const isGrandTotalRow = isRowGrandTotal(row);
+      
+      let rowTotal = 0;
+      const rowKey = rowFields
+        .map((field) => canonicalizeKey(getRowFieldValue(row, field)))
+        .join('|');
+
+      // Additional check: only check for "grand total" in rowKey (not just "total" which could be a subtotal)
+      const rowKeyLower = rowKey.toLowerCase();
+      const isRowKeyGrandTotal = rowKeyLower.includes('grand total') || 
+                                rowKeyLower.includes('grandtotal');
+      const isActuallyGrandTotalRow = isGrandTotalRow || isRowKeyGrandTotal;
+
+      // Calculate row totals: only sum actual value columns, exclude Grand Total columns
+      columnsForRowCalculation.forEach((column) => {
+        const canonicalColumn = canonicalizeKey(column);
+        const cellValue =
+          row[column] ??
+          (canonicalColumn && canonicalColumn !== column ? row[canonicalColumn] : undefined);
+
+        if (typeof cellValue === 'number' && Number.isFinite(cellValue)) {
+          rowTotal += cellValue;
+        }
+      });
+
+      // Calculate column totals: include Grand Total columns for column percentage mode
+      // But exclude Grand Total rows to avoid double-counting
+      if (!isActuallyGrandTotalRow) {
+        columnsForColumnCalculation.forEach((column) => {
+          const canonicalColumn = canonicalizeKey(column);
+          const cellValue =
+            row[column] ??
+            (canonicalColumn && canonicalColumn !== column ? row[canonicalColumn] : undefined);
+
+          if (typeof cellValue === 'number' && Number.isFinite(cellValue)) {
+            const currentColumnTotal = columnTotals.get(column) || 0;
+            columnTotals.set(column, currentColumnTotal + cellValue);
+            
+            // Only add to grandTotal if it's not a Grand Total column
+            // (Grand Total columns are calculated, not source data)
+            if (!isGrandTotalColumn(column)) {
+              grandTotal += cellValue;
+            }
+          }
+        });
+      }
+
+      if (rowTotal > 0) {
+        rowTotals.set(rowKey, rowTotal);
+      }
+    });
+
+    // Also calculate from hierarchy nodes for hierarchical layouts
+    const rawHierarchy = Array.isArray(data.pivotHierarchy) ? data.pivotHierarchy : [];
+    if (rawHierarchy.length > 0) {
+      const isGrandTotalColumn = (column: string) => {
+        const normalized = column.toLowerCase();
+        return normalized.includes('grand total') || normalized === 'grandtotal';
+      };
+      const columnsForCalculation = valueColumns.filter((col) => !isGrandTotalColumn(col));
+
+      rawHierarchy.forEach((raw: any) => {
+        const nodeKey = raw?.key;
+        if (!nodeKey) return;
+        
+        let nodeRowTotal = 0;
+        const nodeValues = raw?.values ?? {};
+        // Only sum actual value columns, exclude Grand Total columns
+        columnsForCalculation.forEach((column) => {
+          const value = nodeValues[column];
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            nodeRowTotal += value;
+          }
+        });
+        if (nodeRowTotal > 0) {
+          hierarchyRowTotals.set(nodeKey, nodeRowTotal);
+        }
+      });
+    }
+
+    return { rowTotals, columnTotals, grandTotal, hierarchyRowTotals };
+  }, [percentageMode, pivotRows, valueColumns, rowFields, hasResults, canonicalizeKey, getRowFieldValue, data.pivotHierarchy, isRowGrandTotal]);
+
+  const getPercentageValue = useCallback(
+    (cellValue: unknown, rowKey: string, column: string, row?: Record<string, any>): number | null => {
+      if (percentageMode === 'off') {
+        return null;
+      }
+
+      if (typeof cellValue !== 'number' || !Number.isFinite(cellValue)) {
+        return null;
+      }
+
+      const { rowTotals, columnTotals, grandTotal, hierarchyRowTotals } = calculateTotals;
+
+      // Check if this is a Grand Total column
+      const isGrandTotalCol = column?.toLowerCase().includes('grand total') || column?.toLowerCase() === 'grandtotal';
+      
+      // Check if this is a Grand Total row - use both row check and rowKey check for robustness
+      // Only treat as Grand Total if it contains "Grand Total", not just "Total" (which could be a subtotal)
+      const isGrandTotalRow = row ? isRowGrandTotal(row) : false;
+      const rowKeyLower = rowKey?.toLowerCase() || '';
+      const isRowKeyGrandTotal = rowKeyLower.includes('grand total') || 
+                                 rowKeyLower.includes('grandtotal');
+      const isActuallyGrandTotalRow = isGrandTotalRow || isRowKeyGrandTotal;
+
+      if (percentageMode === 'row') {
+        // Try hierarchy row totals first, then regular row totals
+        const rowTotal = hierarchyRowTotals.get(rowKey) || rowTotals.get(rowKey);
+        if (rowTotal && rowTotal !== 0) {
+          // For Grand Total column in row percentage mode, it should always be 100%
+          if (isGrandTotalCol) {
+            return 100;
+          }
+          return (cellValue / rowTotal) * 100;
+        }
+      } else if (percentageMode === 'column') {
+        if (isActuallyGrandTotalRow) {
+          return 100;
+        }
+        
+        // For regular rows: calculate percentage of column total
+        const columnTotal = columnTotals.get(column);
+        if (columnTotal && columnTotal !== 0) {
+          return (cellValue / columnTotal) * 100;
+        }
+      } else if (percentageMode === 'grand_total') {
+        if (grandTotal !== 0) {
+          return (cellValue / grandTotal) * 100;
+        }
+      }
+
+      return null;
+    },
+    [percentageMode, calculateTotals, isRowGrandTotal]
+  );
+
+  const formatValue = useCallback(
+    (value: unknown, rowKey?: string, column?: string, row?: Record<string, any>) => {
     if (value === null || value === undefined) {
       return '-';
     }
+
+      // Check if we should show percentage
+      if (percentageMode !== 'off' && rowKey && column && typeof value === 'number') {
+        const percentage = getPercentageValue(value, rowKey, column, row);
+        if (percentage !== null) {
+          return `${percentage.toFixed(percentageDecimals)}%`;
+        }
+      }
+
     if (typeof value === 'number') {
       return Number.isFinite(value) ? value.toLocaleString() : '-';
     }
@@ -925,7 +1179,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       return value.toLocaleString();
     }
     return String(value);
-  };
+    },
+    [percentageMode, percentageDecimals, getPercentageValue]
+  );
 
   const renderLoadingRow = (colSpan: number) => (
     <TableRow style={{ borderColor }}>
@@ -1040,6 +1296,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       (canonicalColumn && canonicalColumn !== column
                         ? row.record[canonicalColumn]
                         : undefined);
+                    
+                    const rowKey = rowFields
+                      .map((field) => canonicalizeKey(getRowFieldValue(row.record, field)))
+                      .join('|');
 
                     return (
                       <TableCell
@@ -1052,7 +1312,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                           isRowHeader: false,
                         })}
                       >
-                        {formatValue(rawValue)}
+                        {formatValue(rawValue, rowKey, column, row.record)}
                       </TableCell>
                     );
                   })}
@@ -1163,7 +1423,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                         <span>{row.label}</span>
                       </div>
                     </TableCell>
-                    {valueColumns.map((column) => (
+                    {valueColumns.map((column) => {
+                      const rowKey = row.node.key;
+                      return (
                       <TableCell
                         key={`${row.node.key}-${column}`}
                         className="text-right tabular-nums"
@@ -1174,9 +1436,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                           isRowHeader: false,
                         })}
                       >
-                        {formatValue(row.record[column])}
+                          {formatValue(row.record[column], rowKey, column, row.record)}
                       </TableCell>
-                    ))}
+                      );
+                    })}
                   </TableRow>
                 );
               })}
@@ -1290,7 +1553,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       </TableCell>
                     );
                   })}
-                  {valueColumns.map((column) => (
+                  {valueColumns.map((column) => {
+                    const rowKey = row.node.key;
+                    return (
                     <TableCell
                       key={`${row.node.key}-${column}-${row.isTotal ? 'total' : 'value'}`}
                       className="text-right tabular-nums font-medium"
@@ -1301,9 +1566,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                         isRowHeader: false,
                       })}
                     >
-                      {formatValue(row.record[column])}
+                        {formatValue(row.record[column], rowKey, column, row.record)}
                     </TableCell>
-                  ))}
+                    );
+                  })}
                 </TableRow>
               ))}
         </TableBody>
@@ -1629,7 +1895,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         if (displayValue === undefined) {
           displayValue = '';
         }
-        if (node.children.length > 0 && index === node.level && typeof displayValue === 'string') {
+        // Only add "Total" suffix if subtotals are enabled
+        if (subtotalsMode !== 'off' && node.children.length > 0 && index === node.level && typeof displayValue === 'string') {
           const trimmed = displayValue.trim();
           displayValue = trimmed.length > 0 && !trimmed.toLowerCase().endsWith('total')
             ? `${trimmed} Total`
@@ -1655,8 +1922,26 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     };
 
     hierarchyTree.roots.forEach((root) => traverse(root, {}));
+    
+    // Filter out subtotal rows when subtotals are off
+    if (subtotalsMode === 'off') {
+      return rows.filter((row) => {
+        // Check if any field value ends with "Total" (subtotal indicator)
+        // But keep Grand Total rows (rows where all fields might be "Grand Total")
+        const hasSubtotal = rowFields.some((field) => {
+          const value = row.record[field];
+          if (typeof value === 'string') {
+            const lower = value.toLowerCase().trim();
+            return lower.endsWith('total') && !lower.includes('grand total') && lower !== 'grand total';
+          }
+          return false;
+        });
+        return !hasSubtotal;
+      });
+    }
+    
     return rows;
-  }, [buildRecordForNode, canonicalizeKey, hierarchyTree, pivotRows, rowFields, valueColumns]);
+  }, [buildRecordForNode, canonicalizeKey, hierarchyTree, pivotRows, rowFields, valueColumns, subtotalsMode]);
 
   type LayoutOption = { id: 'compact' | 'outline' | 'tabular'; label: string };
 
@@ -1671,6 +1956,15 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
   const canUseHierarchicalLayouts = rowFields.length > 0 && hierarchyTree.roots.length > 0;
 
+  // Calculate max height for scrollable area (approximately 20 rows)
+  const tableMaxHeight = useMemo(() => {
+    const headerRowCount = columnHeaderRows.length > 0 ? columnHeaderRows.length : 1;
+    const headerHeight = headerRowCount * 50; // ~50px per header row
+    const rowHeight = 40; // ~40px per data row
+    const maxVisibleRows = 20;
+    return headerHeight + (maxVisibleRows * rowHeight);
+  }, [columnHeaderRows.length]);
+
   React.useEffect(() => {
     if (!canUseHierarchicalLayouts && (reportLayout === 'compact' || reportLayout === 'outline')) {
       onReportLayoutChange('tabular');
@@ -1678,8 +1972,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   }, [canUseHierarchicalLayouts, onReportLayoutChange, reportLayout]);
 
   return (
-    <div className="w-full h-full bg-[#F3F3F3] overflow-auto">
-      <div className="p-3 space-y-3">
+    <div className="w-full h-full bg-[#F3F3F3] flex flex-col overflow-hidden">
+      <div className="p-3 space-y-3 flex-shrink-0">
         <Card className="bg-white border border-[#D9D9D9] rounded-md shadow-sm">
           <div className="px-4 py-3">
             <div className="flex w-full flex-nowrap items-center gap-3 sm:gap-4 overflow-x-auto">
@@ -1764,6 +2058,52 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                             onSelect={(event) => {
                               event.preventDefault();
                               onGrandTotalsChange(option.id as 'off' | 'rows' | 'columns' | 'both');
+                            }}
+                            className={cn(
+                              'text-xs py-2 flex items-center justify-between',
+                              isActive ? 'font-semibold text-[#1A73E8]' : ''
+                            )}
+                          >
+                            {option.label}
+                            {isActive && (
+                              <span className="text-[10px] uppercase tracking-wide">
+                                Selected
+                              </span>
+                            )}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
+                      >
+                        <span className="flex flex-col leading-tight text-left whitespace-normal">
+                          <span>Show</span>
+                          <span>Values As</span>
+                        </span>
+                        <ChevronDown className="w-3 h-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-56 py-1">
+                      {[
+                        { id: 'off', label: 'No Calculation' },
+                        { id: 'row', label: '% of Row Total' },
+                        { id: 'column', label: '% of Column Total' },
+                        { id: 'grand_total', label: '% of Grand Total' },
+                      ].map((option) => {
+                        const isActive = percentageMode === option.id;
+                        return (
+                          <DropdownMenuItem
+                            key={option.id}
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              onDataChange({ percentageMode: option.id as 'off' | 'row' | 'column' | 'grand_total' });
                             }}
                             className={cn(
                               'text-xs py-2 flex items-center justify-between',
@@ -1985,14 +2325,38 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       </div>
             <div className="flex items-center gap-2">
               <Button
-                variant="default"
-                size="sm"
                 onClick={onSave}
                 disabled={isSaving || !hasResults}
-                className="h-8 px-3 text-[12px] font-semibold bg-[#1A73E8] hover:bg-[#1455ad] text-white"
+                className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
               >
-                {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                Save
+                {isSaving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save</span>
+                  </>
+                )}
+              </Button>
+              <Button
+                onClick={onSaveAs}
+                disabled={isSaving || !hasResults}
+                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4"
+              >
+                {isSaving ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    <span>Save As</span>
+                  </>
+                )}
               </Button>
               <Button
                 variant="outline"
@@ -2036,11 +2400,14 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
             </div>
           )}
         </Card>
+      </div>
 
+      <div className="flex-1 min-h-0 p-3 pt-0">
+        <div className="bg-white border border-[#D9D9D9] rounded-md overflow-hidden shadow-sm h-full flex flex-col">
         {filters.length > 0 && (
-          <div className="bg-card border border-border rounded-lg shadow-sm">
+            <div className="bg-card border-b border-border flex-shrink-0">
             <div className="bg-accent/5 border-b border-border px-4 py-2.5">
-              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                 <div className="flex items-center gap-1.5 bg-[#FFEED9] px-2 py-1 rounded border border-[#E0E0E0]">
                   <Filter className="w-3.5 h-3.5 text-primary" />
                   <span className="text-xs font-semibold text-[#C25700]">Filters</span>
@@ -2201,9 +2568,14 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
               </div>
             </div>
           )}
-
-        <div className="bg-white border border-[#D9D9D9] rounded-md overflow-hidden shadow-sm">
-          {renderCurrentLayout()}
+          <div 
+            className="flex-1 min-h-0 overflow-y-auto overflow-x-auto"
+            style={{
+              maxHeight: `${tableMaxHeight}px`
+            }}
+          >
+            {renderCurrentLayout()}
+          </div>
         </div>
       </div>
     </div>

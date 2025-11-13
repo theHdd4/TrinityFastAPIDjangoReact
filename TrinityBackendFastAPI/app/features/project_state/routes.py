@@ -548,11 +548,34 @@ async def save_atom_list_configuration(
                 if 'positive_constraints' in atom_settings:
                     logger.info(f"🔍 DEBUG: Found positive_constraints in {atom_id}: {atom_settings['positive_constraints']}")
                 
+                # Check for pivotSettings and pivotResults
+                if 'pivotSettings' in atom_settings:
+                    pivot_settings = atom_settings.get('pivotSettings', {})
+                    pivot_results = pivot_settings.get('pivotResults', [])
+                    logger.info(f"🔍 DEBUG: Found pivotSettings in {atom_id}, pivotResults length: {len(pivot_results) if isinstance(pivot_results, list) else 'N/A'}")
+                
                 # Clean up dataframe-operations data (similar to Django backend)
+                # Note: We strip tableData and data (large datasets), but preserve pivotSettings
+                # including pivotResults, which is needed for session restoration
+                # If pivotResults becomes too large, frontend can reload from backend cache
                 if atom.get("atomId") == "dataframe-operations":
+                    # Check pivotResults before stripping
+                    pivot_results_before = None
+                    if 'pivotSettings' in atom_settings:
+                        pivot_results_before = atom_settings.get('pivotSettings', {}).get('pivotResults', [])
+                    
                     atom_settings = {
                         k: v for k, v in atom_settings.items() if k not in {"tableData", "data"}
                     }
+                    # pivotResults is preserved as part of pivotSettings
+                    
+                    # Verify pivotResults is still present after stripping
+                    if pivot_results_before is not None and 'pivotSettings' in atom_settings:
+                        pivot_results_after = atom_settings.get('pivotSettings', {}).get('pivotResults', [])
+                        if len(pivot_results_after) != len(pivot_results_before) if isinstance(pivot_results_before, list) and isinstance(pivot_results_after, list) else pivot_results_after != pivot_results_before:
+                            logger.warning(f"⚠️ WARNING: pivotResults may have been lost during sanitization for {atom_id}")
+                        else:
+                            logger.info(f"✅ Verified: pivotResults preserved for {atom_id} ({len(pivot_results_after) if isinstance(pivot_results_after, list) else 'N/A'} items)")
                 
                 # Generate version hash
                 version_hash = hashlib.sha256(

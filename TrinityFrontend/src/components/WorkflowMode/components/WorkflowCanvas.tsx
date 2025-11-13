@@ -50,14 +50,15 @@ interface WorkflowCanvasProps {
     position?: number;
   }>;
   onStandaloneCardRemove?: (standaloneCardId: string) => void;
-  onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string) => void;
-  onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string) => void;
+  onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string, atomIndex: number) => void;
+  onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string, atomIndex: number) => void;
   onMoleculeRemove?: (moleculeId: string) => void;
   onMoleculeRename?: (moleculeId: string, newName: string) => void;
   onMoleculeAdd?: (molecule: any) => void;
   onMoleculeReplace?: (oldId: string, newMolecule: any) => void; // NEW: Replace molecule in parent state
   onMoleculePositionsUpdate?: (positions: { moleculeId: string; position: { x: number; y: number } }[]) => void; // NEW: Update molecule positions
   onInsertMolecule?: (referenceMoleculeId: string, position: 'left' | 'right') => void; // NEW: Insert molecule before/after another molecule
+  onAtomOrderChange?: (moleculeId: string, newOrder: string[]) => void;
   isLibraryVisible?: boolean;
   isRightPanelVisible?: boolean;
   isAtomLibraryVisible?: boolean;
@@ -264,6 +265,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   onMoleculeReplace,
   onMoleculePositionsUpdate,
   onInsertMolecule,
+  onAtomOrderChange,
   isLibraryVisible = true,
   isRightPanelVisible = true,
   isAtomLibraryVisible = false,
@@ -374,9 +376,27 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
   const onAtomReorder = useCallback((id: string, order: string[]) => {
     setNodes(ns =>
-      ns.map(node => (node.id === id ? { ...node, data: { ...node.data, atomOrder: order } } : node))
+      ns.map(node =>
+        node.id === id
+          ? {
+              ...node,
+              data: {
+                ...node.data,
+                atomOrder: order,
+                atoms:
+                  Array.isArray(node.data.atoms) && node.data.atoms.length === order.length
+                    ? [...order]
+                    : order
+              }
+            }
+          : node
+      )
     );
-  }, []);
+
+    if (onAtomOrderChange) {
+      onAtomOrderChange(id, order);
+    }
+  }, [onAtomOrderChange]);
 
   const onAddToContainer = useCallback((containerId: string, molecule: any) => {
     setNodes(ns =>
