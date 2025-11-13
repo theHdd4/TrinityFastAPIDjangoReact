@@ -26,16 +26,21 @@ class TaskSubmission:
     status: str
     result: Any | None = None
     metadata: Dict[str, Any] | None = None
+    detail: str | None = None
 
     def as_dict(self, *, embed_result: bool = True) -> Dict[str, Any]:
         if embed_result and isinstance(self.result, dict):
             payload = dict(self.result)
             payload.setdefault("task_id", self.task_id)
             payload.setdefault("task_status", self.status)
+            if self.detail and "detail" not in payload:
+                payload["detail"] = self.detail
             return payload
         response: Dict[str, Any] = {"task_id": self.task_id, "task_status": self.status}
         if embed_result and self.result is not None:
             response["result"] = self.result
+        if self.detail is not None:
+            response["detail"] = self.detail
         return response
 
 
@@ -98,6 +103,7 @@ class CeleryTaskClient:
                     status="failure",
                     result=None,
                     metadata=task_metadata,
+                    detail=str(exc),
                 )
 
         options: Dict[str, Any] = {"task_id": task_id}
