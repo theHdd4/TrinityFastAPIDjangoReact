@@ -1,4 +1,5 @@
 import { CHART_MAKER_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 
 export interface UploadCSVResponse {
   file_id: string;
@@ -13,18 +14,22 @@ export interface UploadCSVResponse {
 export interface ColumnResponse {
   numeric_columns: string[];
   categorical_columns: string[];
+  file_id?: string;
 }
 
 export interface AllColumnsResponse {
   columns: string[];
+  file_id?: string;
 }
 
 export interface UniqueValuesResponse {
   values: Record<string, string[]>;
+  file_id?: string;
 }
 
 export interface FilterResponse {
   filtered_data: Record<string, any>[];
+  file_id?: string;
 }
 
 export interface ChartTrace {
@@ -85,7 +90,8 @@ class ChartMakerApiService {
       throw new Error(error.detail || 'Failed to upload file');
     }
 
-    return response.json();
+    const payload = await response.json();
+    return resolveTaskResponse<UploadCSVResponse>(payload);
   }
 
   async uploadCSV(file: File): Promise<UploadCSVResponse> {
@@ -113,7 +119,8 @@ class ChartMakerApiService {
       throw new Error(error.detail || 'Failed to load saved dataframe');
     }
 
-    return response.json();
+    const payload = await response.json();
+    return resolveTaskResponse<UploadCSVResponse>(payload);
   }
 
   async getAllColumns(fileId: string): Promise<AllColumnsResponse> {
@@ -124,7 +131,8 @@ class ChartMakerApiService {
       throw new Error(error.detail || 'Failed to get all columns');
     }
 
-    return response.json();
+    const payload = await response.json();
+    return resolveTaskResponse<AllColumnsResponse>(payload);
   }
 
   async getColumns(fileId: string): Promise<ColumnResponse> {
@@ -135,7 +143,8 @@ class ChartMakerApiService {
       throw new Error(error.detail || 'Failed to get columns');
     }
 
-    return response.json();
+    const payload = await response.json();
+    return resolveTaskResponse<ColumnResponse>(payload);
   }
 
   async getUniqueValues(fileId: string, columns: string[]): Promise<UniqueValuesResponse> {
@@ -152,8 +161,8 @@ class ChartMakerApiService {
       throw new Error(error.detail || 'Failed to get unique values');
     }
 
-    const result = await response.json();
-    return result;
+    const payload = await response.json();
+    return resolveTaskResponse<UniqueValuesResponse>(payload);
   }
 
   async filterData(fileId: string, filters: Record<string, string[]>): Promise<FilterResponse> {
@@ -170,10 +179,11 @@ class ChartMakerApiService {
       throw new Error(error.detail || 'Failed to filter data');
     }
 
-    return response.json();
+    const payload = await response.json();
+    return resolveTaskResponse<FilterResponse>(payload);
   }
 
-  async getSampleData(fileId: string, n: number = 10): Promise<{ sample_data: Record<string, any>[] }> {
+  async getSampleData(fileId: string, n: number = 10): Promise<{ file_id?: string; sample_data: Record<string, any>[] }> {
     const response = await fetch(`${this.baseUrl}/sample-data/${fileId}?n=${n}`);
     
     if (!response.ok) {
@@ -181,7 +191,8 @@ class ChartMakerApiService {
       throw new Error(error.detail || 'Failed to get sample data');
     }
 
-    return response.json();
+    const payload = await response.json();
+    return resolveTaskResponse<{ file_id?: string; sample_data: Record<string, any>[] }>(payload);
   }
 
   async generateChart(request: ChartRequest): Promise<ChartResponse> {
@@ -198,7 +209,8 @@ class ChartMakerApiService {
       throw new Error(error.detail || 'Failed to generate chart');
     }
 
-    return response.json();
+    const payload = await response.json();
+    return resolveTaskResponse<ChartResponse>(payload);
   }
 }
 
