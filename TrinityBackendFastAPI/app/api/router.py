@@ -29,6 +29,7 @@ from app.features.build_autoregressive.endpoint import router as autoregressive_
 from app.features.molecule.routes import router as molecule_router
 from app.features.laboratory.endpoint import router as laboratory_router
 from app.features.pivot_table.endpoint import router as pivot_table_router
+from app.features.task_queue.endpoint import router as task_queue_router
 
 api_router = APIRouter()
 text_router = APIRouter()
@@ -66,6 +67,7 @@ api_router.include_router(scenario_planner_router)
 api_router.include_router(correlation_router)
 api_router.include_router(images_router)
 api_router.include_router(exhibition_router)
+api_router.include_router(task_queue_router)
 
 # Machine learning and model routers
 api_router.include_router(build_model_router)

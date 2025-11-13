@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket
 
 from .models import LaboratoryAtomResponse, LaboratoryCardRequest, LaboratoryCardResponse
+from .websocket import handle_laboratory_sync
 
 router = APIRouter()
 
@@ -36,3 +37,26 @@ async def create_laboratory_card(payload: LaboratoryCardRequest) -> LaboratoryCa
         molecule_id=payload.molecule_id,
         molecule_title=None,
     )
+
+
+@router.websocket("/sync/{client_name}/{app_name}/{project_name}")
+async def laboratory_sync_websocket(
+    websocket: WebSocket,
+    client_name: str,
+    app_name: str,
+    project_name: str
+):
+    """
+    WebSocket endpoint for real-time collaborative Laboratory Mode synchronization.
+    
+    Handles:
+    - Real-time state broadcasting to all connected clients
+    - Debounced persistence to MongoDB
+    - Version tracking and conflict detection
+    
+    Path parameters:
+    - client_name: Client identifier
+    - app_name: Application identifier
+    - project_name: Project identifier
+    """
+    await handle_laboratory_sync(websocket, client_name, app_name, project_name)

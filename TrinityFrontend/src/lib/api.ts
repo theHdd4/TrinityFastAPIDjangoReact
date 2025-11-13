@@ -183,6 +183,10 @@ export const PIVOT_API =
   normalizeUrl(import.meta.env.VITE_PIVOT_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/pivot`;
 
+export const TASK_QUEUE_API =
+  normalizeUrl(import.meta.env.VITE_TASK_QUEUE_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/task-queue`;
+
 export const BUILD_MODEL_API =
   normalizeUrl(import.meta.env.VITE_BUILD_MODEL_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`;
