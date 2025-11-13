@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,13 +12,19 @@ import StreamWorkflowPreview from './StreamWorkflowPreview';
 import StreamStepMonitor from './StreamStepMonitor';
 import StreamStepApproval from './StreamStepApproval';
 import { autoSaveStepResult } from '../TrinityAI/handlers/utils';
+import { listMemoryChats, saveMemoryChat, deleteMemoryChat } from '@/lib/trinityMemory';
+import type { MemoryChatResponse } from '@/lib/trinityMemory';
 import { AgentModeProvider, useAgentMode } from './context/AgentModeContext';
 
 const BRAND_GREEN = '#50C878';
 const BRAND_PURPLE = '#7C3AED';
 
-// FastAPI base URL
-const FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || 'http://localhost:8002';
+// FastAPI base URL - use same logic as api.ts for port detection
+const isDevStack = typeof window !== 'undefined' && window.location.port === '8081';
+const aiPort = import.meta.env.VITE_AI_PORT || (isDevStack ? '8005' : '8002');
+const hostIp = import.meta.env.VITE_HOST_IP || 'localhost';
+const FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || `http://${hostIp}:${aiPort}`;
+const MEMORY_API_BASE = `${(FASTAPI_BASE_URL || '').replace(/\/$/, '')}/trinityai`;
 
 // Add CSS for fade-in animation and slow pulse
 const fadeInStyle = `
@@ -112,6 +119,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [isResizing, setIsResizing] = useState(false);
   const [baseFontSize] = useState(14);
   const [smallFontSize] = useState(12);
+  const isCompact = panelWidth <= 420;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -122,6 +130,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [availableFiles, setAvailableFiles] = useState<any[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [showWorkflowPreview, setShowWorkflowPreview] = useState(false);
+  const [showStepApproval, setShowStepApproval] = useState(false);
+  const [workflowPlan, setWorkflowPlan] = useState<any>(null);
+  const [executionSteps, setExecutionSteps] = useState<any[]>([]);
   
   // Workflow state (for current active workflow only)
   const [currentWorkflowMessageId, setCurrentWorkflowMessageId] = useState<string | null>(null);
@@ -130,6 +142,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [completedStepNumber, setCompletedStepNumber] = useState(0);
   const [isAutoRunning, setIsAutoRunning] = useState(false);
   const autoRunRef = useRef(false);
+  const memoryPersistSkipRef = useRef(true);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [isMemoryLoading, setIsMemoryLoading] = useState(true);
   const { isAgentMode, setAgentMode } = useAgentMode();
   const agentModeTrackerRef = useRef<{ workflowSequences: Set<string>; stepMessageIds: Set<string> }>({
     workflowSequences: new Set<string>(),
@@ -290,116 +305,218 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     });
   }, [isAgentMode, isAutoRunning, messages, wsConnection]);
   
-  // Create new chat
-  const createNewChat = () => {
+  const toSerializableMessage = useCallback((msg: Message) => ({
+    ...msg,
+    timestamp: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : msg.timestamp,
+  }), []);
+
+  const createNewChat = useCallback(async () => {
     const newChatId = `stream_chat_${Date.now()}`;
     const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
+    const createdAt = new Date();
+
+    const initialMessage: Message = {
+      id: `welcome-${Date.now()}`,
+      content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+      sender: 'ai',
+      timestamp: createdAt,
+    };
+
     const newChat: Chat = {
       id: newChatId,
       title: 'New Trinity AI Chat',
-      messages: [
-        {
-          id: '1',
-          content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
-          sender: 'ai',
-          timestamp: new Date()
-        }
-      ],
-      createdAt: new Date(),
-      sessionId: newSessionId
+      messages: [initialMessage],
+      createdAt,
+      sessionId: newSessionId,
     };
-    
+
+    memoryPersistSkipRef.current = true;
     setChats(prev => [newChat, ...prev]);
     setCurrentChatId(newChatId);
-    setMessages(newChat.messages);
+    setMessages([initialMessage]);
     setCurrentSessionId(newSessionId);
-    
-    // Close any existing WebSocket when creating new chat
+
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
       wsConnection.close();
       setWsConnection(null);
     }
     setCurrentWorkflowMessageId(null);
-  };
-  
-  // Load chats from localStorage on mount
-  useEffect(() => {
-    const loadChats = () => {
-    const savedChats = localStorage.getItem('trinity-ai-chats');
-    const savedCurrentChatId = localStorage.getItem('trinity-ai-current-chat-id');
-      
-      if (savedChats) {
-        try {
-          const parsedChats = JSON.parse(savedChats);
-          // Convert date strings back to Date objects
-          const chatsWithDates = parsedChats.map((chat: any) => ({
-            ...chat,
-            createdAt: new Date(chat.createdAt),
-            messages: chat.messages.map((msg: any) => ({
-              ...msg,
-              timestamp: new Date(msg.timestamp)
-            }))
-          }));
-          
-          setChats(chatsWithDates);
-          
-          if (savedCurrentChatId && chatsWithDates.find((c: Chat) => c.id === savedCurrentChatId)) {
-            setCurrentChatId(savedCurrentChatId);
-            const currentChat = chatsWithDates.find((c: Chat) => c.id === savedCurrentChatId);
-            if (currentChat) {
-              setMessages(currentChat.messages);
-            }
-          } else if (chatsWithDates.length > 0) {
-            setCurrentChatId(chatsWithDates[0].id);
-            setMessages(chatsWithDates[0].messages);
-          } else {
-            createNewChat();
-          }
-        } catch (e) {
-          console.error('Failed to load chats:', e);
-          createNewChat();
-        }
+
+    try {
+      const result = await saveMemoryChat(MEMORY_API_BASE, newChatId, {
+        messages: newChat.messages.map(toSerializableMessage),
+        metadata: {
+          title: newChat.title,
+          createdAt: createdAt.toISOString(),
+          sessionId: newSessionId,
+        },
+        append: false,
+      });
+      memoryPersistSkipRef.current = true;
+      if (result === null) {
+        setMemoryError('Memory service unavailable - chat not persisted.');
       } else {
-        createNewChat();
+        setMemoryError(null);
       }
+    } catch (error) {
+      console.error('Failed to persist new chat:', error);
+      setMemoryError('Unable to save chat history to server.');
+    }
+  }, [MEMORY_API_BASE, toSerializableMessage, wsConnection]);
+
+  const mapRecordToChat = useCallback((record: MemoryChatResponse): Chat => {
+    const metadata = record.metadata || {};
+    const createdAt = metadata.createdAt ? new Date(metadata.createdAt) : new Date(record.updatedAt);
+    const sessionId =
+      metadata.sessionId ||
+      `session_${createdAt.getTime()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    const messages = (record.messages || []).map((msg, index) => ({
+      ...msg,
+      id: msg.id || `mem-${record.chatId}-${index}`,
+      timestamp:
+        msg.timestamp instanceof Date
+          ? msg.timestamp
+          : msg.timestamp
+          ? new Date(msg.timestamp as string)
+          : new Date(createdAt.getTime() + index),
+    })) as Message[];
+
+    return {
+      id: record.chatId,
+      title: (metadata.title as string) || 'Trinity AI Chat',
+      messages,
+      createdAt,
+      sessionId,
+    };
+  }, []);
+
+  const persistChatToMemory = useCallback(async (chat: Chat) => {
+    try {
+      const result = await saveMemoryChat(MEMORY_API_BASE, chat.id, {
+        messages: chat.messages.map(toSerializableMessage),
+        metadata: {
+          title: chat.title,
+          createdAt: chat.createdAt.toISOString(),
+          sessionId: chat.sessionId,
+        },
+        append: false,
+      });
+      if (result === null) {
+        setMemoryError('Memory service unavailable - chat not persisted.');
+      } else {
+        setMemoryError(null);
+      }
+    } catch (error) {
+      console.error('Failed to sync chat history:', error);
+      setMemoryError('Unable to sync chat history to server.');
+    }
+  }, [MEMORY_API_BASE, toSerializableMessage]);
+  
+  useEffect(() => {
+    // Set initial welcome message immediately so UI is never blank
+    const initialMessage: Message = {
+      id: '1',
+      content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+      sender: 'ai',
+      timestamp: new Date()
     };
     
+    // Only set if messages are empty (first load)
+    setMessages(prev => {
+      if (prev.length === 0) {
+        return [initialMessage];
+      }
+      return prev;
+    });
+
+    const loadChats = async () => {
+      setIsMemoryLoading(true);
+      try {
+        const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+
+        if (records.length > 0) {
+          const mappedChats: Chat[] = records.map(record => mapRecordToChat(record));
+          memoryPersistSkipRef.current = true;
+          setChats(mappedChats);
+
+          const activeChat = mappedChats[0];
+          setCurrentChatId(activeChat.id);
+          // Only update messages if the loaded chat has messages
+          if (activeChat.messages && activeChat.messages.length > 0) {
+            setMessages(activeChat.messages);
+          }
+          setCurrentSessionId(activeChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+          memoryPersistSkipRef.current = true;
+        } else {
+          // Create new chat but don't wait - messages already set above
+          createNewChat().catch(err => {
+            console.error('Failed to create new chat:', err);
+            // Messages already set, so UI won't be blank
+          });
+        }
+        setMemoryError(null);
+      } catch (error) {
+        console.error('Failed to load remote chat history:', error);
+        setMemoryError('Unable to load saved chat history. Starting a new chat.');
+        // Don't await - messages already set above
+        createNewChat().catch(err => {
+          console.error('Failed to create new chat after error:', err);
+          // Messages already set, so UI won't be blank
+        });
+      } finally {
+        setIsInitialized(true);
+        setIsMemoryLoading(false);
+      }
+    };
+
     loadChats();
-    setIsInitialized(true);
-  }, []);
+  }, [MEMORY_API_BASE, createNewChat, mapRecordToChat]);
   
-  // Save chats to localStorage
-  useEffect(() => {
-    if (chats.length > 0) {
-      safeSetLocalStorage('trinity-ai-chats', JSON.stringify(chats));
-    }
-  }, [chats, safeSetLocalStorage]);
-  
-  // Save current chat ID
-  useEffect(() => {
-    if (currentChatId) {
-      safeSetLocalStorage('trinity-ai-current-chat-id', currentChatId);
-    }
-  }, [currentChatId, safeSetLocalStorage]);
-  
-  // Save messages to current chat
+  // Save messages to current chat (UI state only - memory sync happens separately)
   useEffect(() => {
     if (currentChatId && messages.length > 0) {
       setChats(prev => prev.map(chat => 
         chat.id === currentChatId 
-          ? { ...chat, messages, title: messages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || chat.title }
+          ? { 
+              ...chat, 
+              messages, 
+              title: messages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || chat.title,
+              sessionId: currentSessionId || chat.sessionId,
+            }
           : chat
       ));
     }
-  }, [messages, currentChatId]);
+  }, [messages, currentChatId, currentSessionId]);
+
+  // Sync to MinIO memory (non-blocking, doesn't affect UI)
+  useEffect(() => {
+    if (!isInitialized || !currentChatId || messages.length === 0) return;
+    if (memoryPersistSkipRef.current) {
+      memoryPersistSkipRef.current = false;
+      return;
+    }
+    const chat = chats.find(c => c.id === currentChatId);
+    if (!chat) return;
+    persistChatToMemory(chat);
+  }, [chats, currentChatId, isInitialized, persistChatToMemory]);
   
   // Switch to a different chat
   const switchToChat = (chatId: string) => {
     setCurrentChatId(chatId);
     const chat = chats.find(c => c.id === chatId);
     if (chat) {
-      setMessages(chat.messages);
+      memoryPersistSkipRef.current = true;
+      // Ensure messages are never empty - use chat messages or fallback to initial message
+      const chatMessages = chat.messages && chat.messages.length > 0 
+        ? chat.messages 
+        : [{
+            id: '1',
+            content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+            sender: 'ai' as const,
+            timestamp: new Date()
+          }];
+      setMessages(chatMessages);
       setCurrentSessionId(chat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
       
       // Close existing WebSocket and reset workflow state when switching chats
@@ -413,17 +530,72 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     setShowChatHistory(false);
   };
   
-  // Delete current chat
-  const deleteCurrentChat = () => {
-    if (chats.length === 1) {
-      createNewChat();
-    } else {
-      const remainingChats = chats.filter(chat => chat.id !== currentChatId);
-      setChats(remainingChats);
-      setCurrentChatId(remainingChats[0].id);
-      setMessages(remainingChats[0].messages);
+  const deleteCurrentChat = useCallback(async () => {
+    if (!currentChatId) return;
+
+    try {
+      await deleteMemoryChat(MEMORY_API_BASE, currentChatId);
+      setMemoryError(null);
+    } catch (error) {
+      console.error('Failed to delete chat history:', error);
+      setMemoryError('Unable to delete chat history from server.');
     }
-  };
+
+    const remainingChats = chats.filter(chat => chat.id !== currentChatId);
+    if (remainingChats.length === 0) {
+      await createNewChat();
+      return;
+    }
+
+    memoryPersistSkipRef.current = true;
+    setChats(remainingChats);
+    const nextChat = remainingChats[0];
+    setCurrentChatId(nextChat.id);
+    // Ensure messages are never empty - use chat messages or fallback to initial message
+    const nextMessages = nextChat.messages && nextChat.messages.length > 0 
+      ? nextChat.messages 
+      : [{
+          id: '1',
+          content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+          sender: 'ai' as const,
+          timestamp: new Date()
+        }];
+    setMessages(nextMessages);
+    setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+  }, [MEMORY_API_BASE, chats, createNewChat, currentChatId]);
+
+  const clearAllChats = useCallback(async () => {
+    if (chats.length === 0) {
+      await createNewChat();
+      return;
+    }
+
+    try {
+      const results = await Promise.allSettled(
+        chats.map(chat => deleteMemoryChat(MEMORY_API_BASE, chat.id))
+      );
+      const failed = results.find(result => result.status === 'rejected');
+      if (failed && failed.status === 'rejected') {
+        throw failed.reason;
+      }
+      setChats([]);
+      memoryPersistSkipRef.current = true;
+      await createNewChat();
+      setMemoryError(null);
+    } catch (error) {
+      console.error('Failed to clear chat history:', error);
+      setMemoryError('Unable to clear chat history from server.');
+    }
+  }, [MEMORY_API_BASE, chats, createNewChat]);
+
+  const handleCopyChatId = useCallback(async () => {
+    if (!currentChatId || !navigator?.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(currentChatId);
+    } catch (error) {
+      console.error('Failed to copy chat ID:', error);
+    }
+  }, [currentChatId]);
   
   // Resize handlers
   useEffect(() => {
@@ -1278,6 +1450,40 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                     </div>
                   )}
                 </div>
+
+                {/* Chat Persistence */}
+                <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
+                  <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Chat Persistence</h5>
+                  <p className="text-gray-600 font-inter text-xs mb-2">
+                    Chats are stored securely in MinIO so you can resume conversations across sessions.
+                  </p>
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 flex items-center justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-gray-500 font-inter">Current Chat ID</p>
+                      <p className="text-sm font-mono text-gray-800 truncate">{currentChatId || '—'}</p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-2 h-8 px-2 text-[#458EE2] hover:text-[#356CB0]"
+                      onClick={handleCopyChatId}
+                      disabled={!currentChatId}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <div className="flex items-center justify-between mt-3 text-xs text-gray-600 font-inter">
+                    <span>{isMemoryLoading ? 'Loading chat history…' : `Stored chats: ${chats.length}`}</span>
+                    {memoryError ? (
+                      <span className="text-red-500 font-medium">Sync issue</span>
+                    ) : (
+                      <span className="text-[#41C185] font-medium">Syncing</span>
+                    )}
+                  </div>
+                  {memoryError && (
+                    <p className="mt-2 text-xs text-red-500 font-inter">{memoryError}</p>
+                  )}
+                </div>
                 
                 {/* Panel Width Info */}
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
@@ -1294,14 +1500,13 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
                   <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Data Management</h5>
                   <Button
-                    onClick={() => {
+                    onClick={async () => {
                       if (confirm('Are you sure you want to clear all chat history? This cannot be undone.')) {
-                        localStorage.removeItem('trinity-ai-chats');
-                        localStorage.removeItem('trinity-ai-current-chat-id');
-                        createNewChat();
+                        await clearAllChats();
                         setShowSettings(false);
                       }
                     }}
+                    disabled={isMemoryLoading}
                     className="w-full bg-red-500 hover:bg-red-600 text-white font-inter"
                     style={{ fontSize: `${smallFontSize}px` }}
                   >
@@ -1333,7 +1538,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           
           <div className="p-4 border-b border-gray-200">
             <Button
-              onClick={createNewChat}
+              onClick={() => void createNewChat()}
               className="w-full text-white font-semibold font-inter rounded-xl shadow-md transition-all duration-200"
               style={{ fontSize: `${smallFontSize}px`, backgroundColor: BRAND_GREEN }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#3AB077')}
@@ -1425,12 +1630,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         
         <div className="flex items-center space-x-4 relative z-10">
           <div className="relative">
-            <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shadow-lg shadow-gray-200/30 border-2 border-gray-200/20 transition-all duration-300 group-hover:scale-105 group-hover:shadow-xl group-hover:shadow-gray-200/40">
-              <Sparkles className="w-6 h-6 animate-slow-pulse" style={{ color: BRAND_PURPLE }} />
+            <div className={`${isCompact ? 'w-9 h-9' : 'w-10 h-10'} rounded-2xl bg-white flex items-center justify-center shadow-lg shadow-gray-200/30 border-2 border-gray-200/20 transition-all duration-300 group-hover:scale-105 group-hover:shadow-xl group-hover:shadow-gray-200/40`}>
+              <Sparkles className={`${isCompact ? 'w-4 h-4' : 'w-5 h-5'} animate-slow-pulse`} style={{ color: BRAND_PURPLE }} />
             </div>
             {/* Online indicator */}
             <div
-              className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow-lg"
+              className={`absolute -bottom-0.5 -right-0.5 ${isCompact ? 'w-2.5 h-2.5' : 'w-3 h-3'} rounded-full border-2 border-white shadow-lg`}
               style={{ backgroundColor: BRAND_GREEN }}
             >
               <div
@@ -1440,49 +1645,20 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             </div>
           </div>
           <div>
-            <h3 className="font-bold text-gray-800 tracking-tight font-inter text-lg">Trinity AI</h3>
-            <div className="flex items-center gap-2">
-              <div
-                className="w-2 h-2 rounded-full animate-pulse"
-                style={{ backgroundColor: BRAND_GREEN }}
-              />
-              <p className="text-gray-600 font-medium font-inter text-xs">Active • Ready to help</p>
-            </div>
+            <h3 className={`font-bold text-gray-800 tracking-tight font-inter ${isCompact ? 'text-base' : 'text-lg'} whitespace-nowrap`}>Trinity AI</h3>
           </div>
         </div>
-        <div className="flex items-center gap-4 relative z-10">
-          <div className="flex items-center gap-3">
-            <div className="flex flex-col items-end">
-              <div className="flex items-center gap-2">
-                <div
-                  className={`relative flex h-2.5 w-2.5 items-center justify-center transition-opacity duration-300 ${
-                    isAgentMode ? 'opacity-100' : 'opacity-0'
-                  }`}
-                >
-                  <span className="absolute inline-flex h-full w-full rounded-full bg-[#41C185]/50 animate-ping" />
-                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#41C185]" />
-                </div>
-                <span className="text-xs font-semibold text-gray-600 font-inter tracking-wide uppercase">
-                  Agent Mode
-                </span>
-              </div>
-              <span
-                className={`text-xs font-medium font-inter transition-colors duration-300 ${
-                  isAgentMode ? 'text-[#1f6b4a]' : 'text-gray-500'
-                }`}
-              >
-                {isAgentMode ? 'Auto-run enabled' : 'Manual approval'}
-              </span>
-            </div>
+        <div className="flex items-center gap-5 relative z-10">
+          <div className="flex flex-col items-center gap-1 min-w-[72px]">
             <button
               type="button"
               role="switch"
               aria-checked={isAgentMode}
               aria-label="Toggle Agent Mode"
               onClick={() => setAgentMode(!isAgentMode)}
-              className={`relative inline-flex h-8 w-14 items-center rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              className={`relative inline-flex items-center rounded-full transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                 isAgentMode ? 'bg-[#41C185] focus:ring-[#41C185]/40' : 'bg-gray-300 focus:ring-gray-400/40'
-              }`}
+              } ${isCompact ? 'h-6 w-11' : 'h-7 w-12'}`}
             >
               <span
                 className={`absolute inset-0 rounded-full transition-opacity duration-300 ${
@@ -1490,58 +1666,61 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 }`}
               />
               <span
-                className={`relative inline-block h-6 w-6 transform rounded-full bg-white shadow-md transition-transform duration-300 ${
-                  isAgentMode ? 'translate-x-7' : 'translate-x-1'
+                className={`relative inline-block transform rounded-full bg-white shadow-md transition-transform duration-300 ${isCompact ? 'h-4 w-4' : 'h-5 w-5'} ${
+                  isAgentMode ? (isCompact ? 'translate-x-5' : 'translate-x-6') : 'translate-x-1'
                 }`}
               />
             </button>
+            <span className={`font-semibold text-gray-600 font-inter tracking-wide uppercase text-center ${isCompact ? 'text-[9px]' : 'text-[10px]'}`}>
+              {isAgentMode ? 'Agent Mode' : 'Agent Mode Off'}
+            </span>
           </div>
           <div className="flex items-center space-x-1">
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 w-9 p-0 transition-all duration-200 rounded-xl"
+              className={`${isCompact ? 'h-7 w-7' : 'h-8 w-8'} p-0 transition-all duration-200 rounded-xl`}
               style={{ color: showChatHistory ? BRAND_GREEN : undefined }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
               onClick={() => setShowChatHistory(!showChatHistory)}
               title="Chat History"
             >
-              <Clock className="w-4 h-4" />
+              <Clock className={isCompact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 w-9 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl"
+              className={`${isCompact ? 'h-7 w-7' : 'h-8 w-8'} p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl`}
               onClick={deleteCurrentChat}
               title="Delete Current Chat"
             >
-              <Trash2 className="w-4 h-4" />
+              <Trash2 className={isCompact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 w-9 p-0 transition-all duration-200 rounded-xl"
+              className={`${isCompact ? 'h-7 w-7' : 'h-8 w-8'} p-0 transition-all duration-200 rounded-xl`}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
-              onClick={createNewChat}
+              onClick={() => void createNewChat()}
               title="New Chat"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className={isCompact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 w-9 p-0 hover:bg-blue-100 hover:text-blue-500 transition-all duration-200 rounded-xl"
+              className={`${isCompact ? 'h-7 w-7' : 'h-8 w-8'} p-0 hover:bg-blue-100 hover:text-blue-500 transition-all duration-200 rounded-xl`}
               onClick={onToggle}
               title="Minimize Panel"
             >
-              <Minus className="w-4 h-4" />
+              <Minus className={isCompact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 w-9 p-0 hover:bg-red-100 hover:text-red-500 transition-all duration-200 rounded-xl"
+              className={`${isCompact ? 'h-7 w-7' : 'h-8 w-8'} p-0 hover:bg-red-100 hover:text-red-500 transition-all duration-200 rounded-xl`}
               onClick={() => {
                 // Cancel any ongoing requests
                 if (wsConnection) {
@@ -1552,7 +1731,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               }}
               title="Close Panel (Cancel Requests)"
             >
-              <X className="w-4 h-4" />
+              <X className={isCompact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
             </Button>
           </div>
         </div>
@@ -1571,7 +1750,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               {/* Avatar - Hide for workflow components to save space */}
               {(!msg.type || msg.type === 'text') && (
                 <div
-                  className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg transition-all duration-300 hover:scale-110 border-2 ${
+                  className={`${isCompact ? 'w-8 h-8' : 'w-10 h-10'} rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg transition-all duration-300 hover:scale-110 border-2 ${
                     msg.sender === 'ai' ? '' : 'bg-[#458EE2] border-[#458EE2]/30 shadow-[#458EE2]/20'
                   }`}
                   style={
@@ -1585,9 +1764,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                   }
                 >
                   {msg.sender === 'ai' ? (
-                    <Bot className="w-5 h-5 text-white" />
+                    <Bot className={isCompact ? 'w-4 h-4 text-white' : 'w-5 h-5 text-white'} />
                   ) : (
-                    <User className="w-5 h-5 text-white" />
+                    <User className={isCompact ? 'w-4 h-4 text-white' : 'w-5 h-5 text-white'} />
                   )}
                 </div>
               )}
@@ -1605,7 +1784,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 {(!msg.type || msg.type === 'text') && (
                   <>
                     <div
-                      className={`rounded-3xl px-5 py-3.5 shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] max-w-full ${
+                      className={`rounded-3xl ${isCompact ? 'px-4 py-3' : 'px-5 py-3.5'} shadow-lg border-2 transition-all duration-300 hover:shadow-xl hover:scale-[1.02] max-w-full ${
                         msg.sender === 'ai'
                           ? 'text-white rounded-tl-md backdrop-blur-sm'
                           : 'bg-[#458EE2] text-white border-[#458EE2]/30 rounded-tr-md backdrop-blur-sm'
@@ -1620,14 +1799,14 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                           : undefined
                       }
                     >
-                        <div
-                          className="leading-relaxed font-medium font-inter text-sm break-words"
-                          dangerouslySetInnerHTML={{
-                            __html: parseMarkdown(msg.content)
-                          }}
-                        />
-                      </div>
-                      <p className="text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter text-xs">
+                      <div
+                        className={`leading-relaxed font-medium font-inter break-words ${isCompact ? 'text-[13px]' : 'text-sm'}`}
+                        dangerouslySetInnerHTML={{
+                          __html: parseMarkdown(msg.content)
+                        }}
+                      />
+                    </div>
+                    <p className={`text-gray-600 mt-2 px-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity duration-200 font-inter ${isCompact ? 'text-[10px]' : 'text-xs'}`}>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </>
