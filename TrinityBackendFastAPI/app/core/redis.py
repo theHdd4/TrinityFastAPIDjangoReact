@@ -31,6 +31,7 @@ activity_logger = logging.getLogger("redis.activity")
 if not activity_logger.handlers:
     handler = logging.StreamHandler()
     handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(message)s"))
     activity_logger.addHandler(handler)
 activity_logger.setLevel(logging.INFO)
 activity_logger.propagate = False
