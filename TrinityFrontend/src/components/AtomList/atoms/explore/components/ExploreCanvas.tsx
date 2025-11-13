@@ -12,6 +12,7 @@ import { BarChart3, Settings, Filter, Eye, EyeOff, Edit3, Palette, ChevronDown, 
 import { ExploreData } from '../ExploreAtom';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { EXPLORE_API, TEXT_API, INSIGHT_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { toast } from '@/components/ui/use-toast';
 import './ExploreCanvas.css';
 import ChatBubble from '../../chart-maker/components/ChatBubble';
@@ -490,7 +491,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     try {
       const response = await fetch(`${EXPLORE_API}/column_summary?object_name=${encodeURIComponent(safeData.dataframe)}`);
       if (response.ok) {
-        const summary = await response.json();
+        const raw = await response.json();
+        const summary = await resolveTaskResponse<{ summary?: any[] }>(raw);
         const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
         
         // Transform the data to match the cardinality format expected by the table
@@ -1664,9 +1666,10 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     try {
       const objectName = safeData.dataframe.endsWith('.arrow') ? safeData.dataframe : `${safeData.dataframe}.arrow`;
       const response = await fetch(`${EXPLORE_API}/column_summary?object_name=${encodeURIComponent(objectName)}`);
-      
+
       if (response.ok) {
-        const summary = await response.json();
+        const raw = await response.json();
+        const summary = await resolveTaskResponse<{ summary?: any[] }>(raw);
         const summaryData = Array.isArray(summary.summary) ? summary.summary : [];
         
         // Find the column summary for this identifier
@@ -1767,7 +1770,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         throw new Error(`Failed to create explore atom: ${createResponse.status} - ${errorText}`);
       }
 
-      const createResult = await createResponse.json();
+      const rawCreate = await createResponse.json();
+      const createResult = await resolveTaskResponse<{ explore_atom_id: string }>(rawCreate);
       const exploreAtomId = createResult.explore_atom_id;
       
 
@@ -1827,7 +1831,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         throw new Error(`Operations specification failed: ${operationsResponse.status} - ${errorText}`);
       }
       
-      const operationsResult = await operationsResponse.json();
+      const rawOperations = await operationsResponse.json();
+      await resolveTaskResponse(rawOperations);
 
       // Get the chart data
       const chartResponse = await fetch(`${EXPLORE_API}/chart-data-multidim/${exploreAtomId}`);
@@ -1838,7 +1843,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         throw new Error(`Chart data fetch failed: ${chartResponse.status} - ${errorText}`);
       }
 
-      const result = await chartResponse.json();
+      const rawResult = await chartResponse.json();
+      const result = await resolveTaskResponse<Record<string, any>>(rawResult);
       
       const chartData = result.data || [];
 
@@ -2956,10 +2962,12 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
         try {
           const response = await fetch(`${EXPLORE_API}/column_summary?object_name=${encodeURIComponent(safeData.dataframe)}`);
           if (response.ok) {
-            const summary = await response.json();
+            const raw = await response.json();
+            const summary = await resolveTaskResponse<{ summary?: any[] }>(raw);
             const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
             onDataChange({ columnSummary: summaryData });
-          }         } catch (error) {
+          }
+        } catch (error) {
         } finally {
           setIsLoadingColumnSummary(false);
         }
@@ -3089,7 +3097,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
     try {
       const response = await fetch(`${EXPLORE_API}/date-range?object_name=${encodeURIComponent(safeData.dataframe)}&date_column=${encodeURIComponent(columnName)}`);
       if (response.ok) {
-        const data = await response.json();
+        const raw = await response.json();
+        const data = await resolveTaskResponse<{ status?: string; min_date?: string; max_date?: string }>(raw);
         if (data.status === 'success' && data.min_date && data.max_date) {
           setDateRanges(prev => ({
             ...prev,
