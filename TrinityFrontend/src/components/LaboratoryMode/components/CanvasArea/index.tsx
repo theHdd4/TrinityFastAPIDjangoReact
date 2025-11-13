@@ -82,6 +82,15 @@ interface CanvasAreaProps {
   onToggleSettingsPanel?: () => void;
   onToggleHelpPanel?: () => void;
   canEdit: boolean;
+  cardEditors?: Map<string, {
+    card_id: string;
+    user_email: string;
+    user_name: string;
+    user_color: string;
+    client_id: string;
+  }>;
+  onCardFocus?: (cardId: string) => void;
+  onCardBlur?: (cardId: string) => void;
 }
 
 interface CanvasAreaRef {
@@ -294,6 +303,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onToggleSettingsPanel,
   onToggleHelpPanel,
   canEdit,
+  cardEditors,
+  onCardFocus,
+  onCardBlur,
 }, ref) => {
   const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
@@ -361,6 +373,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [expandedCard]);
+
+  // Removed: Card focus/blur is now handled only by mouse events (hover)
 
   interface ColumnInfo {
     column: string;
@@ -4615,20 +4629,49 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             : card.atoms.length > 0
               ? card.atoms[0].title
               : 'Card';
+          
+          // Check if someone is editing this card
+          const editor = cardEditors?.get(card.id);
+          const isBeingEdited = !!editor;
+          
           return (
           <React.Fragment key={card.id}>
           <Card
             data-card-id={card.id}
-            className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
+            className={`relative w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
               dragOver === card.id
                 ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
+                : isBeingEdited
+                ? `shadow-lg`
                 : 'border-gray-200 shadow-sm hover:shadow-md'
             }`}
+            style={isBeingEdited ? {
+              borderColor: editor.user_color,
+              boxShadow: `0 0 0 2px ${editor.user_color}40`,
+            } : undefined}
             onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
             onDragOver={(e) => handleDragOver(e, card.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
+            onMouseEnter={() => onCardFocus?.(card.id)}
+            onMouseLeave={() => onCardBlur?.(card.id)}
           >
+            {/* Editor Badge - shows who's editing this card */}
+            {isBeingEdited && editor && (
+              <div 
+                className="absolute top-2 right-2 px-2 py-1 rounded-full text-xs font-medium text-white shadow-md z-10 flex items-center gap-1"
+                style={{ backgroundColor: editor.user_color }}
+              >
+                <div 
+                  className="w-2 h-2 rounded-full bg-white/80 animate-pulse"
+                  title={`${editor.user_name} is editing`}
+                />
+                <span className="max-w-[150px] truncate">
+                  {editor.user_email}
+                </span>
+              </div>
+            )}
+            
             <div className="flex items-center justify-between p-4 border-b border-gray-100">
               <div className="flex items-center space-x-2">
                 <span className="text-sm font-medium text-gray-700">
