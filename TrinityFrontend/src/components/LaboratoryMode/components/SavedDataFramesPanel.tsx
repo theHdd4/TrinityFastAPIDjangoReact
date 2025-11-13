@@ -1,10 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API, CLASSIFIER_API } from '@/lib/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
 import { CheckboxTemplate } from '@/templates/checkbox';
 import { Plus } from 'lucide-react';
@@ -543,6 +549,68 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
   };
 
+  const handleDownloadCSV = async (obj: string, filename: string) => {
+    try {
+      const response = await fetch(
+        `${VALIDATE_API}/export_csv?object_name=${encodeURIComponent(obj)}`,
+        { credentials: 'include' }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to download CSV');
+      }
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      const baseFilename = filename || obj.split('/').pop() || 'dataframe';
+      const downloadFilename = baseFilename.replace(/\.arrow$/, '') + '.csv';
+      link.download = downloadFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      toast({ title: 'Download started', description: 'CSV download has started.' });
+    } catch (error: any) {
+      console.error('CSV download failed:', error);
+      toast({
+        title: 'Download failed',
+        description: error.message || 'Failed to download CSV',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDownloadExcel = async (obj: string, filename: string) => {
+    try {
+      const response = await fetch(
+        `${VALIDATE_API}/export_excel?object_name=${encodeURIComponent(obj)}`,
+        { credentials: 'include' }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to download Excel');
+      }
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      const baseFilename = filename || obj.split('/').pop() || 'dataframe';
+      const downloadFilename = baseFilename.replace(/\.arrow$/, '') + '.xlsx';
+      link.download = downloadFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      toast({ title: 'Download started', description: 'Excel download has started.' });
+    } catch (error: any) {
+      console.error('Excel download failed:', error);
+      toast({
+        title: 'Download failed',
+        description: error.message || 'Failed to download Excel',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const promptDeleteAll = () => setConfirmDelete({ type: 'all' });
 
   const promptDeleteOne = (obj: string) =>
@@ -735,6 +803,34 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               className="w-4 h-4 text-gray-400 cursor-pointer"
               onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)}
             />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="p-0 border-0 bg-transparent cursor-pointer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Download
+                    className="w-4 h-4 text-gray-400 cursor-pointer hover:text-blue-600"
+                    title="Download dataframe"
+                  />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem
+                  onClick={() => handleDownloadCSV(f.object_name, f.arrow_name || f.csv_name)}
+                  className="cursor-pointer"
+                >
+                  <span>Download as CSV</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => handleDownloadExcel(f.object_name, f.arrow_name || f.csv_name)}
+                  className="cursor-pointer"
+                >
+                  <span>Download as Excel</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Trash2
               className="w-4 h-4 text-gray-400 cursor-pointer"
               onClick={() => promptDeleteOne(f.object_name)}
