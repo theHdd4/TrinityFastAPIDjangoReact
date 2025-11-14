@@ -2731,7 +2731,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   
                   // Handle different endpoint parameter formats
                   if (operation.api_endpoint === "/filter_rows") {
-                    // Backend expects individual Body(...) parameters - use FormData
+                    // 🔧 CRITICAL FIX: Backend expects JSON body with Body(...) parameters, NOT FormData
                     // Ensure df_id is present (use current_df_id if not provided)
                     const df_id = operationParams.df_id || current_df_id;
                     if (!df_id) {
@@ -2739,14 +2739,16 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                       continue;
                     }
                     
-                    const formData = new FormData();
-                    formData.append('df_id', df_id);
-                    formData.append('column', operationParams.column);
-                    formData.append('value', JSON.stringify(operationParams.value));
-                    requestBody = formData;
-                    contentType = 'multipart/form-data';
+                    // Use JSON format (not FormData) - FastAPI Body(...) accepts JSON
+                    requestBody = JSON.stringify({
+                      df_id: df_id,
+                      column: operationParams.column,
+                      value: operationParams.value
+                    });
+                    contentType = 'application/json';
+                    console.log('🔍 FILTER_ROWS JSON REQUEST:', { df_id, column: operationParams.column, value: operationParams.value });
                   } else if (operation.api_endpoint === "/sort") {
-                    // Backend expects individual Body(...) parameters - use FormData
+                    // 🔧 CRITICAL FIX: Backend expects JSON body with Body(...) parameters, NOT FormData
                     // Ensure df_id is present (use current_df_id if not provided)
                     const df_id = operationParams.df_id || current_df_id;
                     if (!df_id) {
@@ -2754,13 +2756,29 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                       continue;
                     }
                     
-                    const formData = new FormData();
-                    formData.append('df_id', df_id);
-                    formData.append('column', operationParams.column);
-                    formData.append('direction', operationParams.direction || "asc");
-                    requestBody = formData;
-                    contentType = 'multipart/form-data';
+                    // Use JSON format (not FormData) - FastAPI Body(...) accepts JSON
+                    requestBody = JSON.stringify({
+                      df_id: df_id,
+                      column: operationParams.column,
+                      direction: operationParams.direction || "asc"
+                    });
+                    contentType = 'application/json';
+                    console.log('🔍 SORT JSON REQUEST:', { df_id, column: operationParams.column, direction: operationParams.direction || "asc" });
                   } else {
+                    // 🔧 CRITICAL FIX: For apply_formula, ensure formula starts with '=' (backend requirement)
+                    if (operation.api_endpoint === '/apply_formula' && operationParams.formula) {
+                      const originalFormula = operationParams.formula;
+                      let formula = operationParams.formula;
+                      if (formula && typeof formula === 'string') {
+                        const trimmedFormula = formula.trim();
+                        if (trimmedFormula && !trimmedFormula.startsWith('=')) {
+                          formula = `=${trimmedFormula}`;
+                          operationParams.formula = formula;
+                          console.log(`🔧 Added '=' prefix to formula: "${originalFormula}" -> "${formula}"`);
+                        }
+                      }
+                    }
+                    
                     // Default format for other endpoints
                     requestBody = JSON.stringify(operationParams);
                   }
@@ -2768,12 +2786,22 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   console.log('📋 Final parameters for operation:', JSON.stringify(operationParams, null, 2));
                   console.log('🌐 API Endpoint:', `${DATAFRAME_OPERATIONS_API}${operation.api_endpoint}`);
                   console.log('📤 Request body:', requestBody);
+                  console.log('📤 Content-Type:', contentType);
+                  
+                  // 🔧 CRITICAL: Set proper headers for JSON requests
+                  const headers: HeadersInit = {};
+                  if (contentType === 'application/json') {
+                    headers['Content-Type'] = 'application/json';
+                  }
+                  // For FormData, don't set Content-Type (browser sets it automatically with boundary)
                   
                   const response = await fetch(`${DATAFRAME_OPERATIONS_API}${operation.api_endpoint}`, {
                     method: operation.method || 'POST',
-                    headers: contentType === 'multipart/form-data' ? {} : { 'Content-Type': contentType },
+                    headers: headers,
                     body: requestBody
                   });
+                  
+                  console.log('📥 Response status:', response.status, response.statusText);
                   
                   if (response.ok) {
                     const result = await response.json();

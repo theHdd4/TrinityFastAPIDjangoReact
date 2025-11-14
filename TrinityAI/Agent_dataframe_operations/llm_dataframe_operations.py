@@ -141,7 +141,60 @@ class DataFrameOperationsAgent:
                 include_metadata=True
             )
             self._last_context_selection = selection
-            context = self._extend_context_with_files(context, selection)
+            
+            # 🔧 CRITICAL: Load comprehensive file details for identified files (like chart maker)
+            # This ensures the LLM has exact column names, types, and sample values
+            file_details_loaded = {}
+            if selection and selection.relevant_files:
+                # Get the first relevant file (most likely what user is talking about)
+                relevant_file_paths = list(selection.relevant_files.keys())
+                if relevant_file_paths:
+                    primary_file_path = relevant_file_paths[0]
+                    logger.info(f"🔍 Identified primary file from user query: {primary_file_path}")
+                    
+                    # Load comprehensive file details from backend
+                    try:
+                        import requests
+                        import os
+                        
+                        # Get the dataframe operations API URL
+                        df_ops_api_url = os.getenv("DATAFRAME_OPERATIONS_API_URL", "http://fastapi:8001")
+                        if not df_ops_api_url.startswith("http"):
+                            df_ops_api_url = f"http://{df_ops_api_url}"
+                        
+                        # Call the load-file-details endpoint
+                        load_details_url = f"{df_ops_api_url}/api/dataframe-operations/load-file-details"
+                        logger.info(f"📥 Loading file details from: {load_details_url}")
+                        logger.info(f"📥 Object name: {primary_file_path}")
+                        
+                        response = requests.post(
+                            load_details_url,
+                            json={"object_name": primary_file_path},
+                            timeout=30
+                        )
+                        
+                        if response.status_code == 200:
+                            file_details_loaded = response.json()
+                            logger.info(f"✅ File details loaded successfully:")
+                            logger.info(f"   - File ID: {file_details_loaded.get('file_id')}")
+                            logger.info(f"   - Columns: {len(file_details_loaded.get('columns', []))}")
+                            logger.info(f"   - Numeric columns: {len(file_details_loaded.get('numeric_columns', []))}")
+                            logger.info(f"   - Categorical columns: {len(file_details_loaded.get('categorical_columns', []))}")
+                            logger.info(f"   - Row count: {file_details_loaded.get('row_count', 0)}")
+                            
+                            # Store the file_id for use in operations
+                            if file_details_loaded.get('file_id'):
+                                # Update selection with loaded file details
+                                if not selection.file_details:
+                                    selection.file_details = {}
+                                selection.file_details[primary_file_path] = file_details_loaded
+                        else:
+                            logger.warning(f"⚠️ Failed to load file details: {response.status_code} - {response.text}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error loading file details from backend: {e}")
+                        # Continue without file details - will use basic file info
+            
+            context = self._extend_context_with_files(context, selection, file_details_loaded)
             
             # Get current dataframe state if available
             current_df_state = None
@@ -165,12 +218,22 @@ class DataFrameOperationsAgent:
             else:
                 available_for_prompt = self.files_with_columns
 
+            # 🔧 CRITICAL: Pass comprehensive file details to prompt builder
+            # This ensures the LLM receives exact column names, types, and sample values
+            prompt_file_details = {}
+            if file_details_loaded:
+                # Use the loaded file details (most comprehensive)
+                prompt_file_details = file_details_loaded
+            elif selection and selection.file_details:
+                # Fallback to selection file details
+                prompt_file_details = selection.file_details
+
             prompt = build_dataframe_operations_prompt(
                 user_prompt,
                 available_for_prompt,
                 context,
                 current_df_state,
-                file_details=selection.file_details if selection else {},
+                file_details=prompt_file_details,
                 other_files=selection.other_files if selection else []
             )
             logger.info(f"🔍 DataFrame Operations Process - Generated prompt length: {len(prompt)}")
@@ -426,8 +489,9 @@ class DataFrameOperationsAgent:
         context_parts = []
         context_parts.append("=== DATAFRAME OPERATIONS CONVERSATION HISTORY ===")
         
-        # Include more messages for better context
-        for msg in messages[-20:]:
+        # 🔧 OPTIMIZATION: Reduce conversation history to last 10 messages (reduced from 20)
+        # This reduces prompt size while maintaining recent context
+        for msg in messages[-10:]:
             role = msg["role"]
             content = msg["content"]
             timestamp = msg.get("timestamp", "")
@@ -463,12 +527,13 @@ class DataFrameOperationsAgent:
             context_parts.append("- Track DataFrame transformations and current state")
             context_parts.append("")
             
-            # Extract key information from conversation history
+            # Extract key information from conversation history (reduced scope)
             user_files = []
             user_operations = []
             user_preferences = []
             
-            for msg in messages[-10:]:
+            # Only analyze last 5 messages for patterns (reduced from 10)
+            for msg in messages[-5:]:
                 if msg["role"] == "user":
                     content = msg["content"].lower()
                     # Extract file mentions
@@ -500,8 +565,12 @@ class DataFrameOperationsAgent:
         
         return "\n".join(context_parts)
 
-    def _extend_context_with_files(self, context: str, selection: Optional[FileContextResult]) -> str:
-        """Append relevant file information and metadata into the conversation context."""
+    def _extend_context_with_files(self, context: str, selection: Optional[FileContextResult], file_details_loaded: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Append relevant file information and metadata into the conversation context.
+        Enhanced to include comprehensive file details (like chart maker) so LLM can use exact column names.
+        OPTIMIZED: Only includes details for the matched file to reduce prompt size.
+        """
         if not selection:
             return context
 
@@ -509,21 +578,96 @@ class DataFrameOperationsAgent:
         if context:
             parts.append(context)
 
-        relevant = selection.relevant_files or self.file_context_resolver.get_available_files()
-        if relevant:
-            parts.append("\n--- RELEVANT DATA FILES AND COLUMNS ---")
-            parts.append(json.dumps(relevant, indent=2))
+        # 🔧 OPTIMIZATION: Only include comprehensive file details for the matched file
+        # Skip the "RELEVANT DATA FILES AND COLUMNS" section if we have comprehensive details
+        # This reduces prompt size significantly
+        
+        if file_details_loaded:
+            # Only include details for the matched file
+            parts.append("\n--- MATCHED FILE DETAILS (USE EXACT COLUMN NAMES) ---")
+            parts.append("⚠️ CRITICAL: Use EXACT column names from 'columns' below (case-sensitive).")
+            parts.append("⚠️ For filters, use values from 'unique_values' or 'sample_data'.")
+            
+            # Filter to only include relevant columns if matched_columns exist
+            all_columns = file_details_loaded.get("columns", [])
+            matched_cols = selection.matched_columns if selection else {}
+            
+            # If we have matched columns, prioritize those
+            columns_to_include = all_columns
+            if matched_cols:
+                # Extract column names from matched_columns
+                matched_col_names = set()
+                for file_path, cols in matched_cols.items():
+                    if isinstance(cols, list):
+                        matched_col_names.update(cols)
+                    elif isinstance(cols, dict):
+                        matched_col_names.update(cols.keys())
+                
+                # Include matched columns plus a few more for context (limit to 30 total)
+                columns_to_include = [col for col in all_columns if col in matched_col_names][:30]
+                if len(columns_to_include) < len(all_columns):
+                    # Add a few more columns for context
+                    remaining = [col for col in all_columns if col not in matched_col_names][:10]
+                    columns_to_include.extend(remaining)
+            
+            # Limit columns to reduce size
+            columns_to_include = columns_to_include[:40]  # Max 40 columns
+            
+            # Filter unique_values and column_types to only include relevant columns
+            filtered_unique_values = {
+                col: vals for col, vals in file_details_loaded.get("unique_values", {}).items()
+                if col in columns_to_include
+            }
+            
+            filtered_column_types = {
+                col: dtype for col, dtype in file_details_loaded.get("column_types", {}).items()
+                if col in columns_to_include
+            }
+            
+            # Filter numeric/categorical columns
+            filtered_numeric = [col for col in file_details_loaded.get("numeric_columns", []) if col in columns_to_include]
+            filtered_categorical = [col for col in file_details_loaded.get("categorical_columns", []) if col in columns_to_include]
+            
+            # Reduce sample_data to 1 row to minimize size
+            sample_data = file_details_loaded.get("sample_data", [])
+            if len(sample_data) > 1:
+                sample_data = sample_data[:1]
+            
+            parts.append(json.dumps({
+                "file_id": file_details_loaded.get("file_id"),
+                "object_name": file_details_loaded.get("object_name"),
+                "columns": columns_to_include,
+                "numeric_columns": filtered_numeric,
+                "categorical_columns": filtered_categorical,
+                "column_types": filtered_column_types,
+                "unique_values": filtered_unique_values,
+                "sample_data": sample_data,
+                "row_count": file_details_loaded.get("row_count", 0)
+            }, indent=2))
+            parts.append("")
+            parts.append("INSTRUCTIONS: Use EXACT column names from 'columns' above. Include 'file_id' in operations.")
+        
+        else:
+            # Fallback: Show relevant files if no comprehensive details loaded
+            relevant = selection.relevant_files or self.file_context_resolver.get_available_files()
+            if relevant:
+                # Only show first file to reduce size
+                first_file = {list(relevant.keys())[0]: list(relevant.values())[0]} if relevant else {}
+                parts.append("\n--- RELEVANT FILE ---")
+                parts.append(json.dumps(first_file, indent=2))
+            
+            if selection.file_details:
+                parts.append("\n--- FILE DETAILS ---")
+                # Only include first file's details
+                first_file_details = {}
+                for file_path, details in list(selection.file_details.items())[:1]:
+                    first_file_details[file_path] = details
+                parts.append(json.dumps(first_file_details, indent=2))
 
-        if selection.file_details:
-            parts.append("\n--- FILE DETAILS ---")
-            parts.append(json.dumps(selection.file_details, indent=2))
-
-        if selection.matched_columns:
+        # Only include matched columns if they exist and are relevant
+        if selection.matched_columns and not file_details_loaded:
             parts.append("\n--- MATCHED COLUMNS ---")
             parts.append(json.dumps(selection.matched_columns, indent=2))
-
-        if selection.other_files:
-            parts.append("\nOther available files (not included above): " + ", ".join(selection.other_files))
 
         return "\n".join(part for part in parts if part)
     

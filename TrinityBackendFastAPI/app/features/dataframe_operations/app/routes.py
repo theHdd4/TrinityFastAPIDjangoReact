@@ -444,16 +444,30 @@ def _normalize_formula_functions(expr: str) -> str:
 
 def _fetch_df_from_object(object_name: str) -> pl.DataFrame:
     """Fetch a DataFrame from the Flight server or MinIO given an object key."""
+    import logging
+    logger = logging.getLogger("dataframe_operations.load")
+    
     object_name = unquote(object_name)
+    logger.debug(f"🔍 [FETCH] Fetching object: {object_name}")
+    
     if not object_name.endswith(".arrow"):
-        raise HTTPException(
-            status_code=400, detail="Only .arrow objects are supported"
-        )
+        error_msg = f"Invalid object_name '{object_name}': Only .arrow objects are supported"
+        logger.error(f"❌ [FETCH] {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+    
     try:
+        logger.debug(f"⬇️ [FETCH] Downloading table bytes for: {object_name}")
         data = download_table_bytes(object_name)
-        return pl.read_ipc(io.BytesIO(data))
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not Found")
+        logger.debug(f"✅ [FETCH] Downloaded {len(data)} bytes, parsing Arrow IPC format")
+        df = pl.read_ipc(io.BytesIO(data))
+        logger.debug(f"✅ [FETCH] Successfully parsed DataFrame: {df.shape}")
+        return df
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Failed to load object '{object_name}': {str(e)}"
+        logger.error(f"❌ [FETCH] {error_msg}")
+        raise HTTPException(status_code=404, detail=error_msg) from e
 
 @router.get("/test_alive")
 async def test_alive():
@@ -475,7 +489,21 @@ async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     
     logger.info(f"🔵 [LOAD] Starting load_cached operation - object_name: {object_name}")
     
-    df = _fetch_df_from_object(object_name)
+    # Validate and fix object_name if needed
+    if not object_name.endswith(".arrow"):
+        error_msg = f"Invalid object_name '{object_name}': Must end with '.arrow' extension"
+        logger.error(f"❌ [LOAD] {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    try:
+        df = _fetch_df_from_object(object_name)
+    except HTTPException as e:
+        logger.error(f"❌ [LOAD] Failed to fetch dataframe: {e.detail}")
+        raise
+    except Exception as e:
+        error_msg = f"Error loading dataframe '{object_name}': {str(e)}"
+        logger.error(f"❌ [LOAD] {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg) from e
     
     logger.info(f"📊 [LOAD] DataFrame loaded successfully:")
     logger.info(f"   - Shape: {df.shape}")
@@ -495,6 +523,126 @@ async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     logger.info(f"✅ [LOAD] DataFrame cached in session: {df_id}")
     
     return _df_payload(df, df_id)
+
+
+class LoadFileDetailsRequest(BaseModel):
+    object_name: str
+
+
+@router.post("/load-file-details")
+async def load_file_details(request: LoadFileDetailsRequest):
+    """
+    Load a saved dataframe from Arrow Flight and return comprehensive file info including:
+    - File ID for subsequent operations
+    - All columns
+    - Column types (numeric/categorical)
+    - Unique values for categorical columns
+    - Sample data
+    - Column data types
+    
+    This endpoint is similar to chart maker's /load-saved-dataframe and provides
+    detailed file information so the LLM can use exact column names for operations.
+    """
+    import logging
+    logger = logging.getLogger("dataframe_operations.load_file_details")
+    
+    try:
+        logger.info(f"🔍 ===== LOAD FILE DETAILS REQUEST =====")
+        logger.info(f"📥 Object name: {request.object_name}")
+        
+        # Load the dataframe from Arrow Flight
+        logger.info("🚀 Loading dataframe from Arrow Flight...")
+        df = _fetch_df_from_object(request.object_name)
+        logger.info(f"✅ Dataframe loaded: {len(df)} rows, {len(df.columns)} columns")
+        logger.info(f"📋 Available columns: {list(df.columns)}")
+        
+        # Create a session for the dataframe
+        df_id = str(uuid.uuid4())
+        SESSIONS[df_id] = df
+        
+        # Get all columns
+        all_columns = list(df.columns)
+        logger.info(f"📋 Total columns: {len(all_columns)}")
+        
+        # Classify columns into numeric and categorical
+        numeric_columns = []
+        categorical_columns = []
+        column_types = {}
+        
+        for col in df.columns:
+            dtype = df[col].dtype
+            dtype_str = str(dtype)
+            column_types[col] = dtype_str
+            
+            # Check if numeric
+            if dtype in [pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+                         pl.Float32, pl.Float64]:
+                numeric_columns.append(col)
+            else:
+                categorical_columns.append(col)
+        
+        logger.info(f"🔢 Numeric columns: {len(numeric_columns)}")
+        logger.info(f"📝 Categorical columns: {len(categorical_columns)}")
+        
+        # Get unique values for categorical columns (limit to reduce payload size)
+        unique_values = {}
+        categorical_cols_to_process = categorical_columns[:15]  # Limit to prevent large payloads
+        
+        for col in categorical_cols_to_process:
+            try:
+                unique_vals = df[col].drop_nulls().unique().to_list()
+                # Convert to strings and limit to first 30 unique values (reduced from 100)
+                unique_values[col] = [str(val) for val in unique_vals[:30]]
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get unique values for column '{col}': {e}")
+                unique_values[col] = []
+        
+        logger.info(f"🎯 Unique values for {len(categorical_cols_to_process)} categorical columns")
+        
+        # Get sample data (reduced to 2 rows to minimize payload)
+        try:
+            sample_data = df.head(2).to_dicts()
+            # Convert any non-serializable types
+            for row in sample_data:
+                for key, value in row.items():
+                    if value is None:
+                        continue
+                    # Convert polars types to Python native types
+                    if hasattr(value, 'item'):  # numpy/polars scalar
+                        try:
+                            row[key] = value.item()
+                        except (AttributeError, ValueError):
+                            row[key] = str(value)
+                    elif isinstance(value, (pl.Date, pl.Datetime)):
+                        row[key] = str(value)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not get sample data: {e}")
+            sample_data = []
+        
+        logger.info(f"📄 Sample data: {len(sample_data)} rows")
+        
+        response = {
+            "file_id": df_id,
+            "columns": all_columns,
+            "numeric_columns": numeric_columns,
+            "categorical_columns": categorical_columns,
+            "unique_values": unique_values,
+            "sample_data": sample_data,
+            "row_count": len(df),
+            "column_types": column_types,
+            "object_name": request.object_name
+        }
+        
+        logger.info(f"✅ Response prepared successfully")
+        logger.info(f"🔍 ===== END RESPONSE LOG =====")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error loading file details: {e}")
+        raise HTTPException(status_code=404, detail=f"Error loading file details for {request.object_name}: {str(e)}")
 
 class SaveRequest(BaseModel):
     csv_data: str | None = None
@@ -875,8 +1023,23 @@ async def apply_formula(
     formula: str = Body(...),
 ):
     """Apply a simple column-based formula to the dataframe."""
+    import logging
+    logger = logging.getLogger("dataframe_operations.apply_formula")
+    
+    logger.info(f"🔵 [APPLY_FORMULA] Starting - df_id: {df_id}, target_column: '{target_column}', formula: '{formula}'")
+    
     df = _get_df(df_id)
+    logger.info(f"📊 [APPLY_FORMULA] DataFrame shape: {df.shape}, columns: {df.columns}")
+    
     expr = formula.strip()
+    logger.info(f"📝 [APPLY_FORMULA] Original formula: '{formula}'")
+    logger.info(f"📝 [APPLY_FORMULA] Processed expression: '{expr}'")
+    
+    # 🔧 FIX: Auto-add "=" prefix if formula contains function calls but doesn't start with "="
+    if not expr.startswith("=") and any(func in expr.upper() for func in ["DIV", "SUM", "AVG", "MAX", "MIN", "IF", "CORR", "ZSCORE", "NORM"]):
+        logger.info(f"🔧 [APPLY_FORMULA] Auto-adding '=' prefix to formula")
+        expr = "=" + expr
+    
     rows = df.to_dicts()
     if expr.startswith("="):
         expr_body = expr[1:].strip()
@@ -972,13 +1135,39 @@ async def apply_formula(
                             for v in values
                         ]
 
+            # 🔧 FIX: Create case-insensitive column mapping for formula replacement
+            column_map = {col.lower(): col for col in df.columns if col}
+            logger.info(f"🔍 [APPLY_FORMULA] Available columns: {list(df.columns)}")
+            logger.info(f"🔍 [APPLY_FORMULA] Column map (lowercase -> original): {column_map}")
+            
             headers_pattern = "|".join(re.escape(h) for h in df.columns if h)
-            regex = re.compile(f"\\b({headers_pattern})\\b") if headers_pattern else None
+            regex = re.compile(f"\\b({headers_pattern})\\b", re.IGNORECASE) if headers_pattern else None
+            logger.info(f"🔍 [APPLY_FORMULA] Column pattern: {headers_pattern[:100]}...")
+            logger.info(f"🔍 [APPLY_FORMULA] Processed expression body: '{expr_body_processed}'")
+            
+            def replace_column(match):
+                """Replace column name in formula with actual value, handling case-insensitive matching."""
+                matched_col = match.group(0)
+                # Try exact match first
+                if matched_col in r:
+                    return _format_value(r.get(matched_col))
+                # Try case-insensitive match
+                matched_lower = matched_col.lower()
+                if matched_lower in column_map:
+                    actual_col = column_map[matched_lower]
+                    logger.debug(f"🔧 [APPLY_FORMULA] Case-insensitive match: '{matched_col}' -> '{actual_col}'")
+                    return _format_value(r.get(actual_col))
+                # If no match, return original (might be a function name)
+                logger.warning(f"⚠️ [APPLY_FORMULA] Column '{matched_col}' not found in row, keeping as-is")
+                return matched_col
+            
             new_vals: List[Any] = []
             for row_idx, r in enumerate(rows):
                 replaced = expr_body_processed
                 if regex:
-                    replaced = regex.sub(lambda m: _format_value(r.get(m.group(0))), replaced)
+                    replaced = regex.sub(replace_column, replaced)
+                    if row_idx == 0:  # Log first row replacement for debugging
+                        logger.info(f"🔍 [APPLY_FORMULA] First row replacement: '{expr_body_processed}' -> '{replaced}'")
                 if zscore_placeholders:
                     for placeholder, column_name in zscore_placeholders:
                         column_series = zscore_values.get(column_name)
@@ -990,14 +1179,29 @@ async def apply_formula(
                         replaced = replaced.replace(placeholder, _format_value(z_val))
                 try:
                     val = eval(replaced, SAFE_EVAL_GLOBALS, {})
-                except Exception:
+                    if row_idx == 0:  # Log first row evaluation
+                        logger.info(f"✅ [APPLY_FORMULA] First row eval: '{replaced}' -> {val}")
+                except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    logger.error(f"❌ [APPLY_FORMULA] Row {row_idx} evaluation failed:")
+                    logger.error(f"   Expression: '{replaced}'")
+                    logger.error(f"   Error: {e}")
+                    logger.error(f"   Traceback: {error_trace}")
                     val = None
                 new_vals.append(val)
+            
+            logger.info(f"📊 [APPLY_FORMULA] Generated {len(new_vals)} values, non-null: {sum(1 for v in new_vals if v is not None)}")
             df = df.with_columns(pl.Series(target_column, new_vals))
     else:
+        logger.info(f"📝 [APPLY_FORMULA] No '=' prefix, treating as literal value")
         df = df.with_columns(pl.lit(expr).alias(target_column))
+    
+    logger.info(f"✅ [APPLY_FORMULA] Formula applied successfully, new DataFrame shape: {df.shape}")
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    logger.info(f"🎉 [APPLY_FORMULA] Operation completed, returning result with df_id: {result.get('df_id')}")
+    return result
 
 @router.post("/apply_udf")
 async def apply_udf(

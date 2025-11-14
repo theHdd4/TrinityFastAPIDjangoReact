@@ -192,9 +192,24 @@ export const dataframeOperationsHandler: AtomHandler = {
       console.log('⚠️ No smart_response found, using fallback success message');
     }
     
-    // Automatically execute operations if auto_execute is enabled
-    if (data.execution_plan?.auto_execute && config.operations) {
+    // 🔧 CRITICAL FIX: Default to auto_execute if operations exist but execution_plan is missing
+    const shouldAutoExecute = (data.execution_plan?.auto_execute !== false) && config.operations && config.operations.length > 0;
+    
+    console.log('🔍 EXECUTION CHECK:', {
+      hasExecutionPlan: !!data.execution_plan,
+      autoExecute: data.execution_plan?.auto_execute,
+      hasOperations: !!config.operations,
+      operationsCount: config.operations?.length || 0,
+      shouldAutoExecute
+    });
+    
+    // Automatically execute operations if auto_execute is enabled (or default to true if missing)
+    if (shouldAutoExecute) {
       console.log('🚀 Auto-executing DataFrame operations...');
+      console.log(`📊 Operations to execute: ${config.operations.length}`);
+      config.operations.forEach((op: any, idx: number) => {
+        console.log(`  ${idx + 1}. ${op.api_endpoint || op.operation_name || 'unknown'}: ${op.description || 'no description'}`);
+      });
       const progressTracker = createProgressTracker(config.operations.length, 'operation');
       
        try {
@@ -301,17 +316,35 @@ export const dataframeOperationsHandler: AtomHandler = {
               
               requestBody = operation.parameters;
             } else if (opName === 'filter_rows' || apiEndpoint === '/filter_rows') {
+              // 🔧 CRITICAL FIX: Ensure df_id is available before filter operation
+              let dfIdForFilter = operation.parameters.df_id === 'auto_from_previous' ? currentDfId : operation.parameters.df_id;
+              
+              if (!dfIdForFilter) {
+                console.error(`❌ CRITICAL: No df_id available for filter operation!`);
+                console.error(`❌ currentDfId: ${currentDfId}`);
+                console.error(`❌ operation.parameters.df_id: ${operation.parameters.df_id}`);
+                throw new Error(`Filter operation failed: No df_id available. Please ensure a file is loaded first.`);
+              }
+              
               // 🔧 CRITICAL FIX: Handle case sensitivity for column names with type safety
               const originalColumn = operation.parameters.column;
               const correctedColumn = (originalColumn && typeof originalColumn === 'string') ? 
                 normalizeColumnName(originalColumn, availableColumns) : originalColumn;
               
               requestBody = {
-                df_id: operation.parameters.df_id === 'auto_from_previous' ? currentDfId : operation.parameters.df_id,
+                df_id: dfIdForFilter,
                 column: correctedColumn,
                 value: operation.parameters.value,
                 filter_type: operation.parameters.filter_type || 'simple'
               };
+              
+              console.log(`🔍 FILTER REQUEST DEBUG:`, {
+                'df_id': dfIdForFilter,
+                'column': correctedColumn,
+                'original_column': originalColumn,
+                'value': operation.parameters.value,
+                'availableColumns': availableColumns.length
+              });
               
               if (correctedColumn !== originalColumn) {
                 console.log(`🔧 Fixed filter column case: ${originalColumn} -> ${correctedColumn}`);
@@ -379,13 +412,23 @@ export const dataframeOperationsHandler: AtomHandler = {
                 console.log(`✨ Creating NEW column: ${originalTargetColumn || 'unnamed'} (no validation data)`);
               }
               
+              // 🔧 CRITICAL FIX: Ensure formula starts with '=' (backend requirement)
+              let formula = operation.parameters.formula || '';
+              if (formula && typeof formula === 'string') {
+                const trimmedFormula = formula.trim();
+                if (trimmedFormula && !trimmedFormula.startsWith('=')) {
+                  formula = `=${trimmedFormula}`;
+                  console.log(`🔧 Added '=' prefix to formula: "${operation.parameters.formula}" -> "${formula}"`);
+                }
+              }
+              
               requestBody = {
                 df_id: operation.parameters.df_id === 'auto_from_previous' ? currentDfId : operation.parameters.df_id,
                 target_column: correctedTargetColumn,
-                formula: operation.parameters.formula
+                formula: formula
               };
               
-              console.log(`📋 APPLY_FORMULA REQUEST: target_column="${correctedTargetColumn}", formula="${operation.parameters.formula}"`);
+              console.log(`📋 APPLY_FORMULA REQUEST: target_column="${correctedTargetColumn}", formula="${formula}"`);
               console.log(`📋 COLUMN STATUS: ${availableColumns.includes(correctedTargetColumn) ? 'EXISTING (will overwrite)' : 'NEW (will create)'}`)
             } else {
               // Regular DataFrame operations (SAME as Atom_ai_chat.tsx)
@@ -402,7 +445,12 @@ export const dataframeOperationsHandler: AtomHandler = {
           }
           
           const operationEndpoint = `${DATAFRAME_OPERATIONS_API}${apiEndpoint}`;
-          console.log(`📡 Calling: ${requestMethod} ${operationEndpoint}`, requestBody);
+          console.log(`📡 ===== CALLING BACKEND API =====`);
+          console.log(`📡 Method: ${requestMethod}`);
+          console.log(`📡 Endpoint: ${operationEndpoint}`);
+          console.log(`📡 Request Body:`, JSON.stringify(requestBody, null, 2));
+          console.log(`📡 Current df_id: ${currentDfId}`);
+          console.log(`📡 ===== END API CALL LOG =====`);
           
           // 🔧 CRITICAL FIX: Handle GET requests differently (no body allowed)
           let response: Response;
@@ -437,25 +485,47 @@ export const dataframeOperationsHandler: AtomHandler = {
           
           if (!response.ok) {
             const errorText = await response.text();
-            console.error(`❌ Operation ${operation.operation_name || apiEndpoint} failed:`, {
-              status: response.status,
-              statusText: response.statusText,
-              url: operationEndpoint,
-              requestBody,
-              response: errorText
-            });
+            console.error(`❌ ===== OPERATION FAILED =====`);
+            console.error(`❌ Operation: ${operation.operation_name || apiEndpoint}`);
+            console.error(`❌ Status: ${response.status} ${response.statusText}`);
+            console.error(`❌ URL: ${operationEndpoint}`);
+            console.error(`❌ Request Body:`, JSON.stringify(requestBody, null, 2));
+            console.error(`❌ Response:`, errorText);
+            console.error(`❌ ===== END ERROR LOG =====`);
             
             throw new Error(`Operation ${operation.operation_name || apiEndpoint} failed: ${errorText}`);
           }
           
           const result = await response.json();
-          if (result.df_id) {
+          console.log(`📥 ===== BACKEND RESPONSE RECEIVED =====`);
+          console.log(`📥 Operation: ${operation.operation_name || apiEndpoint}`);
+          console.log(`📥 Status: ${response.status} ${response.statusText}`);
+          console.log(`📥 Response Keys:`, Object.keys(result));
+          console.log(`📥 Full Response:`, JSON.stringify(result, null, 2));
+          console.log(`📥 ===== END RESPONSE LOG =====`);
+          
+          // 🔧 CRITICAL FIX: Handle Celery task response format
+          // The response might be nested: { result: { df_id, headers, rows, ... } }
+          let actualResult = result;
+          if (result.result && typeof result.result === 'object') {
+            // Celery task response with embedded result
+            actualResult = result.result;
+            console.log(`🔧 Extracted nested result from Celery task response`);
+          }
+          
+          // Extract df_id (check both top level and nested)
+          if (actualResult.df_id) {
+            currentDfId = actualResult.df_id;
+            console.log(`✅ Updated currentDfId: ${currentDfId}`);
+          } else if (result.df_id) {
             currentDfId = result.df_id;
+            console.log(`✅ Updated currentDfId from top level: ${currentDfId}`);
           }
           
           // 🔧 CRITICAL: Track available columns for case correction
-          if (result.headers && Array.isArray(result.headers)) {
-            availableColumns = result.headers;
+          const headers = actualResult.headers || result.headers;
+          if (headers && Array.isArray(headers)) {
+            availableColumns = headers;
             console.log(`📊 Updated available columns (${availableColumns.length}): ${availableColumns.join(', ')}`);
             
             // 🔧 STRATEGY: If this is a load operation and we have existing data, 
@@ -465,18 +535,35 @@ export const dataframeOperationsHandler: AtomHandler = {
               console.log(`🔗 COLUMN INFO: Fresh columns loaded, now AI operations will use correct column names`);
               currentDfId = sessionExistingDfId; // Use existing modified DataFrame, not the fresh loaded one
             }
+          } else {
+            console.warn(`⚠️ No headers found in response for ${operation.operation_name || apiEndpoint}`);
+            console.warn(`⚠️ Response structure:`, Object.keys(actualResult));
           }
           
           // Only push results for operations that were actually executed
           if (!operation._skipped) {
-            results.push(result);
-            console.log(`✅ Operation completed: ${operation.operation_name}`);
+            results.push(actualResult);
+            console.log(`✅ Operation completed: ${operation.operation_name || apiEndpoint}`);
+            console.log(`📊 Operation result summary:`, {
+              hasDfId: !!actualResult.df_id,
+              hasHeaders: !!actualResult.headers,
+              hasRows: !!actualResult.rows,
+              rowCount: actualResult.rows?.length || 0
+            });
           } else {
             console.log(`⏭️ Operation skipped: ${operation.operation_name} - ${operation._reason}`);
           }
           
-          // 🔧 CRITICAL: Update UI after each operation if it returns data (SAME as Atom_ai_chat.tsx)
-          if (result && result.headers && result.rows) {
+          // 🔧 CRITICAL: Update UI after each operation if it returns data
+          const rows = actualResult.rows || result.rows;
+          
+          // 🔧 CRITICAL FIX: Ensure we have valid data before updating UI
+          if (!currentDfId && actualResult.df_id) {
+            currentDfId = actualResult.df_id;
+            console.log(`🔧 Fixed missing df_id: ${currentDfId}`);
+          }
+          
+          if (actualResult && headers && rows && Array.isArray(headers) && Array.isArray(rows)) {
             // 🔧 CRITICAL FIX: Always use the actual file name from the current operation or load operation
             const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
             
@@ -493,12 +580,13 @@ export const dataframeOperationsHandler: AtomHandler = {
             
             console.log(`🔧 USING ACTUAL FILE NAME: ${actualFileName} (from load operation: ${loadOperation?.parameters?.object_name})`);
             
+            const types = actualResult.types || result.types || {};
             const dataFrameData = {
-              headers: result.headers,
-              rows: result.rows,
+              headers: headers,
+              rows: rows,
               fileName: actualFileName, // 🔧 CRITICAL: Use actual AI file name, not temporary
-              columnTypes: Object.keys(result.types || {}).reduce((acc, col) => {
-                const type = result.types[col];
+              columnTypes: Object.keys(types).reduce((acc, col) => {
+                const type = types[col];
                 acc[col] = type.includes('Float') || type.includes('Int') ? 'number' : 'text';
                 return acc;
               }, {} as { [key: string]: 'text' | 'number' | 'date' }),
@@ -506,6 +594,8 @@ export const dataframeOperationsHandler: AtomHandler = {
               frozenColumns: 0,
               cellColors: {}
             };
+            
+            console.log(`📊 Prepared DataFrame data: ${rows.length} rows, ${headers.length} columns`);
             
             // 🔧 BATCH UI UPDATES: Collect all UI changes and apply at the end to reduce API calls
             // Store the operation result data but don't update UI immediately
@@ -542,6 +632,23 @@ export const dataframeOperationsHandler: AtomHandler = {
             }
             
             console.log(`🔄 Operation ${operation.operation_name} data prepared for batch UI update (${isLastOperation ? 'FINAL' : 'INTERMEDIATE'})`);
+          } else {
+            console.warn(`⚠️ Operation ${operation.operation_name || apiEndpoint} did not return valid data:`, {
+              hasHeaders: !!headers,
+              hasRows: !!rows,
+              headersType: typeof headers,
+              rowsType: typeof rows,
+              actualResultKeys: Object.keys(actualResult || {}),
+              resultKeys: Object.keys(result || {})
+            });
+            
+            // 🔧 CRITICAL: Even if no data returned, ensure df_id is tracked for next operation
+            if (currentDfId) {
+              console.log(`✅ df_id preserved for next operation: ${currentDfId}`);
+            } else {
+              console.error(`❌ CRITICAL: No df_id available after operation ${operation.operation_name || apiEndpoint}`);
+              console.error(`❌ This will cause subsequent operations to fail!`);
+            }
           }
           
         }

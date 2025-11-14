@@ -59,16 +59,33 @@ def build_dataframe_operations_prompt(
     if len(file_list) > 5:
         file_summary += f" + {len(file_list) - 5} more"
 
-    file_details_json = json.dumps(file_details, indent=2) if file_details else "None"
-    other_files_summary = ", ".join(other_files) if other_files else "None"
+    # 🔧 OPTIMIZATION: Only include file details if comprehensive details are available
+    # If file_details contains comprehensive info, skip redundant file listings
+    file_details_json = "None"
+    if file_details and isinstance(file_details, dict):
+        # Check if this is comprehensive file details (has file_id, columns, etc.)
+        if "file_id" in file_details or "columns" in file_details:
+            # This is comprehensive details - use it, but don't duplicate file listings
+            file_details_json = json.dumps(file_details, indent=2)
+            # Skip the redundant FILES DETAIL section if we have comprehensive details
+            files_detail_section = ""  # Empty to reduce duplication
+        else:
+            file_details_json = json.dumps(file_details, indent=2)
+            files_detail_section = f"FILES DETAIL: {json.dumps(available_files_with_columns, indent=2)}\n"
+    else:
+        files_detail_section = f"FILES DETAIL: {json.dumps(available_files_with_columns, indent=2)}\n"
+    
+    # Only include other_files if no comprehensive details (to reduce size)
+    other_files_summary = ""
+    if not file_details_json or file_details_json == "None":
+        other_files_summary = f"OTHER AVAILABLE FILES (REFERENCE ONLY): {', '.join(other_files) if other_files else 'None'}\n"
     
     prompt = f"""You are a DataFrame operations assistant. Generate JSON configs for data manipulation tasks.
 
 USER REQUEST: "{user_prompt}"
 AVAILABLE FILES: {file_summary}
-FILES DETAIL: {json.dumps(available_files_with_columns, indent=2)}
-FILE METADATA: {file_details_json}
-OTHER AVAILABLE FILES (REFERENCE ONLY): {other_files_summary}
+{files_detail_section}FILE METADATA: {file_details_json}
+{other_files_summary}
 
 {f"CONVERSATION: {context[:500]}..." if len(context) > 500 else f"CONVERSATION: {context}" if context else ""}
 
@@ -78,7 +95,12 @@ KEY RULES:
 3. Find file by matching user's words to file keys (e.g., user says "uk beans" → use the FULL KEY containing "UK_Beans")
 4. CRITICAL: object_name parameter MUST be the complete key from FILES DETAIL, NOT just the filename
 5. ONLY generate operations user explicitly requests - NO random filters
-6. Use exact column names from file schema (case-sensitive)
+6. 🔧 CRITICAL FOR COLUMN NAMES: If FILE METADATA contains comprehensive file details with 'columns' list:
+   - ALWAYS use EXACT column names from the 'columns' list (case-sensitive, including spaces and special characters)
+   - For filter operations, verify column names match EXACTLY - check 'unique_values' or 'sample_data' for valid filter values
+   - Column names may contain spaces, underscores, hyphens - use them EXACTLY as shown in 'columns' list
+   - If user mentions a column that doesn't match exactly, find the closest match from 'columns' list
+7. If no comprehensive file details available, use exact column names from file schema (case-sensitive)
 
 AVAILABLE OPERATIONS:
 • /load_cached: Load file (params: object_name)
@@ -529,6 +551,22 @@ def _validate_dataframe_operations_json(result: Dict[str, Any], available_files_
             return None
         
         logger.info(f"✅ operations is a list with {len(operations)} operations")
+        
+        # 🔧 CRITICAL FIX: Ensure execution_plan exists with auto_execute: true
+        if 'execution_plan' not in result:
+            logger.info("⚠️ execution_plan missing, adding default execution_plan with auto_execute: true")
+            result['execution_plan'] = {
+                "auto_execute": True,
+                "execution_mode": "sequential",
+                "error_handling": "stop_on_error"
+            }
+        elif not result.get('execution_plan', {}).get('auto_execute'):
+            logger.info("⚠️ execution_plan.auto_execute is False or missing, setting to True")
+            if 'execution_plan' not in result:
+                result['execution_plan'] = {}
+            result['execution_plan']['auto_execute'] = True
+        
+        logger.info(f"✅ execution_plan: {result.get('execution_plan')}")
         
         # Validate each operation
         for i, op in enumerate(operations):

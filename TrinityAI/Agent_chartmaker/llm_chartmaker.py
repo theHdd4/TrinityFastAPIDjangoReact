@@ -508,6 +508,13 @@ class ChartMakerAgent:
 
         normalized_charts: List[Dict[str, Any]] = []
 
+        def _pick_field_value(*candidates):
+            """Return the first non-empty string candidate."""
+            for candidate in candidates:
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+            return ""
+
         for index, chart in enumerate(charts_source):
             try:
                 chart_id = str(chart.get("chart_id", index + 1))
@@ -521,6 +528,12 @@ class ChartMakerAgent:
                 title = chart.get("title") or f"Chart {index + 1}"
 
                 raw_traces = chart.get("traces") or []
+                chart_level_legend = _pick_field_value(
+                    chart.get("legend_field"),
+                    chart.get("legendField"),
+                    chart.get("segregated_field"),
+                    chart.get("segregatedField"),
+                )
                 traces: List[Dict[str, Any]] = []
 
                 if isinstance(raw_traces, dict):
@@ -553,6 +566,13 @@ class ChartMakerAgent:
                         trace_chart_type = chart_type
 
                     filters = self._normalize_filters(trace.get("filters"))
+                    trace_legend_field = _pick_field_value(
+                        trace.get("legend_field"),
+                        trace.get("legendField"),
+                        trace.get("segregated_field"),
+                        trace.get("segregatedField"),
+                        chart_level_legend
+                    )
 
                     traces.append({
                         "id": trace.get("id", f"trace_{trace_index}"),
@@ -562,7 +582,8 @@ class ChartMakerAgent:
                         "aggregation": aggregation,
                         "chart_type": trace_chart_type,
                         "color": trace.get("color"),
-                        "filters": filters
+                        "filters": filters,
+                        **({"legend_field": trace_legend_field} if trace_legend_field else {})
                     })
 
                 normalized_chart = {
@@ -572,6 +593,10 @@ class ChartMakerAgent:
                     "traces": traces,
                     "filters": self._normalize_filters(chart.get("filters"))
                 }
+
+                if chart_level_legend:
+                    normalized_chart["legend_field"] = chart_level_legend
+                    normalized_chart["segregated_field"] = chart_level_legend
 
                 # Preserve optional fields when already in correct format
                 for optional_key in ["description", "insights", "notes"]:

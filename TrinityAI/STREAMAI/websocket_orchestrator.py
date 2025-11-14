@@ -12,7 +12,8 @@ import logging
 import os
 import re
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple, Callable
 from dataclasses import dataclass
 import uuid
 
@@ -61,13 +62,17 @@ class WorkflowStepPlan:
     files_used: List[str]
     inputs: List[str]
     output_alias: str
+    enriched_description: Optional[str] = None  # Enriched description with file details for UI
+    atom_prompt: Optional[str] = None  # Full prompt that will be sent to atom LLM
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "step_number": self.step_number,
             "atom_id": self.atom_id,
             "description": self.description,
+            "enriched_description": self.enriched_description or self.description,
             "prompt": self.prompt,
+            "atom_prompt": self.atom_prompt,  # Include full prompt for UI display
             "files_used": self.files_used,
             "inputs": self.inputs,
             "output_alias": self.output_alias
@@ -85,6 +90,14 @@ class WorkflowPlan:
             "workflow_steps": [step.to_dict() for step in self.workflow_steps],
             "total_steps": self.total_steps
         }
+
+
+class RetryableJSONGenerationError(Exception):
+    """Exception raised when JSON generation fails after all retries"""
+    def __init__(self, message: str, attempts: int, last_error: Exception):
+        super().__init__(message)
+        self.attempts = attempts
+        self.last_error = last_error
 
 
 class StreamWebSocketOrchestrator:
@@ -140,6 +153,64 @@ class StreamWebSocketOrchestrator:
         
         logger.info("✅ StreamWebSocketOrchestrator initialized")
     
+    async def _retry_llm_json_generation(
+        self,
+        llm_call_func: Callable,
+        step_name: str,
+        max_attempts: int = 3
+    ) -> Any:
+        """
+        Retry mechanism for LLM JSON generation.
+        
+        Args:
+            llm_call_func: Async function that calls LLM and returns JSON-parsed result
+            step_name: Name of the step (for logging)
+            max_attempts: Maximum number of retry attempts (default: 3)
+            
+        Returns:
+            Parsed JSON result from LLM
+            
+        Raises:
+            RetryableJSONGenerationError: If all retry attempts fail
+        """
+        last_error = None
+        last_content = None
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(f"🔄 [{step_name}] Attempt {attempt}/{max_attempts}: Calling LLM for JSON generation...")
+                result = await llm_call_func()
+                logger.info(f"✅ [{step_name}] Attempt {attempt} succeeded: Valid JSON generated")
+                return result
+            except json.JSONDecodeError as e:
+                last_error = e
+                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Invalid JSON - {e}")
+                if attempt < max_attempts:
+                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
+                else:
+                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed to generate valid JSON")
+            except ValueError as e:
+                last_error = e
+                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Validation error - {e}")
+                if attempt < max_attempts:
+                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
+                else:
+                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
+            except Exception as e:
+                last_error = e
+                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: {type(e).__name__} - {e}")
+                if attempt < max_attempts:
+                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
+                else:
+                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
+        
+        # All attempts failed
+        error_msg = (
+            f"Failed to generate valid JSON for '{step_name}' after {max_attempts} attempts. "
+            f"Please rephrase your query in a clearer way."
+        )
+        raise RetryableJSONGenerationError(error_msg, max_attempts, last_error)
+    
     def _load_atom_mapping(self):
         """Load atom mapping"""
         try:
@@ -194,9 +265,11 @@ Generate a workflow plan as a JSON array. Each step should have:
 
 IMPORTANT RULES:
 {workflow_rule}
-- Keep workflow simple (2-4 steps)
+- Workflows can be long (2-10+ steps) - break complex tasks into individual steps
+- Use ONE atom per task for clarity (e.g., one dataframe-operations step for filtering, another for formulas)
 - Put transformations before visualizations
 - Each step should logically follow the previous one
+- For dataframe-operations: Each operation type should be a separate step when workflow is complex
 
 Respond ONLY with valid JSON array, no other text:
 [
@@ -234,12 +307,22 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
    - Output: groupby_json with groupby columns and aggregation functions
    - Example: "Group sales by region and calculate total revenue"
 
-4. **dataframe-operations** - Filter, Sort, Select
-   - Capability: Filters rows, sorts data, selects/drops columns
-   - Use when: User wants to filter, sort, select, remove, or drop data
-   - Keywords: filter, where, sort, select, drop, remove, keep, only
-   - Output: dataframe_config with operations list
-   - Example: "Filter sales where revenue > 1000 and sort by date"
+4. **dataframe-operations** - Excel-like DataFrame Operations (Powerful Tool)
+   - Capability: Comprehensive DataFrame manipulation like Excel - formulas, filters, sorts, transformations, column operations
+   - Use when: User wants to:
+     * Apply formulas/calculations (PROD, SUM, DIV, IF, etc.)
+     * Filter rows based on conditions
+     * Sort data by columns
+     * Select/drop/rename columns
+     * Transform data (case conversion, type conversion, rounding)
+     * Insert/delete rows or columns
+     * Edit cell values
+     * Find and replace values
+     * Split or manipulate data like Excel
+   - Keywords: formula, calculate, compute, filter, where, sort, order, select, drop, remove, rename, transform, convert, round, edit, insert, delete, find, replace, split, excel, spreadsheet, manipulate, clean, prepare
+   - Output: dataframe_config with operations list (can include multiple operations in sequence)
+   - Example: "Apply formula PROD(Price, Volume) to Sales column", "Filter rows where revenue > 1000 and sort by date", "Rename column A to Revenue"
+   - IMPORTANT: This atom can handle multiple operations in one step, but for complex workflows, use ONE atom per task for clarity
 
 5. **create-column** - Create Calculated Columns
    - Capability: Creates new columns using formulas and calculations
@@ -272,11 +355,13 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
 
 WORKFLOW PLANNING RULES:
 - Put data loading (data-upload-validate) FIRST only if files don't exist
-- Put data transformations (merge, concat, filter, groupby) BEFORE visualization
+- Put data transformations (merge, concat, filter, groupby, dataframe-operations) BEFORE visualization
 - Put chart-maker or visualization atoms LAST
 - Each step should build on previous steps
-- Keep workflows simple and focused (2-4 steps is ideal)
+- For dataframe-operations: Use ONE atom per task for clarity (e.g., one for filtering, one for formulas, one for sorting)
+- Workflows can be long (5-10+ steps) - break complex tasks into individual steps
 - Consider data dependencies between steps
+- Example long workflow: Load → Filter → Apply Formula → Sort → Group → Visualize
 """
     
     def _extract_file_names_from_prompt(self, user_prompt: str) -> List[str]:
@@ -433,6 +518,57 @@ WORKFLOW PLANNING RULES:
 
         return matched
 
+    def _build_enriched_description(self, step: WorkflowStepPlan, available_files: List[str]) -> str:
+        """
+        Build enriched description with file details for UI display.
+        Includes file names, input/output information, and atom-specific details.
+        """
+        lines = [step.description]
+        
+        # Add file information
+        if hasattr(step, "files_used") and step.files_used:
+            file_display_names = [self._display_file_name(f) for f in step.files_used]
+            if len(step.files_used) == 1:
+                lines.append(f"📁 Input file: {file_display_names[0]} ({step.files_used[0]})")
+            else:
+                files_str = ", ".join([f"{name} ({path})" for name, path in zip(file_display_names, step.files_used)])
+                lines.append(f"📁 Input files: {files_str}")
+        
+        # Add input from previous steps
+        if hasattr(step, "inputs") and step.inputs:
+            if len(step.inputs) == 1:
+                lines.append(f"🔗 Using output from previous step: {step.inputs[0]}")
+            else:
+                inputs_str = ", ".join(step.inputs)
+                lines.append(f"🔗 Using outputs from previous steps: {inputs_str}")
+        
+        # Add output alias
+        if hasattr(step, "output_alias") and step.output_alias:
+            lines.append(f"📤 Output alias: {step.output_alias}")
+        
+        # Add atom-specific details from capabilities
+        atom_capabilities = self._get_atom_capability_info(step.atom_id)
+        if atom_capabilities:
+            capabilities = atom_capabilities.get("capabilities", [])
+            if capabilities:
+                lines.append(f"⚙️ Capabilities: {', '.join(capabilities[:2])}")
+        
+        return " | ".join(lines)
+    
+    def _get_atom_capability_info(self, atom_id: str) -> Optional[Dict[str, Any]]:
+        """Get atom capability information from JSON file"""
+        try:
+            capabilities_path = Path(__file__).parent / "rag" / "atom_capabilities.json"
+            if capabilities_path.exists():
+                with open(capabilities_path, 'r', encoding='utf-8') as f:
+                    capabilities_data = json.load(f)
+                    for atom in capabilities_data.get("atoms", []):
+                        if atom.get("atom_id") == atom_id:
+                            return atom
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load atom capability for {atom_id}: {e}")
+        return None
+    
     def _compose_prompt(
         self,
         atom_id: str,
@@ -442,29 +578,56 @@ WORKFLOW PLANNING RULES:
         inputs: List[str],
         output_alias: str
     ) -> str:
-        """Build a natural language prompt for downstream atom execution."""
+        """
+        Build a natural language prompt for downstream atom execution.
+        Now includes clear file names and detailed instructions based on atom capabilities.
+        """
+        # Get atom capabilities for better prompt generation
+        atom_capabilities = self._get_atom_capability_info(atom_id)
+        
         description_text = description.strip() or guidance.get("purpose", "Perform the requested operation")
         if not description_text.endswith('.'):  # ensure sentence end
             description_text += '.'
 
         lines: List[str] = []
+        
+        # Add atom-specific instructions from capabilities
+        if atom_capabilities:
+            prompt_reqs = atom_capabilities.get("prompt_requirements", [])
+            if prompt_reqs:
+                lines.append(f"**CRITICAL REQUIREMENTS FOR {atom_id.upper()}:**")
+                for req in prompt_reqs[:3]:  # Top 3 requirements
+                    lines.append(f"- {req}")
+                lines.append("")  # Empty line for readability
 
         if files_used:
+            # Use EXACT file names with full paths
             if len(files_used) == 1:
-                lines.append(f"Use dataset `{files_used[0]}` as the primary input.")
+                file_name = self._display_file_name(files_used[0])
+                lines.append(f"**PRIMARY INPUT FILE:** Use dataset `{files_used[0]}` (display name: {file_name}) as the primary input.")
+                lines.append(f"**IMPORTANT:** Reference this file by its exact path: `{files_used[0]}`")
             else:
                 formatted = ', '.join(f"`{name}`" for name in files_used)
-                lines.append(f"Use datasets {formatted} as inputs.")
+                display_names = [self._display_file_name(f) for f in files_used]
+                lines.append(f"**INPUT FILES:** Use datasets {formatted} as inputs.")
+                lines.append(f"**FILE PATHS:** {', '.join(f'`{f}`' for f in files_used)}")
+                lines.append(f"**DISPLAY NAMES:** {', '.join(display_names)}")
         elif inputs:
             if len(inputs) == 1:
-                lines.append(f"Use dataset `{inputs[0]}` produced in earlier steps.")
+                lines.append(f"**INPUT FROM PREVIOUS STEP:** Use dataset `{inputs[0]}` produced in earlier steps.")
             else:
                 formatted = ', '.join(f"`{alias}`" for alias in inputs)
-                lines.append(f"Use datasets {formatted} produced in earlier steps.")
+                lines.append(f"**INPUTS FROM PREVIOUS STEPS:** Use datasets {formatted} produced in earlier steps.")
         else:
-            lines.append("Ask the user to provide or confirm the correct dataset before executing this atom.")
+            lines.append("**WARNING:** No input dataset specified. Ask the user to provide or confirm the correct dataset before executing this atom.")
 
-        lines.append(description_text)
+        lines.append("")
+        lines.append(f"**TASK:** {description_text}")
+        lines.append("")
+        lines.append("**COLUMN VALIDATION CHECKLIST:**")
+        lines.append("- Use ONLY column names/values that appear in the file metadata & alias map above.")
+        lines.append("- If the user uses abbreviations or synonyms, map them to the exact column names before building formulas/filters.")
+        lines.append("- If a requested column/value is not found, choose the closest matching column that exists (case-sensitive). Never invent new columns.")
 
         guidelines = guidance.get("prompt_guidelines", [])
         if guidelines:
@@ -567,6 +730,18 @@ WORKFLOW PLANNING RULES:
                 else:
                     description_for_step = f"Files used: {files_clause}"
 
+            # Build enriched description with file details
+            temp_step = WorkflowStepPlan(
+                step_number=idx,
+                atom_id=atom_id,
+                description=description_for_step,
+                prompt=prompt_text,
+                files_used=files_used,
+                inputs=inputs,
+                output_alias=output_alias
+            )
+            enriched_description = self._build_enriched_description(temp_step, available_files)
+
             enriched_steps.append(
                 WorkflowStepPlan(
                     step_number=idx,
@@ -575,7 +750,9 @@ WORKFLOW PLANNING RULES:
                     prompt=prompt_text,
                     files_used=files_used,
                     inputs=inputs,
-                    output_alias=output_alias
+                    output_alias=output_alias,
+                    enriched_description=enriched_description,
+                    atom_prompt=prompt_text  # Store the prompt that will be sent to atom
                 )
             )
 
@@ -635,7 +812,9 @@ WORKFLOW PLANNING RULES:
         logger.info(f"🤖 Calling LLM for workflow generation...")
         logger.info(f"📝 Prompt length: {len(llm_prompt)} chars")
         
-        try:
+        # Define the LLM call function for retry mechanism
+        async def _call_llm_for_workflow() -> List[Dict[str, Any]]:
+            """Inner function that makes the LLM call and parses JSON"""
             async with aiohttp.ClientSession() as session:
                 payload = {
                     "model": self.llm_model,
@@ -705,31 +884,39 @@ WORKFLOW PLANNING RULES:
                     if not normalized_steps:
                         raise ValueError("No valid workflow steps extracted from LLM response")
 
-                    workflow_steps = normalized_steps
-
-                    # Post-process: Remove data-upload-validate if files already exist
-                    if files_exist:
-                        original_count = len(workflow_steps)
-                        workflow_steps = [s for s in workflow_steps if s.get('atom_id') != 'data-upload-validate']
-                        if len(workflow_steps) < original_count:
-                            logger.info(f"🔧 Removed {original_count - len(workflow_steps)} data-upload-validate step(s) - files already exist")
-                            # Renumber steps
-                            for i, step in enumerate(workflow_steps, 1):
-                                step['step_number'] = i
-                    
-                    logger.info(f"✅ Generated {len(workflow_steps)} steps via LLM")
+                    return normalized_steps
+        
+        # Use retry mechanism for workflow generation
+        try:
+            workflow_steps = await self._retry_llm_json_generation(
+                llm_call_func=_call_llm_for_workflow,
+                step_name="Workflow Generation",
+                max_attempts=3
+            )
+            
+            # Post-process: Remove data-upload-validate if files already exist
+            if files_exist:
+                original_count = len(workflow_steps)
+                workflow_steps = [s for s in workflow_steps if s.get('atom_id') != 'data-upload-validate']
+                if len(workflow_steps) < original_count:
+                    logger.info(f"🔧 Removed {original_count - len(workflow_steps)} data-upload-validate step(s) - files already exist")
+                    # Renumber steps
                     for i, step in enumerate(workflow_steps, 1):
-                        logger.info(f"   Step {i}: {step.get('atom_id')} - {step.get('description')}")
-                    
-                    return workflow_steps, prompt_files, files_exist
-                    
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Failed to parse LLM response as JSON: {e}")
-            logger.error(f"   Content: {content}")
+                        step['step_number'] = i
+            
+            logger.info(f"✅ Generated {len(workflow_steps)} steps via LLM")
+            for i, step in enumerate(workflow_steps, 1):
+                logger.info(f"   Step {i}: {step.get('atom_id')} - {step.get('description')}")
+            
+            return workflow_steps, prompt_files, files_exist
+            
+        except RetryableJSONGenerationError as e:
+            logger.error(f"❌ Workflow generation failed after all retries: {e}")
             # Fallback to keyword-based
+            logger.info("🔄 Falling back to keyword-based workflow generation")
             return self._fallback_to_keywords(user_prompt, available_files)
         except Exception as e:
-            logger.error(f"❌ LLM workflow generation failed: {e}")
+            logger.error(f"❌ LLM workflow generation failed with unexpected error: {e}")
             import traceback
             traceback.print_exc()
             # Fallback to keyword-based
@@ -761,8 +948,15 @@ WORKFLOW PLANNING RULES:
         if any(kw in query_lower for kw in ["concat", "append", "stack"]):
             steps.append({"atom_id": "concat", "description": "Concatenate datasets"})
         
-        if any(kw in query_lower for kw in ["filter", "sort", "select"]):
-            steps.append({"atom_id": "dataframe-operations", "description": "Filter and transform data"})
+        # Expanded keywords for dataframe-operations (Excel-like operations)
+        dataframe_ops_keywords = [
+            "filter", "where", "sort", "order", "select", "drop", "remove", "rename",
+            "formula", "calculate", "compute", "prod", "sum", "div", "if", "average",
+            "transform", "convert", "round", "edit", "insert", "delete", "find", "replace",
+            "split", "excel", "spreadsheet", "manipulate", "clean", "prepare", "column", "row"
+        ]
+        if any(kw in query_lower for kw in dataframe_ops_keywords):
+            steps.append({"atom_id": "dataframe-operations", "description": "Perform DataFrame operations (filter, formula, transform, etc.)"})
         
         if any(kw in query_lower for kw in ["group", "aggregate", "sum", "mean"]):
             steps.append({"atom_id": "groupby-wtg-avg", "description": "Group and aggregate data"})
@@ -824,11 +1018,32 @@ WORKFLOW PLANNING RULES:
             # ================================================================
             logger.info("📋 PHASE 1: Generating workflow plan with LLM...")
             
-            # Use LLM to generate intelligent workflow
-            workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                user_prompt=user_prompt,
-                available_files=available_files
-            )
+            # Use LLM to generate intelligent workflow with retry mechanism
+            try:
+                workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
+                    user_prompt=user_prompt,
+                    available_files=available_files
+                )
+            except RetryableJSONGenerationError as e:
+                logger.error(f"❌ Workflow generation failed after all retries: {e}")
+                # Send error event asking user to rephrase
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_generation_failed",
+                        {
+                            "sequence_id": sequence_id,
+                            "error": str(e),
+                            "message": (
+                                "Failed to generate workflow plan after 3 attempts. "
+                                "Please rephrase your query in a clearer way."
+                            ),
+                            "suggestion": "Try being more specific about what operations you want to perform."
+                        }
+                    ),
+                    "workflow_generation_failed event"
+                )
+                return  # Stop workflow execution
             
             # Create plan structure
             enriched_steps = self._build_enriched_plan(
@@ -902,11 +1117,32 @@ WORKFLOW PLANNING RULES:
                         
                         logger.info(f"➕ Regenerating workflow with additional info: {additional_info}")
                         
-                        # Regenerate workflow with combined prompt
-                        workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                            user_prompt=combined_prompt,
-                            available_files=available_files
-                        )
+                        # Regenerate workflow with combined prompt (with retry mechanism)
+                        try:
+                            workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
+                                user_prompt=combined_prompt,
+                                available_files=available_files
+                            )
+                        except RetryableJSONGenerationError as e:
+                            logger.error(f"❌ Workflow regeneration failed after all retries: {e}")
+                            # Send error event asking user to rephrase
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "workflow_generation_failed",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "error": str(e),
+                                        "message": (
+                                            "Failed to regenerate workflow plan after 3 attempts. "
+                                            "Please rephrase your query in a clearer way."
+                                        ),
+                                        "suggestion": "Try being more specific about what operations you want to perform."
+                                    }
+                                ),
+                                "workflow_generation_failed event (regeneration)"
+                            )
+                            return  # Stop workflow execution
                         
                         enriched_steps = self._build_enriched_plan(
                             workflow_steps_raw=workflow_steps_raw,
@@ -1163,9 +1399,12 @@ WORKFLOW PLANNING RULES:
         
         try:
             # ================================================================
-            # EVENT 1: STEP_STARTED
+            # EVENT 1: STEP_STARTED (with enriched description)
             # ================================================================
             logger.info(f"📍 Step {step_number}/{plan.total_steps}: {atom_id}")
+            
+            # Build enriched description with file details
+            enriched_description = self._build_enriched_description(step, available_files)
             
             await self._send_event(
                 websocket,
@@ -1176,6 +1415,10 @@ WORKFLOW PLANNING RULES:
                         "total_steps": plan.total_steps,
                         "atom_id": atom_id,
                         "description": step.description,
+                        "enriched_description": enriched_description,
+                        "files_used": step.files_used if hasattr(step, "files_used") else [],
+                        "inputs": step.inputs if hasattr(step, "inputs") else [],
+                        "output_alias": step.output_alias if hasattr(step, "output_alias") else "",
                         "sequence_id": sequence_id
                     }
                 ),
@@ -1204,6 +1447,35 @@ WORKFLOW PLANNING RULES:
                     atom_id,
                 )
                 raise
+            
+            # Extract the prompt that will be sent to the atom
+            atom_prompt = parameters.get("prompt", step.prompt if hasattr(step, "prompt") else "")
+            
+            # 🔧 NEW: Log and send prompt to UI for visibility
+            logger.info(f"📝 PROMPT FOR STEP {step_number} ({atom_id}):")
+            logger.info("="*80)
+            logger.info(atom_prompt)
+            logger.info("="*80)
+            
+            # Send prompt to UI via WebSocket event BEFORE execution
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "atom_prompt",
+                    {
+                        "step": step_number,
+                        "atom_id": atom_id,
+                        "prompt": atom_prompt,
+                        "full_prompt": atom_prompt,  # Full prompt text for UI display
+                        "parameters": parameters,
+                        "sequence_id": sequence_id,
+                        "message": f"📝 Prompt being sent to {atom_id} at step {step_number}",
+                        "description": step.description,
+                        "enriched_description": enriched_description
+                    }
+                ),
+                f"atom_prompt event (step {step_number})"
+            )
             
             logger.info(f"✅ Parameters: {json.dumps(parameters, indent=2)[:150]}...")
             
@@ -1917,6 +2189,8 @@ WORKFLOW PLANNING RULES:
             return self._build_groupby_section(original_prompt, inputs or files_used)
         if atom_id == "concat":
             return self._build_concat_section(original_prompt, files_used)
+        if atom_id == "dataframe-operations":
+            return self._build_dataframe_operations_section(original_prompt, inputs or files_used)
         return self._build_generic_section(atom_id, original_prompt)
 
     def _build_available_files_section(self, available_files: List[str]) -> str:
@@ -2027,6 +2301,92 @@ WORKFLOW PLANNING RULES:
 
         return "\n".join(lines)
 
+    def _build_dataframe_operations_section(self, original_prompt: str, possible_inputs: List[str]) -> str:
+        """
+        Build detailed instructions for dataframe-operations atom.
+        This atom supports Excel-like operations: formulas, filters, sorts, transformations, etc.
+        """
+        prompt_lower = original_prompt.lower()
+        lines: List[str] = ["DataFrame operations requirements (Excel-like capabilities):"]
+        
+        # Detect operation types from prompt
+        has_formula = any(kw in prompt_lower for kw in ["formula", "calculate", "compute", "prod", "sum", "div", "if", "average", "multiply", "divide"])
+        has_filter = any(kw in prompt_lower for kw in ["filter", "where", "remove", "exclude", "keep only"])
+        has_sort = any(kw in prompt_lower for kw in ["sort", "order", "arrange", "ascending", "descending"])
+        has_transform = any(kw in prompt_lower for kw in ["transform", "convert", "round", "case", "rename", "edit"])
+        has_column_ops = any(kw in prompt_lower for kw in ["column", "select", "drop", "remove column", "add column", "insert column"])
+        has_row_ops = any(kw in prompt_lower for kw in ["row", "insert row", "delete row", "remove row"])
+        has_find_replace = any(kw in prompt_lower for kw in ["find", "replace", "search"])
+        
+        # Formula operations
+        if has_formula:
+            lines.append("- Formula operations:")
+            lines.append("  * Detect formula type: PROD (multiply), SUM (add), DIV (divide), IF (conditional), AVG (average), etc.")
+            lines.append("  * Extract column names from prompt (case-insensitive matching)")
+            lines.append("  * Ensure formulas start with '=' prefix (required by backend)")
+            lines.append("  * Example: 'PROD(Price, Volume)' → '=PROD(Price, Volume)'")
+            lines.append("  * Target column: Create new column or overwrite existing based on user intent")
+        
+        # Filter operations
+        if has_filter:
+            lines.append("- Filter operations:")
+            lines.append("  * Extract filter conditions (e.g., 'revenue > 1000', 'status == active')")
+            lines.append("  * Support multiple conditions with AND/OR logic")
+            lines.append("  * Handle numeric, string, and date comparisons")
+        
+        # Sort operations
+        if has_sort:
+            lines.append("- Sort operations:")
+            lines.append("  * Extract sort column(s) and direction (asc/desc)")
+            lines.append("  * Support multi-column sorting if mentioned")
+        
+        # Transform operations
+        if has_transform:
+            lines.append("- Transform operations:")
+            lines.append("  * Column renaming: Extract old and new column names")
+            lines.append("  * Type conversion: Detect target types (text, number, date)")
+            lines.append("  * Case conversion: lower, upper, snake_case, etc.")
+            lines.append("  * Rounding: Extract decimal places if mentioned")
+        
+        # Column operations
+        if has_column_ops:
+            lines.append("- Column operations:")
+            lines.append("  * Select/drop: Identify columns to keep or remove")
+            lines.append("  * Insert: Detect position and default values")
+            lines.append("  * Rename: Map old names to new names")
+        
+        # Row operations
+        if has_row_ops:
+            lines.append("- Row operations:")
+            lines.append("  * Insert: Detect position (above/below) and default values")
+            lines.append("  * Delete: Identify rows to remove (by index or condition)")
+        
+        # Find and replace
+        if has_find_replace:
+            lines.append("- Find and replace:")
+            lines.append("  * Extract search text and replacement text")
+            lines.append("  * Detect case sensitivity and replace all options")
+        
+        # General guidance
+        if not (has_formula or has_filter or has_sort or has_transform or has_column_ops or has_row_ops or has_find_replace):
+            lines.append("- General operations:")
+            lines.append("  * Analyze prompt to determine which DataFrame operations are needed")
+            lines.append("  * Support multiple operations in sequence if user requests multiple tasks")
+            lines.append("  * Use operations list in dataframe_config to chain operations")
+        
+        # Input dataset
+        if possible_inputs:
+            lines.append(f"- Use input dataset: `{possible_inputs[0]}`")
+        
+        # Output guidance
+        lines.append("- Output format:")
+        lines.append("  * Return dataframe_config with operations array")
+        lines.append("  * Each operation should have: operation_name, api_endpoint, method, parameters")
+        lines.append("  * Use 'auto_from_previous' for df_id to chain operations")
+        lines.append("  * Ensure operations are ordered correctly (load first, then transformations)")
+        
+        return "\n".join(lines)
+    
     def _build_generic_section(self, atom_id: str, original_prompt: str) -> str:
         lines = [
             "Execution requirements:",
@@ -2034,8 +2394,6 @@ WORKFLOW PLANNING RULES:
             "- Reuse upstream datasets and maintain Quant Matrix AI styling and naming conventions.",
             f"- Ensure the `{atom_id}` atom returns a result ready for the next workflow step."
         ]
-        if "filter" in original_prompt.lower() and atom_id == "dataframe-operations":
-            lines.append("- Explicitly encode filter and sort logic mentioned by the user.")
         return "\n".join(lines)
 
     def _extract_join_columns(self, text: str) -> List[str]:

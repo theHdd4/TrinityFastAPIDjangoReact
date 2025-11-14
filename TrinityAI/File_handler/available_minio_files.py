@@ -313,12 +313,60 @@ class FileHandler:
         
         return all_matches
     
-    def get_file_context(self, filenames: List[str]) -> Dict[str, Any]:
+    def load_file_details_from_backend(self, object_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Load comprehensive file details from /load-file-details endpoint.
+        Same logic as dataframe operations agent.
+        
+        Args:
+            object_name: Full path to the file (e.g., "prefix/filename.arrow")
+            
+        Returns:
+            Comprehensive file details dict or None if failed
+        """
+        try:
+            import requests
+            
+            # Get the dataframe operations API URL
+            df_ops_api_url = os.getenv("DATAFRAME_OPERATIONS_API_URL", "http://fastapi:8001")
+            if not df_ops_api_url.startswith("http"):
+                df_ops_api_url = f"http://{df_ops_api_url}"
+            
+            # Call the load-file-details endpoint
+            load_details_url = f"{df_ops_api_url}/api/dataframe-operations/load-file-details"
+            logger.info(f"📥 Loading comprehensive file details from: {load_details_url}")
+            logger.info(f"📥 Object name: {object_name}")
+            
+            response = requests.post(
+                load_details_url,
+                json={"object_name": object_name},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                file_details = response.json()
+                logger.info(f"✅ File details loaded successfully:")
+                logger.info(f"   - File ID: {file_details.get('file_id')}")
+                logger.info(f"   - Columns: {len(file_details.get('columns', []))}")
+                logger.info(f"   - Numeric columns: {len(file_details.get('numeric_columns', []))}")
+                logger.info(f"   - Categorical columns: {len(file_details.get('categorical_columns', []))}")
+                logger.info(f"   - Row count: {file_details.get('row_count', 0)}")
+                return file_details
+            else:
+                logger.warning(f"⚠️ Failed to load file details: {response.status_code} - {response.text}")
+                return None
+        except Exception as e:
+            logger.warning(f"⚠️ Error loading file details from backend: {e}")
+            return None
+    
+    def get_file_context(self, filenames: List[str], use_backend_endpoint: bool = True) -> Dict[str, Any]:
         """
         Get detailed context for specified files.
+        Now uses /load-file-details endpoint for comprehensive details (same as dataframe operations).
         
         Args:
             filenames: List of filenames to get context for
+            use_backend_endpoint: If True, use /load-file-details endpoint for comprehensive details
             
         Returns:
             Dict with file details in JSON-serializable format
@@ -326,10 +374,14 @@ class FileHandler:
         Example:
             {
                 "sales_data.arrow": {
+                    "file_id": "uuid-here",
                     "columns": ["date", "revenue", "region"],
-                    "data_types": {"date": "datetime64", "revenue": "float64", "region": "string"},
+                    "numeric_columns": ["revenue"],
+                    "categorical_columns": ["region"],
+                    "column_types": {"date": "datetime64", "revenue": "float64", "region": "string"},
                     "row_count": 10000,
-                    "sample_values": {"region": ["North", "South", "East", "West"]}
+                    "unique_values": {"region": ["North", "South", "East", "West"]},
+                    "sample_data": [...]
                 }
             }
         """
@@ -343,14 +395,49 @@ class FileHandler:
             # Try exact match first
             if filename in self.files_with_columns:
                 matched_filename = filename
+                file_info = self.files_with_columns[matched_filename]
+                object_name = file_info.get('file_path', matched_filename)
             else:
                 # Try partial match (user might mention without extension)
                 matched_filename = None
                 for available_file in self.files_with_columns.keys():
                     if filename.lower() in available_file.lower():
                         matched_filename = available_file
+                        file_info = self.files_with_columns[matched_filename]
+                        object_name = file_info.get('file_path', matched_filename)
                         break
+                
+                if not matched_filename:
+                    logger.warning(f"⚠️ File not found: {filename}")
+                    file_context[filename] = {
+                        "error": "File not found",
+                        "available_files": list(self.files_with_columns.keys())[:10]
+                    }
+                    continue
             
+            # 🔧 NEW: Use /load-file-details endpoint for comprehensive details (same as dataframe operations)
+            if use_backend_endpoint:
+                # Ensure object_name has .arrow extension
+                if not object_name.endswith('.arrow'):
+                    if matched_filename.endswith('.arrow'):
+                        object_name = matched_filename
+                    else:
+                        # Try to find the full path with .arrow extension
+                        for available_file, info in self.files_with_columns.items():
+                            if available_file.endswith('.arrow') and filename.lower() in available_file.lower():
+                                object_name = info.get('file_path', available_file)
+                                break
+                
+                # Call backend endpoint for comprehensive file details
+                comprehensive_details = self.load_file_details_from_backend(object_name)
+                
+                if comprehensive_details:
+                    # Use comprehensive details from backend (same format as dataframe operations)
+                    file_context[matched_filename] = comprehensive_details
+                    logger.info(f"✅ Using comprehensive file details from /load-file-details endpoint")
+                    continue
+            
+            # Fallback to original method if backend endpoint not available or failed
             if matched_filename:
                 # Get basic file info
                 file_info = self.files_with_columns[matched_filename]
@@ -382,12 +469,6 @@ class FileHandler:
                 
                 file_context[matched_filename] = context_entry
                 logger.info(f"✅ File context entry has {len(context_entry)} fields")
-            else:
-                logger.warning(f"⚠️ File not found: {filename}")
-                file_context[filename] = {
-                    "error": "File not found",
-                    "available_files": list(self.files_with_columns.keys())[:10]
-                }
         
         return file_context
     
@@ -450,6 +531,8 @@ class FileHandler:
         """
         Format file context as a string suitable for including in LLM prompts.
         Includes comprehensive statistical information and column descriptions.
+        Now supports both comprehensive file details from /load-file-details endpoint
+        and legacy format from FileAnalyzer.
         
         Args:
             file_context: File context dictionary from get_file_context()
@@ -476,22 +559,31 @@ class FileHandler:
             formatted += f"📄 FILE: {filename}\n"
             formatted += "="*60 + "\n"
             
+            # Check if this is comprehensive file details from /load-file-details endpoint
+            is_comprehensive = "file_id" in context or ("numeric_columns" in context and "categorical_columns" in context)
+            
             # Basic info
             columns = context.get('columns', [])
             row_count = context.get('row_count', 0)
             formatted += f"\n📊 OVERVIEW:\n"
             formatted += f"   Total Rows: {row_count:,}\n"
             formatted += f"   Total Columns: {len(columns)}\n"
-            formatted += f"   File Size: {context.get('file_size_bytes', 0):,} bytes\n"
+            if is_comprehensive:
+                formatted += f"   File ID: {context.get('file_id', 'N/A')}\n"
+                formatted += f"   Numeric Columns: {len(context.get('numeric_columns', []))}\n"
+                formatted += f"   Categorical Columns: {len(context.get('categorical_columns', []))}\n"
+            else:
+                formatted += f"   File Size: {context.get('file_size_bytes', 0):,} bytes\n"
             
             # All column names
             formatted += f"\n📋 COLUMNS ({len(columns)}):\n"
             formatted += f"   {', '.join(columns)}\n"
             
             # Data types with detailed breakdown
-            if context.get('data_types'):
+            # Comprehensive format uses 'column_types', legacy uses 'data_types'
+            column_types = context.get('column_types') or context.get('data_types', {})
+            if column_types:
                 formatted += f"\n🔤 DATA TYPES:\n"
-                data_types = context.get('data_types', {})
                 
                 # Group by type
                 numeric_cols = []
@@ -499,13 +591,13 @@ class FileHandler:
                 datetime_cols = []
                 other_cols = []
                 
-                for col, dtype in data_types.items():
+                for col, dtype in column_types.items():
                     dtype_str = str(dtype).lower()
                     if 'int' in dtype_str or 'float' in dtype_str or 'double' in dtype_str:
                         numeric_cols.append(f"{col} ({dtype})")
-                    elif 'datetime' in dtype_str or 'timestamp' in dtype_str:
+                    elif 'datetime' in dtype_str or 'timestamp' in dtype_str or 'date' in dtype_str:
                         datetime_cols.append(f"{col} ({dtype})")
-                    elif 'object' in dtype_str or 'string' in dtype_str or 'category' in dtype_str:
+                    elif 'object' in dtype_str or 'string' in dtype_str or 'category' in dtype_str or 'utf8' in dtype_str:
                         categorical_cols.append(f"{col} ({dtype})")
                     else:
                         other_cols.append(f"{col} ({dtype})")
@@ -522,6 +614,17 @@ class FileHandler:
                     formatted += f"   DateTime Columns ({len(datetime_cols)}): {', '.join(datetime_cols)}\n"
                 if other_cols:
                     formatted += f"   Other Types ({len(other_cols)}): {', '.join(other_cols)}\n"
+            
+            # Show numeric and categorical column lists if available (comprehensive format)
+            if is_comprehensive:
+                numeric_cols_list = context.get('numeric_columns', [])
+                categorical_cols_list = context.get('categorical_columns', [])
+                if numeric_cols_list:
+                    formatted += f"\n🔢 NUMERIC COLUMNS LIST:\n"
+                    formatted += f"   {', '.join(numeric_cols_list)}\n"
+                if categorical_cols_list:
+                    formatted += f"\n📝 CATEGORICAL COLUMNS LIST:\n"
+                    formatted += f"   {', '.join(categorical_cols_list)}\n"
             
             # Statistical Summary (df.describe() equivalent) - SHOW ALL COLUMNS
             if context.get('statistical_summary'):
@@ -577,8 +680,31 @@ class FileHandler:
                 if not has_missing:
                     formatted += f"   ✅ No missing values detected in any column\n"
             
-            # Sample values (unique values for ALL categorical columns)
-            if context.get('sample_values'):
+            # Unique values (comprehensive format) or Sample values (legacy format)
+            if is_comprehensive and context.get('unique_values'):
+                formatted += f"\n💡 UNIQUE VALUES - Categorical Columns:\n"
+                unique_vals = context.get('unique_values', {})
+                formatted += f"   Total Columns with Unique Values: {len(unique_vals)}\n\n"
+                # Show unique values for categorical columns
+                for col, values in unique_vals.items():
+                    if values and len(values) > 0:
+                        # Show unique values
+                        if len(values) <= 15:
+                            formatted += f"   {col}: {', '.join(str(v) for v in values)}\n"
+                        else:
+                            formatted += f"   {col}: {', '.join(str(v) for v in values[:15])} ... (total {len(values)} unique values)\n"
+            
+            # Sample data (comprehensive format) - show sample rows
+            if is_comprehensive and context.get('sample_data'):
+                formatted += f"\n📄 SAMPLE DATA (First 2 rows):\n"
+                sample_data = context.get('sample_data', [])
+                if sample_data:
+                    # Show first 2 rows as examples
+                    for idx, row in enumerate(sample_data[:2], 1):
+                        formatted += f"   Row {idx}: {json.dumps(row, default=str)}\n"
+            
+            # Sample values (legacy format)
+            if not is_comprehensive and context.get('sample_values'):
                 formatted += f"\n💡 SAMPLE VALUES - All Categorical Columns:\n"
                 samples = context.get('sample_values', {})
                 formatted += f"   Total Columns with Samples: {len(samples)}\n\n"

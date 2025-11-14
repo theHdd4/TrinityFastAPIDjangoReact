@@ -177,6 +177,19 @@ export const chartMakerHandler: AtomHandler = {
         filters = { ...filters, ...chartConfig.filters };
         console.log('🔧 Additional filters from chartConfig.filters:', chartConfig.filters);
       }
+
+      const legendFieldCandidate =
+        chartConfig.legend_field ??
+        chartConfig.legendField ??
+        chartConfig.segregated_field ??
+        chartConfig.segregatedField ??
+        traces[0]?.legend_field ??
+        '';
+      const normalizedLegendField =
+        legendFieldCandidate && legendFieldCandidate !== 'aggregate'
+          ? legendFieldCandidate
+          : '';
+      const legendField = normalizedLegendField || 'aggregate';
       
       return {
         id: `ai_chart_${chartConfig.chart_id || index + 1}_${Date.now()}`,
@@ -186,6 +199,7 @@ export const chartMakerHandler: AtomHandler = {
         xAxis: traces[0]?.x_column || '', // 🔧 FIX: Keep original case for backend validation
         yAxis: traces[0]?.y_column || '', // 🔧 FIX: Keep original case for backend validation
         filters: filters, // 🔧 FILTER INTEGRATION: Use AI-generated filters
+        legendField,
         chartRendered: false,
         isAdvancedMode: traces.length > 1,
         traces: traces.map((trace: any, traceIndex: number) => ({
@@ -197,7 +211,13 @@ export const chartMakerHandler: AtomHandler = {
           color: trace.color || undefined,
           aggregation: trace.aggregation || 'sum',
           chart_type: trace.chart_type || chartType, // 🔧 CRITICAL FIX: Add chart_type to traces
-          filters: filters // 🔧 FILTER INTEGRATION: Apply same filters to traces
+          filters: filters, // 🔧 FILTER INTEGRATION: Apply same filters to traces
+          legend_field:
+            trace.legend_field ||
+            trace.legendField ||
+            trace.segregated_field ||
+            trace.segregatedField ||
+            (legendField !== 'aggregate' ? legendField : undefined)
         }))
       };
     });
@@ -333,7 +353,13 @@ export const chartMakerHandler: AtomHandler = {
               name: trace.name || `Trace ${traceIndex + 1}`,
               chart_type: trace.chart_type || chartType,
               aggregation: trace.aggregation || 'sum',
-              filters: enhancedTraceFilters[traceIndex] || {}
+              filters: enhancedTraceFilters[traceIndex] || {},
+              legend_field:
+                trace.legend_field ||
+                trace.legendField ||
+                trace.segregated_field ||
+                trace.segregatedField ||
+                (chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined)
             })),
             title: title,
             filters: processedFilters

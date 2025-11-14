@@ -547,6 +547,7 @@ export interface ChartTraceConfig {
   filters: Record<string, string[]>;
   color?: string;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+  legend_field?: string;
 }
 
 export interface ChartMakerConfig {

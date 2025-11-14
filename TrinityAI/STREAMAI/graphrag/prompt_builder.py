@@ -102,9 +102,13 @@ AVAILABLE ATOMS:
 
 RULES:
 - {file_rule}
-- Produce 2–5 ordered steps. Merge/transform before visualisation.
+- Produce ordered steps (can be 2-10+ steps for complex tasks). Break down complex operations into individual steps.
+- Use ONE atom per task for clarity (e.g., one dataframe-operations step for filtering, another for formulas, another for sorting).
+- Merge/transform before visualisation.
+- For dataframe-operations: Each operation type (filter, formula, sort, transform) should be a separate step when the workflow is complex.
 - Each step MUST include `atom_id`, `description`, `prompt`, `inputs`, `files_used`, and `output_alias`.
 - The `prompt` field should be ready to send to the atom without further reformatting.
+- Long workflows are supported - break tasks into logical sequential steps.
 - Respond in JSON only. No markdown fences.
 """
 

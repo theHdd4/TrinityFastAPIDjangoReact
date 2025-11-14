@@ -73,3 +73,4 @@ class SessionResponse(BaseModel):
     metadata: Dict[str, Any]
     updated_at: datetime
 
+
