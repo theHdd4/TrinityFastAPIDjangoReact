@@ -19,7 +19,6 @@ from app.features.build_feature_based.endpoint import router as build_feature_ro
 from app.features.build_model_feature_based.endpoint import router as build_model_router
 from app.features.scenario_planner_category_forecasting.endpoint import router as scenario_planner_router
 # from app.features.build_autoregressive.endpoint import router as autoregressive_router
-from app.features.select_models_feature_based.endpoint import router as select_router
 from app.features.select_models_feature_based.endpoint import router as select_models_router
 from app.features.evaluate_models_feature_based.endpoint import router as evaluate_router
 from app.features.exhibition.endpoint import router as exhibition_router
