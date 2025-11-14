@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import statistics
 from dataclasses import dataclass
@@ -9,7 +10,13 @@ from datetime import datetime
 from itertools import count
 from typing import Any, Dict, Iterable, List, Sequence
 
+from minio.error import S3Error
 from pydantic import BaseModel, Field
+
+from .database import MINIO_BUCKET, minio_client
+
+
+logger = logging.getLogger("app.features.select_models_feature_based.service")
 
 
 @dataclass(frozen=True)
@@ -275,22 +282,74 @@ def _models_for_file(file_key: str, combination_id: str | None = None) -> List[M
     return models
 
 
-def list_model_results_files() -> Dict[str, Any]:
-    unique_files = sorted({record.file_key for record in MODEL_DATA})
-    files = [
-        {
-            "object_name": key,
-            "csv_name": key.split("/")[-1],
-            "last_modified": "2023-12-01T00:00:00Z",
-            "file_size": 1024 * (index + 1),
-        }
-        for index, key in enumerate(unique_files)
-    ]
+def _normalise_prefix(prefix: str) -> str:
+    cleaned = prefix.strip()
+    if not cleaned:
+        return ""
+    return cleaned.lstrip("/")
+
+
+def list_model_results_files(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    prefix: str = "model-results/",
+    limit: int = 100,
+) -> Dict[str, Any]:
+    """Return Arrow model result files for the provided project.
+
+    The previous deterministic implementation surfaced a static parquet file which
+    caused the Select Models UI to point at an unrelated dataset.  We now mirror the
+    legacy router by asking MinIO for files that live within the project's
+    ``model-results`` directory and only return Arrow artefacts that represent model
+    outputs.
+    """
+
+    if not client_name or not app_name or not project_name:
+        raise ValueError("Client, app, and project names are required to list model results")
+
+    cleaned_prefix = _normalise_prefix(prefix or "")
+    project_prefix = "/".join(part.strip("/") for part in (client_name, app_name, project_name))
+    base_prefix = f"{project_prefix}/"
+    full_prefix = f"{base_prefix}{cleaned_prefix}" if cleaned_prefix else base_prefix
+
+    try:
+        objects = minio_client.list_objects(
+            MINIO_BUCKET,
+            prefix=full_prefix,
+            recursive=True,
+        )
+    except S3Error as exc:
+        logger.exception(
+            "select_models_feature_based.minio_list_failed bucket=%s prefix=%s", MINIO_BUCKET, full_prefix
+        )
+        raise ValueError(f"Unable to list model results for prefix '{full_prefix}': {exc}") from exc
+
+    files: List[Dict[str, Any]] = []
+    for obj in objects:
+        if len(files) >= limit:
+            break
+        if getattr(obj, "is_dir", False):
+            continue
+        object_name = getattr(obj, "object_name", "")
+        if not object_name.lower().endswith(".arrow"):
+            continue
+        files.append(
+            {
+                "object_name": object_name,
+                "csv_name": object_name,
+                "file_size": getattr(obj, "size", None),
+                "last_modified": (
+                    obj.last_modified.isoformat() if getattr(obj, "last_modified", None) else None
+                ),
+            }
+        )
+
     return {
         "total_files": len(files),
         "files": files,
-        "bucket": "demo",
-        "prefix": "model-results/",
+        "bucket": MINIO_BUCKET,
+        "prefix": full_prefix,
     }
 
 
