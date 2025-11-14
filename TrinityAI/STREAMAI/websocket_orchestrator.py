@@ -13,7 +13,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Callable
+from typing import Dict, Any, List, Optional, Tuple, Callable, Set
 from dataclasses import dataclass
 import uuid
 
@@ -32,6 +32,7 @@ from .atom_mapping import ATOM_MAPPING
 from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
+from Agent_insight.workflow_insight_agent import get_workflow_insight_agent
 
 try:
     import aiohttp  # type: ignore
@@ -125,6 +126,7 @@ class StreamWebSocketOrchestrator:
         self.parameter_generator = parameter_generator
         self.result_storage = result_storage
         self.rag_engine = rag_engine
+        self._cancelled_sequences: Set[str] = set()
 
         # GraphRAG integration
         self.graph_workspace_config = GraphRAGWorkspaceConfig()
@@ -1198,6 +1200,21 @@ WORKFLOW PLANNING RULES:
                         
                         logger.info(f"✅ Regenerated workflow with {plan.total_steps} steps")
                         # Continue waiting for approval
+                    elif approval_msg.get('type') == 'stop_workflow':
+                        logger.info("🛑 User stopped workflow before execution")
+                        self._cancelled_sequences.add(sequence_id)
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "workflow_stopped",
+                                {
+                                    "message": "Workflow stopped by user before execution",
+                                    "sequence_id": sequence_id
+                                }
+                            ),
+                            "workflow_stopped (plan phase)"
+                        )
+                        return
                 except WebSocketDisconnect:
                     logger.info("🔌 WebSocket disconnected while waiting for initial approval")
                     return
@@ -1225,7 +1242,28 @@ WORKFLOW PLANNING RULES:
                 "workflow_started event"
             )
             
+            if sequence_id in self._cancelled_sequences:
+                logger.info(f"🛑 Workflow {sequence_id} marked as cancelled before execution start")
+                self._cancelled_sequences.discard(sequence_id)
+                return
+
             for idx, step in enumerate(plan.workflow_steps):
+                if sequence_id in self._cancelled_sequences:
+                    logger.info(f"🛑 Workflow {sequence_id} cancelled before executing step {step.step_number}")
+                    self._cancelled_sequences.discard(sequence_id)
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "workflow_stopped",
+                            {
+                                "message": "Workflow stopped by user",
+                                "sequence_id": sequence_id
+                            }
+                        ),
+                        "workflow_stopped (pre-step)"
+                    )
+                    return
+
                 await self._execute_step_with_events(
                     websocket=websocket,
                     step=step,
@@ -1350,6 +1388,21 @@ WORKFLOW PLANNING RULES:
                                     
                                     # Continue to next step (which is now updated)
                                     step_approved = True
+                            elif approval_msg.get('type') == 'stop_workflow':
+                                logger.info(f"🛑 Workflow {sequence_id} stopped by user at step {step.step_number}")
+                                self._cancelled_sequences.add(sequence_id)
+                                await self._send_event(
+                                    websocket,
+                                    WebSocketEvent(
+                                        "workflow_stopped",
+                                        {
+                                            "message": f"Workflow stopped by user at step {step.step_number}",
+                                            "sequence_id": sequence_id
+                                        }
+                                    ),
+                                    "workflow_stopped (step phase)"
+                                )
+                                return
                         except WebSocketDisconnect:
                             logger.info("🔌 WebSocket disconnected while waiting for step approval")
                             return
@@ -1375,6 +1428,15 @@ WORKFLOW PLANNING RULES:
             )
             
             logger.info(f"✅ Workflow completed: {sequence_id}")
+
+            await self._emit_workflow_insight(
+                websocket=websocket,
+                sequence_id=sequence_id,
+                plan=plan,
+                user_prompt=user_prompt,
+                project_context=project_context,
+                additional_context=history_summary or "",
+            )
             
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during workflow {sequence_id}")
@@ -1401,6 +1463,7 @@ WORKFLOW PLANNING RULES:
                 logger.info("🔌 WebSocket disconnected before error event could be delivered")
         finally:
             self._cleanup_sequence_state(sequence_id)
+            self._cancelled_sequences.discard(sequence_id)
     async def _execute_step_with_events(
         self,
         websocket,
@@ -2295,6 +2358,129 @@ WORKFLOW PLANNING RULES:
             "recorded_at": datetime.utcnow().isoformat(),
             "insight": insight
         }
+
+    def _collect_workflow_step_records(
+        self,
+        sequence_id: str,
+        plan: WorkflowPlan
+    ) -> List[Dict[str, Any]]:
+        """Prepare structured step records for the workflow insight agent."""
+        cache = self._step_execution_cache.get(sequence_id, {})
+        if not cache:
+            return []
+
+        saved_files = self._step_output_files.get(sequence_id, {}) or {}
+        records: List[Dict[str, Any]] = []
+
+        for step in plan.workflow_steps:
+            step_cache = cache.get(step.step_number)
+            if not step_cache:
+                continue
+
+            execution_result = step_cache.get("execution_result")
+            record = {
+                "step_number": step.step_number,
+                "agent": step.atom_id,
+                "description": step.description,
+                "insight": step_cache.get("insight"),
+                "result_preview": self._extract_result_preview(execution_result),
+                "output_files": [],
+            }
+
+            saved_path = saved_files.get(step.step_number)
+            if saved_path:
+                record["output_files"].append(saved_path)
+
+            records.append(record)
+
+        return records
+
+    def _collect_generated_files(self, sequence_id: str) -> List[str]:
+        """Return all files auto-saved during the workflow."""
+        step_outputs = self._step_output_files.get(sequence_id)
+        if not step_outputs:
+            return []
+        return list(dict.fromkeys(step_outputs.values()))
+
+    async def _emit_workflow_insight(
+        self,
+        websocket,
+        sequence_id: str,
+        plan: WorkflowPlan,
+        user_prompt: str,
+        project_context: Dict[str, Any],
+        additional_context: str = ""
+    ) -> None:
+        """Generate and stream the final workflow-level insight paragraph."""
+        try:
+            step_records = self._collect_workflow_step_records(sequence_id, plan)
+            if not step_records:
+                logger.info("Skipped workflow insight emission (no step records)")
+                return
+
+            agent = get_workflow_insight_agent()
+            payload = {
+                "user_prompt": user_prompt,
+                "step_records": step_records,
+                "session_id": sequence_id,
+                "workflow_id": sequence_id,
+                "available_files": self._sequence_available_files.get(sequence_id, []),
+                "generated_files": self._collect_generated_files(sequence_id),
+                "additional_context": additional_context,
+                "client_name": project_context.get("client_name", ""),
+                "app_name": project_context.get("app_name", ""),
+                "project_name": project_context.get("project_name", ""),
+                "metadata": {"total_steps": plan.total_steps},
+            }
+
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, lambda: agent.generate_workflow_insight(payload))
+
+            if not result.get("success"):
+                logger.warning("Workflow insight agent returned error: %s", result.get("error"))
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_insight_failed",
+                        {
+                            "sequence_id": sequence_id,
+                            "error": result.get("error") or "Insight agent returned unsuccessful response",
+                        },
+                    ),
+                    "workflow_insight_failed event",
+                )
+                return
+
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "workflow_insight",
+                    {
+                        "sequence_id": sequence_id,
+                        "insight": result.get("insight"),
+                        "used_steps": result.get("used_steps"),
+                        "files_profiled": result.get("files_profiled"),
+                    },
+                ),
+                "workflow_insight event",
+            )
+            logger.info("✅ Workflow insight emitted for %s", sequence_id)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("⚠️ Failed to emit workflow insight: %s", exc)
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_insight_failed",
+                        {
+                            "sequence_id": sequence_id,
+                            "error": str(exc),
+                        },
+                    ),
+                    "workflow_insight_failed event",
+                )
+            except Exception:
+                logger.debug("Unable to notify client about workflow insight failure")
 
     async def _send_event(
         self,

@@ -96,7 +96,7 @@ const normalizeColumnName = (aiColumnName: string, availableColumns: string[] = 
 
 export const dataframeOperationsHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId, isStreamMode = false, stepAlias: workflowStepAlias } = context;
 
     if (!data.dataframe_config) {
       return { success: false, error: 'No dataframe configuration found in AI response' };
@@ -903,11 +903,13 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
         
         if (shouldAutoSave) {
           try {
-            const autoSaveAlias = `${atomId}_dfops_${sessionId || 'session'}`;
+            const normalizedWorkflowAlias = workflowStepAlias?.trim();
+            const fallbackAliasBase = `${atomId}_dfops_${sessionId || 'session'}`;
+            const stepAliasForSave = normalizedWorkflowAlias || `${fallbackAliasBase}_${Date.now()}`;
             await autoSaveStepResult({
               atomType: 'dataframe-operations',
               atomId,
-              stepAlias: `${autoSaveAlias}_${Date.now()}`,
+              stepAlias: stepAliasForSave,
               result: {
                 tableData: tableDataForAutoSave,
                 selectedFile: autoSaveSelectedFile || mappedFile || loadOperation?.parameters?.object_name || '',
@@ -916,7 +918,7 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
               },
               updateAtomSettings,
               setMessages,
-              isStreamMode: context.isStreamMode || false
+              isStreamMode
             });
           } catch (autoSaveError) {
             console.error('⚠️ DataFrame auto-save failed:', autoSaveError);

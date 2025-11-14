@@ -388,6 +388,7 @@ from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
 from Agent_dataframe_operations.main_app import router as dataframe_operations_router
+from Agent_insight.main_app import router as workflow_insight_router
 from insight import router as insight_router
 from STREAMAI.main_app import router as streamai_router
 from workflow_mode import workflow_router
@@ -596,6 +597,7 @@ api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
 api_router.include_router(dataframe_operations_router)
 api_router.include_router(insight_router)
+api_router.include_router(workflow_insight_router)
 api_router.include_router(workflow_router)
 if memory_router is not None:
     api_router.include_router(memory_router)

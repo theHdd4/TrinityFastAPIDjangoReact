@@ -124,6 +124,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const isCompact = panelWidth <= 420;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<Message[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const backgroundStatusRef = useRef<TrinityAIBackgroundStatus | null>(null);
   
@@ -153,7 +154,14 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     stepMessageIds: new Set<string>()
   });
   const agentModeEnabledRef = useRef(isAgentMode);
+  const workflowFinalizationRef = useRef<{ awaitingInsight: boolean }>({
+    awaitingInsight: false
+  });
   
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
   // Laboratory store
   const { setCards, updateCard } = useLaboratoryStore();
 
@@ -317,7 +325,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     timestamp: msg.timestamp instanceof Date ? msg.timestamp.toISOString() : msg.timestamp,
   }), []);
 
-  const createNewChat = useCallback(async () => {
+  const createNewChat = useCallback(async (options?: { forceReset?: boolean }) => {
     const newChatId = `stream_chat_${Date.now()}`;
     const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const createdAt = new Date();
@@ -341,7 +349,13 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     memoryPersistSkipRef.current = true;
     setChats(prev => [newChat, ...prev]);
     setCurrentChatId(newChatId);
-    setMessages([initialMessage]);
+    const hasUserTyped = messagesRef.current.some(msg => msg.sender === 'user');
+    const shouldResetMessages = options?.forceReset || !hasUserTyped;
+    if (shouldResetMessages) {
+      setMessages([initialMessage]);
+    } else {
+      console.log('🔁 Preserving in-progress user prompt while registering new chat shell');
+    }
     setCurrentSessionId(newSessionId);
 
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
@@ -452,9 +466,14 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
           const activeChat = mappedChats[0];
           setCurrentChatId(activeChat.id);
-          // Only update messages if the loaded chat has messages
+          // Only update messages if the loaded chat has messages AND user hasn't typed in this session yet
           if (activeChat.messages && activeChat.messages.length > 0) {
-            setMessages(activeChat.messages);
+            const hasUserTyped = messagesRef.current.some(msg => msg.sender === 'user');
+            if (!hasUserTyped) {
+              setMessages(activeChat.messages);
+            } else {
+              console.log('↩️ Skipping remote chat overwrite because user already typed before history loaded');
+            }
           }
           setCurrentSessionId(activeChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
           memoryPersistSkipRef.current = true;
@@ -554,7 +573,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
     const remainingChats = chats.filter(chat => chat.id !== currentChatId);
     if (remainingChats.length === 0) {
-      await createNewChat();
+      await createNewChat({ forceReset: true });
       return;
     }
 
@@ -577,7 +596,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
   const clearAllChats = useCallback(async () => {
     if (chats.length === 0) {
-      await createNewChat();
+      await createNewChat({ forceReset: true });
       return;
     }
 
@@ -591,7 +610,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       }
       setChats([]);
       memoryPersistSkipRef.current = true;
-      await createNewChat();
+      await createNewChat({ forceReset: true });
       setMemoryError(null);
     } catch (error) {
       console.error('Failed to clear chat history:', error);
@@ -1339,14 +1358,57 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
             
           case 'workflow_completed':
-            updateProgress('\n\n🎉 Workflow complete!');
+            updateProgress('\n\n🎉 Workflow complete! Generating final insight...');
             setIsLoading(false);
             stopAutoRun();
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
             }
-            ws.close();
+            workflowFinalizationRef.current.awaitingInsight = true;
             break;
+
+          case 'workflow_insight': {
+            const insightText = (data.insight || '').trim();
+            const formattedContent = insightText
+              ? `✨ **Workflow Insight**\n\n${insightText}`
+              : '✨ **Workflow Insight**\n\nNo additional insight was returned.';
+            
+            const insightMessage: Message = {
+              id: `workflow-insight-${Date.now()}`,
+              content: formattedContent,
+              sender: 'ai',
+              timestamp: new Date(),
+              type: 'text'
+            };
+            
+            setMessages(prev => [...prev, insightMessage]);
+            updateProgress('\n\n🧠 Final insight shared in chat.');
+            setIsLoading(false);
+            
+            workflowFinalizationRef.current.awaitingInsight = false;
+            
+            window.setTimeout(() => {
+              if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+              }
+            }, 250);
+            break;
+          }
+          
+          case 'workflow_insight_failed': {
+            workflowFinalizationRef.current.awaitingInsight = false;
+            const failureMessage: Message = {
+              id: `workflow-insight-failed-${Date.now()}`,
+              content: `⚠️ Insight service could not summarize this workflow automatically.\n\nDetails: ${data.error || 'Unknown error'}`,
+              sender: 'ai',
+              timestamp: new Date(),
+              type: 'text'
+            };
+            setMessages(prev => [...prev, failureMessage]);
+            updateProgress('\n\n⚠️ Insight service unavailable.');
+            setIsLoading(false);
+            break;
+          }
 
           case 'workflow_rejected':
             stopAutoRun();
@@ -1355,6 +1417,16 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
             }
+            break;
+          
+          case 'workflow_stopped':
+            stopAutoRun();
+            setIsLoading(false);
+            updateProgress(`\n\n🛑 Workflow stopped: ${data?.message || 'Stopped by user'}`);
+            if (agentModeEnabledRef.current) {
+              autoRunRef.current = true;
+            }
+            ws.close();
             break;
             
           case 'error':
@@ -1379,6 +1451,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       ws.onclose = () => {
         console.log('🔌 WebSocket closed');
         stopAutoRun();
+        workflowFinalizationRef.current.awaitingInsight = false;
         setWsConnection(null);
       };
       
@@ -1387,6 +1460,33 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       setIsLoading(false);
     }
   };
+
+  const handleStopRequest = useCallback(() => {
+    const stopMessage: Message = {
+      id: `stop-request-${Date.now()}`,
+      content: '🛑 You stopped the current workflow request.',
+      sender: 'ai',
+      timestamp: new Date()
+    };
+
+    setMessages((prev) => [...prev, stopMessage]);
+    stopAutoRun();
+    setIsLoading(false);
+
+    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+      try {
+        wsConnection.send(JSON.stringify({ type: 'stop_workflow' }));
+      } catch (error) {
+        console.error('❌ Failed to notify backend about stop request:', error);
+      } finally {
+        wsConnection.close();
+      }
+    } else if (wsConnection) {
+      wsConnection.close();
+    }
+
+    setWsConnection(null);
+  }, [stopAutoRun, wsConnection]);
   
   // Don't unmount when collapsed - keep WebSocket connections and requests alive
   // Show loading during initialization
@@ -1549,7 +1649,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           
           <div className="p-4 border-b border-gray-200">
             <Button
-              onClick={() => void createNewChat()}
+              onClick={() => void createNewChat({ forceReset: true })}
               className="w-full text-white font-semibold font-inter rounded-xl shadow-md transition-all duration-200"
               style={{ fontSize: `${smallFontSize}px`, backgroundColor: BRAND_GREEN }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#3AB077')}
@@ -1714,7 +1814,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               className={`${isCompact ? 'h-7 w-7' : 'h-8 w-8'} p-0 transition-all duration-200 rounded-xl`}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = `${BRAND_GREEN}20`)}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
-              onClick={() => void createNewChat()}
+              onClick={() => void createNewChat({ forceReset: true })}
               title="New Chat"
             >
               <Plus className={isCompact ? 'w-3 h-3' : 'w-3.5 h-3.5'} />
@@ -2128,12 +2228,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           </div>
           {isLoading && (
             <Button
-              onClick={() => {
-                if (wsConnection) {
-                  wsConnection.close();
-                }
-                setIsLoading(false);
-              }}
+              onClick={handleStopRequest}
               className="h-12 w-12 bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/30 hover:shadow-xl hover:shadow-red-500/40 transition-all duration-300 hover:scale-110 rounded-2xl animate-fade-in"
               size="icon"
               title="Stop Request"

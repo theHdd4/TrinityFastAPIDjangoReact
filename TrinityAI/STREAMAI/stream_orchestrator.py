@@ -8,6 +8,7 @@ Orchestrates the execution of atom sequences with the Trinity AI 3-step pattern 
 3. Execute Atom - Run atom with prompt and previous results
 """
 
+import asyncio
 import logging
 import aiohttp  # Changed from requests to aiohttp for async
 import json
@@ -21,6 +22,7 @@ from datetime import datetime
 from file_loader import FileLoader
 from file_analyzer import FileAnalyzer
 from file_context_resolver import FileContextResolver, FileContextResult
+from Agent_insight.workflow_insight_agent import get_workflow_insight_agent
 
 logger = logging.getLogger("trinity.trinityai.orchestrator")
 
@@ -255,6 +257,7 @@ class StreamOrchestrator:
         logger.info(f"❌ Failed: {results['failed_atoms']}/{total_atoms}")
         logger.info(f"{'='*80}\n")
         
+        await self._append_workflow_insight(sequence, results)
         return results
     
     async def _execute_atom_3_steps(
@@ -593,6 +596,50 @@ class StreamOrchestrator:
             "results": results,
             "result_count": len(results)
         }
+
+    async def _append_workflow_insight(self, sequence: Dict[str, Any], results: Dict[str, Any]) -> None:
+        """Attach workflow-level insight to the sequence results."""
+        try:
+            step_records: List[Dict[str, Any]] = []
+            atoms = sequence.get("sequence", [])
+            executed = results.get("atoms_executed", [])
+
+            for index, atom in enumerate(atoms, start=1):
+                exec_info = next((item for item in executed if item.get("step") == index), None)
+                record = {
+                    "step_number": index,
+                    "agent": atom.get("atom_id", f"atom_{index}"),
+                    "description": atom.get("purpose") or atom.get("description") or "",
+                    "insight": (exec_info or {}).get("insight"),
+                    "result_preview": atom.get("prompt", ""),
+                    "output_files": [atom.get("output_name")] if atom.get("output_name") else [],
+                }
+                step_records.append(record)
+
+            if not step_records:
+                return
+
+            user_prompt = sequence.get("user_prompt") or sequence.get("description") or ""
+            agent = get_workflow_insight_agent()
+            payload = {
+                "user_prompt": user_prompt,
+                "step_records": step_records,
+                "session_id": results.get("session_id"),
+                "workflow_id": sequence.get("workflow_id"),
+                "available_files": list(self._raw_files_with_columns.keys()),
+                "generated_files": [],
+                "additional_context": "",
+                "client_name": sequence.get("client_name", os.getenv("CLIENT_NAME", "")),
+                "app_name": sequence.get("app_name", os.getenv("APP_NAME", "")),
+                "project_name": sequence.get("project_name", os.getenv("PROJECT_NAME", "")),
+                "metadata": {"total_steps": len(step_records)},
+            }
+
+            loop = asyncio.get_running_loop()
+            insight = await loop.run_in_executor(None, lambda: agent.generate_workflow_insight(payload))
+            results["workflow_insight"] = insight
+        except Exception as exc:
+            logger.warning("⚠️ Failed to append workflow insight: %s", exc)
 
     def _refresh_file_context(self) -> None:
         """Reload available files and update the shared resolver cache."""

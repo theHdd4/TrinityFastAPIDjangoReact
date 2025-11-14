@@ -26,9 +26,7 @@ def build_prompt_create_transform(
     
     # Build file information section
     file_info_section = _build_file_info_section(files_with_columns)
-    file_details_section = ""
-    if file_details:
-        file_details_section = f"\n## Relevant File Metadata:\n{json.dumps(file_details, indent=2)}\n"
+    file_details_section = _build_file_details_section(file_details)
     matched_columns_section = ""
     if matched_columns:
         matched_columns_section = f"\n## Matched Columns From Prompt:\n{json.dumps(matched_columns, indent=2)}\n"
@@ -73,7 +71,10 @@ def build_prompt_create_transform(
 4. Do NOT invent columns or files. Only use what is listed.
 5. Maintain operation_id as strings ("1", "2", etc.) and ensure execute_order matches the order.
 6. For derived columns, include clear descriptions and formulas when applicable.
-7. If user intent is unclear, return success=false with helpful suggestions in smart_response.
+7. If comprehensive FILE DETAILS are provided, VALIDATE every referenced column (including rename targets) exists in that file before returning success=true. If any column is missing, return success=false with the list of available columns.
+8. If comprehensive FILE DETAILS are missing, fall back to the Available Files list and still double-check column names EXACTLY (case-sensitive and spacing-preserving) before returning success=true.
+9. If user intent is unclear, return success=false with helpful suggestions in smart_response.
+10. If columns requested are not found, explicitly tell the user which valid columns exist for the chosen file.
 
 ## Respond with JSON only.
 """
@@ -167,6 +168,75 @@ def _build_file_info_section(files_with_columns: dict) -> str:
         file_info.append(f"- {display_name} ({len(columns)} columns): {column_list}")
     
     return "\n".join(file_info)
+
+def _build_file_details_section(file_details: Optional[Dict[str, Any]], max_files: int = 2, max_columns: int = 80) -> str:
+    """
+    Build a detailed FILE DETAILS section similar to dataframe ops/chart maker so the LLM
+    sees the exact column names, data types, and sample stats.
+    """
+    entries = _normalize_file_details_entries(file_details)
+    if not entries:
+        return ""
+
+    section_lines = ["## Comprehensive File Details (use exact column names):"]
+    for idx, (label, details) in enumerate(entries):
+        if idx >= max_files:
+            break
+        columns = _extract_columns_from_details(details, max_columns)
+        numeric_cols = details.get("numeric_columns") or details.get("numericColumns") or []
+        categorical_cols = details.get("categorical_columns") or details.get("categoricalColumns") or []
+        section_lines.append(f"\n### {label}")
+        section_lines.append(f"- object_name: {details.get('object_name') or details.get('file_path') or label}")
+        section_lines.append(f"- total_rows: {details.get('row_count') or details.get('total_rows')}")
+        section_lines.append(f"- columns ({len(columns)}): {', '.join(columns)}")
+        if numeric_cols:
+            section_lines.append(f"- numeric_columns: {', '.join(numeric_cols[:20])}")
+        if categorical_cols:
+            section_lines.append(f"- categorical_columns: {', '.join(categorical_cols[:20])}")
+        sample_data = details.get("sample_data")
+        if isinstance(sample_data, list) and sample_data:
+            section_lines.append(f"- sample_data_preview: {json.dumps(sample_data[:1])}")
+
+    section_lines.append("")  # Ensure trailing newline
+    return "\n".join(section_lines)
+
+def _normalize_file_details_entries(file_details: Optional[Dict[str, Any]]) -> List[tuple]:
+    """
+    Normalise file_details into [(label, details_dict), ...] to keep prompts consistent.
+    """
+    if not file_details:
+        return []
+
+    if isinstance(file_details, dict):
+        # Single file format from /load-file-details endpoint
+        if any(key in file_details for key in ("file_id", "columns", "object_name", "file_path")):
+            label = file_details.get("display_name") or file_details.get("object_name") or file_details.get("file_path") or "selected_file"
+            return [(label, file_details)]
+        # Multi-file format {filename: {...}}
+        entries = []
+        for label, details in file_details.items():
+            if isinstance(details, dict):
+                entries.append((label, details))
+        return entries
+
+    if isinstance(file_details, list):
+        entries = []
+        for idx, details in enumerate(file_details):
+            if isinstance(details, dict):
+                label = details.get("display_name") or details.get("object_name") or f"file_{idx+1}"
+                entries.append((label, details))
+        return entries
+
+    return []
+
+def _extract_columns_from_details(details: Dict[str, Any], max_columns: int) -> List[str]:
+    columns = details.get("columns")
+    if isinstance(columns, dict):
+        columns = list(columns.keys())
+    if not isinstance(columns, list):
+        columns = details.get("sample_columns") or []
+    columns = [str(col) for col in columns][:max_columns]
+    return columns
 
 def _categorize_file(filename: str, columns: List[str]) -> str:
     """Categorize file based on name and content."""

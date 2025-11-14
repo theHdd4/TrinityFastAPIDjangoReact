@@ -20,7 +20,7 @@ export const createColumnHandler: AtomHandler = {
     console.log('🆔 AtomId:', context.atomId);
     console.log('🔢 SessionId:', context.sessionId);
     
-    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId, stepAlias: workflowStepAlias, isStreamMode = false } = context;
     
     // 🔧 CRITICAL FIX: Show smart_response FIRST (like concat/merge)
     // This displays the AI's clean, user-friendly message immediately
@@ -686,14 +686,15 @@ export const createColumnHandler: AtomHandler = {
             resultFile: autoSavePayload.result_file
           });
 
+          const saveAlias = workflowStepAlias?.trim() || 'create_transform';
           await autoSaveStepResult({
             atomType: 'create-column',
             atomId,
-            stepAlias: `create_transform`, // 🔧 FIX: Use simple alias without atomId/timestamp to avoid duplication (timestamp added in utils)
+            stepAlias: saveAlias,
             result: autoSavePayload,
             updateAtomSettings,
             setMessages,
-            isStreamMode: context.isStreamMode || false
+            isStreamMode
           });
           
           console.log('✅ Auto-save completed successfully');
@@ -703,7 +704,7 @@ export const createColumnHandler: AtomHandler = {
         }
         
         // Add success message (only in Individual AI mode, not Stream mode)
-        if (!context.isStreamMode) {
+        if (!isStreamMode) {
           const completionDetails = {
             'Result File': resultFilePath || result.result_file || 'N/A',
             'Rows': (parsedRows?.length || result.row_count || 0).toLocaleString(),

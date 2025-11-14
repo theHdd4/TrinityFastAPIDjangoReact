@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
+import requests
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain.memory import ConversationBufferWindowMemory
 
@@ -190,6 +191,72 @@ class SmartCreateTransformAgent:
             buf.append(f"\n--- {role} {i} ---\n{msg.content}")
         return "\n".join(buf)
 
+    def _fetch_file_details_from_backend(self, object_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Load comprehensive file metadata via the dataframe operations backend endpoint
+        so the LLM can see the full column list (same approach as dataframe ops & chart maker).
+        """
+        if not object_name:
+            return None
+
+        try:
+            df_ops_api_url = os.getenv("DATAFRAME_OPERATIONS_API_URL", "http://fastapi:8001")
+            if not df_ops_api_url.startswith("http"):
+                df_ops_api_url = f"http://{df_ops_api_url}"
+
+            load_details_url = f"{df_ops_api_url}/api/dataframe-operations/load-file-details"
+            logger.info(f"📥 Loading file details for create/transform from: {load_details_url}")
+            logger.info(f"📥 Object name: {object_name}")
+
+            response = requests.post(
+                load_details_url,
+                json={"object_name": object_name},
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                details = response.json()
+                if details.get("columns"):
+                    logger.info(f"✅ Retrieved {len(details.get('columns', []))} columns for {object_name}")
+                return details
+
+            logger.warning(f"⚠️ Failed to load file details ({response.status_code}): {response.text}")
+        except Exception as exc:
+            logger.warning(f"⚠️ Error loading file details for {object_name}: {exc}")
+        return None
+
+    def _collect_comprehensive_file_details(
+        self,
+        selection: Optional[FileContextResult],
+        max_files: int = 2
+    ) -> Dict[str, Any]:
+        """
+        Collect comprehensive metadata for the top relevant files. This mirrors
+        dataframe operations & chart maker so the LLM gets the exact column names.
+        """
+        if not selection or not selection.relevant_files:
+            return {}
+
+        details: Dict[str, Any] = {}
+        for idx, display_name in enumerate(selection.relevant_files.keys()):
+            if idx >= max_files:
+                break
+
+            cached = self.files_metadata.get(display_name)
+            if cached and cached.get("columns"):
+                details[display_name] = cached
+                continue
+
+            object_candidates = selection.object_mappings.get(display_name) or [display_name]
+            for object_name in object_candidates:
+                backend_details = self._fetch_file_details_from_backend(object_name)
+                if backend_details:
+                    details[display_name] = backend_details
+                    self.files_metadata[display_name] = backend_details
+                    break
+
+        return details
+
     def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = "") -> dict:
         # Set environment context for dynamic path resolution (like explore agent)
         self.set_context(client_name, app_name, project_name)
@@ -232,6 +299,9 @@ class SmartCreateTransformAgent:
             include_metadata=True
         )
         self._last_context_selection = selection
+        prompt_file_details = self._collect_comprehensive_file_details(selection)
+        if not prompt_file_details and selection and selection.file_details:
+            prompt_file_details = selection.file_details
 
         available_for_prompt = selection.to_object_column_mapping(self._raw_files_with_columns) if selection else self._raw_files_with_columns
         prompt = build_prompt_create_transform(
@@ -241,7 +311,7 @@ class SmartCreateTransformAgent:
             supported_ops,
             self.operation_format,
             history_str,
-            file_details=selection.file_details if selection else {},
+            file_details=prompt_file_details,
             other_files=selection.other_files if selection else [],
             matched_columns=selection.matched_columns if selection else {}
         )

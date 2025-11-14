@@ -266,6 +266,39 @@ export const createProgressTracker = (total: number, operation: string) => {
 const sanitizeFileName = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_\-]+/g, '_');
 
+const buildAliasFilename = (alias?: string): string | null => {
+  if (!alias || typeof alias !== 'string') {
+    return null;
+  }
+
+  const trimmed = alias.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const withoutExtension = trimmed.replace(/\.arrow$/i, '');
+  const sanitizedAlias = sanitizeFileName(withoutExtension);
+  if (!sanitizedAlias) {
+    return null;
+  }
+
+  const pad = (value: number): string => value.toString().padStart(2, '0');
+  const now = new Date();
+  const timestampToken = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}_${pad(
+    now.getUTCHours()
+  )}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
+
+  return `${sanitizedAlias}_${timestampToken}.arrow`;
+};
+
+const buildDefaultFilename = (aliasKey: string): string => {
+  const timestamp = Date.now();
+  const baseName = sanitizeFileName(aliasKey || 'stream_step');
+  return baseName.toLowerCase().endsWith('.arrow')
+    ? `${baseName}_${timestamp}`
+    : `${baseName}_${timestamp}.arrow`;
+};
+
 interface AutoSaveParams {
   atomType: string;
   atomId: string;
@@ -288,15 +321,24 @@ export const autoSaveStepResult = async ({
   const store = useLaboratoryStore.getState();
   const currentAtom = store.getAtom(atomId);
   const currentSettings = currentAtom?.settings || {};
-  const aliasKey = stepAlias || `${atomType}_step`;
+  const trimmedAlias = typeof stepAlias === 'string' ? stepAlias.trim() : '';
+  const aliasKey = trimmedAlias || `${atomType}_step`;
+  const aliasFilename = buildAliasFilename(trimmedAlias);
 
   if (currentSettings.lastAutoSavedAlias === aliasKey) {
     return;
   }
 
-  const timestamp = Date.now();
-  const baseName = sanitizeFileName(aliasKey || atomType);
-  const filename = baseName.endsWith('.arrow') ? `${baseName}_${timestamp}` : `${baseName}_${timestamp}.arrow`;
+  const defaultFilename = buildDefaultFilename(aliasKey);
+  const resolveFilename = (override?: string | null): string => {
+    if (typeof override === 'string') {
+      const trimmedOverride = override.trim();
+      if (trimmedOverride) {
+        return trimmedOverride;
+      }
+    }
+    return aliasFilename || defaultFilename;
+  };
 
   const notify = !isStreamMode;
 
@@ -312,6 +354,7 @@ export const autoSaveStepResult = async ({
         return;
       }
 
+      const filename = resolveFilename();
       const response = await fetch(`${MERGE_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -345,6 +388,7 @@ export const autoSaveStepResult = async ({
         return;
       }
 
+      const filename = resolveFilename();
       const response = await fetch(`${CONCAT_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -387,6 +431,7 @@ export const autoSaveStepResult = async ({
         return;
       }
 
+      const filename = resolveFilename();
       const response = await fetch(`${GROUPBY_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -443,6 +488,7 @@ export const autoSaveStepResult = async ({
       }
 
       // Always save as Arrow file with proper filename in create-data folder
+      const filename = resolveFilename();
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -512,34 +558,41 @@ export const autoSaveStepResult = async ({
         return 'dataframe';
       };
 
-      const baseName = inferBaseName() || 'dataframe';
-      let nextSerial = 1;
+      let resolvedFilename = aliasFilename;
+      let dfOpsFilename: string | null = aliasFilename ? aliasFilename.replace(/\.arrow$/i, '') : null;
 
-      try {
-        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' });
-        if (res.ok) {
-          const data = await res.json();
-          const files = Array.isArray(data?.files) ? data.files : [];
-          const maxSerial = files.reduce((max: number, file: any) => {
-            const match = file?.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/i);
-            if (match) {
-              const value = parseInt(match[1], 10);
-              if (!Number.isNaN(value)) {
-                return Math.max(max, value);
+      if (!resolvedFilename) {
+        const baseName = inferBaseName() || 'dataframe';
+        let nextSerial = 1;
+
+        try {
+          const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' });
+          if (res.ok) {
+            const data = await res.json();
+            const files = Array.isArray(data?.files) ? data.files : [];
+            const maxSerial = files.reduce((max: number, file: any) => {
+              const match = file?.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/i);
+              if (match) {
+                const value = parseInt(match[1], 10);
+                if (!Number.isNaN(value)) {
+                  return Math.max(max, value);
+                }
               }
-            }
-            return max;
-          }, 0);
-          nextSerial = maxSerial + 1;
+              return max;
+            }, 0);
+            nextSerial = maxSerial + 1;
+          }
+        } catch (err) {
+          console.warn('⚠️ list_saved_dataframes failed for DataFrame auto-save:', err);
         }
-      } catch (err) {
-        console.warn('⚠️ list_saved_dataframes failed for DataFrame auto-save:', err);
+
+        dfOpsFilename = `DF_OPS_${nextSerial}_${baseName}`;
+        resolvedFilename = `${dfOpsFilename}.arrow`;
       }
 
-      const dfOpsFilename = `DF_OPS_${nextSerial}_${baseName}`;
       const savePayload = {
         csv_data: csvData,
-        filename: `${dfOpsFilename}.arrow`
+        filename: resolvedFilename
       };
 
       const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
@@ -567,7 +620,7 @@ export const autoSaveStepResult = async ({
       if (tableData?.headers && Array.isArray(tableData.rows)) {
         nextSettings.tableData = {
           ...tableData,
-          fileName: `${dfOpsFilename}.arrow`
+          fileName: resolvedFilename
         };
       }
 
