@@ -11,10 +11,12 @@ from datetime import datetime
 from itertools import count
 from typing import Any, Dict, Iterable, List, Sequence
 
+import pandas as pd
+
 from minio.error import S3Error
 from pydantic import BaseModel, Field
 
-from .database import MINIO_BUCKET, minio_client
+from .database import MINIO_BUCKET, get_minio_df, minio_client
 
 
 logger = logging.getLogger("app.features.select_models_feature_based.service")
@@ -299,6 +301,56 @@ def _file_key_tokens(file_key: str) -> set[str]:
     return {token.lower() for token in tokens if token}
 
 
+def _load_dataframe(file_key: str) -> pd.DataFrame | None:
+    normalised = _normalise_file_key(file_key)
+    if not normalised:
+        return None
+
+    try:
+        return get_minio_df(MINIO_BUCKET, normalised)
+    except S3Error:
+        logger.warning("Failed to fetch %s from MinIO", normalised, exc_info=True)
+    except Exception:  # pragma: no cover - defensive catch to keep feature usable
+        logger.exception("Unexpected error loading %s from MinIO", normalised)
+    return None
+
+
+def _detect_combination_column(frame: pd.DataFrame) -> str | None:
+    for column in frame.columns:
+        col_lower = column.lower()
+        if (
+            col_lower == "combination_id"
+            or col_lower == "combinationid"
+            or "combination_id" in col_lower
+            or col_lower.endswith("_combination")
+            or "combination" in col_lower
+        ):
+            return column
+    return None
+
+
+def _combination_ids_from_minio(file_key: str) -> List[str] | None:
+    frame = _load_dataframe(file_key)
+    if frame is None:
+        return None
+
+    column = _detect_combination_column(frame)
+    if column is None:
+        logger.warning(
+            "Could not determine combination column for file %s (columns=%s)",
+            file_key,
+            list(frame.columns[:10]),
+        )
+        return []
+
+    combinations = {
+        str(value).strip()
+        for value in frame[column].dropna().astype(str)
+        if str(value).strip()
+    }
+    return sorted(combinations)
+
+
 def _models_for_file(file_key: str, combination_id: str | None = None) -> List[ModelRecord]:
     target_tokens = _file_key_tokens(file_key)
     normalised_key = _normalise_file_key(file_key)
@@ -400,8 +452,10 @@ def list_model_results_files(
 
 
 def list_combination_ids(file_key: str) -> Dict[str, Any]:
-    models = _models_for_file(file_key)
-    combo_ids = sorted({record.combination_id for record in models})
+    combo_ids = _combination_ids_from_minio(file_key)
+    if combo_ids is None:
+        models = _models_for_file(file_key)
+        combo_ids = sorted({record.combination_id for record in models})
     return {
         "file_key": file_key,
         "unique_combination_ids": combo_ids,
@@ -563,8 +617,14 @@ def get_variable_ranges(file_key: str, combination_id: str | None, variables: It
 
 
 def get_saved_combinations_status(file_key: str, atom_id: str) -> Dict[str, Any]:
-    models = _models_for_file(file_key)
-    combos = sorted({record.combination_id for record in models})
+    combos_from_file = _combination_ids_from_minio(file_key)
+    if combos_from_file is None:
+        models = _models_for_file(file_key)
+        combos = sorted({record.combination_id for record in models})
+        data_source_note = "Demo data – persisted in memory only"
+    else:
+        combos = combos_from_file
+        data_source_note = "Computed from MinIO model results"
     normalised_key = _normalise_file_key(file_key)
     saved_for_file = [
         details
@@ -584,7 +644,7 @@ def get_saved_combinations_status(file_key: str, atom_id: str) -> Dict[str, Any]
         "saved_count": len(saved_combo_ids),
         "pending_count": len(pending),
         "completion_percentage": round(completion, 2),
-        "note": "Demo data – persisted in memory only",
+        "note": data_source_note,
     }
 
 
