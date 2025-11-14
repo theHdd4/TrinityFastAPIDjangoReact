@@ -20,6 +20,7 @@ import {
   CLASSIFIER_API,
   MOLECULES_API,
 } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { AIChatBot, AtomAIChatBot } from '@/components/TrinityAI';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 import { AtomSuggestion } from '@/components/AtomSuggestion';
@@ -433,7 +434,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         if (!res.ok) {
           console.warn('⚠️ column summary request failed', res.status);
         } else {
-          const data = await res.json();
+          const raw = await res.json();
+          const data = await resolveTaskResponse<{ summary?: ColumnInfo[] }>(raw);
           const summary: ColumnInfo[] = (data.summary || []).filter(Boolean);
           console.log('ℹ️ fetched column summary rows', summary.length);
           const numeric = summary
@@ -1698,9 +1700,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   }, [layoutCards, workflowMolecules]);
 
   // Sync cards with exhibition store
-  useEffect(() => {
-    setCards(layoutCards);
-  }, [layoutCards, setCards]);
+  // useEffect(() => {
+  //   setCards(layoutCards);
+  // }, [layoutCards, setCards]);
 
   // Persist workflowMolecules to localStorage only when we have cards with molecule info
   useEffect(() => {

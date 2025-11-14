@@ -395,6 +395,11 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
 
       // Ignore messages from self
       if (message.client_id === clientIdRef.current) {
+        console.log('[CollaborativeSync] Ignoring self-echo message:', {
+          type: message.type,
+          myClientId: clientIdRef.current,
+          messageClientId: message.client_id,
+        });
         return;
       }
 

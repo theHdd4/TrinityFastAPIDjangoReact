@@ -1,4 +1,5 @@
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, VALIDATE_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
   getEnvironmentContext, 
@@ -390,7 +391,8 @@ export const createColumnHandler: AtomHandler = {
         // Fetch column summary to populate allColumns with full object name
         const columnRes = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fullObjectName)}`);
         if (columnRes.ok) {
-          const columnData = await columnRes.json();
+          const rawColumn = await columnRes.json();
+          const columnData = await resolveTaskResponse<{ summary?: any[] }>(rawColumn);
           const allColumns = Array.isArray(columnData.summary) ? columnData.summary.filter(Boolean) : [];
           
           console.log('✅ Columns loaded successfully:', allColumns.length);
@@ -408,10 +410,11 @@ export const createColumnHandler: AtomHandler = {
             const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(resolvedDataSource)}`);
             console.log('🔍 Classification response status:', resp.status);
             if (resp.ok) {
-              const classificationData = await resp.json();
+              const rawClassification = await resp.json();
+              const classificationData = await resolveTaskResponse<Record<string, any>>(rawClassification);
               console.log('🔍 Classification identifiers:', classificationData.identifiers);
               updateAtomSettings(atomId, {
-                selectedIdentifiers: classificationData.identifiers || []
+                selectedIdentifiers: (classificationData.identifiers as string[]) || []
               });
             } else {
               // Fallback to categorical columns

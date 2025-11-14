@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, CLUSTERING_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { Save } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -113,7 +114,8 @@ const ClusteringInputFiles: React.FC<Props> = ({ atomId }) => {
       // Fetch column summary
       const response = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fileName)}`);
       if (response.ok) {
-        const data = await response.json();
+        const raw = await response.json();
+        const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
         const summaryData = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
         
         // Fetch identifiers and measures from column_classifier_configs

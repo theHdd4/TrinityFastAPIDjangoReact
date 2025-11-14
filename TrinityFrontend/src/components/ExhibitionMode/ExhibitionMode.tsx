@@ -29,6 +29,7 @@ import { ImagePanel, type ImageSelectionRequest } from './components/Images';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCollaborativeSyncExhibition } from '@/hooks/useCollaborativeSyncExhibition';
 import {
   saveExhibitionLayout,
   fetchExhibitionManifest,
@@ -178,6 +179,34 @@ const ExhibitionMode = () => {
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
+
+  // Real-time collaborative synchronization
+  const {
+    isConnected: isCollabConnected,
+    activeUsers: collabActiveUsers,
+    cardEditors: collabCardEditors,
+    notifyCardFocus,
+    notifyCardBlur,
+  } = useCollaborativeSyncExhibition({
+    enabled: true,
+    onError: (error) => {
+      console.error('[ExhibitionMode] Collaborative sync error:', error);
+    },
+    onConnected: () => {
+      console.log('[ExhibitionMode] Collaborative sync connected');
+      toast({
+        title: 'Real-time collaboration active',
+        description: 'Your changes are now synced with other users.',
+        duration: 3000,
+      });
+    },
+    onDisconnected: () => {
+      console.log('[ExhibitionMode] Collaborative sync disconnected');
+    },
+    onUsersChanged: (users) => {
+      console.log('[ExhibitionMode] Active users:', users.length);
+    },
+  });
 
   const presenterDisplayName = useMemo(() => {
     const username = typeof user?.username === 'string' ? user.username.trim() : '';
@@ -688,9 +717,9 @@ const ExhibitionMode = () => {
   }, [notes]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.localStorage.getItem('laboratory-config')) {
-      console.log('Successfully Loaded Existing Project State');
-      toast({ title: 'Successfully Loaded Existing Project State' });
+    if (typeof window !== 'undefined' && window.localStorage.getItem('exhibition-config')) {
+      console.log('Successfully Loaded Existing Exhibition State');
+      toast({ title: 'Successfully Loaded Existing Exhibition State' });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1637,6 +1666,45 @@ const ExhibitionMode = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2" data-exhibition-toolbar="true">
+          {canEdit && collabActiveUsers.length > 0 && (
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-border shadow-sm"
+              title={collabActiveUsers.map(user => user.email).join('\n')}
+            >
+              <div className="flex -space-x-2">
+                {collabActiveUsers.slice(0, 3).map((activeUser, index) => (
+                  <div
+                    key={activeUser.client_id}
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold border-2 border-white shadow-sm"
+                    title={`${activeUser.name} (${activeUser.email})`}
+                    style={{
+                      zIndex: 10 - index,
+                      backgroundColor: activeUser.color || '#3B82F6',
+                    }}
+                  >
+                    {activeUser.name
+                      .split(' ')
+                      .map(n => n[0])
+                      .join('')
+                      .toUpperCase()
+                      .slice(0, 2)}
+                  </div>
+                ))}
+                {collabActiveUsers.length > 3 && (
+                  <div
+                    className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs font-semibold border-2 border-white shadow-sm"
+                    title={`+${collabActiveUsers.length - 3} more`}
+                  >
+                    +{collabActiveUsers.length - 3}
+                  </div>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground font-medium ml-1">
+                {collabActiveUsers.length}{' '}
+                {collabActiveUsers.length === 1 ? 'user' : 'users'} editing
+              </span>
+            </div>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -2408,6 +2476,9 @@ const ExhibitionMode = () => {
                     onPositionPanelChange={handleOperationsPalettePanelChange}
                     onUndo={handleUndo}
                     presentationMode={isPresentationView}
+                    cardEditor={collabCardEditors.get(currentCard.id)}
+                    onFocusCard={notifyCardFocus}
+                    onBlurCard={notifyCardBlur}
                   />
                 )
               ) : (
@@ -2440,6 +2511,9 @@ const ExhibitionMode = () => {
                     presenterName={presenterDisplayName}
                     onPositionPanelChange={handleOperationsPalettePanelChange}
                     onUndo={handleUndo}
+                    cardEditor={collabCardEditors.get(card.id)}
+                    onFocusCard={notifyCardFocus}
+                    onBlurCard={notifyCardBlur}
                   />
                 </div>
               ))}

@@ -761,7 +761,7 @@ const LaboratoryMode = () => {
               <Share2 className="w-4 h-4 mr-2" />
               Share
             </Button>
-            {canEdit && (
+            {/* {canEdit && (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
                 {isSyncConnected ? (
                   <>
@@ -775,7 +775,7 @@ const LaboratoryMode = () => {
                   </>
                 )}
               </div>
-            )}
+            )} */}
             <Button
               className={`bg-gradient-to-r from-[#41C185] to-[#3ba876] text-white shadow-lg font-medium ${canEdit ? 'hover:from-[#3ba876] to-[#339966]' : 'opacity-50 cursor-not-allowed'}`}
               disabled={!canEdit}
