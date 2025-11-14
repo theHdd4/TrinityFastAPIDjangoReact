@@ -171,12 +171,32 @@ export const parseChartObjectProps = (
   };
 };
 
+const resolveNextZIndex = (objects: SlideObject[] | undefined): number => {
+  if (!Array.isArray(objects) || objects.length === 0) {
+    return 1;
+  }
+
+  const max = objects.reduce((acc, object) => {
+    const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+    return value > acc ? value : acc;
+  }, 0);
+
+  return Math.round(max) + 1;
+};
+
+export interface CreateChartSlideObjectOptions {
+  existingObjects?: SlideObject[];
+  overrides?: Partial<SlideObject>;
+}
+
 export const createChartSlideObject = (
   id: string,
   data: ChartDataRow[],
   config: ChartConfig,
-  overrides: Partial<SlideObject> = {},
+  options: CreateChartSlideObjectOptions = {},
 ): SlideObject => {
+  const { existingObjects = [], overrides = {} } = options;
+  const { props: overrideProps = {}, zIndex: overrideZIndex, ...restOverrides } = overrides;
   const safeData = data.length > 0 ? data.map(entry => ({ ...entry })) : [...DEFAULT_CHART_DATA];
   const safeConfig: ChartConfig = {
     ...DEFAULT_CHART_CONFIG,
@@ -192,6 +212,11 @@ export const createChartSlideObject = (
     ),
   };
 
+  const zIndex =
+    typeof overrideZIndex === 'number' && Number.isFinite(overrideZIndex)
+      ? Math.round(overrideZIndex)
+      : resolveNextZIndex(existingObjects);
+
   const base: SlideObject = {
     id,
     type: 'chart',
@@ -199,7 +224,7 @@ export const createChartSlideObject = (
     y: 180,
     width: DEFAULT_CHART_WIDTH,
     height: DEFAULT_CHART_HEIGHT,
-    zIndex: 1,
+    zIndex,
     rotation: 0,
     groupId: null,
     props: {
@@ -210,10 +235,10 @@ export const createChartSlideObject = (
 
   return {
     ...base,
-    ...overrides,
+    ...restOverrides,
     props: {
       ...(base.props ?? {}),
-      ...(overrides.props ?? {}),
+      ...(overrideProps ?? {}),
       chartData: safeData,
       chartConfig: safeConfig,
     },

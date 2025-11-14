@@ -12,6 +12,11 @@ import {
   Grid3x3,
   Palette,
   Check,
+  Layers,
+  ArrowUpToLine,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import {
   ContextMenuContent,
@@ -139,11 +144,15 @@ export interface ExhibitionTableTrayProps {
   onDelete2Columns: () => void;
   onDeleteRow: () => void;
   onDelete2Rows: () => void;
-  onAddColumn: () => void;
-  onAdd2Columns: () => void;
-  onAddRow: () => void;
-  onAdd2Rows: () => void;
+  onAddColumn: (startIndex: number, count: number) => void;
+  onAdd2Columns: (startIndex: number, count: number) => void;
+  onAddRow: (startIndex: number, count: number) => void;
+  onAdd2Rows: (startIndex: number, count: number) => void;
   onSelectStyle?: (styleId: string) => void;
+  onBringToFront?: () => void;
+  onBringForward?: () => void;
+  onSendBackward?: () => void;
+  onSendToBack?: () => void;
 }
 
 export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
@@ -166,6 +175,10 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   onAddRow,
   onAdd2Rows,
   onSelectStyle = noop,
+  onBringToFront,
+  onBringForward,
+  onSendBackward,
+  onSendToBack,
 }) => {
   const columnSelection = useMemo(() => deriveColumnSelectionBounds(selectedCell, cols), [cols, selectedCell]);
   const rowSelection = useMemo(() => deriveRowSelectionBounds(selectedCell, rows), [rows, selectedCell]);
@@ -174,6 +187,7 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
   const hasColumnSelection = Boolean(columnSelection);
   const hasBodySelection = Boolean(rowSelection);
   const disableStyleSelection = locked || !canEdit;
+  const layerActionsDisabled = locked || !canEdit;
   const doubleColumnRemoval = Math.max(2, selectedColumnCount || 0);
   const doubleRowRemoval = Math.max(2, selectedRowCount || 0);
   const remainingColumnsAfterDelete = cols - selectedColumnCount;
@@ -347,6 +361,63 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
         </ContextMenuSubContent>
       </ContextMenuSub>
 
+      <ContextMenuSub>
+        <ContextMenuSubTrigger disabled={layerActionsDisabled}>
+          <Layers className="mr-2 h-4 w-4" />
+          Layer
+        </ContextMenuSubTrigger>
+        <ContextMenuSubContent className="w-52">
+          <ContextMenuItem
+            disabled={layerActionsDisabled}
+            onSelect={() => {
+              if (layerActionsDisabled || !onBringToFront) {
+                return;
+              }
+              onBringToFront();
+            }}
+          >
+            <ArrowUpToLine className="mr-2 h-4 w-4" />
+            Bring to front
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={layerActionsDisabled}
+            onSelect={() => {
+              if (layerActionsDisabled || !onBringForward) {
+                return;
+              }
+              onBringForward();
+            }}
+          >
+            <ArrowUp className="mr-2 h-4 w-4" />
+            Bring forward
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={layerActionsDisabled}
+            onSelect={() => {
+              if (layerActionsDisabled || !onSendBackward) {
+                return;
+              }
+              onSendBackward();
+            }}
+          >
+            <ArrowDown className="mr-2 h-4 w-4" />
+            Send backward
+          </ContextMenuItem>
+          <ContextMenuItem
+            disabled={layerActionsDisabled}
+            onSelect={() => {
+              if (layerActionsDisabled || !onSendToBack) {
+                return;
+              }
+              onSendToBack();
+            }}
+          >
+            <ArrowDownToLine className="mr-2 h-4 w-4" />
+            Send to back
+          </ContextMenuItem>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+
       <ContextMenuItem onClick={onToggleOutline} disabled={!canEdit}>
         <AlignHorizontalSpaceAround className="mr-2 h-4 w-4" />
         {showOutline ? 'Hide table outline' : 'Show table outline'}
@@ -409,19 +480,43 @@ export const ExhibitionTableTray: React.FC<ExhibitionTableTrayProps> = ({
 
       <ContextMenuSeparator />
 
-      <ContextMenuItem onClick={onAddColumn} disabled={locked || !canEdit}>
+      <ContextMenuItem
+        onClick={() => {
+          const insertionIndex = columnSelection ? columnSelection.start : cols;
+          onAddColumn(insertionIndex, 1);
+        }}
+        disabled={locked || !canEdit}
+      >
         <Plus className="mr-2 h-4 w-4" />
         Add column
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAdd2Columns} disabled={locked || !canEdit}>
+      <ContextMenuItem
+        onClick={() => {
+          const insertionIndex = columnSelection ? columnSelection.start : cols;
+          onAdd2Columns(insertionIndex, 2);
+        }}
+        disabled={locked || !canEdit}
+      >
         <Plus className="mr-2 h-4 w-4" />
         Add 2 columns
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAddRow} disabled={locked || !canEdit}>
+      <ContextMenuItem
+        onClick={() => {
+          const insertionIndex = rowSelection ? rowSelection.start : rows;
+          onAddRow(insertionIndex, 1);
+        }}
+        disabled={locked || !canEdit}
+      >
         <Plus className="mr-2 h-4 w-4" />
         Add row
       </ContextMenuItem>
-      <ContextMenuItem onClick={onAdd2Rows} disabled={locked || !canEdit}>
+      <ContextMenuItem
+        onClick={() => {
+          const insertionIndex = rowSelection ? rowSelection.start : rows;
+          onAdd2Rows(insertionIndex, 2);
+        }}
+        disabled={locked || !canEdit}
+      >
         <Plus className="mr-2 h-4 w-4" />
         Add 2 rows
       </ContextMenuItem>

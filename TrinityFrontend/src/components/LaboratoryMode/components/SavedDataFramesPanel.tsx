@@ -1,10 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2 } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API, CLASSIFIER_API } from '@/lib/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Label } from '@/components/ui/label';
 import { CheckboxTemplate } from '@/templates/checkbox';
 import { Plus } from 'lucide-react';
@@ -17,9 +23,10 @@ import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 interface Props {
   isOpen: boolean;
   onToggle: () => void;
+  collapseDirection?: 'left' | 'right';
 }
 
-const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
+const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirection = 'right' }) => {
   interface Frame {
     object_name: string;
     csv_name: string;
@@ -46,7 +53,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<
-    { type: 'one'; target: string } | { type: 'all' } | null
+    { type: 'one'; target: string } | { type: 'folder'; target: string } | { type: 'all' } | null
   >(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -542,16 +549,99 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
   };
 
+  const handleDownloadCSV = async (obj: string, filename: string) => {
+    try {
+      const response = await fetch(
+        `${VALIDATE_API}/export_csv?object_name=${encodeURIComponent(obj)}`,
+        { credentials: 'include' }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to download CSV');
+      }
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      const baseFilename = filename || obj.split('/').pop() || 'dataframe';
+      const downloadFilename = baseFilename.replace(/\.arrow$/, '') + '.csv';
+      link.download = downloadFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      toast({ title: 'Download started', description: 'CSV download has started.' });
+    } catch (error: any) {
+      console.error('CSV download failed:', error);
+      toast({
+        title: 'Download failed',
+        description: error.message || 'Failed to download CSV',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDownloadExcel = async (obj: string, filename: string) => {
+    try {
+      const response = await fetch(
+        `${VALIDATE_API}/export_excel?object_name=${encodeURIComponent(obj)}`,
+        { credentials: 'include' }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to download Excel');
+      }
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      const baseFilename = filename || obj.split('/').pop() || 'dataframe';
+      const downloadFilename = baseFilename.replace(/\.arrow$/, '') + '.xlsx';
+      link.download = downloadFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+      toast({ title: 'Download started', description: 'Excel download has started.' });
+    } catch (error: any) {
+      console.error('Excel download failed:', error);
+      toast({
+        title: 'Download failed',
+        description: error.message || 'Failed to download Excel',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const promptDeleteAll = () => setConfirmDelete({ type: 'all' });
 
   const promptDeleteOne = (obj: string) =>
     setConfirmDelete({ type: 'one', target: obj });
+
+  const promptDeleteFolder = (folderPath: string) =>
+    setConfirmDelete({ type: 'folder', target: folderPath });
 
   const performDelete = async () => {
     if (!confirmDelete) return;
     if (confirmDelete.type === 'all') {
       await fetch(`${VALIDATE_API}/delete_all_dataframes`, { method: 'DELETE' });
       setFiles([]);
+    } else if (confirmDelete.type === 'folder') {
+      const folderPath = confirmDelete.target;
+      // Ensure folder path ends with / for proper matching
+      const normalizedPath = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+      // Find all files that belong to this folder (files that start with the folder path)
+      const filesToDelete = files.filter(f => 
+        f.object_name.startsWith(normalizedPath)
+      );
+      // Delete all files in the folder
+      await Promise.all(
+        filesToDelete.map(f =>
+          fetch(
+            `${VALIDATE_API}/delete_dataframe?object_name=${encodeURIComponent(f.object_name)}`,
+            { method: 'DELETE' }
+          )
+        )
+      );
+      setFiles(prev => prev.filter(f => !f.object_name.startsWith(normalizedPath)));
     } else {
       const obj = confirmDelete.target;
       await fetch(
@@ -713,6 +803,34 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
               className="w-4 h-4 text-gray-400 cursor-pointer"
               onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)}
             />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="p-0 border-0 bg-transparent cursor-pointer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Download
+                    className="w-4 h-4 text-gray-400 cursor-pointer hover:text-blue-600"
+                    title="Download dataframe"
+                  />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem
+                  onClick={() => handleDownloadCSV(f.object_name, f.arrow_name || f.csv_name)}
+                  className="cursor-pointer"
+                >
+                  <span>Download as CSV</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => handleDownloadExcel(f.object_name, f.arrow_name || f.csv_name)}
+                  className="cursor-pointer"
+                >
+                  <span>Download as Excel</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Trash2
               className="w-4 h-4 text-gray-400 cursor-pointer"
               onClick={() => promptDeleteOne(f.object_name)}
@@ -1027,21 +1145,32 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     const isOpen = openDirs[node.path];
     return (
       <div key={node.path} style={{ marginLeft: level * 12 }} className="mt-1">
-        <button
-          onClick={() => toggleDir(node.path)}
-          className="flex items-center text-sm text-gray-700"
-        >
-          {isOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
-          {node.name}
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => toggleDir(node.path)}
+            className="flex items-center text-sm text-gray-700"
+          >
+            {isOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+            {node.name}
+          </button>
+          <Trash2
+            className="w-4 h-4 text-gray-400 cursor-pointer ml-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              promptDeleteFolder(node.path);
+            }}
+          />
+        </div>
         {isOpen && node.children?.map(child => renderNode(child, level + 1))}
       </div>
     );
   };
 
+  const borderClass = collapseDirection === 'left' ? 'border-r border-gray-200' : 'border-l border-gray-200';
+
   if (!isOpen) {
     return (
-      <div className="w-12 bg-white border-l border-gray-200 flex flex-col h-full">
+      <div className={`w-12 bg-white flex flex-col h-full ${borderClass}`}>
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
           <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
             <Database className="w-4 h-4" />
@@ -1051,8 +1180,10 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
     );
   }
 
+  const CollapseIcon = collapseDirection === 'left' ? ChevronLeft : ChevronRight;
+
   return (
-    <div className="w-80 bg-white border-l border-gray-200 flex flex-col h-full">
+    <div className={`w-80 bg-white flex flex-col h-full ${borderClass}`}>
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
           <Database className="w-4 h-4" />
@@ -1069,7 +1200,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
             <Trash2 className="w-4 h-4" />
           </Button>
           <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
-            <ChevronRight className="w-4 h-4" />
+            <CollapseIcon className="w-4 h-4" />
           </Button>
         </div>
       </div>
@@ -1097,11 +1228,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle }) => {
         onConfirm={performDelete}
         onCancel={() => setConfirmDelete(null)}
         title={
-          confirmDelete?.type === 'all' ? 'Delete All DataFrames' : 'Delete DataFrame'
+          confirmDelete?.type === 'all' 
+            ? 'Delete All DataFrames' 
+            : confirmDelete?.type === 'folder'
+            ? 'Delete Folder'
+            : 'Delete DataFrame'
         }
         description={
           confirmDelete?.type === 'all'
             ? 'Delete all saved dataframes? This may impact existing projects.'
+            : confirmDelete?.type === 'folder'
+            ? 'Are you sure you want to delete this folder and all files in it? This may impact existing projects.'
             : 'Are you sure you want to delete this dataframe? This may impact existing projects.'
         }
         icon={<Trash2 className="w-5 h-5 text-white" />}

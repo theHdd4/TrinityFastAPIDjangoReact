@@ -29,10 +29,23 @@ class TaskRunSerializer(serializers.ModelSerializer):
             "atom_slug",
             "engine",
             "status",
+            "execution_profile",
+            "tenant_schema",
+            "celery_task_id",
             "input",
             "output",
             "error",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "engine", "status", "output", "error", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "engine",
+            "status",
+            "tenant_schema",
+            "celery_task_id",
+            "output",
+            "error",
+            "created_at",
+            "updated_at",
+        ]

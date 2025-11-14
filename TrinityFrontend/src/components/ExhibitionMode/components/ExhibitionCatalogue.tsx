@@ -206,8 +206,8 @@ const CatalogueComponentCard: React.FC<{
               Preview snapshot
             </div>
             <div className="mt-2 rounded-md border border-gray-200 bg-white/80 p-2">
-              <div className="pointer-events-none select-none">
-                <div className="overflow-auto">
+              <div className="pointer-events-none select-none w-full max-w-full min-w-0">
+                <div className="overflow-auto w-full max-w-full min-w-0">
                   {atom.atomId === 'chart-maker' ? (
                     <ChartMaker metadata={metadata} variant="full" />
                   ) : atom.atomId === 'evaluate-models-feature' ? (

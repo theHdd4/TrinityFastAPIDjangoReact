@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import DataFrameOperationsCanvas from './components/DataFrameOperationsCanvas';
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import {
+  useLaboratoryStore,
+  PivotTableSettings as PivotSettings,
+  DEFAULT_PIVOT_TABLE_SETTINGS,
+} from '@/components/LaboratoryMode/store/laboratoryStore';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { loadDataframeByKey } from './services/dataframeOperationsApi';
 import { Table } from 'lucide-react';
@@ -18,6 +22,7 @@ export interface DataFrameData {
   frozenColumns: number;
   cellColors: { [key: string]: string }; // key format: "row-col"
   hiddenColumns: string[]; // Array of hidden column names
+  deletedColumns?: string[]; // Track columns removed from the dataset
 }
 
 export interface DataFrameSettings {
@@ -35,6 +40,7 @@ export interface DataFrameSettings {
   columnWidths: { [key: string]: number };
   rowHeights: { [key: number]: number };
   columnFormulas: Record<string, string>;
+  pivotSettings: PivotSettings;
 }
 
 interface Props {
@@ -59,6 +65,10 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     rowHeights: {},
     ...baseSettings,
     columnFormulas: baseSettings.columnFormulas || {},
+    pivotSettings: {
+      ...DEFAULT_PIVOT_TABLE_SETTINGS,
+      ...(baseSettings.pivotSettings || {}),
+    },
   };
   // Always use tableData as the source of truth
   const data = settings.tableData || null;
@@ -84,6 +94,30 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   // Update handleDataUpload to always set selectedColumns to newData.headers
   const handleDataUpload = (newData: DataFrameData, backendFileId?: string) => {
     setOriginalData(JSON.parse(JSON.stringify(newData)));
+    const resolvedDataSource =
+      backendFileId ??
+      settings.selectedFile ??
+      (settings.pivotSettings?.dataSource ?? '');
+    const pivotDefaults: PivotSettings = {
+      ...DEFAULT_PIVOT_TABLE_SETTINGS,
+      ...(settings.pivotSettings || {}),
+      dataSource: resolvedDataSource,
+      dataSourceColumns: newData.headers,
+      fields: newData.headers,
+      selectedFields: newData.headers,
+      rowFields: [],
+      columnFields: [],
+      filterFields: [],
+      valueFields: [],
+      pivotResults: [],
+      pivotStatus: 'idle',
+      pivotError: null,
+      pivotRowCount: 0,
+      pivotFilterOptions: {},
+      pivotFilterSelections: {},
+      collapsedKeys: [],
+    };
+
     const newSettings: DataFrameSettings = {
       ...settings,
       selectedColumns: newData.headers,
@@ -93,6 +127,7 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
       columnWidths: {},
       rowHeights: {},
       columnFormulas: {},
+      pivotSettings: pivotDefaults,
     };
     updateSettings(atomId, newSettings);
   };
@@ -104,6 +139,13 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
     if ("filters" in newSettings) {
       mergedSettings.filters = newSettings.filters;
     }
+    // Properly merge pivotSettings to ensure nested updates are preserved
+    if ("pivotSettings" in newSettings && newSettings.pivotSettings) {
+      mergedSettings.pivotSettings = {
+        ...(current?.pivotSettings || DEFAULT_PIVOT_TABLE_SETTINGS),
+        ...newSettings.pivotSettings,
+      };
+    }
     if (current?.tableData && (!mergedSettings.selectedColumns || mergedSettings.selectedColumns.length === 0)) {
       mergedSettings.selectedColumns = current.tableData.headers;
     }
@@ -114,10 +156,20 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   const handleDataChange = (newData: DataFrameData) => {
     const clonedData = JSON.parse(JSON.stringify(newData));
     const current = useLaboratoryStore.getState().getAtom(atomId)?.settings as DataFrameSettings;
+    const mergedPivot: PivotSettings = {
+      ...DEFAULT_PIVOT_TABLE_SETTINGS,
+      ...((current?.pivotSettings as PivotSettings) || {}),
+      dataSource: (current?.pivotSettings as PivotSettings)?.dataSource ?? '',
+      dataSourceColumns: clonedData.headers,
+      fields: clonedData.headers,
+      selectedFields: clonedData.headers,
+    };
+
     updateSettings(atomId, {
       ...(current || {}),
       tableData: clonedData,
       selectedColumns: [...clonedData.headers],
+      pivotSettings: mergedPivot,
     });
   };
 
@@ -138,6 +190,25 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
         columnWidths: {},
         rowHeights: {},
         columnFormulas: {},
+        pivotSettings: {
+          ...DEFAULT_PIVOT_TABLE_SETTINGS,
+          ...(settings.pivotSettings || {}),
+          dataSource: settings.pivotSettings?.dataSource ?? settings.selectedFile ?? '',
+          dataSourceColumns: originalData.headers,
+          fields: originalData.headers,
+          selectedFields: originalData.headers,
+          rowFields: [],
+          columnFields: [],
+          filterFields: [],
+          valueFields: [],
+          pivotResults: [],
+          pivotStatus: 'idle',
+          pivotError: null,
+          pivotRowCount: 0,
+          pivotFilterOptions: {},
+          pivotFilterSelections: {},
+          collapsedKeys: [],
+        },
       });
     }
   };
@@ -181,6 +252,32 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           tableData: newData,
           selectedColumns: resp.headers,
           fileId: resp.df_id,
+          pivotSettings: {
+            ...DEFAULT_PIVOT_TABLE_SETTINGS,
+            ...(settings.pivotSettings || {}),
+            dataSource:
+              settings.selectedFile ??
+              resp.df_id ??
+              settings.pivotSettings?.dataSource ??
+              '',
+            dataSourceColumns: resp.headers,
+            fields: resp.headers,
+            selectedFields: resp.headers,
+            rowFields: [],
+            columnFields: [],
+            filterFields: [],
+            valueFields: [],
+            pivotResults: [],
+            pivotStatus: 'idle',
+            pivotError: null,
+            pivotRowCount: 0,
+            pivotFilterOptions: {},
+            pivotFilterSelections: {},
+            collapsedKeys: [],
+          },
+          operationCompleted: true,
+          hasData: true,
+          dataLoaded: true,
         });
       })
       .catch(err => console.error('[DataFrameOperations] auto-load failed', err))

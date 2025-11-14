@@ -49,15 +49,15 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
   // Date range state
   const [dateRangeData, setDateRangeData] = useState<{
     dateColumn: string | null;
-    availableDates: string[];
     minDate: string | null;
     maxDate: string | null;
+    available: boolean;
     isLoading: boolean;
   }>({
     dateColumn: null,
-    availableDates: [],
     minDate: null,
     maxDate: null,
+    available: false,
     isLoading: false
   });
   
@@ -123,7 +123,10 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
   // Fetch available dates when objectName changes
   useEffect(() => {
     const fetchAvailableDates = async () => {
-      if (!clusteringData.objectName) return;
+      if (!clusteringData.objectName) {
+        setDateRangeData({ dateColumn: null, minDate: null, maxDate: null, available: false, isLoading: false });
+        return;
+      }
       
       setDateRangeData(prev => ({ ...prev, isLoading: true }));
       
@@ -134,16 +137,18 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
           const data = await response.json();
           console.log('📅 Available dates data:', data);
           
-          setDateRangeData({
+          const fetchedRange = {
             dateColumn: data.date_column,
-            availableDates: data.date_values || [],
             minDate: data.min_date,
             maxDate: data.max_date,
+            available: !!(data.date_column && data.min_date && data.max_date),
             isLoading: false
-          });
+          };
+          
+          setDateRangeData(fetchedRange);
           
           // Set default date range if dates are available
-          if (data.min_date && data.max_date) {
+          if (fetchedRange.available) {
             setSelectedDateRange({
               fromDate: data.min_date,
               toDate: data.max_date
@@ -151,11 +156,11 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
           }
         } else {
           console.error('Failed to fetch available dates:', response.status);
-          setDateRangeData(prev => ({ ...prev, isLoading: false }));
+          setDateRangeData(prev => ({ ...prev, isLoading: false, available: false }));
         }
       } catch (error) {
         console.error('Error fetching available dates:', error);
-        setDateRangeData(prev => ({ ...prev, isLoading: false }));
+        setDateRangeData(prev => ({ ...prev, isLoading: false, available: false }));
       }
     };
     
@@ -579,7 +584,6 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
     if (dateRangeData.dateColumn) {
       const newDateColumnInfo = {
         dateColumn: dateRangeData.dateColumn,
-        availableDates: dateRangeData.availableDates,
         minDate: dateRangeData.minDate,
         maxDate: dateRangeData.maxDate
       };
@@ -587,7 +591,6 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
       // Only update if the date column info has actually changed
       if (JSON.stringify({
         dateColumn: clusteringData.dateColumn,
-        availableDates: clusteringData.availableDates,
         minDate: clusteringData.minDate,
         maxDate: clusteringData.maxDate
       }) !== JSON.stringify(newDateColumnInfo)) {
@@ -599,7 +602,7 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
         });
       }
     }
-  }, [dateRangeData.dateColumn, dateRangeData.availableDates, dateRangeData.minDate, dateRangeData.maxDate, clusteringData, updateSettings, getCorrectAtomId]);
+  }, [dateRangeData.dateColumn, dateRangeData.minDate, dateRangeData.maxDate, clusteringData, updateSettings, getCorrectAtomId]);
 
   return (
     <div className="space-y-6 p-2">
@@ -620,50 +623,45 @@ const ClusteringSelections: React.FC<Props> = ({ atomId }) => {
             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mx-auto mb-2"></div>
             <p className="text-xs text-muted-foreground">Loading available dates...</p>
           </div>
-        ) : dateRangeData.dateColumn && dateRangeData.availableDates.length > 0 ? (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs text-muted-foreground">From</Label>
-                <Select 
-                  value={selectedDateRange.fromDate} 
-                  onValueChange={(value) => setSelectedDateRange(prev => ({ ...prev, fromDate: value }))}
-                >
-                  <SelectTrigger className="text-xs">
-                    <SelectValue placeholder="Select start date" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {dateRangeData.availableDates.map((date) => (
-                      <SelectItem key={date} value={date}>
-                        {date}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+        ) : dateRangeData.available && dateRangeData.dateColumn ? (
+          <div className="space-y-4">
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-medium text-gray-700">From</Label>
+              <div className="relative">
+                <Input
+                  type="date"
+                  disabled={!dateRangeData.available}
+                  min={dateRangeData.minDate ?? undefined}
+                  max={dateRangeData.maxDate ?? undefined}
+                  value={selectedDateRange.fromDate}
+                  onChange={(e) => setSelectedDateRange(prev => ({ ...prev, fromDate: e.target.value }))}
+                  className="bg-white border-gray-200 hover:border-gray-300 focus:border-primary w-full h-9 text-sm cursor-pointer appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <Calendar className="w-4 h-4 text-gray-400" />
+                </div>
               </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">To</Label>
-                <Select 
-                  value={selectedDateRange.toDate} 
-                  onValueChange={(value) => setSelectedDateRange(prev => ({ ...prev, toDate: value }))}
-                >
-                  <SelectTrigger className="text-xs">
-                    <SelectValue placeholder="Select end date" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {dateRangeData.availableDates.map((date) => (
-                      <SelectItem key={date} value={date}>
-                        {date}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-medium text-gray-700">To</Label>
+              <div className="relative">
+                <Input
+                  type="date"
+                  disabled={!dateRangeData.available}
+                  min={dateRangeData.minDate ?? undefined}
+                  max={dateRangeData.maxDate ?? undefined}
+                  value={selectedDateRange.toDate}
+                  onChange={(e) => setSelectedDateRange(prev => ({ ...prev, toDate: e.target.value }))}
+                  className="bg-white border-gray-200 hover:border-gray-300 focus:border-primary w-full h-9 text-sm cursor-pointer appearance-none [&::-webkit-calendar-picker-indicator]:opacity-0"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">
+                  <Calendar className="w-4 h-4 text-gray-400" />
+                </div>
               </div>
             </div>
             
             <div className="text-xs text-muted-foreground">
-              Available range: {dateRangeData.minDate} to {dateRangeData.maxDate} 
-              ({dateRangeData.availableDates.length} dates)
+              Available range: {dateRangeData.minDate} to {dateRangeData.maxDate}
             </div>
           </div>
         ) : (

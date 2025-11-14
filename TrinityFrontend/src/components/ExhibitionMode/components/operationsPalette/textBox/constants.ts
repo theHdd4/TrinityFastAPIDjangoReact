@@ -125,23 +125,56 @@ const createDefaultFormatting = (
   ...overrides,
 });
 
+const resolveNextZIndex = (objects: SlideObject[] | undefined): number => {
+  if (!Array.isArray(objects) || objects.length === 0) {
+    return 1;
+  }
+
+  const max = objects.reduce((acc, object) => {
+    const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+    return value > acc ? value : acc;
+  }, 0);
+
+  return Math.round(max) + 1;
+};
+
+export interface CreateTextBoxSlideObjectOptions {
+  existingObjects?: SlideObject[];
+  overrides?: Partial<SlideObject>;
+  formattingOverrides?: Partial<TextBoxFormatting>;
+}
+
 export const createTextBoxSlideObject = (
   id: string,
-  overrides: Partial<SlideObject> = {},
-  formattingOverrides: Partial<TextBoxFormatting> = {},
-): SlideObject => ({
-  id,
-  type: 'text-box',
-  x: 120,
-  y: 120,
-  width: DEFAULT_TEXT_BOX_WIDTH,
-  height: DEFAULT_TEXT_BOX_HEIGHT,
-  zIndex: 1,
-  rotation: 0,
-  groupId: null,
-  props: createDefaultFormatting(formattingOverrides),
-  ...overrides,
-});
+  options: CreateTextBoxSlideObjectOptions = {},
+): SlideObject => {
+  const { existingObjects = [], overrides = {}, formattingOverrides = {} } = options;
+  const { props: overrideProps = {}, zIndex: overrideZIndex, ...restOverrides } = overrides;
+
+  const zIndex =
+    typeof overrideZIndex === 'number' && Number.isFinite(overrideZIndex)
+      ? Math.round(overrideZIndex)
+      : resolveNextZIndex(existingObjects);
+
+  const props: TextBoxFormatting = {
+    ...createDefaultFormatting(formattingOverrides),
+    ...(overrideProps as Partial<TextBoxFormatting>),
+  };
+
+  return {
+    id,
+    type: 'text-box',
+    x: 120,
+    y: 120,
+    width: DEFAULT_TEXT_BOX_WIDTH,
+    height: DEFAULT_TEXT_BOX_HEIGHT,
+    zIndex,
+    rotation: 0,
+    groupId: null,
+    props,
+    ...restOverrides,
+  };
+};
 
 export const extractTextBoxFormatting = (
   props: Record<string, unknown> | undefined,

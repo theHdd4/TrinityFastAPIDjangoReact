@@ -1,4 +1,5 @@
 from django.contrib import admin
+
 from .models import EngineRegistry, TaskRun
 
 
@@ -22,7 +23,9 @@ class TaskRunAdmin(admin.ModelAdmin):
         "atom_slug",
         "engine",
         "status",
+        "execution_profile",
+        "tenant_schema",
         "created_at",
     )
-    list_filter = ("status", "engine")
-    search_fields = ("atom_slug", "workflow_run__id")
+    list_filter = ("status", "engine", "execution_profile")
+    search_fields = ("atom_slug", "workflow_run__id", "tenant_schema", "celery_task_id")

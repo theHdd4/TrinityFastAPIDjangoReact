@@ -326,6 +326,8 @@ def test_mongodb_operations() -> Dict[str, Any]:
 def save_workflow_to_mongo(
     canvas_molecules: List[Dict[str, Any]],
     custom_molecules: List[Dict[str, Any]],
+    standalone_cards: Optional[List[Dict[str, Any]]] = None,
+    workflow_name: Optional[str] = None,
     *,
     user_id: str = "",
     client_name: str = "",
@@ -345,6 +347,8 @@ def save_workflow_to_mongo(
             "_id": workflow_id,
             "canvas_molecules": canvas_molecules,
             "custom_molecules": custom_molecules,
+            "standalone_cards": standalone_cards or [],
+            "workflow_name": workflow_name,
             "user_id": user_id,
             "client_name": client_name,
             "app_name": app_name,
@@ -369,7 +373,8 @@ def save_workflow_to_mongo(
             "operation": "inserted" if result.upserted_id else "updated",
             "collection": WORKFLOW_COLLECTION_NAME,
             "canvas_molecules_count": len(canvas_molecules),
-            "custom_molecules_count": len(custom_molecules)
+            "custom_molecules_count": len(custom_molecules),
+            "standalone_cards_count": len(standalone_cards or [])
         }
         
     except Exception as e:
@@ -413,8 +418,10 @@ def get_workflow_from_mongo(
         # Convert MongoDB document back to workflow format
         workflow_data = {
             "workflow_id": doc.get("_id"),
+            "workflow_name": doc.get("workflow_name"),
             "canvas_molecules": doc.get("canvas_molecules", []),
             "custom_molecules": doc.get("custom_molecules", []),
+            "standalone_cards": doc.get("standalone_cards", []),
             "created_at": doc.get("created_at"),
             "updated_at": doc.get("updated_at"),
             "user_id": doc.get("user_id"),
@@ -442,8 +449,10 @@ def get_workflow_by_id_from_mongo(workflow_id: str) -> Optional[Dict[str, Any]]:
         
         workflow_data = {
             "workflow_id": doc.get("_id"),
+            "workflow_name": doc.get("workflow_name"),
             "canvas_molecules": doc.get("canvas_molecules", []),
             "custom_molecules": doc.get("custom_molecules", []),
+            "standalone_cards": doc.get("standalone_cards", []),
             "created_at": doc.get("created_at"),
             "updated_at": doc.get("updated_at"),
             "user_id": doc.get("user_id"),

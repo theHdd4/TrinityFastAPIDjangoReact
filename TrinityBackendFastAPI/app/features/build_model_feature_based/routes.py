@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Path, Form, Body, Request
+from fastapi import APIRouter, HTTPException, Query, Path, Form, Body, Request, Depends
 import logging
 import asyncio
 from datetime import datetime
@@ -28,6 +28,7 @@ from ..scope_selector.deps import get_minio_client
 
 # Import get_object_prefix for dynamic path construction
 from ..data_upload_validate.app.routes import get_object_prefix
+from app.core.observability import timing_dependency_factory
 
 # Import MMM model results saver (removed - using save_build_config instead)
 
@@ -115,7 +116,9 @@ training_progress = {}
 logger = logging.getLogger(__name__)
 
 
-router = APIRouter()
+timing_dependency = timing_dependency_factory("app.features.build_model_feature_based")
+
+router = APIRouter(dependencies=[Depends(timing_dependency)])
 logger = logging.getLogger(__name__)
 
 @router.get("/health", response_model=Health, tags=["Health"])
@@ -2309,7 +2312,7 @@ async def save_build_data(
         # Check if this is atom list configuration data (has cards structure)
         if "cards" in body and isinstance(body["cards"], list):
             # This is atom list configuration data - save to atom_list_configuration collection
-            from .mongodb_saver import save_atom_list_configuration
+            from app.features.project_state.routes import save_atom_list_configuration
             
             result = await save_atom_list_configuration(
                 client_name=client_name,

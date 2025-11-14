@@ -1,14 +1,14 @@
+import base64
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import JSONResponse
-from typing import List, Dict, Optional
+from fastapi import Depends
+from typing import List, Dict
 import json
-import io
 
 from .service import chart_service
 from .schemas import (
-    ColumnResponse, 
-    UniqueValuesResponse, 
-    AllColumnsResponse, 
+    ColumnResponse,
+    UniqueValuesResponse,
+    AllColumnsResponse,
     CSVUploadResponse,
     LoadSavedDataframeRequest,
     FilterResponse,
@@ -16,7 +16,12 @@ from .schemas import (
     ChartResponse
 )
 
-router = APIRouter(prefix="/chart-maker", tags=["chart-maker"])
+from app.core.observability import timing_dependency_factory
+from app.core.task_queue import celery_task_client, format_task_response
+
+timing_dependency = timing_dependency_factory("app.features.chart_maker")
+
+router = APIRouter(prefix="/chart-maker", tags=["chart-maker"], dependencies=[Depends(timing_dependency)])
 
 
 def get_dataframe_with_reload(file_id: str):
@@ -24,55 +29,10 @@ def get_dataframe_with_reload(file_id: str):
     Get dataframe by file_id, reloading from saved source if not in memory.
     Returns tuple of (dataframe, file_id) - file_id may be updated if reloaded.
     """
-    if file_id in chart_service.file_storage:
-        return chart_service.get_file(file_id), file_id
-    
-    # File not in memory - try to reload from the file_id directly (it might be a full path)
-    print(f"⚠️ File {file_id} not in memory storage, trying to reload directly...")
-    
-    # Try to reload using the full file_id first (preserves project path)
-    print(f"🔄 Attempting to reload from file_id: {file_id}")
-    
     try:
-        new_file_id = chart_service.load_saved_dataframe(file_id)
-        df = chart_service.get_file(new_file_id)
-        print(f"✅ Dataframe reloaded: {len(df)} rows, {len(df.columns)} columns")
-        return df, new_file_id
-    except Exception as reload_error:
-        print(f"❌ Failed to reload from full path: {reload_error}")
-        
-        # If full path fails, try extracting just the filename as fallback
-        # (this may load the wrong file if multiple projects have the same filename!)
-        if '/' in file_id:
-            filename = file_id.split('/')[-1]
-            print(f"⚠️ WARNING: Falling back to filename only (may load wrong file): {filename}")
-            print(f"🔄 Attempting to reload from filename: {filename}")
-            try:
-                new_file_id = chart_service.load_saved_dataframe(filename)
-                df = chart_service.get_file(new_file_id)
-                print(f"✅ Dataframe reloaded from filename: {len(df)} rows, {len(df.columns)} columns")
-                return df, new_file_id
-            except Exception as fallback_error:
-                print(f"❌ Filename fallback also failed: {fallback_error}")
-        
-        # Final fallback: check metadata to see if it has a saved source
-        print(f"⚠️ Trying metadata approach for: {file_id}")
-        try:
-            metadata = chart_service.get_file_metadata(file_id)
-            
-            if metadata.get("data_source") in ["arrow_flight", "minio_fallback"]:
-                # Reload from the saved file
-                print(f"🔄 Reloading from saved source: {metadata.get('filename')}")
-                new_file_id = chart_service.load_saved_dataframe(metadata.get("filename"))
-                df = chart_service.get_file(new_file_id)
-                print(f"✅ Dataframe reloaded: {len(df)} rows, {len(df.columns)} columns")
-                return df, new_file_id
-            else:
-                print(f"❌ File {file_id} not found and no saved source available")
-                raise HTTPException(status_code=404, detail=f"File {file_id} not found")
-        except Exception as metadata_error:
-            print(f"❌ Metadata approach also failed: {metadata_error}")
-            raise HTTPException(status_code=404, detail=f"File not found in memory and failed to reload: {str(reload_error)}")
+        return chart_service.ensure_dataframe(file_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/upload-csv", response_model=CSVUploadResponse)
@@ -85,48 +45,34 @@ async def upload_csv(file: UploadFile = File(...)):
     - Unique values for categorical columns
     - Sample data
     """
-    try:
-        # Validate file type
-        if not file.filename.lower().endswith((".csv", ".xlsx", ".xls", ".arrow")):
-            raise HTTPException(
-                status_code=400,
-                detail="Unsupported file type. Please upload CSV, Excel, or Arrow files."
-            )
-        
-        # Read file
-        contents = await file.read()
-        df = chart_service.read_file(contents, file.filename)
-        
-        # Store file and get ID
-        file_id = chart_service.store_file(df, filename=file.filename)
-        
-        # Get all columns
-        all_columns = chart_service.get_all_columns(df)
-        
-        # Get column types
-        column_types = chart_service.get_column_types(df)
-        
-        # Get unique values for categorical columns (limit to first 100 for performance)
-        categorical_columns = column_types["categorical_columns"][:20]  # Limit to prevent large payloads
-        unique_values = chart_service.get_unique_values(df, categorical_columns)
-        
-        # Get sample data
-        sample_data = chart_service.get_sample_data(df, n=5)
-        
-        return CSVUploadResponse(
-            file_id=file_id,
-            columns=all_columns,
-            numeric_columns=column_types["numeric_columns"],
-            categorical_columns=column_types["categorical_columns"],
-            unique_values=unique_values,
-            sample_data=sample_data,
-            row_count=len(df)
+    if not file.filename.lower().endswith((".csv", ".xlsx", ".xls", ".arrow")):
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Please upload CSV, Excel, or Arrow files.",
         )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing file: {str(e)}")
+
+    contents = await file.read()
+    submission = celery_task_client.submit_callable(
+        name="chart_maker.upload_csv",
+        dotted_path="app.features.chart_maker.service.load_dataframe_from_upload",
+        kwargs={
+            "content_b64": base64.b64encode(contents).decode("utf-8"),
+            "filename": file.filename,
+        },
+        metadata={
+            "atom": "chart_maker",
+            "operation": "upload_csv",
+            "filename": file.filename,
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=400,
+            detail=submission.detail or "Failed to process uploaded file",
+        )
+
+    return format_task_response(submission)
 
 
 @router.post("/load-saved-dataframe", response_model=CSVUploadResponse)
@@ -139,129 +85,141 @@ async def load_saved_dataframe(request: LoadSavedDataframeRequest):
     - Unique values for categorical columns
     - Sample data
     """
-    try:
-        print(f"🔍 ===== LOAD SAVED DATAFRAME REQUEST =====")
-        print(f"📥 Object name: {request.object_name}")
-        print(f"🔍 ===== END REQUEST LOG =====")
-        
-        # Load the dataframe from Arrow Flight
-        print("🚀 Loading dataframe from Arrow Flight...")
-        file_id = chart_service.load_saved_dataframe(request.object_name)
-        print(f"✅ Dataframe loaded with file ID: {file_id}")
-        
-        df = chart_service.get_file(file_id)
-        print(f"📊 DataFrame loaded: {len(df)} rows, {len(df.columns)} columns")
-        print(f"📋 Available columns: {list(df.columns)}")
-        
-        # Get all columns
-        all_columns = chart_service.get_all_columns(df)
-        print(f"📋 Total columns: {len(all_columns)}")
-        
-        # Get column types
-        column_types = chart_service.get_column_types(df)
-        print(f"🔢 Numeric columns: {len(column_types['numeric_columns'])}")
-        print(f"📝 Categorical columns: {len(column_types['categorical_columns'])}")
-        
-        # Get unique values for categorical columns (limit to first 100 for performance)
-        categorical_columns = column_types["categorical_columns"][:20]  # Limit to prevent large payloads
-        unique_values = chart_service.get_unique_values(df, categorical_columns)
-        print(f"🎯 Unique values for {len(categorical_columns)} categorical columns")
-        
-        # Get sample data
-        sample_data = chart_service.get_sample_data(df, n=5)
-        print(f"📄 Sample data: {len(sample_data)} rows")
-        
-        response = CSVUploadResponse(
-            file_id=file_id,
-            columns=all_columns,
-            numeric_columns=column_types["numeric_columns"],
-            categorical_columns=column_types["categorical_columns"],
-            unique_values=unique_values,
-            sample_data=sample_data,
-            row_count=len(df)
+    submission = celery_task_client.submit_callable(
+        name="chart_maker.load_saved_dataframe",
+        dotted_path="app.features.chart_maker.service.load_saved_dataframe_task",
+        kwargs={"object_name": request.object_name},
+        metadata={
+            "atom": "chart_maker",
+            "operation": "load_saved_dataframe",
+            "object_name": request.object_name,
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=404,
+            detail=submission.detail or f"Error loading saved dataframe {request.object_name}",
         )
-        
-        print(f"✅ Response prepared successfully")
-        print(f"🔍 ===== END RESPONSE LOG =====")
-        
-        return response
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Error loading saved dataframe: {e}")
-        raise HTTPException(status_code=404, detail=f"Error loading saved dataframe {request.object_name}: {str(e)}")
+
+    return format_task_response(submission)
 
 
 @router.get("/get-all-columns/{file_id}", response_model=AllColumnsResponse)
 async def get_all_columns(file_id: str):
     """Get all column names for a stored file"""
-    try:
-        df, _ = get_dataframe_with_reload(file_id)
-        columns = chart_service.get_all_columns(df)
-        return AllColumnsResponse(columns=columns)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting columns: {str(e)}")
+    submission = celery_task_client.submit_callable(
+        name="chart_maker.get_all_columns",
+        dotted_path="app.features.chart_maker.service.get_all_columns_task",
+        kwargs={"file_id": file_id},
+        metadata={
+            "atom": "chart_maker",
+            "operation": "get_all_columns",
+            "file_id": file_id,
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=404,
+            detail=submission.detail or "Failed to load dataframe columns",
+        )
+
+    return format_task_response(submission)
 
 
 @router.get("/columns/{file_id}", response_model=ColumnResponse)
 async def get_columns(file_id: str):
     """Get numeric and categorical columns for a stored file"""
-    try:
-        df, _ = get_dataframe_with_reload(file_id)
-        column_types = chart_service.get_column_types(df)
-        return ColumnResponse(
-            numeric_columns=column_types["numeric_columns"],
-            categorical_columns=column_types["categorical_columns"]
+    submission = celery_task_client.submit_callable(
+        name="chart_maker.get_column_types",
+        dotted_path="app.features.chart_maker.service.get_column_types_task",
+        kwargs={"file_id": file_id},
+        metadata={
+            "atom": "chart_maker",
+            "operation": "get_column_types",
+            "file_id": file_id,
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=404,
+            detail=submission.detail or "Failed to determine column types",
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting column types: {str(e)}")
+
+    return format_task_response(submission)
 
 
 @router.post("/unique-values/{file_id}")
 async def get_unique_values(file_id: str, columns: List[str]):
     """Get unique values for specified columns"""
-    try:
-        df, _ = get_dataframe_with_reload(file_id)
-        unique_values = chart_service.get_unique_values(df, columns)
-        return {"values": unique_values}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting unique values: {str(e)}")
+    submission = celery_task_client.submit_callable(
+        name="chart_maker.unique_values",
+        dotted_path="app.features.chart_maker.service.get_unique_values_task",
+        kwargs={"file_id": file_id, "columns": columns},
+        metadata={
+            "atom": "chart_maker",
+            "operation": "unique_values",
+            "file_id": file_id,
+            "columns": list(columns),
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=500,
+            detail=submission.detail or "Failed to compute unique values",
+        )
+
+    return format_task_response(submission)
 
 
 @router.post("/filter-data/{file_id}", response_model=FilterResponse)
 async def filter_data(file_id: str, filters: Dict[str, List[str]]):
     """Apply filters to stored file data"""
-    try:
-        df, _ = get_dataframe_with_reload(file_id)
-        filtered_df = chart_service.apply_filters(df, filters)
-        
-        return FilterResponse(
-            filtered_data=filtered_df.to_dict('records')
+    submission = celery_task_client.submit_callable(
+        name="chart_maker.filter_data",
+        dotted_path="app.features.chart_maker.service.filter_data_task",
+        kwargs={"file_id": file_id, "filters": filters},
+        metadata={
+            "atom": "chart_maker",
+            "operation": "filter_data",
+            "file_id": file_id,
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=500,
+            detail=submission.detail or "Failed to filter dataframe",
         )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error filtering data: {str(e)}")
+
+    return format_task_response(submission)
 
 
 @router.get("/sample-data/{file_id}")
 async def get_sample_data(file_id: str, n: int = 10):
     """Get sample data from stored file"""
-    try:
-        df, _ = get_dataframe_with_reload(file_id)
-        sample_data = chart_service.get_sample_data(df, n)
-        return {"sample_data": sample_data}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting sample data: {str(e)}")
+    submission = celery_task_client.submit_callable(
+        name="chart_maker.sample_data",
+        dotted_path="app.features.chart_maker.service.get_sample_data_task",
+        kwargs={"file_id": file_id, "n": n},
+        metadata={
+            "atom": "chart_maker",
+            "operation": "sample_data",
+            "file_id": file_id,
+            "sample_size": n,
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=500,
+            detail=submission.detail or "Failed to fetch sample data",
+        )
+
+    return format_task_response(submission)
 
 
 @router.post("/charts", response_model=ChartResponse)
@@ -280,60 +238,26 @@ async def generate_chart(request: ChartRequest):
     - chart_config: Ready-to-use recharts configuration
     - data_summary: Metadata about the processed data
     """
-    try:
-        # 🚨 SINGLE CHART API ENDPOINT CALLED 🚨
-        print(f"🚨🚨🚨 SINGLE CHART API ENDPOINT: /charts 🚨🚨🚨")
-        print(f"🚨🚨🚨 SINGLE CHART API ENDPOINT: /charts 🚨🚨🚨")
-        print(f"🚨🚨🚨 SINGLE CHART API ENDPOINT: /charts 🚨🚨🚨")
-        
-        # 🔍 COMPREHENSIVE LOGGING: Show incoming request
-        print(f"🔍 ===== CHART GENERATION REQUEST =====")
-        print(f"📥 Request received: {request}")
-        print(f"📊 Chart Type: {request.chart_type}")
-        print(f"📈 Traces Count: {len(request.traces)}")
-        print(f"📁 File ID: {request.file_id}")
-        print(f"📝 Title: {request.title}")
-        print(f"🔍 ===== END REQUEST LOG =====")
-        
-        # Validate that the file exists and get the correct file_id
-        try:
-            df, actual_file_id = get_dataframe_with_reload(request.file_id)
-            print(f"✅ File loaded successfully: {len(df)} rows, {len(df.columns)} columns")
-            print(f"📊 Available columns: {list(df.columns)}")
-            print(f"🆔 Using file_id: {actual_file_id}")
-        except Exception as e:
-            print(f"❌ File loading failed: {e}")
-            raise HTTPException(status_code=404, detail=f"File with id {request.file_id} not found: {str(e)}")
-        
-        # Validate traces against available columns
-        for i, trace in enumerate(request.traces):
-            if trace.x_column not in df.columns:
-                print(f"❌ X-column '{trace.x_column}' not found in file")
-                raise HTTPException(status_code=400, detail=f"X-column '{trace.x_column}' not found in file. Available columns: {list(df.columns)}")
-            if trace.y_column not in df.columns:
-                print(f"❌ Y-column '{trace.y_column}' not found in file")
-                raise HTTPException(status_code=400, detail=f"Y-column '{trace.y_column}' not found in file. Available columns: {list(df.columns)}")
-            print(f"✅ Trace {i+1}: X='{trace.x_column}', Y='{trace.y_column}' - columns found")
-        
-        # Generate chart configuration with the correct file_id
-        print("🚀 Generating chart configuration...")
-        # Update the request with the actual file_id that was loaded
-        request.file_id = actual_file_id
-        chart_response = chart_service.generate_chart_config(request)
-        print(f"✅ Chart configuration generated successfully")
-        print(f"📊 Chart data rows: {len(chart_response.chart_config.data)}")
-        print(f"📈 Chart traces: {len(chart_response.chart_config.traces)}")
-        
-        return chart_response
-        
-    except ValueError as e:
-        print(f"❌ Validation error: {e}")
-        raise HTTPException(status_code=404, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"❌ Unexpected error: {e}")
-        raise HTTPException(status_code=500, detail=f"Error generating chart: {str(e)}")
+    submission = celery_task_client.submit_callable(
+        name="chart_maker.generate_chart",
+        dotted_path="app.features.chart_maker.service.generate_chart_task",
+        kwargs={"payload": request.dict()},
+        metadata={
+            "atom": "chart_maker",
+            "operation": "generate_chart",
+            "file_id": request.file_id,
+            "chart_type": request.chart_type,
+            "trace_count": len(request.traces),
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=400,
+            detail=submission.detail or "Failed to generate chart",
+        )
+
+    return format_task_response(submission)
 
 
 # @router.post("/multiple-charts", response_model=List[ChartResponse])

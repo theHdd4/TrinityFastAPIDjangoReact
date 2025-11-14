@@ -1,0 +1,65 @@
+Shared Redis configuration
+==========================
+
+Overview
+--------
+Trinity now centralises Redis access across the FastAPI backend, Django site,
+and AI worker.  A single set of environment variables define the connection
+credentials, TLS settings, and connection pool sizing so all services behave the
+same in development and production.
+
+Configuration entry points
+--------------------------
+* FastAPI: ``TrinityBackendFastAPI/app/core/redis.py`` exposes ``get_sync_redis``
+  and ``get_async_redis`` helpers backed by pooled connections.
+* Django: ``TrinityBackendDjango/redis_store/redis_client.py`` reuses the shared
+  helper so tasks and Celery workers read the same settings.
+* AI worker: ``TrinityAI/redis_client.py`` mirrors the helper inside the AI
+  service context (the Docker build only copies the AI folder, so the helper is
+  vendored locally).
+
+Environment variables
+---------------------
+The following variables are respected by every service.  Populate them in the
+``envs/dev.env`` or ``envs/prod.env`` templates (and copy them to any runtime
+``.env`` files):
+
+* ``REDIS_URL`` – optional full connection URL (e.g. ``rediss://user:pass@host:6380/0``)
+* ``REDIS_HOST`` / ``REDIS_PORT`` / ``REDIS_DB`` – host connection details when
+  a URL is not provided
+* ``REDIS_USERNAME`` / ``REDIS_PASSWORD`` – authentication credentials
+* ``REDIS_CLIENT_NAME`` – optional client name shown in Redis ``CLIENT LIST``
+* ``REDIS_USE_TLS`` – enable TLS when connecting to Redis
+* ``REDIS_TLS_CA_FILE`` / ``REDIS_TLS_CERT_FILE`` / ``REDIS_TLS_KEY_FILE`` – TLS
+  certificate paths (mounted into the container)
+* ``REDIS_TLS_CERT_REQS`` – one of ``required``, ``optional`` or ``none``
+* ``REDIS_POOL_MAX_CONNECTIONS`` – shared connection pool size
+* ``REDIS_POOL_TIMEOUT`` – seconds to wait for a free pooled connection
+* ``REDIS_SOCKET_TIMEOUT`` / ``REDIS_SOCKET_CONNECT_TIMEOUT`` – low-level socket
+  timeouts in seconds
+* ``REDIS_HEALTH_CHECK_INTERVAL`` – how often the pool performs health checks
+
+Docker compose integration
+--------------------------
+Both ``docker-compose.example.yml`` and ``docker-compose-dev.example.yml``
+define reusable ``x-redis-env`` and ``x-redis-healthcheck`` anchors.  The Redis
+service now includes a health probe using ``redis-cli`` so dependent services can
+wait for readiness, and every backend container inherits the shared environment
+block via ``<<: *redis-env``.  Update the values in the ``envs`` templates to
+match your deployment (set passwords, TLS files, etc.).
+
+TLS and managed Redis notes
+---------------------------
+For managed Redis offerings (AWS ElastiCache, Azure Cache, etc.) set
+``REDIS_URL`` to the vendor endpoint, enable ``REDIS_USE_TLS=true`` and provide
+CA certificates using the TLS variables above.  The helpers automatically switch
+to TLS-capable connection pools and will validate certificates based on the
+``REDIS_TLS_CERT_REQS`` choice.
+
+Health and observability
+------------------------
+The Redis health check runs every 10 seconds (15 seconds in production) and will
+report container failure if ``PING`` does not succeed.  Connection pools share
+``health_check_interval`` so idle connections remain valid even under bursty
+load.
+

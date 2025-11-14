@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import logging
 import json
@@ -19,17 +21,43 @@ if not ENV_FILE.exists():
     ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(ENV_FILE, override=False)
 
+ENV_NAMESPACE = "env"
+ENV_VERSION_SUFFIX = ":version"
+_LAST_ENV_VERSION: str | None = None
+
 try:
-    import redis  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover - redis optional
-    redis = None
+    from app.core.redis import get_sync_redis
+except ModuleNotFoundError:  # pragma: no cover - fallback for AI worker image
+    try:
+        from TrinityBackendFastAPI.app.core.redis import get_sync_redis  # type: ignore
+    except ModuleNotFoundError:  # pragma: no cover - Docker image without backend package
+        _fallback_redis_factory = None
+        try:
+            from TrinityAI.redis_client import (  # type: ignore
+                get_redis_client as _fallback_redis_factory,
+            )
+        except ModuleNotFoundError:  # pragma: no cover - alternate image layout
+            try:
+                from redis_client import (  # type: ignore
+                    get_redis_client as _fallback_redis_factory,
+                )
+            except ModuleNotFoundError:  # pragma: no cover - redis optional in tooling
+                _fallback_redis_factory = None
+
+        if _fallback_redis_factory is not None:
+            def get_sync_redis(*, decode_responses: bool = True):  # type: ignore
+                return _fallback_redis_factory(decode_responses=decode_responses)
+        else:
+            get_sync_redis = None  # type: ignore
 
 from .flight_registry import get_arrow_for_flight_path
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-_redis_client = (
-    redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True) if redis else None
-)
+try:
+    if get_sync_redis is None:  # type: ignore
+        raise RuntimeError("redis helper unavailable")
+    _redis_client = get_sync_redis(decode_responses=True)  # type: ignore[misc]
+except Exception:  # pragma: no cover - redis optional in offline tooling
+    _redis_client = None
 
 
 def load_env_from_redis() -> Dict[str, str]:
@@ -52,16 +80,37 @@ def load_env_from_redis() -> Dict[str, str]:
     app = os.getenv("APP_NAME", env.get("APP_NAME", ""))
     project = os.getenv("PROJECT_NAME", env.get("PROJECT_NAME", ""))
     if client and project:
-        env_key = f"env:{client}:{app}:{project}"
+        env_key = f"{ENV_NAMESPACE}:{client}:{app}:{project}"
         logger.debug("redis namespace %s", env_key)
         cached = _redis_client.get(env_key)
+        version_raw = _redis_client.get(f"{env_key}{ENV_VERSION_SUFFIX}")
+        if isinstance(version_raw, bytes):
+            version = version_raw.decode("utf-8")
+        else:
+            version = version_raw
         if cached:
             try:
                 data = json.loads(cached)
                 logger.debug("redis %s -> %s", env_key, data)
                 env.update(data)
+                env_version = data.get("_env_version") or version
                 for k, v in data.items():
-                    os.environ[k] = v
+                    if k.startswith("_"):
+                        continue
+                    value = v if isinstance(v, str) else json.dumps(v, default=str)
+                    os.environ[k] = value
+                if env_version:
+                    os.environ["ENV_VERSION_HASH"] = env_version
+                    global _LAST_ENV_VERSION
+                    if env_version != _LAST_ENV_VERSION:
+                        logger.info(
+                            "env version changed for %s/%s/%s -> %s",
+                            client,
+                            app,
+                            project,
+                            env_version,
+                        )
+                    _LAST_ENV_VERSION = env_version
             except Exception as exc:  # pragma: no cover
                 logger.error("failed to decode %s: %s", env_key, exc)
     logger.debug("env after redis load: %s", env)

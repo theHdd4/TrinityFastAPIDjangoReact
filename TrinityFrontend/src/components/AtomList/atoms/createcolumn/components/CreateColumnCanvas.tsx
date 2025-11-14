@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { constructFullPath } from '@/components/TrinityAI/handlers/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { SingleSelectDropdown } from '@/templates/dropdown';
 import { Badge } from '@/components/ui/badge';
-import { Save, Eye, Calculator, Trash2, Plus, ChevronUp, ChevronDown } from 'lucide-react';
+import { Save, Eye, Calculator, Trash2, Plus, ChevronUp, ChevronDown, AlertCircle } from 'lucide-react';
 import Table from "@/templates/tables/table";
 import createColumn from "../index";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
@@ -17,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import {
   Pagination,
   PaginationContent,
@@ -67,9 +69,38 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const settings = atom?.settings || {};
+  const envContext = settings?.envContext;
+
+  const resolveObjectName = React.useCallback(
+    (objectName: string): string => {
+      if (!objectName) return '';
+
+      if (envContext && envContext.client_name && envContext.app_name && envContext.project_name) {
+        const prefix = `${envContext.client_name}/${envContext.app_name}/${envContext.project_name}/`;
+        if (objectName.startsWith(prefix)) {
+          return objectName;
+        }
+
+        const tail = objectName.includes('/') ? objectName.split('/').pop() || objectName : objectName;
+        return `${prefix}${tail}`;
+      }
+
+      if (!objectName.includes('/')) {
+        return constructFullPath(objectName, envContext);
+      }
+
+      return objectName;
+    },
+    [envContext]
+  );
+
+  const resolvedDataSource = React.useMemo(
+    () => resolveObjectName((settings.file_key as string) || (settings.dataSource as string) || ''),
+    [resolveObjectName, settings.file_key, settings.dataSource]
+  );
   
   // Get input file name for clickable subtitle
-  const inputFileName = settings.dataSource || '';
+  const inputFileName = resolvedDataSource;
 
   // Handle opening the input file in a new tab
   const handleViewDataClick = () => {
@@ -184,6 +215,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveFileName, setSaveFileName] = useState('');
+  const [showOverwriteConfirmDialog, setShowOverwriteConfirmDialog] = useState(false);
   const [previewFile, setPreviewFile] = useState<string | null>(null);
   const [previewData, setPreviewData] = useState<Record<string, any>[]>([]);
   const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
@@ -238,7 +270,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       setShowCatSelector(false);
       setCatColumns([]);
       setSelectedIdentifiers([]);
-      const dataSource = atom?.settings?.dataSource;
+      const dataSource = resolveObjectName((atom?.settings?.file_key as string) || (atom?.settings?.dataSource as string) || '');
       if (!dataSource) return;
       
       // Extract client/app/project from file path like scope_selector does
@@ -269,7 +301,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       try {
         const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(dataSource)}`);
         if (res.ok) {
-          const data = await res.json();
+          const raw = await res.json();
+          const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
           const summary = (data.summary || []).filter(Boolean);
           // Exclude 'date' (case-insensitive) from selectable identifiers
           const cats = summary.filter((c: any) =>
@@ -350,7 +383,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       if (!operations.length) throw new Error('No operations selected.');
       // Prepare form data
       const formData = new FormData();
-      formData.append('object_names', atom.settings.dataSource);
+      formData.append('object_names', resolvedDataSource);
       formData.append('bucket_name', 'trinity'); // TODO: use actual bucket if needed
       // Add each operation as a key with columns as value
       // Operations are processed sequentially - each operation can use columns created by previous operations
@@ -429,14 +462,12 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         method: 'POST',
         body: formData,
       });
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error('Backend did not return valid JSON. Response: ' + text.slice(0, 200));
+      if (!res.ok) {
+        throw new Error(`Backend error ${res.status}`);
       }
-      if (data.status !== 'SUCCESS') {
+      const raw = await res.json();
+      const data = await resolveTaskResponse<Record<string, any>>(raw);
+      if (data.status && data.status !== 'SUCCESS') {
         if (data.error && data.error.includes('Unsupported or custom frequency')) {
           // Set periodNeeded for all STL ops that don't have a period set
           const stlOps = operations.filter(
@@ -452,7 +483,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         }
         throw new Error(data.error || 'Backend error');
       }
-      
+
       // Save the createResults to atom settings
       if (data.createResults) {
         const currentSettings = atom?.settings || {};
@@ -525,7 +556,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         `${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(file)}&page=${page}&page_size=20`
       );
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const result = await response.json();
+      const payload = await response.json();
+      const result = await resolveTaskResponse<{ data: string; pagination: any }>(payload);
       const { headers, rows } = parseCSV(result.data);
       setPreviewData(rows);
       setPreviewHeaders(headers);
@@ -643,8 +675,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          csv_data, 
+        body: JSON.stringify({
+          csv_data,
           filename,
           client_name: env.CLIENT_NAME || '',
           app_name: env.APP_NAME || '',
@@ -657,8 +689,15 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
       }
+      const payload = await response.json();
+      const result = await resolveTaskResponse<Record<string, any>>(payload);
       setSaveSuccess(true);
-      setPreviewFile(filename.endsWith('.arrow') ? filename : filename + '.arrow');
+      const savedFile = typeof result?.result_file === 'string'
+        ? result.result_file
+        : filename.endsWith('.arrow')
+          ? filename
+          : `${filename}.arrow`;
+      setPreviewFile(savedFile);
       setShowSaveModal(false);
       // Don't clear the preview data - keep it visible
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
@@ -670,21 +709,32 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     }
   };
 
-  // Save to original file (update the input file)
-  const handleSaveToOriginalFile = async () => {
+  // Show confirmation dialog before saving to original file
+  const handleSaveToOriginalFile = () => {
+    if (preview.length === 0) return;
+    if (!atom?.settings?.dataSource) {
+      toast({ title: 'Error', description: 'No input file found', variant: 'destructive' });
+      return;
+    }
+    setShowOverwriteConfirmDialog(true);
+  };
+
+  // Save to original file (update the input file) - called after confirmation
+  const confirmOverwriteSave = async () => {
     if (preview.length === 0) return;
     if (!atom?.settings?.dataSource) {
       toast({ title: 'Error', description: 'No input file found', variant: 'destructive' });
       return;
     }
     
+    setShowOverwriteConfirmDialog(false);
     setSaveLoading(true);
     setSaveError(null);
     setSaveSuccess(false);
     try {
       const csv_data = previewToCSV(preview);
       // Use the full original path to overwrite at the original location
-      let filename = atom.settings.dataSource;
+      let filename = resolvedDataSource;
       // Remove .arrow extension if present (backend will add it back)
       if (filename.endsWith('.arrow')) {
         filename = filename.replace('.arrow', '');
@@ -698,7 +748,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       
       // Prepare operation details for MongoDB
       const operation_details = {
-        input_file: atom.settings.dataSource,
+        input_file: resolvedDataSource,
         operations: operations.map(op => {
           // Get the actual column name created (either rename or default)
           let created_column_name = '';
@@ -757,8 +807,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          csv_data, 
+        body: JSON.stringify({
+          csv_data,
           filename,
           client_name: env.CLIENT_NAME || '',
           app_name: env.APP_NAME || '',
@@ -772,8 +822,15 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
       }
+      const payload = await response.json();
+      const result = await resolveTaskResponse<Record<string, any>>(payload);
       setSaveSuccess(true);
-      setPreviewFile(filename.endsWith('.arrow') ? filename : filename + '.arrow');
+      const savedFile = typeof result?.result_file === 'string'
+        ? result.result_file
+        : filename.endsWith('.arrow')
+          ? filename
+          : `${filename}.arrow`;
+      setPreviewFile(savedFile);
       // Don't clear the preview data - keep it visible
       toast({ title: 'Success', description: 'Original file updated successfully.' });
     } catch (err: any) {
@@ -796,13 +853,14 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
 
   // Fetch cardinality data
   const fetchCardinalityData = async () => {
-    if (!atom?.settings?.dataSource) return;
+    const resolvedObjectName = resolveObjectName((atom?.settings?.file_key as string) || (atom?.settings?.dataSource as string) || '');
+    if (!resolvedObjectName) return;
     
     setCardinalityLoading(true);
     setCardinalityError(null);
     
     try {
-      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(atom.settings.dataSource || '')}`;
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(resolvedObjectName)}`;
       const res = await fetch(url);
       const data = await res.json();
       
@@ -2080,6 +2138,47 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {saveLoading ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Overwrite Confirmation Dialog */}
+      <Dialog open={showOverwriteConfirmDialog} onOpenChange={setShowOverwriteConfirmDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Overwrite</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="text-sm text-gray-700 mb-2">
+                  Are you sure you want to save the changes to the original file?
+                </p>
+                <p className="text-sm font-medium text-gray-900 mb-1">
+                  File: {atom?.settings?.dataSource || 'Unknown'}
+                </p>
+                <p className="text-xs text-gray-600">
+                  This action will overwrite the original file and cannot be undone.
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowOverwriteConfirmDialog(false)}
+              disabled={saveLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmOverwriteSave}
+              disabled={saveLoading}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {saveLoading ? 'Saving...' : 'Yes, Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>

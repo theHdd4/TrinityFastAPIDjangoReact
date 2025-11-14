@@ -21,15 +21,44 @@ export const generateImageObjectId = () => resolveId('image');
 export interface CreateImageObjectOptions {
   name?: string | null;
   source?: string | null;
+  fullBleed?: boolean;
 }
+
+export interface CreateImageSlideObjectOptions extends CreateImageObjectOptions {
+  existingObjects?: SlideObject[];
+  overrides?: Partial<SlideObject>;
+}
+
+const resolveNextZIndex = (objects: SlideObject[] | undefined): number => {
+  if (!Array.isArray(objects) || objects.length === 0) {
+    return 1;
+  }
+
+  const max = objects.reduce((acc, object) => {
+    const value = typeof object.zIndex === 'number' ? object.zIndex : 0;
+    return value > acc ? value : acc;
+  }, 0);
+
+  return Math.round(max) + 1;
+};
 
 export const createImageSlideObject = (
   id: string,
   src: string,
-  options: CreateImageObjectOptions = {},
-  overrides: Partial<SlideObject> = {},
+  options: CreateImageSlideObjectOptions = {},
 ): SlideObject => {
-  const { props: overrideProps, ...restOverrides } = overrides;
+  const { existingObjects = [], overrides = {}, name = null, source = null, fullBleed = false } = options;
+  const { props: overrideProps = {}, zIndex: overrideZIndex, ...restOverrides } = overrides;
+  const propsOverrides = (overrideProps ?? {}) as Record<string, unknown>;
+  const { fullBleed: overrideFullBleedValue, ...restPropOverrides } = propsOverrides;
+
+  const zIndex =
+    typeof overrideZIndex === 'number' && Number.isFinite(overrideZIndex)
+      ? Math.round(overrideZIndex)
+      : resolveNextZIndex(existingObjects);
+
+  const resolvedFullBleed =
+    typeof overrideFullBleedValue === 'boolean' ? overrideFullBleedValue : Boolean(fullBleed);
 
   return {
     id,
@@ -38,14 +67,22 @@ export const createImageSlideObject = (
     y: DEFAULT_IMAGE_OBJECT_Y,
     width: DEFAULT_IMAGE_OBJECT_WIDTH,
     height: DEFAULT_IMAGE_OBJECT_HEIGHT,
-    zIndex: 1,
+    zIndex,
     rotation: 0,
     groupId: null,
     props: {
       src,
-      name: options.name ?? null,
-      source: options.source ?? null,
-      ...(overrideProps ?? {}),
+      name,
+      source,
+      fullBleed: resolvedFullBleed,
+      fit: 'cover',
+      flipX: false,
+      flipY: false,
+      // Legacy flags retained for compatibility with previously saved layouts.
+      flipHorizontal: false,
+      flipVertical: false,
+      animate: false,
+      ...restPropOverrides,
     },
     ...restOverrides,
   };

@@ -77,6 +77,8 @@ interface SlideObjectContextMenuProps {
   disableComment?: boolean;
   disableApplyColors?: boolean;
   renderAdditionalContent?: (closeMenu: () => void) => React.ReactNode;
+  renderLayerExtras?: (closeMenu: () => void) => React.ReactNode;
+  renderPostLockContent?: (closeMenu: () => void) => React.ReactNode;
 }
 
 const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
@@ -116,9 +118,18 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   disableComment = false,
   disableApplyColors = false,
   renderAdditionalContent,
+  renderLayerExtras,
+  renderPostLockContent,
 }) => {
   const [open, setOpen] = useState(false);
   const closeMenu = useCallback(() => setOpen(false), []);
+
+  const handleTriggerContextMenu = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      onContextMenu?.(event);
+    },
+    [onContextMenu],
+  );
 
   const handleAlign = useCallback(
     (action: AlignAction) => () => {
@@ -129,11 +140,13 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   );
 
   const additionalContent = renderAdditionalContent?.(closeMenu);
+  const layerExtras = renderLayerExtras?.(closeMenu);
+  const postLockContent = renderPostLockContent?.(closeMenu);
 
   return (
     <ContextMenu open={open} onOpenChange={setOpen}>
       <ContextMenuTrigger asChild>
-        <div onContextMenu={onContextMenu}>{children}</div>
+        <div onContextMenu={handleTriggerContextMenu}>{children}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-64" style={{ zIndex: 9999 }}>
         <ContextMenuItem disabled={!canEdit || disableCopy} onSelect={event => {
@@ -204,6 +217,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
           {lockLabel}
           <ContextMenuShortcut>Alt+Shift+L</ContextMenuShortcut>
         </ContextMenuItem>
+        {postLockContent}
         <ContextMenuSub>
           <ContextMenuSubTrigger disabled={!canEdit || !canLayer}>
             <Layers className="mr-2 h-4 w-4" />
@@ -254,6 +268,7 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
               <ArrowDownToLine className="mr-2 h-4 w-4" />
               Send to back
             </ContextMenuItem>
+            {layerExtras}
           </ContextMenuSubContent>
         </ContextMenuSub>
         <ContextMenuSub>

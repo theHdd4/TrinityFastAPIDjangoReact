@@ -18,10 +18,13 @@ export interface ChartRendererConfig {
   xAxisLabel?: string;
   yAxisLabel?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 const DEFAULT_TREND_ANALYSIS_DATA: Array<{ date: string; salesvalue: number; series: string }> = [
@@ -51,7 +54,7 @@ export const DEFAULT_FEATURE_OVERVIEW_TREND_METADATA: FeatureOverviewMetadata = 
     yAxisField: 'salesvalue',
     legendField: 'series',
     showLegend: true,
-    showAxisLabels: true,
+    // showAxisLabels: true,
     showGrid: true,
     colorPalette: ['#6366F1'],
     xAxisLabel: 'Date',
@@ -109,7 +112,6 @@ const safeParseJson = (value: string): unknown => {
   try {
     return JSON.parse(value);
   } catch (error) {
-    console.warn('[FeatureOverview] Failed to parse JSON payload', error);
     return undefined;
   }
 };
@@ -253,8 +255,12 @@ const normaliseChartState = (value: unknown) => {
 
   const showLegend = asBoolean(value.showLegend ?? value['show_legend']);
   if (showLegend !== undefined) chartState.showLegend = showLegend;
-  const showAxisLabels = asBoolean(value.showAxisLabels ?? value['show_axis_labels']);
-  if (showAxisLabels !== undefined) chartState.showAxisLabels = showAxisLabels;
+  // const showAxisLabels = asBoolean(value.showAxisLabels ?? value['show_axis_labels']);
+  // if (showAxisLabels !== undefined) chartState.showAxisLabels = showAxisLabels;
+  const showXAxisLabels = asBoolean(value.showXAxisLabels ?? value['show_x_axis_labels']);
+  if (showXAxisLabels !== undefined) chartState.showXAxisLabels = showXAxisLabels;
+  const showYAxisLabels = asBoolean(value.showYAxisLabels ?? value['show_y_axis_labels']);
+  if (showYAxisLabels !== undefined) chartState.showYAxisLabels = showYAxisLabels;
   const showDataLabels = asBoolean(value.showDataLabels ?? value['show_data_labels']);
   if (showDataLabels !== undefined) chartState.showDataLabels = showDataLabels;
   const showGrid = asBoolean(value.showGrid ?? value['show_grid']);
@@ -265,6 +271,11 @@ const normaliseChartState = (value: unknown) => {
     chartState.sortOrder = sortOrder;
   } else if (value.sortOrder === null || value['sort_order'] === null) {
     chartState.sortOrder = null;
+  }
+
+  const seriesSettings = value.seriesSettings ?? value['series_settings'];
+  if (isRecord(seriesSettings)) {
+    chartState.seriesSettings = seriesSettings as Record<string, { color?: string; showDataLabels?: boolean }>;
   }
 
   return Object.keys(chartState).length > 0 ? chartState : undefined;
@@ -623,7 +634,7 @@ const buildDefaultTrendChartConfig = (variant: FeatureOverviewComponentProps['va
   xAxisLabel: 'Date',
   yAxisLabel: 'SalesValue',
   showLegend: true,
-  showAxisLabels: true,
+  // showAxisLabels: true,
   showDataLabels: false,
   showGrid: true,
   sortOrder: null,
@@ -830,13 +841,20 @@ const parseDirectChartRendererConfig = (
   if (typeof candidate.yAxisLabel === 'string') config.yAxisLabel = candidate.yAxisLabel;
 
   if (typeof candidate.showLegend === 'boolean') config.showLegend = candidate.showLegend;
-  if (typeof candidate.showAxisLabels === 'boolean') config.showAxisLabels = candidate.showAxisLabels;
+  // if (typeof candidate.showAxisLabels === 'boolean') config.showAxisLabels = candidate.showAxisLabels;
+  if (typeof candidate.showXAxisLabels === 'boolean') config.showXAxisLabels = candidate.showXAxisLabels;
+  if (typeof candidate.showYAxisLabels === 'boolean') config.showYAxisLabels = candidate.showYAxisLabels;
   if (typeof candidate.showDataLabels === 'boolean') config.showDataLabels = candidate.showDataLabels;
   if (typeof candidate.showGrid === 'boolean') config.showGrid = candidate.showGrid;
 
   const sortOrder = candidate.sortOrder ?? candidate['sort_order'];
   if (sortOrder === 'asc' || sortOrder === 'desc' || sortOrder === null) {
     config.sortOrder = sortOrder;
+  }
+
+  const seriesSettings = candidate.seriesSettings ?? candidate['series_settings'];
+  if (isRecord(seriesSettings)) {
+    config.seriesSettings = seriesSettings as Record<string, { color?: string; showDataLabels?: boolean }>;
   }
 
   return config;
@@ -872,10 +890,13 @@ const createChartRendererConfig = (
     xAxisLabel: chartState.xAxisLabel ?? chartState.xAxisField,
     yAxisLabel: chartState.yAxisLabel ?? chartState.yAxisField ?? metadata.metric,
     showLegend: chartState.showLegend,
-    showAxisLabels: chartState.showAxisLabels,
+    // showAxisLabels: chartState.showAxisLabels,
+    showXAxisLabels: chartState.showXAxisLabels,
+    showYAxisLabels: chartState.showYAxisLabels,
     showDataLabels: chartState.showDataLabels,
     showGrid: chartState.showGrid,
     sortOrder: chartState.sortOrder ?? null,
+    seriesSettings: chartState.seriesSettings || {},
   };
 };
 
@@ -887,9 +908,29 @@ export const deriveChartConfig = (
   const createdConfig = createChartRendererConfig(metadata, variant);
   const defaultConfig = buildDefaultTrendChartConfig(variant);
   
-  return ensureRenderableChartConfig(
+  const finalConfig = ensureRenderableChartConfig(
     directConfig ?? createdConfig ?? defaultConfig,
   );
+  
+  // Debug: Log seriesSettings to verify they're being passed through
+  if (finalConfig && (directConfig || createdConfig)) {
+    const seriesSettingsObj = finalConfig.seriesSettings || {};
+    const seriesSettingsEntries = Object.entries(seriesSettingsObj);
+    console.log('🔍 deriveChartConfig - seriesSettings:', {
+      hasSeriesSettings: !!finalConfig.seriesSettings,
+      seriesSettingsKeys: Object.keys(seriesSettingsObj),
+      seriesSettingsEntries: seriesSettingsEntries.map(([key, value]) => ({ key, value })),
+      source: directConfig ? 'directConfig' : 'createdConfig',
+      chartStateHasSeriesSettings: !!metadata.chartState?.seriesSettings,
+      chartRendererPropsHasSeriesSettings: metadata.chartRendererProps && isRecord(metadata.chartRendererProps) ? !!(metadata.chartRendererProps as any).seriesSettings : false,
+      yField: finalConfig.yField,
+      legendField: finalConfig.legendField,
+      yFields: finalConfig.yFields,
+      firstDataRow: finalConfig.data && finalConfig.data.length > 0 ? finalConfig.data[0] : null,
+    });
+  }
+  
+  return finalConfig;
 };
 
 export const extractSummaryEntries = (stats: FeatureOverviewStatistics | undefined): Array<[string, unknown]> => {

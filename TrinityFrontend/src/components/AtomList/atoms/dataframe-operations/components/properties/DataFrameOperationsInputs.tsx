@@ -10,19 +10,47 @@ const DataFrameOperationsInputs = ({ data, settings, selectedFile, onFileSelect 
   const [selectedFrame, setSelectedFrame] = useState<Frame | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // 🔧 DEBUG: Log when selectedFile prop changes
   useEffect(() => {
+    console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [DataFrameOps Inputs] DROPDOWN VALUE CHECK
+╠════════════════════════════════════════════════════════════════
+║ selectedFile prop: "${selectedFile}"
+║ frames loaded: ${frames.length}
+║ matching frame exists: ${frames.some(f => f.object_name === selectedFile)}
+╚════════════════════════════════════════════════════════════════
+    `);
+    
+    if (selectedFile && frames.length > 0) {
+      const match = frames.find(f => f.object_name === selectedFile);
+      if (match) {
+        console.log(`✅ [Inputs] MATCH FOUND:`, match);
+      } else {
+        console.log(`❌ [Inputs] NO MATCH for "${selectedFile}"`);
+        console.log(`   Available frames:`, frames.map(f => f.object_name));
+      }
+    }
+  }, [selectedFile, frames]);
+
+  useEffect(() => {
+    console.log(`🔄 [DataFrameOps Inputs] Fetching frames list...`);
     fetch(`${VALIDATE_API}/list_saved_dataframes`)
       .then(r => r.json())
-      .then(d =>
-        setFrames(
-          Array.isArray(d.files)
-            ? d.files
-                .filter((f: any) => !!f.arrow_name)
-                .map((f: any) => ({ object_name: f.object_name, arrow_name: f.arrow_name }))
-            : []
-        )
-      )
-      .catch(() => setFrames([]));
+      .then(d => {
+        const framesList = Array.isArray(d.files)
+          ? d.files
+              .filter((f: any) => !!f.arrow_name)
+              .map((f: any) => ({ object_name: f.object_name, arrow_name: f.arrow_name }))
+          : [];
+        setFrames(framesList);
+        console.log(`✅ [Inputs] Frames loaded: ${framesList.length} files`);
+        console.log(`   Frames:`, framesList.map(f => ({ object_name: f.object_name, arrow_name: f.arrow_name })));
+      })
+      .catch((err) => {
+        console.error(`❌ [Inputs] Failed to fetch frames:`, err);
+        setFrames([]);
+      });
   }, []);
 
   const handleFileChange = (val: string) => {

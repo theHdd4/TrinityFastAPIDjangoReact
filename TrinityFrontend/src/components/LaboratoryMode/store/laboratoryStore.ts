@@ -174,7 +174,9 @@ export interface FeatureOverviewVisualizationManifestChart {
   type: string;
   theme?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   xField?: string;
@@ -185,6 +187,7 @@ export interface FeatureOverviewVisualizationManifestChart {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewVisualizationManifestTable {
@@ -219,7 +222,9 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   chartType: string;
   theme: string;
   showDataLabels: boolean;
-  showAxisLabels: boolean;
+  // showAxisLabels: boolean;
+  showXAxisLabels: boolean;
+  showYAxisLabels: boolean;
   showGrid: boolean;
   showLegend: boolean;
   xAxisField: string;
@@ -229,6 +234,7 @@ export interface FeatureOverviewExhibitionSelectionChartState {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewExhibitionSelectionContext {
@@ -377,6 +383,7 @@ export interface CorrelationSettings {
   };
   isUsingFileData?: boolean;
   showAllColumns?: boolean;
+  filteredFilePath?: string;
   // Column values loading state
   columnValuesLoading?: boolean;
   columnValuesError?: string;
@@ -440,6 +447,7 @@ export const DEFAULT_CORRELATION_SETTINGS: CorrelationSettings = {
   fileData: undefined,
   isUsingFileData: true,  // Default to always using file data
   showAllColumns: false,
+  filteredFilePath: undefined,
   columnValuesLoading: false,
   columnValuesError: undefined
 };
@@ -544,13 +552,28 @@ export interface ChartTraceConfig {
 export interface ChartMakerConfig {
   id: string;
   title: string;
-  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter';
+  type: 'line' | 'bar' | 'area' | 'pie' | 'scatter' | 'stacked_bar';
   xAxis: string;
   yAxis: string;
+  secondYAxis?: string;
+  dualAxisMode?: 'dual' | 'single'; // 'dual' = separate axes, 'single' = combined single axis
   filters: Record<string, string[]>;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
   legendField?: string;
-  chartConfig?: any;
+  sortOrder?: 'asc' | 'desc' | null;
+  sortColumn?: string;
+  chartConfig?: {
+    theme?: string;
+    showLegend?: boolean;
+    showXAxisLabels?: boolean;
+    showYAxisLabels?: boolean;
+    showDataLabels?: boolean;
+    showGrid?: boolean;
+    sortOrder?: 'asc' | 'desc' | null;
+    sortColumn?: string;
+    seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>; // Per-series settings for right-click menu
+    [key: string]: any; // Allow other properties
+  };
   filteredData?: Record<string, any>[];
   chartRendered?: boolean;
   chartLoading?: boolean;
@@ -566,6 +589,8 @@ export interface ChartMakerExhibitionSelectionChartState {
   chartType: string;
   xAxis: string;
   yAxis: string;
+  secondYAxis?: string;
+  dualAxisMode?: 'dual' | 'single'; // 'dual' = separate axes, 'single' = combined single axis
   filters: Record<string, string[]>;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
   legendField?: string;
@@ -1613,6 +1638,12 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
   variables?: CardVariable[];
+  order?: number; // For positioning standalone cards between molecules
+  afterMoleculeId?: string; // Reference to molecule this card is positioned after
+  beforeMoleculeId?: string; // Reference to molecule this card is positioned before
+  betweenMolecules?: [string, string]; // [moleculeId1, moleculeId2] - card is between these two molecules
+  afterLastMolecule?: boolean; // true if card is after the last molecule (converted to betweenMolecules when new molecule added)
+  beforeFirstMolecule?: boolean; // true if card is before the first molecule
 }
 
 // GroupBy Atom Settings
@@ -1689,11 +1720,80 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   }
 };
 
+export interface PivotTableSettings {
+  dataSource?: string;
+  dataSourceColumns?: string[];
+  fields: string[];
+  selectedFields: string[];
+  rowFields: string[];
+  columnFields: string[];
+  valueFields: { field: string; aggregation: string; weightColumn?: string }[];
+  filterFields: string[];
+  pivotResults: any[];
+  pivotStatus?: 'idle' | 'pending' | 'success' | 'failed';
+  pivotError?: string | null;
+  pivotUpdatedAt?: string;
+  pivotRowCount?: number;
+  pivotLastSavedPath?: string | null;
+  pivotLastSavedAt?: string | null;
+  pivotFilterOptions?: Record<string, string[]>;
+  pivotFilterSelections?: Record<string, string[]>;
+  grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
+  subtotalsMode?: 'off' | 'top' | 'bottom';
+  percentageMode?: 'off' | 'row' | 'column' | 'grand_total';
+  percentageDecimals?: number;
+  pivotStyleId?: string;
+  pivotStyleOptions?: {
+    rowHeaders: boolean;
+    columnHeaders: boolean;
+    bandedRows: boolean;
+  };
+  pivotHierarchy?: any[];
+  pivotColumnHierarchy?: any[];
+  reportLayout?: 'compact' | 'outline' | 'tabular';
+  collapsedKeys?: string[];
+}
+
+export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
+  dataSource: '',
+  dataSourceColumns: [],
+  fields: [],
+  selectedFields: [],
+  rowFields: [],
+  columnFields: [],
+  valueFields: [],
+  filterFields: [],
+  pivotResults: [],
+  pivotStatus: 'idle',
+  pivotError: null,
+  pivotUpdatedAt: undefined,
+  pivotRowCount: 0,
+  pivotLastSavedPath: null,
+  pivotLastSavedAt: null,
+  pivotFilterOptions: {},
+  pivotFilterSelections: {},
+  grandTotalsMode: 'off',
+  subtotalsMode: 'off',
+  percentageMode: 'off',
+  percentageDecimals: 2,
+  pivotStyleId: 'light-slate',
+  pivotStyleOptions: {
+    rowHeaders: true,
+    columnHeaders: true,
+    bandedRows: false,
+  },
+  pivotHierarchy: [],
+  pivotColumnHierarchy: [],
+  reportLayout: 'compact',
+  collapsedKeys: [],
+};
+
 interface LaboratoryStore {
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;
   setCards: (cards: LayoutCard[]) => void;
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
+  updateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
   addCardVariable: (cardId: string, variable: CardVariable) => void;
@@ -1711,11 +1811,25 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
   auxPanelActive: null,
   setCards: (cards: LayoutCard[]) => {
+    // FIX: Ensure cards is always an array
+    if (!Array.isArray(cards)) {
+      console.error('[Laboratory Store] setCards called with non-array:', cards);
+      set({ cards: [] });
+      return;
+    }
     set({ cards });
   },
   
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => {
     set({ auxPanelActive: panel });
+  },
+
+  updateCard: (cardId: string, updates: Partial<LayoutCard>) => {
+    set((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === cardId ? { ...card, ...updates } : card
+      ),
+    }));
   },
 
   updateAtomSettings: (atomId: string, settings: any) => {
@@ -1724,9 +1838,15 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     // console.log('Store: settings to update:', settings);
     
     set((state) => {
+      // FIX: Ensure cards is always an array
+      if (!Array.isArray(state.cards)) {
+        console.error('[Laboratory Store] state.cards is not an array in updateAtomSettings:', state.cards);
+        return { cards: [] };
+      }
+      
       const updatedCards = state.cards.map((card) => ({
         ...card,
-        atoms: card.atoms.map((atom) =>
+        atoms: Array.isArray(card.atoms) ? card.atoms.map((atom) =>
           atom.id === atomId
             ? { 
                 ...atom, 
@@ -1736,7 +1856,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
                 } 
               }
             : atom,
-        ),
+        ) : [],
       }));
       
       return { cards: updatedCards };
@@ -1745,7 +1865,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   getAtom: (atomId: string) => {
     const state = get();
-    return state.cards.flatMap(card => card.atoms).find(atom => atom.id === atomId);
+    // FIX: Ensure cards is always an array
+    if (!Array.isArray(state.cards)) {
+      console.error('[Laboratory Store] state.cards is not an array in getAtom:', state.cards);
+      return undefined;
+    }
+    return state.cards.flatMap(card => Array.isArray(card.atoms) ? card.atoms : []).find(atom => atom.id === atomId);
   },
 
   addCardVariable: (cardId: string, variable: CardVariable) => {

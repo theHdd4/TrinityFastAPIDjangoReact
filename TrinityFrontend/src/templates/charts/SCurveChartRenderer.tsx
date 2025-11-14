@@ -264,7 +264,9 @@ interface SCurveProps {
   onDataLabelsToggle?: (enabled: boolean) => void;
   onSave?: () => void;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean; // External control for X axis labels visibility
+  showYAxisLabels?: boolean; // External control for Y axis labels visibility
   showDataLabels?: boolean;
   initialShowDataLabels?: boolean;
   showGrid?: boolean;
@@ -289,7 +291,9 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
   onDataLabelsToggle,
   onSave,
   showLegend: propShowLegend,
-  showAxisLabels: propShowAxisLabels,
+  // showAxisLabels: propShowAxisLabels,
+  showXAxisLabels: propShowXAxisLabels,
+  showYAxisLabels: propShowYAxisLabels,
   showDataLabels: propShowDataLabels,
   initialShowDataLabels,
   showGrid: propShowGrid,
@@ -309,8 +313,10 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [showColorSubmenu, setShowColorSubmenu] = useState(false);
   const [showAxisLabelSubmenu, setShowAxisLabelSubmenu] = useState(false);
+  const [showAxisToggleSubmenu, setShowAxisToggleSubmenu] = useState(false);
   const [colorSubmenuPos, setColorSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [axisLabelSubmenuPos, setAxisLabelSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [axisToggleSubmenuPos, setAxisToggleSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const chartRef = useRef<HTMLDivElement>(null);
 
@@ -385,6 +391,7 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
     setShowContextMenu(false);
     setShowColorSubmenu(false);
     setShowAxisLabelSubmenu(false);
+    setShowAxisToggleSubmenu(false);
   };
 
   // Handler for axis label editing submenu
@@ -395,14 +402,28 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
     setAxisLabelSubmenuPos({ x: rect.right + 4, y: rect.top });
     setShowAxisLabelSubmenu(prev => !prev);
     setShowColorSubmenu(false);
+    setShowAxisToggleSubmenu(false);
   }, []);
 
-  const overlayVisible = showContextMenu || showColorSubmenu || showAxisLabelSubmenu;
+  // Handler for axis toggle submenu
+  const handleAxisToggleClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setAxisToggleSubmenuPos({ x: rect.right + 4, y: rect.top });
+    setShowAxisToggleSubmenu(prev => !prev);
+    setShowColorSubmenu(false);
+    setShowAxisLabelSubmenu(false);
+  }, []);
+
+  const overlayVisible = showContextMenu || showColorSubmenu || showAxisLabelSubmenu || showAxisToggleSubmenu;
 
   // State for chart options
   const [showGrid, setShowGrid] = useState(true);
   const [showLegend, setShowLegend] = useState(true);
   const [showAxisLabels, setShowAxisLabels] = useState(true);
+  const [showXAxisLabels, setShowXAxisLabels] = useState(true);
+  const [showYAxisLabels, setShowYAxisLabels] = useState(true);
   const [showDataLabels, setShowDataLabels] = useState(initialShowDataLabels ?? true);
 
   // Sync internal states with external props
@@ -414,9 +435,21 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
     if (propShowLegend !== undefined) setShowLegend(propShowLegend);
   }, [propShowLegend]);
 
+  // useEffect(() => {
+  //   if (propShowAxisLabels !== undefined) {
+  //     setShowAxisLabels(propShowAxisLabels);
+  //     setShowXAxisLabels(propShowAxisLabels);
+  //     setShowYAxisLabels(propShowAxisLabels);
+  //   }
+  // }, [propShowAxisLabels]);
+
   useEffect(() => {
-    if (propShowAxisLabels !== undefined) setShowAxisLabels(propShowAxisLabels);
-  }, [propShowAxisLabels]);
+    if (propShowXAxisLabels !== undefined) setShowXAxisLabels(propShowXAxisLabels);
+  }, [propShowXAxisLabels]);
+
+  useEffect(() => {
+    if (propShowYAxisLabels !== undefined) setShowYAxisLabels(propShowYAxisLabels);
+  }, [propShowYAxisLabels]);
 
   useEffect(() => {
     if (propShowDataLabels !== undefined) setShowDataLabels(propShowDataLabels);
@@ -425,7 +458,9 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
   // Use external props if provided, otherwise use internal state
   const currentShowGrid = propShowGrid !== undefined ? propShowGrid : showGrid;
   const currentShowLegend = propShowLegend !== undefined ? propShowLegend : showLegend;
-  const currentShowAxisLabels = propShowAxisLabels !== undefined ? propShowAxisLabels : showAxisLabels;
+  // const currentShowAxisLabels = propShowAxisLabels !== undefined ? propShowAxisLabels : showAxisLabels;
+  const currentShowXAxisLabels = propShowXAxisLabels !== undefined ? propShowXAxisLabels : showXAxisLabels;
+  const currentShowYAxisLabels = propShowYAxisLabels !== undefined ? propShowYAxisLabels : showYAxisLabels;
   const currentShowDataLabels = propShowDataLabels !== undefined ? propShowDataLabels : showDataLabels;
 
   // Use custom axis labels if provided, otherwise fall back to props
@@ -434,11 +469,19 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
 
   // Calculate dynamic margins based on axis labels visibility
   const getChartMargins = () => {
-    if (!currentShowAxisLabels) {
-      return { top: 20, right: 20, left: 20, bottom: 80 };
+    // Base margins for when no axis labels are shown
+    let left = 20;
+    let bottom = 80;
+    
+    // Adjust based on which axis labels are visible
+    if (currentShowYAxisLabels) {
+      left = 80; // Add space for Y-axis label
     }
-    // Increase left margin to create more gap between Y-axis line and label; trim bottom to reduce blank space
-    return { top: 20, right: 20, left: 80, bottom: 80 };
+    
+    // Bottom margin stays at 80 for both with and without X-axis labels
+    // (space needed for category names)
+    
+    return { top: 20, right: 20, left, bottom };
   };
 
   // Get current theme colors
@@ -561,11 +604,29 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
   const handleAxisLabelsToggle = () => {
     const newAxisLabelsState = !showAxisLabels;
     setShowAxisLabels(newAxisLabelsState);
+    setShowXAxisLabels(newAxisLabelsState);
+    setShowYAxisLabels(newAxisLabelsState);
     setShowContextMenu(false);
     setShowColorSubmenu(false);
     if (onAxisLabelsToggle) {
       onAxisLabelsToggle(newAxisLabelsState);
     }
+  };
+
+  // Handle X-axis labels toggle
+  const handleXAxisLabelsToggle = () => {
+    const newXAxisLabelsState = !showXAxisLabels;
+    setShowXAxisLabels(newXAxisLabelsState);
+    setShowContextMenu(false);
+    setShowColorSubmenu(false);
+  };
+
+  // Handle Y-axis labels toggle
+  const handleYAxisLabelsToggle = () => {
+    const newYAxisLabelsState = !showYAxisLabels;
+    setShowYAxisLabels(newYAxisLabelsState);
+    setShowContextMenu(false);
+    setShowColorSubmenu(false);
   };
 
   // Handle data labels toggle
@@ -595,17 +656,19 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
       const isOutsideMainMenu = !target.closest('.context-menu');
       const isOutsideColorSubmenu = !target.closest('.color-submenu');
       const isOutsideAxisLabelSubmenu = !target.closest('.axis-label-submenu');
+      const isOutsideAxisToggleSubmenu = !target.closest('.axis-toggle-submenu');
 
-      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideAxisLabelSubmenu) {
+      if (isOutsideMainMenu && isOutsideColorSubmenu && isOutsideAxisLabelSubmenu && isOutsideAxisToggleSubmenu) {
         setTimeout(() => {
           setShowContextMenu(false);
           setShowColorSubmenu(false);
           setShowAxisLabelSubmenu(false);
+          setShowAxisToggleSubmenu(false);
         }, 50);
       }
     };
 
-    if (showContextMenu || showColorSubmenu || showAxisLabelSubmenu) {
+    if (showContextMenu || showColorSubmenu || showAxisLabelSubmenu || showAxisToggleSubmenu) {
       const timeoutId = setTimeout(() => {
         document.addEventListener('click', handleClickOutside, false);
       }, 200);
@@ -615,7 +678,7 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
         document.removeEventListener('click', handleClickOutside, false);
       };
     }
-  }, [showContextMenu, showColorSubmenu, showAxisLabelSubmenu]);
+  }, [showContextMenu, showColorSubmenu, showAxisLabelSubmenu, showAxisToggleSubmenu]);
 
   // Context menu component
   const ContextMenu = () => {
@@ -672,22 +735,16 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
 
         {/* Axis Labels Toggle */}
         <button
-          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
-          onClick={handleAxisLabelsToggle}
+          className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700 relative"
+          onClick={handleAxisToggleClick}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
           </svg>
           <span>Axis Labels</span>
-          <div className="ml-auto">
-            <div className={`w-4 h-3 rounded border ${showAxisLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
-              {showAxisLabels && (
-                <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-          </div>
+          <svg className="w-4 h-4 ml-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
         </button>
 
         {/* Separator */}
@@ -839,6 +896,69 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
     );
   };
 
+  // Axis Toggle Submenu component
+  const AxisToggleSubmenu = () => {
+    if (!showAxisToggleSubmenu) return null;
+
+    const submenu = (
+      <div
+        className="fixed z-[9999] bg-white border border-gray-300 rounded-lg shadow-xl p-2 axis-toggle-submenu"
+        style={{
+          left: axisToggleSubmenuPos.x,
+          top: axisToggleSubmenuPos.y,
+          minWidth: '200px'
+        }}
+      >
+        <div className="px-2 py-2 text-sm font-semibold text-gray-700 border-b border-gray-200 mb-2">
+          Axis Labels
+        </div>
+        <div className="flex flex-col">
+          {/* X-Axis Toggle */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={handleXAxisLabelsToggle}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+            </svg>
+            <span>X-Axis</span>
+            <div className="ml-auto">
+              <div className={`w-4 h-3 rounded border ${showXAxisLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
+                {showXAxisLabels && (
+                  <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </div>
+            </div>
+          </button>
+
+          {/* Y-Axis Toggle */}
+          <button
+            className="w-full px-4 py-2 text-sm text-left hover:bg-gray-50 flex items-center gap-3 text-gray-700"
+            onClick={handleYAxisLabelsToggle}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+            </svg>
+            <span>Y-Axis</span>
+            <div className="ml-auto">
+              <div className={`w-4 h-3 rounded border ${showYAxisLabels ? 'bg-blue-500 border-blue-500' : 'bg-gray-200 border-gray-300'}`}>
+                {showYAxisLabels && (
+                  <svg className="w-4 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+    );
+
+    return createPortal(submenu, document.body);
+  };
+
   const renderChart = () => {
     // Check if data is empty or invalid
     if (!data || data.length === 0 || !Array.isArray(data)) {
@@ -878,7 +998,7 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
         
         <XAxis
           dataKey="x"
-          label={currentShowAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? 
+          label={currentShowXAxisLabels && effectiveXAxisLabel && effectiveXAxisLabel.trim() ? 
             { value: capitalizeWords(effectiveXAxisLabel), position: 'bottom', style: effectiveXAxisLabelStyle, offset: 36 } : 
             undefined
           }
@@ -889,7 +1009,7 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
         />
         
         <YAxis
-          label={currentShowAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? 
+          label={currentShowYAxisLabels && effectiveYAxisLabel && effectiveYAxisLabel.trim() ? 
             // Increase label offset to push text further from the Y-axis line
             { value: capitalizeWords(effectiveYAxisLabel), angle: -90, position: 'left', style: effectiveYAxisLabelStyle, offset: 20 } : 
             undefined
@@ -1113,6 +1233,7 @@ const SCurveChartRenderer: React.FC<SCurveProps> = ({
         <ContextMenu />
         <ColorThemeSubmenu />
         <AxisLabelSubmenu />
+        <AxisToggleSubmenu />
       </div>
     </div>
   );

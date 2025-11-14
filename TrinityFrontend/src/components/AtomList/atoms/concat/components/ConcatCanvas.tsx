@@ -494,11 +494,32 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
         ? currentAtom.settings.file1 
         : currentAtom.settings.file2;
 
+      // 🔧 CRITICAL FIX: Construct full path if only filename is stored
+      let fullFilePath = filePath;
+      
+      // Get environment context to construct full path
+      const envStr = localStorage.getItem('env');
+      if (envStr && filePath && !filePath.includes('/')) {
+        try {
+          const env = JSON.parse(envStr);
+          const clientName = env.CLIENT_NAME || '';
+          const appName = env.APP_NAME || '';
+          const projectName = env.PROJECT_NAME || '';
+          
+          if (clientName && appName && projectName) {
+            fullFilePath = `${clientName}/${appName}/${projectName}/${filePath}`;
+            console.log(`🔧 Constructed full path for cardinality: ${filePath} → ${fullFilePath}`);
+          }
+        } catch (e) {
+          console.warn('Failed to construct full path for cardinality:', e);
+        }
+      }
+
       const formData = new FormData();
       formData.append('validator_atom_id', currentAtom.id);
-      formData.append('file_key', filePath);
+      formData.append('file_key', fullFilePath);
       formData.append('bucket_name', 'trinity');
-      formData.append('object_names', filePath);
+      formData.append('object_names', fullFilePath);
       formData.append('source_type', sourceType);
 
       const response = await fetch(`${CONCAT_API}/cardinality`, {

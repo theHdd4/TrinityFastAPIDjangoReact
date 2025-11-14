@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import { BarChart3, TrendingUp, BarChart2, Triangle, Zap, Maximize2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Filter, X, LineChart as LineChartIcon, PieChart as PieChartIcon, ArrowUp, ArrowDown, FilterIcon, Plus } from 'lucide-react';
@@ -145,9 +145,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
 
   // Fetch cardinality data when data is available
   useEffect(() => {
-    console.log('ChartMakerCanvas - typedData:', typedData);
-    console.log('ChartMakerCanvas - file_id:', typedData?.file_id);
-    console.log('ChartMakerCanvas - dataSource:', dataSource);
     if (typedData && typedData.file_id && dataSource) {
       fetchCardinalityData();
     }
@@ -165,10 +162,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
       // This allows the backend to reload from the saved file even if in-memory storage is cleared
       const objectName = dataSource || typedData.file_id;
       const url = `${CHART_MAKER_API}/column_summary?object_name=${encodeURIComponent(objectName)}`;
-      console.log('Fetching cardinality data from:', url);
-      console.log('Using dataSource:', dataSource, 'or file_id:', typedData.file_id);
       const response = await fetch(url);
-      console.log('Response status:', response.status);
       if (response.ok) {
         const summary = await response.json();
         const summaryData = Array.isArray(summary.summary) ? summary.summary.filter(Boolean) : [];
@@ -185,7 +179,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
         setOriginalFileName(summary.original_name || typedData.file_id);
       } else {
         const errorText = await response.text();
-        console.log('Error response:', errorText);
         setCardinalityError(`Failed to fetch cardinality data: ${response.status} - ${errorText}`);
       }
     } catch (e: any) {
@@ -344,16 +337,10 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     if (typedData && (typedData.uniqueValuesByColumn || typedData.unique_values)) {
       const uniqueMap = typedData.uniqueValuesByColumn || typedData.unique_values;
       if (uniqueMap && uniqueMap[column]) {
-        // console.log(`[ChartMakerCanvas] Found unique values for column "${column}" from backend:`, uniqueMap[column]);
         return uniqueMap[column];
-      } else {
-        console.log(`[ChartMakerCanvas] Column "${column}" not found in uniqueMap. Available columns:`, Object.keys(uniqueMap || {}));
       }
-    } else {
-      console.log(`[ChartMakerCanvas] No uniqueValuesByColumn data available. typedData:`, typedData);
     }
     // Fallback to frontend calculation
-    console.log(`[ChartMakerCanvas] Using fallback calculation for column "${column}"`);
     if (!typedData || !Array.isArray(typedData.rows)) return [];
     const values = new Set(typedData.rows.map(row => String(row[column])));
     return Array.from(values).filter(v => v !== '');
@@ -540,7 +527,6 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
     try {
       return JSON.parse(JSON.stringify(value)) as T;
     } catch (error) {
-      console.warn("Unable to clone value for exhibition selection", error);
       return value;
     }
   };
@@ -560,6 +546,8 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
           chartType: chart.type,
           xAxis: chart.xAxis,
           yAxis: chart.yAxis,
+          secondYAxis: chart.secondYAxis,
+          dualAxisMode: chart.dualAxisMode,
           filters: chart.filters,
           aggregation: chart.aggregation,
           legendField: chart.legendField,
@@ -662,20 +650,26 @@ const renderChart = (
 
   const previewType = previewTypes[chart.id];
   const config = chart.chartConfig || {};
-  const rawType = previewType || config.chart_type || chart.type;
+  // Prioritize chart.type (user selection) over config.chart_type (backend response)
+  // since backend converts stacked_bar to bar, but we want to preserve user's selection
+  const rawType = previewType || chart.type || config.chart_type;
+  const legendActive = chart.legendField && chart.legendField !== 'aggregate';
   const typeMap: Record<string, string> = {
     line: 'line_chart',
     bar: 'bar_chart',
+    stacked_bar: 'stacked_bar_chart',
     area: 'area_chart',
     pie: 'pie_chart',
     scatter: 'scatter_chart',
     line_chart: 'line_chart',
     bar_chart: 'bar_chart',
+    stacked_bar_chart: 'stacked_bar_chart',
     area_chart: 'area_chart',
     pie_chart: 'pie_chart',
     scatter_chart: 'scatter_chart',
   };
-  const rendererType = typeMap[rawType] || 'line_chart';
+  const normalizedType = legendActive && rawType === 'pie' ? 'line' : rawType;
+  const rendererType = typeMap[normalizedType] || 'line_chart';
   const chartData = config.data || getFilteredData(chart);
   const traces = config.traces || [];
   const xAxisConfig = chart.chartRendered && config.x_axis
@@ -721,7 +715,7 @@ const renderChart = (
   const colors = getChartColors(index);
   const rendererProps = {
     key,
-    type: rendererType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
+    type: rendererType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart',
     data: chartData,
     xField: xAxisConfig.dataKey,
     yField: traces.length ? traces[0]?.dataKey : yAxisConfig.dataKey,
@@ -734,13 +728,60 @@ const renderChart = (
     colors: [colors.primary, colors.secondary, colors.tertiary],
     theme: chart.chartConfig?.theme,
     showLegend: chart.chartConfig?.showLegend,
-    showAxisLabels: chart.chartConfig?.showAxisLabels,
+    // showAxisLabels: chart.chartConfig?.showAxisLabels,
+    showXAxisLabels: chart.chartConfig?.showXAxisLabels,
+    showYAxisLabels: chart.chartConfig?.showYAxisLabels,
     showDataLabels: chart.chartConfig?.showDataLabels,
     showGrid: chart.chartConfig?.showGrid,
     height: chartHeightValue,
-    sortOrder: chartSortOrder[chart.id] || chart.chartConfig?.sortOrder || null,
-    onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => onChartTypeChange?.(chart.id, newType.replace('_chart', '') as ChartMakerConfig['type']),
-    onSortChange: (newSortOrder: 'asc' | 'desc' | null) => handleChartSortOrderChange(chart.id, newSortOrder),
+    sortOrder: (chart.sortOrder ?? chart.chartConfig?.sortOrder) || chartSortOrder[chart.id] || null,
+    sortColumn: chart.sortColumn ?? chart.chartConfig?.sortColumn,
+    onSortColumnChange: (column: string) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { 
+              ...c, 
+              sortColumn: column,
+              chartConfig: { ...c.chartConfig, sortColumn: column } 
+            }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart' | 'stacked_bar_chart') => {
+      const mappedType = newType === 'stacked_bar_chart' ? 'stacked_bar' : newType.replace('_chart', '');
+      onChartTypeChange?.(chart.id, mappedType as ChartMakerConfig['type']);
+    },
+    onSortChange: (newSortOrder: 'asc' | 'desc' | null) => {
+      handleChartSortOrderChange(chart.id, newSortOrder);
+      // Also save to chart config for persistence
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { 
+              ...c, 
+              sortOrder: newSortOrder,
+              chartConfig: { ...c.chartConfig, sortOrder: newSortOrder } 
+            }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    seriesSettings: chart.chartConfig?.seriesSettings || {},
+    onSeriesSettingsChange: (newSeriesSettings: Record<string, { color?: string; showDataLabels?: boolean }>) => {
+      // Defer the update to avoid updating during render
+      // Use setTimeout instead of requestAnimationFrame to ensure it's truly deferred
+      setTimeout(() => {
+        // Get fresh charts from store to avoid stale closure
+        const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+        const currentCharts = (currentAtom?.settings as any)?.charts || charts;
+        const updatedCharts = currentCharts.map((c: any) => 
+          c.id === chart.id 
+            ? { ...c, chartConfig: { ...c.chartConfig, seriesSettings: newSeriesSettings } }
+            : c
+        );
+        updateSettings(atomId, { charts: updatedCharts });
+      }, 0);
+    },
     onThemeChange: (theme: string) => {
       const updatedCharts = charts.map(c => 
         c.id === chart.id 
@@ -765,10 +806,26 @@ const renderChart = (
       );
       updateSettings(atomId, { charts: updatedCharts });
     },
-    onAxisLabelsToggle: (enabled: boolean) => {
+    // onAxisLabelsToggle: (enabled: boolean) => {
+    //   const updatedCharts = charts.map(c => 
+    //     c.id === chart.id 
+    //       ? { ...c, chartConfig: { ...c.chartConfig, showAxisLabels: enabled } }
+    //       : c
+    //   );
+    //   updateSettings(atomId, { charts: updatedCharts });
+    // },
+    onXAxisLabelsToggle: (enabled: boolean) => {
       const updatedCharts = charts.map(c => 
         c.id === chart.id 
-          ? { ...c, chartConfig: { ...c.chartConfig, showAxisLabels: enabled } }
+          ? { ...c, chartConfig: { ...c.chartConfig, showXAxisLabels: enabled } }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    onYAxisLabelsToggle: (enabled: boolean) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, chartConfig: { ...c.chartConfig, showYAxisLabels: enabled } }
           : c
       );
       updateSettings(atomId, { charts: updatedCharts });
@@ -781,6 +838,15 @@ const renderChart = (
       );
       updateSettings(atomId, { charts: updatedCharts });
     },
+    onTitleChange: (newTitle: string) => {
+      const updatedCharts = charts.map(c => 
+        c.id === chart.id 
+          ? { ...c, title: newTitle }
+          : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    },
+    forceSingleAxis: chart.dualAxisMode === 'single',
   } as const;
 
   return (
@@ -839,7 +905,6 @@ const renderChart = (
       
       <div className="relative z-10 p-6 overflow-hidden">
         {/* Cardinality View */}
-        {console.log('Rendering cardinality view - cardinalityLoading:', cardinalityLoading, 'cardinalityError:', cardinalityError, 'cardinalityData:', cardinalityData)}
         {cardinalityLoading ? (
           <div className="p-4 text-blue-600">Loading cardinality data...</div>
         ) : cardinalityError ? (
@@ -1106,22 +1171,6 @@ const renderChart = (
                             </div>
                             {/* Hints container - aligned in same row */}
                             <div className="flex items-center gap-2">
-                              {/* Interaction hint for multi-trace charts */}
-                              {(chart.chartConfig?.traces && chart.chartConfig.traces.length > 1) && (
-                                <div className="flex items-center text-xs text-gray-700 bg-yellow-50 border border-yellow-200 rounded-full px-2 py-1">
-                                  {chart.chartConfig.chart_type === 'bar' ? (
-                                    <>
-                                      <span className="hidden sm:inline">Click: trace, Ctrl+Click: dim x-axis</span>
-                                      <span className="sm:hidden">Click to emphasize</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span className="hidden sm:inline">Click traces to emphasize</span>
-                                      <span className="sm:hidden">Click to emphasize</span>
-                                    </>
-                                  )}
-                                </div>
-                              )}
                               {/* Expand icon */}
                               <Button
                                 variant="ghost"

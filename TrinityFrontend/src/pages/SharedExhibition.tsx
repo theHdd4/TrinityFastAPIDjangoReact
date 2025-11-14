@@ -4,7 +4,7 @@ import { AlertCircle, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 
 import { fetchSharedExhibitionLayout, type ExhibitionLayoutResponse } from '@/lib/exhibition';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
-import { SlideCanvas } from '@/components/ExhibitionMode/components/SlideCanvas';
+import { SlideCanvas } from '@/components/ExhibitionMode/components/slideCanvas';
 import { Button } from '@/components/ui/button';
 import AnimatedLogo from '@/components/PrimaryMenu/TrinityAssets/AnimatedLogo';
 

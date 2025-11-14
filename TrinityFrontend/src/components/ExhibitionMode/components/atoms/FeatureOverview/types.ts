@@ -7,7 +7,9 @@ export interface FeatureOverviewChartState {
   chartType?: string;
   theme?: string;
   showDataLabels?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showGrid?: boolean;
   showLegend?: boolean;
   xAxisField?: string;
@@ -17,6 +19,7 @@ export interface FeatureOverviewChartState {
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 }
 
 export interface FeatureOverviewStatistics {

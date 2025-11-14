@@ -1,4 +1,4 @@
-import { DATAFRAME_OPERATIONS_API } from '@/lib/api';
+import { DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
   getEnvironmentContext, 
@@ -165,6 +165,9 @@ export const dataframeOperationsHandler: AtomHandler = {
       existingDataAvailable: sessionHasExistingData
     });
     
+    // 🔧 DEFINE operationsCount for use throughout the handler
+    const operationsCount = config.operations ? config.operations.length : 0;
+    
     // Add AI smart response message (prioritize smart_response over generic success message)
     if (data.smart_response) {
       // Use the AI's smart response for a more conversational experience
@@ -173,7 +176,6 @@ export const dataframeOperationsHandler: AtomHandler = {
       console.log('🤖 AI Smart Response displayed:', data.smart_response);
     } else {
       // Fallback to detailed success message if no smart_response
-      const operationsCount = config.operations ? config.operations.length : 0;
       const successDetails = {
         'Operations': operationsCount.toString(),
         'Auto Execute': data.execution_plan?.auto_execute ? 'Yes' : 'No',
@@ -512,36 +514,30 @@ export const dataframeOperationsHandler: AtomHandler = {
             
             if (isLoadOperation) {
               console.log(`🔧 AI PROVIDED FILE PATH: ${operation.parameters.object_name}`);
-              console.log(`🔧 LOAD OPERATION: Will set selectedFile to EXACT AI path`);
+              console.log(`🔧 LOAD OPERATION: Storing data for mapping later`);
               
               // Store load operation data for final UI update
+              // ⚠️ DON'T set selectedFile here - it will be mapped later
               operation._uiData = {
                 tableData: dataFrameData,
-                selectedFile: operation.parameters.object_name,
+                aiProvidedPath: operation.parameters.object_name, // Store AI's path for mapping
                 fileId: currentDfId,
                 selectedColumns: result.headers || [],
-                // 🔧 CRITICAL FIX: Don't set isTemporaryData at all - let UI handle it naturally
                 hasData: true,
                 dataLoaded: true,
                 originalAIFilePath: operation.parameters.object_name
               };
             } else {
-              console.log(`🔧 REGULAR OPERATION: Will preserve original AI file path`);
+              console.log(`🔧 REGULAR OPERATION: Storing data (selectedFile will be set from mapping)`);
               
               // Store regular operation data for final UI update
-              const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-              const originalAIFilePath = currentSettings?.originalAIFilePath || currentSettings?.selectedFile;
-              
+              // ⚠️ DON'T set selectedFile here - it will be mapped at the end
               operation._uiData = {
                 tableData: dataFrameData,
-                selectedFile: originalAIFilePath,
                 fileId: currentDfId,
                 selectedColumns: result.headers || [],
-                // 🔧 CRITICAL FIX: Don't set isTemporaryData - let it show the actual file name like manual
-                // isTemporaryData: true, // ❌ This causes "Temporary Data" banner instead of file name
                 hasData: true,
-                dataLoaded: true,
-                originalAIFilePath: originalAIFilePath
+                dataLoaded: true
               };
             }
             
@@ -550,61 +546,224 @@ export const dataframeOperationsHandler: AtomHandler = {
           
         }
         
-        // 🔧 BATCH UI UPDATE: Apply final UI changes from the last operation with data
-        // Find the load operation first (has the correct selectedFile), then the last operation with data
+        // 🔧 HYBRID APPROACH: Execute operations BUT keep Properties in sync
+        // We've already executed backend operations, so use the results
+        // BUT also set selectedFile so Properties dropdown shows the file
+        
         const loadOperation = config.operations.find(op => 
           (op.api_endpoint === "/load_cached" || op.api_endpoint === "/load_file") && op._uiData
         );
         const lastDataOperation = [...config.operations].reverse().find(op => op._uiData);
         
         if (loadOperation && lastDataOperation) {
-          console.log(`🔄 BATCH UPDATE: Combining load operation file path with final operation data`);
+          console.log(`🔄 AI OPERATIONS COMPLETE: Syncing with Properties panel`);
+          console.log(`📁 AI File Path: ${loadOperation.parameters.object_name}`);
+          console.log(`📊 Final operation: ${lastDataOperation.operation_name}`);
           
-          // Apply the final UI state combining load operation file info with last operation data
-          const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-          const finalUIData = {
-            ...lastDataOperation._uiData, // Final operation data (tableData, etc.)
-            selectedFile: loadOperation._uiData.selectedFile, // Use load operation's file path
-            originalAIFilePath: loadOperation._uiData.originalAIFilePath, // Preserve original path
-          };
+          // 🔧 CRITICAL: Map AI file path to object_name (same as concat/merge handlers)
+          let mappedFile = loadOperation.parameters.object_name;
           
-          updateAtomSettings(atomId, {
-            ...currentSettings, // 🔧 CRITICAL: Preserve existing settings
-            ...finalUIData, // Apply combined UI data
-            execution_results: results,
-            currentDfId: currentDfId,
-            operationCompleted: true,
-            lastLoadedFileName: loadOperation._uiData.selectedFile, // 🔧 Track last loaded file
-            lastSessionId: sessionId // 🔧 Track current session
-          });
+          try {
+            console.log('🔄 Fetching frames to map AI file path to object_name...');
+            const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+            if (framesResponse.ok) {
+              const framesData = await framesResponse.json();
+              const frames = Array.isArray(framesData.files) ? framesData.files : [];
+              
+              console.log('📋 Available frames:', frames.map((f: any) => ({ 
+                object_name: f.object_name, 
+                arrow_name: f.arrow_name 
+              })));
+              
+              // Map AI file path to object_name (same logic as concat/merge)
+              const mapFilePathToObjectName = (aiFilePath: string) => {
+                if (!aiFilePath) return aiFilePath;
+                
+                // Try exact match first
+                let exactMatch = frames.find((f: any) => f.object_name === aiFilePath);
+                if (exactMatch) {
+                  console.log(`✅ Exact match found: ${aiFilePath} = ${exactMatch.object_name}`);
+                  return exactMatch.object_name;
+                }
+                
+                // Try matching by arrow_name
+                const aiFileName = aiFilePath.includes('/') ? aiFilePath.split('/').pop() : aiFilePath;
+                let filenameMatch = frames.find((f: any) => {
+                  const frameFileName = f.arrow_name?.split('/').pop() || f.arrow_name;
+                  return frameFileName === aiFileName;
+                });
+                
+                if (filenameMatch) {
+                  console.log(`✅ Filename match: ${aiFilePath} -> ${filenameMatch.object_name}`);
+                  return filenameMatch.object_name;
+                }
+                
+                // Try partial match
+                let partialMatch = frames.find((f: any) => 
+                  f.object_name.includes(aiFileName) || 
+                  f.arrow_name?.includes(aiFileName) ||
+                  aiFilePath.includes(f.object_name)
+                );
+                
+                if (partialMatch) {
+                  console.log(`✅ Partial match: ${aiFilePath} -> ${partialMatch.object_name}`);
+                  return partialMatch.object_name;
+                }
+                
+                console.log(`⚠️ No match found for ${aiFilePath}, using original value`);
+                return aiFilePath;
+              };
+              
+              mappedFile = mapFilePathToObjectName(loadOperation.parameters.object_name);
+              
+              console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [Handler] FILE PATH MAPPING RESULT
+╠════════════════════════════════════════════════════════════════
+║ AI Original Path: "${loadOperation.parameters.object_name}"
+║ Mapped Path: "${mappedFile}"
+║ Mapping Changed: ${mappedFile !== loadOperation.parameters.object_name}
+║ 
+║ Available Frames (${frames.length}):
+${frames.slice(0, 3).map((f: any) => `║   - ${f.object_name}`).join('\n')}
+${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
+╚════════════════════════════════════════════════════════════════
+              `);
+            } else {
+              console.warn('⚠️ Failed to fetch frames, using original file path');
+            }
+          } catch (error) {
+            console.error('❌ Error fetching frames for mapping:', error);
+          }
           
-          console.log(`✅ BATCH UPDATE COMPLETE: UI updated with combined state (${finalUIData.selectedFile})`);
+          // 🔧 SMART CONTEXT: Check if user is working with already loaded file
+          const atomSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
+          const currentlyLoadedFile = atomSettings?.selectedFile;
+          const isSameFileAsLoaded = currentlyLoadedFile && 
+            (currentlyLoadedFile === mappedFile || 
+             currentlyLoadedFile.includes(mappedFile.split('/').pop() || '') ||
+             mappedFile.includes(currentlyLoadedFile.split('/').pop() || ''));
+          
+          // 🔧 DECISION LOGIC: Load-only vs Load+Operations
+          const hasSubsequentOps = config.operations.some(op => 
+            op.api_endpoint !== "/load_cached" && op.api_endpoint !== "/load_file"
+          );
+          
+          if (!hasSubsequentOps && !isSameFileAsLoaded) {
+            // 🟢 CASE 1: FIRST TIME LOAD ONLY - Let Atom handle it naturally
+            console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [Handler] CASE 1: FIRST TIME LOAD ONLY
+╠════════════════════════════════════════════════════════════════
+║ Setting selectedFile: "${mappedFile}"
+║ NOT setting tableData (let Atom auto-load)
+╚════════════════════════════════════════════════════════════════
+            `);
+            
+            updateAtomSettings(atomId, {
+              selectedFile: mappedFile, // ✅ Trigger Atom's useEffect auto-load
+              originalAIFilePath: loadOperation.parameters.object_name,
+              execution_results: results,
+              operationCompleted: false, // Will be set by Atom after load
+              lastSessionId: sessionId
+            });
+            
+            console.log(`✅ selectedFile set - DataFrameOperationsAtom will auto-load`);
+            
+          } else if (isSameFileAsLoaded && !hasSubsequentOps) {
+            // 🟡 CASE 2: RELOAD SAME FILE - Skip, file already loaded
+            console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [Handler] CASE 2: FILE ALREADY LOADED - SKIPPING
+╠════════════════════════════════════════════════════════════════
+║ Current file: "${currentlyLoadedFile}"
+║ Requested file: "${mappedFile}"
+║ Action: Keeping existing data, no reload needed
+╚════════════════════════════════════════════════════════════════
+            `);
+            // No update needed - file already loaded and user has no new operations
+            
+          } else {
+            // 🔴 CASE 3: LOAD + OPERATIONS or OPERATIONS ON LOADED FILE
+            const caseType = hasSubsequentOps ? "LOAD + OPERATIONS" : "OPERATIONS ON LOADED FILE";
+            console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [Handler] CASE 3: ${caseType}
+╠════════════════════════════════════════════════════════════════
+║ Setting selectedFile: "${mappedFile}"
+║ Setting tableData: ${lastDataOperation._uiData.tableData?.rows?.length || 0} rows
+║ Setting fileId: "${currentDfId}"
+║ Same file already loaded: ${isSameFileAsLoaded}
+╚════════════════════════════════════════════════════════════════
+            `);
+            
+            updateAtomSettings(atomId, {
+              selectedFile: mappedFile, // ✅ For Properties dropdown
+              tableData: lastDataOperation._uiData.tableData, // ✅ AI operation results
+              selectedColumns: lastDataOperation._uiData.selectedColumns,
+              fileId: currentDfId, // ✅ For manual operations
+              hasData: true,
+              dataLoaded: true,
+              originalAIFilePath: loadOperation.parameters.object_name,
+              execution_results: results,
+              currentDfId: currentDfId,
+              operationCompleted: true,
+              lastLoadedFileName: loadOperation.parameters.object_name,
+              lastSessionId: sessionId
+            });
+            
+            // Verify what was actually stored
+            setTimeout(() => {
+              const verifySettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
+              console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [Handler] VERIFICATION AFTER UPDATE (CASE 3)
+╠════════════════════════════════════════════════════════════════
+║ settings.selectedFile: "${verifySettings?.selectedFile}"
+║ settings.tableData exists: ${!!verifySettings?.tableData}
+║ settings.tableData rows: ${verifySettings?.tableData?.rows?.length || 0}
+║ settings.fileId: "${verifySettings?.fileId}"
+╚════════════════════════════════════════════════════════════════
+              `);
+            }, 100);
+            
+            console.log(`✅ Data updated - Properties dropdown + Canvas + Operations all synced`);
+          }
+          
         } else if (lastDataOperation) {
-          // Fallback: Use last operation data only
-          console.log(`🔄 BATCH UPDATE: Using last operation data only`);
+          // 🟣 CASE 4: NO LOAD OPERATION - Operations on currently loaded file
+          const existingSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
           
-          const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
-          // Find the load operation to track the file name
-          const loadOp = config.operations.find(op => 
-            (op.api_endpoint === "/load_cached" || op.api_endpoint === "/load_file") && !op._skipped
-          );
+          console.log(`
+╔════════════════════════════════════════════════════════════════
+║ [Handler] CASE 4: OPERATIONS ON CURRENT FILE
+╠════════════════════════════════════════════════════════════════
+║ No load operation detected
+║ Updating existing file with operation results
+║ Current selectedFile: "${existingSettings?.selectedFile}"
+║ Updating tableData: ${lastDataOperation._uiData.tableData?.rows?.length || 0} rows
+║ Setting fileId: "${currentDfId}"
+╚════════════════════════════════════════════════════════════════
+          `);
           
           updateAtomSettings(atomId, {
-            ...currentSettings, // 🔧 CRITICAL: Preserve existing settings
-            ...lastDataOperation._uiData, // Apply final operation UI data
-            execution_results: results,
+            ...existingSettings,
+            tableData: lastDataOperation._uiData.tableData, // ✅ Updated data
+            selectedColumns: lastDataOperation._uiData.selectedColumns,
+            fileId: currentDfId, // ✅ For future operations
             currentDfId: currentDfId,
+            hasData: true,
+            dataLoaded: true,
+            execution_results: results,
             operationCompleted: true,
-            lastLoadedFileName: loadOp?.parameters?.object_name || lastDataOperation._uiData.selectedFile, // 🔧 Track last loaded file
-            lastSessionId: sessionId // 🔧 Track current session
+            lastSessionId: sessionId
           });
           
-          console.log(`✅ BATCH UPDATE COMPLETE: UI updated with last operation (${lastDataOperation._uiData.selectedFile})`);
-        } else {
-          // Final fallback: Update metadata only
-          console.log(`⚠️ FALLBACK UPDATE: No UI data found, updating metadata only`);
+          console.log(`✅ Operations applied - Canvas updated, dropdown unchanged`);
           
-          const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
+        } else {
+          console.log(`⚠️ FALLBACK: No operation data found`);
+          const fallbackSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
           
           // Find the load operation to track the file name
           const loadOp = config.operations.find(op => 
@@ -612,11 +771,11 @@ export const dataframeOperationsHandler: AtomHandler = {
           );
           
           updateAtomSettings(atomId, {
-            ...currentSettings, // 🔧 CRITICAL: Preserve existing settings
+            ...fallbackSettings, // 🔧 CRITICAL: Preserve existing settings
             execution_results: results,
             currentDfId: currentDfId,
             operationCompleted: true,
-            lastLoadedFileName: loadOp?.parameters?.object_name || currentSettings?.lastLoadedFileName, // 🔧 Track last loaded file
+            lastLoadedFileName: loadOp?.parameters?.object_name || fallbackSettings?.lastLoadedFileName, // 🔧 Track last loaded file
             lastSessionId: sessionId // 🔧 Track current session
           });
         }

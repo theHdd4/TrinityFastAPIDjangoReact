@@ -4,7 +4,7 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { X, GripVertical, Settings, Save } from 'lucide-react';
+import { X, GripVertical, Settings, Save, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { CUSTOM_MOLECULES_API } from '@/lib/api';
 import { atomIconMap } from '../utils/atomIconMap';
@@ -35,7 +35,7 @@ import {
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
-  verticalListSortingStrategy,
+  rectSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
@@ -111,25 +111,30 @@ export interface MoleculeNodeData {
   onAtomReorder: (moleculeId: string, newOrder: string[]) => void;
   onRemove: (moleculeId: string) => void;
   onClick: (moleculeId: string) => void;
-  onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string) => void;
-  onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string) => void;
+  onMoveAtomToMolecule?: (atomId: string, fromMoleculeId: string, toMoleculeId: string, atomIndex: number) => void;
+  onMoveAtomToAtomList?: (atomId: string, fromMoleculeId: string, atomIndex: number) => void;
   onRename?: (moleculeId: string, newName: string) => void;
   onAddToContainer?: (containerId: string, molecule: any) => void; // NEW: Add molecule to container
+  onInsertMolecule?: (referenceMoleculeId: string, position: 'left' | 'right') => void; // NEW: Insert molecule before/after this one
   availableMolecules?: Array<{ id: string; title: string }>;
 }
 
 interface SortableAtomItemProps {
   atom: string;
+  sortableId: string;
+  orderIndex: number;
   isSelected: boolean;
   onToggle: () => void;
-  onMoveAtomToMolecule?: (atomId: string, toMoleculeId: string) => void;
-  onMoveAtomToAtomList?: (atomId: string) => void;
+  onMoveAtomToMolecule?: (atomId: string, atomIndex: number, toMoleculeId: string) => void;
+  onMoveAtomToAtomList?: (atomId: string, atomIndex: number) => void;
   availableMolecules?: Array<{ id: string; title: string }>;
   currentMoleculeId: string;
 }
 
 const SortableAtomItem: React.FC<SortableAtomItemProps> = ({ 
-  atom, 
+  atom,
+  sortableId,
+  orderIndex,
   isSelected, 
   onToggle, 
   onMoveAtomToMolecule, 
@@ -144,12 +149,45 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: atom });
+  } = useSortable({ id: sortableId, data: { orderIndex, atomName: atom } });
+
+  const composedListeners = React.useMemo(() => {
+    if (!listeners) return {};
+    const {
+      onPointerDown,
+      onPointerMove,
+      onPointerUp,
+      onKeyDown,
+      ...rest
+    } = listeners;
+
+    return {
+      ...rest,
+      onPointerDown: (event: PointerEvent | React.PointerEvent) => {
+        event.stopPropagation();
+        onPointerDown?.(event as any);
+      },
+      onPointerMove: (event: PointerEvent | React.PointerEvent) => {
+        event.stopPropagation();
+        onPointerMove?.(event as any);
+      },
+      onPointerUp: (event: PointerEvent | React.PointerEvent) => {
+        onPointerUp?.(event as any);
+      },
+      onKeyDown: (event: KeyboardEvent | React.KeyboardEvent) => {
+        onKeyDown?.(event as any);
+      },
+    };
+  }, [listeners]);
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
+    transition: transition ?? (isDragging ? 'transform 120ms ease' : 'transform 180ms ease, opacity 180ms ease'),
+    opacity: isDragging ? 0.85 : 1,
+    zIndex: isDragging ? 40 : undefined,
+    boxShadow: isDragging ? '0 12px 24px rgba(15, 23, 42, 0.20)' : undefined,
+    touchAction: 'none' as const,
+    willChange: 'transform',
   };
 
   // Convert atom name to kebab-case for icon map lookup
@@ -290,11 +328,17 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger>
-        <div className="relative">
+      <ContextMenuTrigger asChild>
+        <div
+          ref={setNodeRef}
+          style={style}
+          {...attributes}
+          {...composedListeners}
+          className="relative cursor-grab active:cursor-grabbing"
+        >
           <div className="flex items-center justify-center p-2">
             <PortalTooltip content={atom}>
-              <div className={`p-2 rounded-md bg-white border-2 transition-all duration-200 hover:shadow-md hover:scale-105 bg-gradient-to-br from-white to-gray-50 group relative ${
+               <div className={`p-2 rounded-md bg-white border-2 transition-all duration-200 hover:shadow-md hover:scale-105 bg-gradient-to-br from-white to-gray-50 group relative ${
                 getCategoryColor(atom) === 'blue' ? 'border-blue-400 hover:border-blue-500' :
                 getCategoryColor(atom) === 'green' ? 'border-green-400 hover:border-green-500' :
                 getCategoryColor(atom) === 'purple' ? 'border-purple-400 hover:border-purple-500' :
@@ -316,7 +360,7 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
           Move {atom} to
         </div>
         <ContextMenuItem
-          onClick={() => onMoveAtomToAtomList?.(atom, currentMoleculeId)}
+          onClick={() => onMoveAtomToAtomList?.(atom, orderIndex)}
           className="cursor-pointer"
         >
           Remove Atom
@@ -331,7 +375,7 @@ const SortableAtomItem: React.FC<SortableAtomItemProps> = ({
               .map(molecule => (
                 <ContextMenuItem
                   key={molecule.id}
-                  onClick={() => onMoveAtomToMolecule?.(atom, currentMoleculeId, molecule.id)}
+                  onClick={() => onMoveAtomToMolecule?.(atom, orderIndex, molecule.id)}
                   className="cursor-pointer"
                 >
                   {molecule.title}
@@ -353,7 +397,11 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
     setNewName(data.title);
   }, [data.title]);
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 4,
+      },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
@@ -674,12 +722,19 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
 
-    if (over && active.id !== over.id) {
-      const oldIndex = data.atomOrder.indexOf(active.id as string);
-      const newIndex = data.atomOrder.indexOf(over.id as string);
-      const newOrder = arrayMove(data.atomOrder, oldIndex, newIndex);
-      data.onAtomReorder(id, newOrder);
+    if (!over || active.id === over.id) {
+      return;
     }
+
+    const oldIndex = active.data.current?.orderIndex;
+    const newIndex = over.data.current?.orderIndex;
+
+    if (oldIndex === undefined || newIndex === undefined) {
+      return;
+    }
+
+    const newOrder = arrayMove(data.atomOrder, oldIndex, newIndex);
+    data.onAtomReorder(id, newOrder);
   };
 
   return (
@@ -715,13 +770,53 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
         position={Position.Left} 
         className="w-3.5 h-3.5 !bg-purple-500/70 !border-2 !border-background shadow-md transition-all group-hover:!bg-purple-500 group-hover:scale-125 group-hover:shadow-lg group-hover:shadow-purple-500/30" 
       />
-      <Card
-        className={`relative w-60 select-none ${getTypeColor(data.type)} rounded-xl overflow-hidden group hover:scale-105 transition-all duration-300`}
-        onClick={e => {
-          e.stopPropagation();
-          data.onClick(id);
-        }}
-      >
+      {/* Insert Buttons Container */}
+      <div className="relative group/molecule-wrapper">
+        {/* Left Insert Button */}
+        {data.onInsertMolecule && (
+          <button
+            className="absolute left-0 top-1/2 -translate-x-full -translate-y-1/2 z-50 
+                       opacity-0 group-hover/molecule-wrapper:opacity-100 
+                       bg-blue-500 hover:bg-blue-600 text-white rounded-full p-1.5 
+                       shadow-lg hover:shadow-xl transition-all duration-200 
+                       hover:scale-110 flex items-center justify-center
+                       -ml-2 pointer-events-auto"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onInsertMolecule?.(id, 'left');
+            }}
+            title="Insert molecule before this one"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        )}
+        
+        {/* Right Insert Button */}
+        {data.onInsertMolecule && (
+          <button
+            className="absolute right-0 top-1/2 translate-x-full -translate-y-1/2 z-50 
+                       opacity-0 group-hover/molecule-wrapper:opacity-100 
+                       bg-blue-500 hover:bg-blue-600 text-white rounded-full p-1.5 
+                       shadow-lg hover:shadow-xl transition-all duration-200 
+                       hover:scale-110 flex items-center justify-center
+                       -mr-2 pointer-events-auto"
+            onClick={(e) => {
+              e.stopPropagation();
+              data.onInsertMolecule?.(id, 'right');
+            }}
+            title="Insert molecule after this one"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
+        
+        <Card
+          className={`relative w-60 select-none ${getTypeColor(data.type)} rounded-xl overflow-hidden hover:scale-105 transition-all duration-300`}
+          onClick={e => {
+            e.stopPropagation();
+            data.onClick(id);
+          }}
+        >
         {/* Header */}
         <div className="relative">
           
@@ -838,7 +933,6 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                 </span>
               </div>
               <div className="text-center py-2">
-                <p className="text-xs text-muted-foreground mb-1.5">Drag molecules or select atoms</p>
                 <div 
                   className="border-2 border-dashed border-muted-foreground/30 rounded-lg p-3 min-h-[50px] transition-colors hover:border-primary/50 flex items-center justify-center"
                   onDragOver={(e) => {
@@ -868,34 +962,54 @@ const MoleculeNode: React.FC<NodeProps<MoleculeNodeData>> = ({ id, data }) => {
                     }
                   }}
                 >
-                  <p className="text-sm text-muted-foreground/60 font-medium">Drag QM or custom molecule</p>
+                  <p className="text-xs text-muted-foreground/60 font-medium">drag molecules and select atom</p>
                 </div>
               </div>
             </>
           )}
           {/* Show atoms grid when atoms are assigned */}
           {data.atomOrder.length > 0 && (
-            <div 
-              className="grid grid-cols-5 gap-1.5 max-h-40 overflow-y-auto pr-1"
-              onPointerDownCapture={e => e.stopPropagation()}
-              style={{ scrollbarWidth: 'thin', overflowX: 'visible' }}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
             >
-              {data.atomOrder.map((atom) => (
-                <SortableAtomItem
-                  key={atom}
-                  atom={atom}
-                  isSelected={data.selectedAtoms[atom] || false}
-                  onToggle={() => handleAtomToggle(atom, !data.selectedAtoms[atom])}
-                  onMoveAtomToMolecule={data.onMoveAtomToMolecule}
-                  onMoveAtomToAtomList={data.onMoveAtomToAtomList}
-                  availableMolecules={data.availableMolecules}
-                  currentMoleculeId={id}
-                />
-              ))}
-            </div>
+              <SortableContext
+                items={data.atomOrder.map((_, index) => `${id}-atom-${index}`)}
+                strategy={rectSortingStrategy}
+              >
+                <div 
+                  className="grid grid-cols-5 gap-1.5 max-h-40 overflow-y-auto pr-1"
+                  style={{ scrollbarWidth: 'thin', overflowX: 'visible' }}
+                >
+                  {data.atomOrder.map((atom, index) => {
+                    const sortableId = `${id}-atom-${index}`;
+                    return (
+                      <SortableAtomItem
+                        key={sortableId}
+                        atom={atom}
+                        sortableId={sortableId}
+                        orderIndex={index}
+                        isSelected={data.selectedAtoms[atom] || false}
+                        onToggle={() => handleAtomToggle(atom, !data.selectedAtoms[atom])}
+                        onMoveAtomToMolecule={(atomId, atomIndex, toMoleculeId) =>
+                          data.onMoveAtomToMolecule?.(atomId, id, toMoleculeId, atomIndex)
+                        }
+                        onMoveAtomToAtomList={(atomId, atomIndex) =>
+                          data.onMoveAtomToAtomList?.(atomId, id, atomIndex)
+                        }
+                        availableMolecules={data.availableMolecules}
+                        currentMoleculeId={id}
+                      />
+                    );
+                  })}
+                </div>
+              </SortableContext>
+            </DndContext>
           )}
         </div>
       </Card>
+      </div>
     </div>
   );
 };

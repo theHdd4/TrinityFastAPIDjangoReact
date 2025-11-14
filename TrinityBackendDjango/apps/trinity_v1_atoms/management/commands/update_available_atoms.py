@@ -29,7 +29,8 @@ class Command(BaseCommand):
             'evaluate-models-feature',
             'auto-regressive-models',  # Correct ID from populate command
             'scenario-planner',
-            'clustering'  # Added missing clustering atom
+            'clustering',  # Added missing clustering atom
+            'pivot-table'
         ]
         
         updated_count = 0

@@ -1,0 +1,261 @@
+# Redis Monitoring, Health Checks, and Operations
+
+This document explains how Redis is monitored, how the health endpoints surface cache
+statistics, which alerts are configured, and how to operate the cache safely in
+production-like and local environments.
+
+## Metrics Pipeline Overview
+
+1. **Redis exporter** (`oliver006/redis_exporter`) scrapes the cache instance using the
+   same connection parameters exposed through `REDIS_*` environment variables.
+2. **Prometheus** scrapes the exporter every 15 seconds and evaluates alert rules in
+   `monitoring/prometheus/alerts/redis.rules.yml`.
+3. **Promtail + Loki** tail the Django, Celery, FastAPI, and Trinity AI containers for
+   structured `redis_cache_event` log lines and persist them for seven days so cache hit
+   behaviour can be audited in real time. The emitters now surface read, write, expiry,
+   and scan operations (including TTL lookups and deletes) so the **Redis Cache Activity
+   Logs** panel in Grafana provides a complete picture of how applications interact with
+   the cache.
+4. **Grafana** is provisioned with the *Redis Cache Overview* dashboard that visualises
+   the key metrics required by support and engineering teams (hit rate, latency,
+   fragmentation, memory usage, connection counts) and now includes a live Redis activity
+   log panel sourced from Loki.
+5. **Alertmanager** receives critical alerts (connection exhaustion and high memory
+   pressure) so downstream notification channels can be configured per environment.
+
+All services are available in both the production `docker-compose.example.yml` and the
+local `docker-compose-dev.example.yml` stack (enable the `cache-monitoring` profile in
+local environments).
+
+## Service Health Endpoints
+
+Both backend stacks expose lightweight health endpoints that validate Redis reachability
+and return cached statistics. Responses use the same shape so they can be plugged into
+synthetic monitors or load balancer health checks.
+
+| Service | Endpoint | Description |
+| ------- | -------- | ----------- |
+| Django (TrinityBackendDjango) | `GET /health/redis/` | Validates `redis_store.redis_client` connectivity and returns latency, hit/miss counts, connected clients, and memory stats. |
+| FastAPI (TrinityBackendFastAPI) | `GET /api/health/redis` | Uses `app.core.redis.get_sync_redis` to run a ping, surface hit/miss ratios, client counts, memory fragmentation, and command latency. |
+
+A non-`PONG` response or connectivity exception will return HTTP 503 with a human readable
+message in the `detail` field.
+
+## Alerts
+
+Prometheus evaluates the following rules:
+
+- **RedisConnectionExhaustion** triggers when connected clients exceed 85% of
+  `maxclients` for five minutes. This typically indicates connection leaks in the
+  application code or insufficient pool sizing.
+- **RedisHighMemoryUsage** triggers when memory utilisation is above 90% of the Redis
+  maximum (when configured) or the fragmentation ratio crosses 1.8 for ten minutes. This
+  guards against memory pressure that would otherwise lead to evictions or OOM kills.
+
+Configure Slack, PagerDuty, email, or other receivers by adding them to
+`monitoring/alertmanager/alertmanager.yml` in your deployment repository.
+
+## Runbooks
+
+### Controlled Cache Flush
+
+1. **Validate the risk.** Confirm with the owning team which keys or namespaces must be
+   flushed and communicate expected user impact.
+2. **Take a snapshot.** Ensure `appendonly.aof` or RDB snapshots are current. For manual
+   backups run `docker exec <redis-container> redis-cli save`.
+3. **Warm the cache if necessary.** Preload critical datasets or prime caches using the
+   API endpoints to avoid cold-start latency spikes post-flush.
+4. **Execute the flush.** Prefer scoped deletion (`SCAN` + `DEL`) over `FLUSHALL`. Use the
+   helper script: `docker exec <redis-container> redis-cli --scan --pattern '<prefix>*' | xargs redis-cli del`.
+5. **Verify.** Watch the Grafana dashboard for hit rate recovery and check the
+   `/health/redis` endpoints for expected key counts and latency.
+6. **Communicate completion.** Update the incident or change ticket with the observed
+   metrics.
+
+### Failover or Replacement Node
+
+1. **Assess symptoms.** Review alerts and Grafana panels to determine whether the issue is
+   connection exhaustion, memory pressure, or hardware failure.
+2. **Promote standby.** If running Redis Sentinel/Cluster, promote the replica via the
+   orchestrator. Otherwise bring up a hot spare using the same `REDIS_*` settings.
+3. **Update configuration.** Adjust the `REDIS_URL`/`REDIS_HOST` secrets, reload the
+   services, and confirm the new node appears healthy on the dashboard.
+4. **Validate clients.** Hit both health endpoints to ensure applications can connect and
+   caches rebuild as expected.
+5. **Decommission the faulty node.** After traffic drains, archive logs and snapshots for
+   later analysis.
+
+## Local Development Profiles
+
+Enable the full cache monitoring stack locally with:
+
+```bash
+docker compose -f docker-compose-dev.example.yml --profile cache-monitoring up
+```
+
+This launches Redis with persistent storage (`redis_data`), the exporter, Prometheus,
+Alertmanager, Grafana (available on `http://localhost:3001`), Loki (`http://localhost:3100`),
+and Promtail. Data persists across restarts because Prometheus, Loki, and Grafana share
+named volumes (`prometheus_data`, `loki_data`, `grafana_data`).
+
+> **Does this replace the normal dev stack?** No. When you pass `--profile` to Docker
+> Compose it loads every service without a profile **plus** any services belonging to the
+> specified profile. Running the command above therefore boots the usual development
+> stack (Postgres, Mongo, Redis, backend services, etc.) together with the monitoring
+> components.
+
+### Step-by-step: enable monitoring for the dev stack
+
+1. Copy `docker-compose-dev.example.yml` to `docker-compose-dev.yml` (or export
+   `COMPOSE_FILE` if you prefer to keep the example name) and adjust any secrets or port
+   mappings as needed.
+2. Ensure your `.env` or shell exports contain the desired `REDIS_*` and Grafana admin
+   credentials. Defaults (`admin` / `admin`) work for local testing.
+3. Start the complete stack, including monitoring, with:
+
+   ```bash
+   docker compose -f docker-compose-dev.yml --profile cache-monitoring up -d
+   ```
+
+4. Confirm Grafana can resolve Loki by checking that both containers are running on the
+   shared network:
+
+   ```bash
+   docker compose -f docker-compose-dev.yml --profile cache-monitoring ps grafana loki
+   ```
+
+   Both services should report a `running` state. If Grafana logs show
+   `lookup loki: no such host`, restart the monitoring services with
+   `docker compose -f docker-compose-dev.yml --profile cache-monitoring restart grafana loki`
+   and re-run the command above.
+5. Browse to Grafana on `http://localhost:3001`, open the **Redis Cache Overview**
+   dashboard, and confirm panels populate within ~15 seconds.
+6. Scroll to the **Redis Cache Activity Logs** panel in the dashboard or click
+   **Explore → Loki** and run `{{compose_service="web"}} |= "redis_cache_event"` to verify
+   that cache hits and misses from Django, Celery, FastAPI, and Trinity AI are arriving in
+   real time. If you do not see events, trigger a read through the app (for example,
+   `GET /health/redis/`).
+7. Hit `http://localhost:8000/health/redis/` (Django) or
+   `http://localhost:8001/api/health/redis` (FastAPI) to verify the services report Redis
+   stats while monitoring is enabled.
+8. Create the default tenant and seed users once the containers are healthy:
+
+   ```bash
+   docker compose -f docker-compose-dev.yml exec web python create_tenant.py
+   ```
+
+   Re-run the command whenever you need to refresh seeded users or update tenant metadata
+   after editing `create_tenant.py`.
+
+If Docker reports a port conflict (for example, `Bind for 0.0.0.0:8816 failed` from the
+Flight server), override the host binding before you start the stack:
+
+```bash
+export FLIGHT_HOST_PORT=18816
+docker compose -f docker-compose-dev.yml --profile cache-monitoring up -d
+```
+
+Any free host port works; containers still talk to `flight:8816` internally so no other
+configuration changes are required.
+
+To mimic production port assignments run the production compose file:
+
+```bash
+docker compose -f docker-compose.example.yml up redis redis-exporter prometheus grafana
+```
+
+### Step-by-step: enable monitoring for the production stack
+
+1. Copy `docker-compose.example.yml` to `docker-compose.yml` in your deployment repo or
+   CI/CD pipeline and substitute production secrets (`REDIS_PASSWORD`, Grafana admin
+   credentials, etc.).
+2. Provision persistent volumes (or bind mounts) for Redis, Prometheus, and Grafana so
+   metrics and cache data survive restarts.
+3. Launch the stack in detached mode:
+
+   ```bash
+   docker compose up -d
+   ```
+
+   The production file already includes the monitoring services by default, so no
+   additional profile flags are required.
+4. Verify Loki is discoverable from Grafana:
+
+   ```bash
+   docker compose ps grafana loki
+   ```
+
+   Both services must be `running`. If Grafana reports `lookup loki: no such host`, restart
+   them with `docker compose restart grafana loki` and rerun the check. Once Loki is up the
+   Grafana data source will automatically reconnect.
+5. If you need to roll monitoring out gradually, you can start just the monitoring
+   containers alongside your running application with:
+
+   ```bash
+   docker compose up -d redis-exporter prometheus alertmanager grafana
+   ```
+
+6. Configure Grafana ingress or networking as appropriate for your environment and wire
+   Alertmanager to your paging/notification channels.
+7. Use Grafana → **Dashboards → Redis Cache Overview** to confirm both metrics panels and
+   the **Redis Cache Activity Logs** panel populate. For ad-hoc inspection, open
+   **Explore → Loki** and run
+   `{compose_service=~"web|fastapi|celery|trinity-ai"} |= "redis_cache_event"` to tail cache
+   hits and misses. These events are retained for seven days by Loki.
+8. Execute the tenant bootstrap script from the Django container so the application has a
+   default tenant and superusers:
+
+   ```bash
+   docker compose exec web python create_tenant.py
+   ```
+
+   Run this script again whenever you promote changes to `create_tenant.py` or need to
+   recreate the seeded data in a new environment.
+
+> **Tip:** If your production hosts already use TCP port 8815, set `FLIGHT_HOST_PORT` to an
+> available port before running `docker compose up`. The container continues to listen on
+> `flight:8815` inside the compose network, so no application changes are necessary.
+
+## Accessing the Dashboard and Validating Data
+
+1. Browse to Grafana (`http://localhost:3000` in production compose or
+   `http://localhost:3001` in dev compose) and sign in with the credentials defined by
+   `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` (defaults to `admin` / `admin`).
+2. Open the *Trinity Cache* folder and select **Redis Cache Overview**.
+3. Validate the panels:
+   - **Cache Hit Rate** should align with expectations for the workload (values near 1 for
+     steady caches). Sudden drops indicate evictions or cold caches.
+   - **Command Latency** trends highlight spikes in response time. Compare against
+     application logs when latency rises.
+   - **Memory Fragmentation** panel should stay close to 1.0. Sustained spikes above 1.8
+     trigger the high-memory alert and suggest restarts or `CONFIG SET activedefrag yes`.
+   - **Connected Clients** panel shows active connections; cross-check against pool sizes
+     in application settings.
+4. Cross-verify with the health endpoints (`/api/health/redis` and `/health/redis/`) to
+   ensure reported values (hit/miss counts, fragmentation ratio, latency) match the
+   dashboard panels. The endpoints are lightweight, so they can be polled manually or
+   integrated into smoke tests.
+
+## Redis Activity Logging
+
+- Every Redis `GET`, `MGET`, and `HGETALL` call from Django, Celery, FastAPI, and Trinity
+  AI emits a `redis_cache_event` log line with the command, keys, hit/miss counts, and the
+  logical namespace derived from the key prefix. Logs are JSON payloads prefixed with the
+  marker `redis_cache_event` so Promtail can extract labels without interfering with other
+  application logs.
+- Logs are scraped by Promtail, stored in Loki for seven days, and visualised in Grafana
+  via the **Redis Cache Activity Logs** panel. Use Grafana Explore with the Loki datasource
+  for ad-hoc queries such as filtering by `namespace` or `service` label.
+- Set the `REDIS_LOG_SERVICE` environment variable (already applied in both compose files)
+  if you run the services outside Docker so logs continue to identify the source
+  component.
+
+## Troubleshooting Data Gaps
+
+- If Prometheus shows `target down`, verify that `redis-exporter` can resolve the Redis
+  host and that credentials are correct. Check container logs with
+  `docker compose logs redis-exporter`.
+- If Grafana has no data, confirm the Prometheus datasource is healthy via *Connections →
+  Data sources* inside Grafana and validate the scrape URLs match your docker network.
+- When running locally, remember to pass the `cache-monitoring` profile; otherwise the
+  monitoring stack stays disabled to keep resource usage low.

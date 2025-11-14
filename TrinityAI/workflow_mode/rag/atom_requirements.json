@@ -1,0 +1,323 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Detailed parameter requirements for each atom to enable proper execution in Stream AI",
+    "last_updated": "2025-11-05"
+  },
+  "atoms": {
+    "merge": {
+      "required_parameters": {
+        "file1": {
+          "type": "string",
+          "description": "First file to merge (full path or filename)",
+          "example": "uk_beans.arrow"
+        },
+        "file2": {
+          "type": "string",
+          "description": "Second file to merge (full path or filename)",
+          "example": "uk_mayo.arrow"
+        }
+      },
+      "optional_parameters": {
+        "join_columns": {
+          "type": "string",
+          "description": "Columns to join on (comma-separated)",
+          "default": "auto-detect common columns",
+          "example": "id,date"
+        },
+        "join_type": {
+          "type": "string",
+          "description": "Type of join",
+          "default": "inner",
+          "options": ["inner", "outer", "left", "right"],
+          "example": "inner"
+        }
+      },
+      "endpoint": "/trinityai/merge",
+      "prompt_template": "Merge {file1} and {file2} on common columns using {join_type} join"
+    },
+    "concat": {
+      "required_parameters": {
+        "file1": {
+          "type": "string",
+          "description": "First file to concatenate",
+          "example": "sales_q1.arrow"
+        },
+        "file2": {
+          "type": "string",
+          "description": "Second file to concatenate",
+          "example": "sales_q2.arrow"
+        }
+      },
+      "optional_parameters": {
+        "concat_direction": {
+          "type": "string",
+          "description": "Direction of concatenation",
+          "default": "vertical",
+          "options": ["vertical", "horizontal"],
+          "example": "vertical"
+        }
+      },
+      "endpoint": "/trinityai/concat",
+      "prompt_template": "Concatenate {file1} and {file2} {concat_direction}ly"
+    },
+    "groupby-wtg-avg": {
+      "required_parameters": {
+        "data_source": {
+          "type": "string",
+          "description": "File or DataFrame to group",
+          "example": "sales_data.arrow"
+        },
+        "group_columns": {
+          "type": "array",
+          "description": "Columns to group by",
+          "example": ["region", "product"]
+        }
+      },
+      "optional_parameters": {
+        "aggregations": {
+          "type": "object",
+          "description": "Aggregation functions for columns",
+          "default": {"*": "sum"},
+          "example": {"revenue": "sum", "quantity": "mean"}
+        },
+        "weight_column": {
+          "type": "string",
+          "description": "Column for weighted average",
+          "default": null,
+          "example": "units"
+        }
+      },
+      "endpoint": "/trinityai/groupby",
+      "prompt_template": "Group {data_source} by {group_columns} and calculate {aggregations}"
+    },
+    "dataframe-operations": {
+      "required_parameters": {
+        "data_source": {
+          "type": "string",
+          "description": "File or DataFrame to operate on",
+          "example": "sales.arrow"
+        },
+        "operation": {
+          "type": "string",
+          "description": "Type of operation",
+          "options": ["filter", "sort", "select", "drop"],
+          "example": "filter"
+        }
+      },
+      "optional_parameters": {
+        "filter_condition": {
+          "type": "string",
+          "description": "Filter condition for filtering",
+          "example": "revenue > 1000"
+        },
+        "sort_columns": {
+          "type": "array",
+          "description": "Columns to sort by",
+          "example": ["date", "revenue"]
+        },
+        "select_columns": {
+          "type": "array",
+          "description": "Columns to select",
+          "example": ["date", "region", "revenue"]
+        }
+      },
+      "endpoint": "/trinityai/dataframe-operations",
+      "prompt_template": "{operation} {data_source} where {filter_condition}"
+    },
+    "create-column": {
+      "required_parameters": {
+        "data_source": {
+          "type": "string",
+          "description": "File or DataFrame",
+          "example": "sales.arrow"
+        },
+        "new_column_name": {
+          "type": "string",
+          "description": "Name of new column",
+          "example": "profit"
+        },
+        "formula": {
+          "type": "string",
+          "description": "Calculation formula",
+          "example": "revenue - cost"
+        }
+      },
+      "optional_parameters": {},
+      "endpoint": "/trinityai/create-transform",
+      "prompt_template": "In {data_source}, create column {new_column_name} = {formula}"
+    },
+    "chart-maker": {
+      "required_parameters": {
+        "data_source": {
+          "type": "string",
+          "description": "Data to visualize",
+          "example": "grouped_data"
+        },
+        "chart_type": {
+          "type": "string",
+          "description": "Type of chart",
+          "options": ["bar", "line", "scatter", "pie", "heatmap"],
+          "example": "bar"
+        }
+      },
+      "optional_parameters": {
+        "x_column": {
+          "type": "string",
+          "description": "X-axis column",
+          "example": "region"
+        },
+        "y_column": {
+          "type": "string",
+          "description": "Y-axis column",
+          "example": "revenue"
+        },
+        "title": {
+          "type": "string",
+          "description": "Chart title",
+          "default": "Auto-generated",
+          "example": "Revenue by Region"
+        }
+      },
+      "endpoint": "/trinityai/chart-maker",
+      "prompt_template": "Create {chart_type} chart from {data_source} showing {y_column} by {x_column}"
+    },
+    "feature-overview": {
+      "required_parameters": {
+        "data_source": {
+          "type": "string",
+          "description": "File or DataFrame to analyze",
+          "example": "sales.arrow"
+        }
+      },
+      "optional_parameters": {},
+      "endpoint": "/trinityai/feature-overview",
+      "prompt_template": "Generate statistical overview of {data_source}"
+    },
+    "correlation": {
+      "required_parameters": {
+        "data_source": {
+          "type": "string",
+          "description": "File or DataFrame with numeric columns",
+          "example": "sales.arrow"
+        }
+      },
+      "optional_parameters": {
+        "columns": {
+          "type": "array",
+          "description": "Specific columns to correlate",
+          "default": "all numeric columns",
+          "example": ["revenue", "cost", "profit"]
+        },
+        "method": {
+          "type": "string",
+          "description": "Correlation method",
+          "default": "pearson",
+          "options": ["pearson", "spearman", "kendall"],
+          "example": "pearson"
+        }
+      },
+      "endpoint": "/trinityai/correlation",
+      "prompt_template": "Calculate {method} correlation for {data_source}"
+    },
+    "explore": {
+      "required_parameters": {
+        "data_source": {
+          "type": "string",
+          "description": "File or DataFrame to explore",
+          "example": "sales.arrow"
+        }
+      },
+      "optional_parameters": {},
+      "endpoint": "/trinityai/explore",
+      "prompt_template": "Explore and analyze {data_source}"
+    },
+    "data-upload-validate": {
+      "required_parameters": {
+        "file_path": {
+          "type": "string",
+          "description": "Path to file to upload",
+          "example": "sales.csv"
+        }
+      },
+      "optional_parameters": {
+        "file_type": {
+          "type": "string",
+          "description": "Type of file",
+          "default": "auto-detect",
+          "options": ["csv", "excel", "arrow"],
+          "example": "csv"
+        }
+      },
+      "endpoint": "/trinityai/upload",
+      "prompt_template": "Upload and validate {file_path}"
+    }
+  },
+  "parameter_extraction_guide": {
+    "merge": {
+      "example_queries": [
+        "merge uk beans and uk mayo → {file1: 'uk_beans.arrow', file2: 'uk_mayo.arrow'}",
+        "join sales and inventory on product_id → {file1: 'sales', file2: 'inventory', join_columns: 'product_id'}",
+        "outer join customers with orders → {file1: 'customers', file2: 'orders', join_type: 'outer'}"
+      ],
+      "extraction_rules": [
+        "Look for file names mentioned in query",
+        "Add .arrow extension if not present",
+        "Detect join type from keywords: 'inner', 'outer', 'left', 'right'",
+        "Auto-detect join columns if not specified"
+      ]
+    },
+    "concat": {
+      "example_queries": [
+        "concat q1 sales and q2 sales → {file1: 'q1_sales', file2: 'q2_sales', concat_direction: 'vertical'}",
+        "stack january and february data → {file1: 'january', file2: 'february', concat_direction: 'vertical'}",
+        "append columns from features → {file1: 'data', file2: 'features', concat_direction: 'horizontal'}"
+      ],
+      "extraction_rules": [
+        "Default to vertical concatenation",
+        "Detect horizontal if keywords: 'columns', 'horizontal', 'side by side'",
+        "Add .arrow extension if files don't have extension"
+      ]
+    },
+    "groupby-wtg-avg": {
+      "example_queries": [
+        "group by region → {group_columns: ['region']}",
+        "group sales by product and category → {group_columns: ['product', 'category']}",
+        "aggregate revenue by store → {group_columns: ['store'], aggregations: {'revenue': 'sum'}}"
+      ],
+      "extraction_rules": [
+        "Extract column names after 'group by' or 'aggregate by'",
+        "Detect aggregation type: sum, mean, count, min, max",
+        "Default aggregation is sum for all numeric columns"
+      ]
+    },
+    "dataframe-operations": {
+      "example_queries": [
+        "filter revenue > 1000 → {operation: 'filter', filter_condition: 'revenue > 1000'}",
+        "sort by date → {operation: 'sort', sort_columns: ['date']}",
+        "select region and revenue columns → {operation: 'select', select_columns: ['region', 'revenue']}"
+      ],
+      "extraction_rules": [
+        "Detect operation type from keywords",
+        "Extract column names and conditions",
+        "Handle comparison operators: >, <, >=, <=, ==, !="
+      ]
+    },
+    "chart-maker": {
+      "example_queries": [
+        "create bar chart → {chart_type: 'bar'}",
+        "plot revenue by region → {chart_type: 'bar', x_column: 'region', y_column: 'revenue'}",
+        "line chart of sales over time → {chart_type: 'line', x_column: 'date', y_column: 'sales'}"
+      ],
+      "extraction_rules": [
+        "Detect chart type from keywords: bar, line, scatter, pie",
+        "Extract column names for x and y axes",
+        "Default to bar chart if type not specified"
+      ]
+    }
+  }
+}
+
+
+
+

@@ -1,9 +1,27 @@
 import logging
+from dataclasses import dataclass
+from typing import Any, Dict
+
 import requests
-from django.utils import timezone
+
 from .models import EngineRegistry, TaskRun
 
 logger = logging.getLogger(__name__)
+
+
+class EngineExecutionError(Exception):
+    """Represents a failure while invoking a compute engine."""
+
+    def __init__(self, message: str, *, engine: EngineRegistry | None = None) -> None:
+        super().__init__(message)
+        self.engine = engine
+
+
+@dataclass(slots=True)
+class EngineExecutionResult:
+    engine: EngineRegistry
+    payload: Dict[str, Any]
+
 
 class OrchestratorService:
     @staticmethod
@@ -14,12 +32,8 @@ class OrchestratorService:
         return engines.first()  # or implement round-robin / load-aware logic
 
     @staticmethod
-    def run_task(task_run: TaskRun):
+    def run_task(task_run: TaskRun) -> EngineExecutionResult:
         engine = OrchestratorService.select_engine()
-        task_run.engine = engine
-        task_run.status = TaskRun.STATUS_RUNNING
-        task_run.save(update_fields=["engine", "status", "updated_at"])
-
         url = f"{engine.base_url.rstrip('/')}{engine.run_endpoint}"
         payload = {
             "atom_slug": task_run.atom_slug,
@@ -30,13 +44,14 @@ class OrchestratorService:
         try:
             resp = requests.post(url, json=payload, timeout=60)
             resp.raise_for_status()
+        except requests.RequestException as exc:
+            logger.exception("TaskRun %s failed to reach engine", task_run.id)
+            raise EngineExecutionError(str(exc), engine=engine) from exc
+
+        try:
             result = resp.json()
-            task_run.output = result
-            task_run.status = TaskRun.STATUS_SUCCESS
-        except Exception as e:
-            logger.exception("TaskRun %s failed", task_run.id)
-            task_run.error = str(e)
-            task_run.status = TaskRun.STATUS_FAILURE
-        finally:
-            task_run.updated_at = timezone.now()
-            task_run.save(update_fields=["output", "error", "status", "updated_at"])
+        except ValueError as exc:
+            logger.exception("TaskRun %s returned invalid JSON", task_run.id)
+            raise EngineExecutionError("Engine response was not valid JSON", engine=engine) from exc
+
+        return EngineExecutionResult(engine=engine, payload=result)

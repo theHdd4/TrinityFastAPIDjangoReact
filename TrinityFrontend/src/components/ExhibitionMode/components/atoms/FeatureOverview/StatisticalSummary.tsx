@@ -24,7 +24,7 @@ const StatisticalSummary: React.FC<FeatureOverviewComponentProps> = ({ metadata,
   );
 
   return (
-    <div className={containerClass}>
+    <div className={`${containerClass} w-full max-w-full min-w-0`}>
       {summaryContent ?? (
         <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
           Statistical summary will be displayed here after saving combinations in laboratory mode.

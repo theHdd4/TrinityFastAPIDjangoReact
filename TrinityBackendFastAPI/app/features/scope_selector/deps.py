@@ -13,10 +13,12 @@ except ImportError:  # tests provide a stub without AsyncIOMotorDatabase
         """Fallback type used only for testing."""
         pass
 import os
-import redis
-from redis import Redis
+from typing import Any, AsyncGenerator, Optional
+
 from minio import Minio
-from typing import AsyncGenerator, Optional, Any
+
+from app.core.feature_cache import FeatureCacheRouter, feature_cache
+from app.core.redis import get_redis_settings
 
 from .config import settings
 
@@ -31,21 +33,16 @@ MONGO_URI = settings.mongo_uri
 mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(MONGO_URI)
 db = mongo_client[settings.mongo_source_database]
 
-# Initialize Redis client
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
-redis_db = int(os.getenv("REDIS_DB", "0"))
+_redis_settings = get_redis_settings()
+redis_client: FeatureCacheRouter = feature_cache.router("scope_selector")
 
-# Initialize Redis client with type hint
-redis_client: Redis = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    db=redis_db,
-    decode_responses=True,  # Changed to True for string responses
-    socket_connect_timeout=5,
-    socket_timeout=5,
-    retry_on_timeout=True
-)
+if os.getenv("ENVIRONMENT", "production").lower() == "development":
+    logger.info(
+        "Scope selector using shared Redis %s:%s (db %s)",
+        _redis_settings.host,
+        _redis_settings.port,
+        _redis_settings.db,
+    )
 
 # Initialize MinIO client
 minio_client: Minio = Minio(
@@ -77,7 +74,7 @@ def get_mongo_client() -> AsyncIOMotorClient:
     return mongo_client
 
 
-def get_redis_client() -> Redis:
+def get_redis_client() -> FeatureCacheRouter:
     """Get Redis client instance."""
     return redis_client
 

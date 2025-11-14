@@ -1,10 +1,12 @@
-import os
-import pandas as pd
 import io
-from minio import Minio
-import redis
+import os
 from io import BytesIO
+
+import pandas as pd
+from minio import Minio
+
 from app.DataStorageRetrieval.arrow_client import download_dataframe
+from app.core.feature_cache import feature_cache
 
 # MinIO config
 # Default to the development MinIO service if not explicitly configured
@@ -20,10 +22,7 @@ CLIENT_NAME = os.getenv("CLIENT_NAME", "default_client")
 APP_NAME = os.getenv("APP_NAME", "default_app")
 PROJECT_NAME = os.getenv("PROJECT_NAME", "default_project")
 
-# Redis config
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=False)
+redis_client = feature_cache.router("merge")
 
 OBJECT_PREFIX = f"{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/"
 

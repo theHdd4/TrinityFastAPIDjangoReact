@@ -1,12 +1,15 @@
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Depends
 import pandas as pd
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import io
 import uuid
 from app.features.concat.deps import minio_client, OBJECT_PREFIX, MINIO_BUCKET, redis_client
+from app.core.observability import timing_dependency_factory
 
-router = APIRouter()
+timing_dependency = timing_dependency_factory("app.features.dataframe_operations")
+
+router = APIRouter(dependencies=[Depends(timing_dependency)])
 
 @router.post("/save")
 async def save_dataframe(

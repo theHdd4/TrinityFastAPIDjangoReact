@@ -1,6 +1,8 @@
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
-import redis
+
+from motor.motor_asyncio import AsyncIOMotorClient
+
+from app.core.feature_cache import feature_cache
 
 # MongoDB configuration - use same pattern as feature overview
 MONGO_URI = os.getenv(
@@ -12,8 +14,7 @@ client = AsyncIOMotorClient(MONGO_URI)
 db = client["correlation_db"]
 
 # Redis configuration
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
-redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=False)
+redis_client = feature_cache.router("correlation")
 
 async def get_correlation_results_collection():
     """Get collection for storing correlation analysis results"""

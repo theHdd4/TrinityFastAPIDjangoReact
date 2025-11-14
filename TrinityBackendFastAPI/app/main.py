@@ -74,13 +74,13 @@ def _default_cors_origins() -> List[str]:
     frontend_port = os.getenv("FRONTEND_PORT", "8080").strip() or "8080"
 
     defaults = [
-        "http://10.182.134.220:8080",
+        "http://10.57.91.220:8080",
         "http://10.2.2.142:8080",
         "http://10.2.4.48:8080",
         "http://127.0.0.1:8080",
         "http://10.2.1.207:8080",
         "http://172.22.64.1:8080",
-        "http://10.2.3.55:8080",
+        "http://192.168.31.63:8080",
         "https://trinity.quantmatrixai.com",
         "https://trinity-dev.quantmatrixai.com",
         "http://localhost:8080",

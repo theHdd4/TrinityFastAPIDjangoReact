@@ -54,9 +54,6 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
     const isChecked = Boolean(checked);
     const updatedDimensions = { ...dimensionMap };
     
-    console.log(`🔄 Toggling dimension: ${dimensionName}.${column} to ${isChecked}`);
-    console.log(`🔄 Current dimensionMap before toggle:`, dimensionMap);
-    
     if (!updatedDimensions[dimensionName]) {
       updatedDimensions[dimensionName] = [];
     }
@@ -69,7 +66,6 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
       updatedDimensions[dimensionName] = updatedDimensions[dimensionName].filter(col => col !== column);
     }
     
-    console.log(`🔄 Updated dimensionMap after toggle:`, updatedDimensions);
     onDimensionChange(updatedDimensions);
   };
 
@@ -79,12 +75,15 @@ const FeatureOverviewVisualisation: React.FC<Props> = ({
         <label className="text-sm font-medium text-gray-700 block mb-2">Select Dependant Variables for SKU Analysis</label>
         <div className="grid grid-cols-2 gap-2">
           {numericList.map(c => (
-            <CheckboxTemplate
-              key={c}
-              label={c}
-              checked={yValues.includes(c)}
-              onCheckedChange={val => toggle(c, val)}
-            />
+            <div key={c} title={c} className="cursor-pointer select-none">
+              <CheckboxTemplate
+                label={c}
+                checked={yValues.includes(c)}
+                onCheckedChange={val => toggle(c, val)}
+                className="w-full"
+                labelClassName="text-sm cursor-pointer truncate max-w-full"
+              />
+            </div>
           ))}
         </div>
       </Card>

@@ -24,12 +24,15 @@ export type ManifestChartRendererProps = {
   theme?: string;
   title?: string;
   showLegend?: boolean;
-  showAxisLabels?: boolean;
+  // showAxisLabels?: boolean;
+  showXAxisLabels?: boolean;
+  showYAxisLabels?: boolean;
   showDataLabels?: boolean;
   showGrid?: boolean;
   xAxisLabel?: string;
   yAxisLabel?: string;
   sortOrder?: 'asc' | 'desc' | null;
+  seriesSettings?: Record<string, { color?: string; showDataLabels?: boolean }>;
 };
 
 const normaliseManifestChartType = (
@@ -84,7 +87,9 @@ export const buildChartRendererPropsFromManifest = (
     theme: manifest.chart.theme,
     title: manifest.label ?? manifest.metric,
     showLegend: manifest.chart.showLegend,
-    showAxisLabels: manifest.chart.showAxisLabels,
+    // showAxisLabels: manifest.chart.showAxisLabels,
+    showXAxisLabels: manifest.chart.showXAxisLabels,
+    showYAxisLabels: manifest.chart.showYAxisLabels,
     showDataLabels: manifest.chart.showDataLabels,
     showGrid: manifest.chart.showGrid,
     xAxisLabel: manifest.chart.xAxisLabel,
@@ -95,6 +100,7 @@ export const buildChartRendererPropsFromManifest = (
         : sortOrder === null
         ? null
         : undefined,
+    seriesSettings: manifest.chart.seriesSettings,
   };
 };
 

@@ -1,14 +1,15 @@
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, VALIDATE_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
   getEnvironmentContext, 
-  getFilename, 
   createMessage, 
   createSuccessMessage, 
   createErrorMessage,
   processSmartResponse,
   executePerformOperation,
-  validateFileInput 
+  validateFileInput,
+  constructFullPath
 } from './utils';
 
 export const createColumnHandler: AtomHandler = {
@@ -119,6 +120,8 @@ export const createColumnHandler: AtomHandler = {
     // Map AI file paths to correct file paths for UI compatibility (similar to concat)
     let mappedDataSource = cfg.object_name || '';
     
+    let matchedFrame: any = null;
+
     try {
       console.log('🔄 Fetching frames to map AI file paths for create-column...');
       const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
@@ -136,6 +139,7 @@ export const createColumnHandler: AtomHandler = {
           let exactMatch = frames.find(f => f.object_name === aiFilePath);
           if (exactMatch) {
             console.log(`✅ Exact match found for create-column ${aiFilePath}: ${exactMatch.object_name}`);
+            matchedFrame = exactMatch;
             return exactMatch.object_name;
           }
           
@@ -148,6 +152,7 @@ export const createColumnHandler: AtomHandler = {
           
           if (filenameMatch) {
             console.log(`✅ Filename match found for create-column ${aiFilePath} -> ${filenameMatch.object_name}`);
+            matchedFrame = filenameMatch;
             return filenameMatch.object_name;
           }
           
@@ -161,7 +166,26 @@ export const createColumnHandler: AtomHandler = {
           
           if (partialMatch) {
             console.log(`✅ Partial match found for create-column ${aiFilePath} -> ${partialMatch.object_name}`);
+            matchedFrame = partialMatch;
             return partialMatch.object_name;
+          }
+
+          // Try alias match by base name (handles timestamped auto-save filenames)
+          const aiBaseName = aiFileName ? aiFileName.replace(/\.[^.]+$/, '') : '';
+          if (aiBaseName) {
+            let aliasMatch = frames.find(f => {
+              const candidate =
+                (f.object_name?.split('/').pop() ||
+                  f.csv_name?.split('/').pop() ||
+                  '').replace(/\.[^.]+$/, '');
+              return candidate.startsWith(aiBaseName);
+            });
+
+            if (aliasMatch) {
+              console.log(`✅ Alias match found for create-column ${aiFilePath} -> ${aliasMatch.object_name}`);
+              matchedFrame = aliasMatch;
+              return aliasMatch.object_name;
+            }
           }
           
           console.log(`⚠️ No match found for create-column ${aiFilePath}, using original value`);
@@ -181,17 +205,130 @@ export const createColumnHandler: AtomHandler = {
       console.error('❌ Error fetching frames for create-column mapping:', error);
     }
     
-    // 🔧 CRITICAL FIX: Set dataSource first to trigger column loading, then load columns
+    // 🔧 Build environment context with fallbacks from matched file and AI payload
+    let envWithFallback = (() => {
+      const derived = { ...envContext };
+      const candidatePath = matchedFrame?.object_name || mappedDataSource || cfg.object_name || '';
+
+      if (candidatePath.includes('/')) {
+        const parts = candidatePath.split('/');
+        if (parts.length >= 4) {
+          if (!derived.client_name) derived.client_name = parts[0];
+          if (!derived.app_name) derived.app_name = parts[1];
+          if (!derived.project_name) derived.project_name = parts[2];
+        }
+      }
+
+      return derived;
+    })();
+
+    const hydrateEnvContext = async () => {
+      try {
+        const params = new URLSearchParams();
+        if (envWithFallback.client_name) params.append('client_name', envWithFallback.client_name);
+        if (envWithFallback.app_name) params.append('app_name', envWithFallback.app_name);
+        if (envWithFallback.project_name) params.append('project_name', envWithFallback.project_name);
+
+        const prefixUrl = params.toString()
+          ? `${VALIDATE_API}/get_object_prefix?${params.toString()}`
+          : `${VALIDATE_API}/get_object_prefix`;
+
+        const prefixRes = await fetch(prefixUrl);
+        if (prefixRes.ok) {
+          const prefixData = await prefixRes.json();
+          if (prefixData.environment) {
+            envWithFallback = {
+              client_name: envWithFallback.client_name || prefixData.environment.CLIENT_NAME || '',
+              app_name: envWithFallback.app_name || prefixData.environment.APP_NAME || '',
+              project_name: envWithFallback.project_name || prefixData.environment.PROJECT_NAME || ''
+            };
+          }
+          if (prefixData.prefix) {
+            cachedPrefix = prefixData.prefix;
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ Failed to hydrate create-column environment context:', err);
+      }
+    };
+
+    let cachedPrefix: string | null = null;
+    await hydrateEnvContext();
+    const ensureFullObjectName = async (objectName: string): Promise<string> => {
+      if (!objectName) {
+        return objectName;
+      }
+
+      // Keep fully qualified paths that match the active context
+      if (
+        objectName.includes('/') &&
+        envWithFallback.client_name &&
+        envWithFallback.app_name &&
+        envWithFallback.project_name &&
+        objectName.startsWith(`${envWithFallback.client_name}/${envWithFallback.app_name}/${envWithFallback.project_name}/`)
+      ) {
+        return objectName;
+      }
+
+      if (cachedPrefix === null) {
+        try {
+          const params = new URLSearchParams();
+          if (envWithFallback.client_name) params.append('client_name', envWithFallback.client_name);
+          if (envWithFallback.app_name) params.append('app_name', envWithFallback.app_name);
+          if (envWithFallback.project_name) params.append('project_name', envWithFallback.project_name);
+
+          const prefixUrl = params.toString()
+            ? `${VALIDATE_API}/get_object_prefix?${params.toString()}`
+            : `${VALIDATE_API}/get_object_prefix`;
+
+          const prefixRes = await fetch(prefixUrl);
+          if (prefixRes.ok) {
+            const prefixData = await prefixRes.json();
+            cachedPrefix = prefixData.prefix || '';
+          } else {
+            cachedPrefix = '';
+          }
+        } catch (err) {
+          console.warn('⚠️ Failed to fetch object prefix for create-column:', err);
+          cachedPrefix = '';
+        }
+      }
+
+      if (cachedPrefix) {
+        return `${cachedPrefix}${objectName}`;
+      }
+
+      const constructed = constructFullPath(objectName, envWithFallback);
+      if (constructed && constructed !== objectName) {
+        return constructed;
+      }
+
+      return objectName;
+    };
+
+    const resolvedDataSource = await ensureFullObjectName(mappedDataSource || cfg.object_name || '');
+
+    console.log('🧭 Resolved create-column data source:', {
+      original: cfg.object_name,
+      mappedDataSource,
+      resolvedDataSource,
+      client_name: envWithFallback.client_name,
+      app_name: envWithFallback.app_name,
+      project_name: envWithFallback.project_name
+    });
+
+    cfg.object_name = resolvedDataSource;
+
     const settingsToUpdate = { 
       aiConfig: cfg,
       aiMessage: data.message,
       operationCompleted: false,
       // Auto-populate the CreateColumn interface - EXACTLY like GroupBy
-      dataSource: mappedDataSource, // Use mapped value for UI
+      dataSource: resolvedDataSource,
       bucketName: cfg.bucket_name || 'trinity',
       selectedIdentifiers: cfg.identifiers || [],
       // 🔧 CRITICAL FIX: Set the file key for column loading
-      file_key: mappedDataSource, // Use mapped value for file operations
+      file_key: resolvedDataSource,
       // 🔧 CRITICAL FIX: Set operations in the format expected by CreateColumnCanvas
       // This ensures the UI automatically displays the AI-configured operations
       operations: operations.map((op, index) => ({
@@ -204,13 +341,13 @@ export const createColumnHandler: AtomHandler = {
         param: op.param
       })),
       // Include environment context
-      envContext,
+      envContext: envWithFallback,
       lastUpdateTime: Date.now()
     };
     
     console.log('🔧 Updating atom settings with:', {
       atomId,
-      dataSource: mappedDataSource,
+      dataSource: resolvedDataSource,
       operationsCount: operations.length,
       operations: operations,
       fullSettings: settingsToUpdate
@@ -219,22 +356,31 @@ export const createColumnHandler: AtomHandler = {
     updateAtomSettings(atomId, settingsToUpdate);
     
     // 🔧 CRITICAL FIX: Load columns directly after setting dataSource
-    if (mappedDataSource) {
+    if (resolvedDataSource) {
       try {
-        console.log('🔄 Loading columns for AI-selected data source:', mappedDataSource);
+        console.log('🔄 Loading columns for AI-selected data source:', resolvedDataSource);
         
         // 🔧 CRITICAL FIX: Get the current prefix and construct full object name
-        let fullObjectName = mappedDataSource;
+        let fullObjectName = resolvedDataSource;
         try {
-          const prefixRes = await fetch(`${VALIDATE_API}/get_object_prefix`);
+          const prefixParams = new URLSearchParams();
+          if (envWithFallback.client_name) prefixParams.append('client_name', envWithFallback.client_name);
+          if (envWithFallback.app_name) prefixParams.append('app_name', envWithFallback.app_name);
+          if (envWithFallback.project_name) prefixParams.append('project_name', envWithFallback.project_name);
+
+          const prefixUrl = prefixParams.toString()
+            ? `${VALIDATE_API}/get_object_prefix?${prefixParams.toString()}`
+            : `${VALIDATE_API}/get_object_prefix`;
+
+          const prefixRes = await fetch(prefixUrl);
           if (prefixRes.ok) {
             const prefixData = await prefixRes.json();
             const prefix = prefixData.prefix || '';
             console.log('🔧 Current prefix:', prefix);
             
             // Construct full object name if we have a prefix
-            if (prefix && !mappedDataSource.startsWith(prefix)) {
-              fullObjectName = `${prefix}${mappedDataSource}`;
+            if (prefix && !resolvedDataSource.startsWith(prefix)) {
+              fullObjectName = `${prefix}${resolvedDataSource}`;
               console.log('🔧 Constructed full object name:', fullObjectName);
             }
           }
@@ -245,7 +391,8 @@ export const createColumnHandler: AtomHandler = {
         // Fetch column summary to populate allColumns with full object name
         const columnRes = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fullObjectName)}`);
         if (columnRes.ok) {
-          const columnData = await columnRes.json();
+          const rawColumn = await columnRes.json();
+          const columnData = await resolveTaskResponse<{ summary?: any[] }>(rawColumn);
           const allColumns = Array.isArray(columnData.summary) ? columnData.summary.filter(Boolean) : [];
           
           console.log('✅ Columns loaded successfully:', allColumns.length);
@@ -254,19 +401,20 @@ export const createColumnHandler: AtomHandler = {
           updateAtomSettings(atomId, {
             allColumns: allColumns,
             // Also set the CSV display name
-            csvDisplay: mappedDataSource.split('/').pop() || mappedDataSource
+            csvDisplay: resolvedDataSource.split('/').pop() || resolvedDataSource
           });
           
           // 🔧 CRITICAL FIX: Also trigger the handleFrameChange logic to set up identifiers
           try {
             // Try to fetch identifiers from backend classification
-            const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(mappedDataSource)}`);
+            const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(resolvedDataSource)}`);
             console.log('🔍 Classification response status:', resp.status);
             if (resp.ok) {
-              const classificationData = await resp.json();
+              const rawClassification = await resp.json();
+              const classificationData = await resolveTaskResponse<Record<string, any>>(rawClassification);
               console.log('🔍 Classification identifiers:', classificationData.identifiers);
               updateAtomSettings(atomId, {
-                selectedIdentifiers: classificationData.identifiers || []
+                selectedIdentifiers: (classificationData.identifiers as string[]) || []
               });
             } else {
               // Fallback to categorical columns
@@ -303,7 +451,7 @@ export const createColumnHandler: AtomHandler = {
           }
           
         } else {
-          console.warn('⚠️ Failed to load columns for data source:', mappedDataSource);
+          console.warn('⚠️ Failed to load columns for data source:', resolvedDataSource);
         }
       } catch (error) {
         console.error('❌ Error loading columns for data source:', error);
@@ -312,7 +460,7 @@ export const createColumnHandler: AtomHandler = {
     
     // 🔧 FIX: No need for duplicate success message - smart_response already shown at the top
     console.log('📋 Create Column configuration:', {
-      file: mappedDataSource,
+      file: resolvedDataSource,
       operations: operations.map(op => `${op.type}(${op.columns.join(', ')})`),
       session: sessionId
     });
@@ -322,16 +470,15 @@ export const createColumnHandler: AtomHandler = {
       console.log('🚀 Calling Create Column perform endpoint immediately (like concat)');
       console.log('📋 Operations to execute:', operations);
       
-      // Extract just the filename if it's a full path
-      const getFilename = (filePath: string) => {
-        if (!filePath) return "";
-        return filePath.includes("/") ? filePath.split("/").pop() || filePath : filePath;
-      };
-      
       // 🔧 CRITICAL FIX: Convert to FormData format that CreateColumn backend expects
       const formData = new FormData();
-      formData.append('object_names', getFilename(cfg.object_name || ''));
+      const { client_name = '', app_name = '', project_name = '' } = envWithFallback || {};
+
+      formData.append('object_names', cfg.object_name || resolvedDataSource || '');
       formData.append('bucket_name', cfg.bucket_name || 'trinity');
+      formData.append('client_name', client_name);
+      formData.append('app_name', app_name);
+      formData.append('project_name', project_name);
       
       // Add operations in the format backend expects
       operations.forEach((op, index) => {
@@ -366,8 +513,11 @@ export const createColumnHandler: AtomHandler = {
       formData.append('identifiers', identifiers.join(','));
       
       console.log('📁 Auto-executing with form data:', {
-        object_names: getFilename(cfg.object_name || ''),
+        object_names: cfg.object_name || resolvedDataSource || '',
         bucket_name: cfg.bucket_name || 'trinity',
+        client_name,
+        app_name,
+        project_name,
         operations: operations.map((op, index) => ({
           index,
           type: op.type,
@@ -407,7 +557,7 @@ export const createColumnHandler: AtomHandler = {
         
         // Add success message
         const completionDetails = {
-          'File': mappedDataSource || 'N/A',
+          'File': resolvedDataSource || 'N/A',
           'Operations': operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', '),
           'Result': 'New columns created successfully'
         };

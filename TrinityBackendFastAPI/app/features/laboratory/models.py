@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class LaboratoryCardRequest(BaseModel):
     """Schema describing the payload for creating a laboratory card."""
 
-    atom_id: str = Field(..., alias="atomId", description="Identifier of the atom to render inside the card")
+    atom_id: Optional[str] = Field(None, alias="atomId", description="Optional identifier of the atom to render inside the card. Can be None for empty cards.")
     molecule_id: Optional[str] = Field(
         default=None,
         alias="moleculeId",
