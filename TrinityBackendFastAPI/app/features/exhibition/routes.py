@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from motor.motor_asyncio import AsyncIOMotorCollection
@@ -12,6 +12,7 @@ from motor.motor_asyncio import AsyncIOMotorCollection
 from .deps import get_exhibition_layout_collection
 from .persistence import save_exhibition_list_configuration
 from .share_links import fetch_shared_link_context
+from .websocket import handle_exhibition_sync
 from .schemas import (
     ExhibitionConfigurationIn,
     ExhibitionConfigurationOut,
@@ -32,6 +33,29 @@ from .export import (
 
 router = APIRouter(prefix="/exhibition", tags=["Exhibition"])
 storage = ExhibitionStorage()
+
+
+@router.websocket("/sync/{client_name}/{app_name}/{project_name}")
+async def exhibition_sync_websocket(
+    websocket: WebSocket,
+    client_name: str,
+    app_name: str,
+    project_name: str
+):
+    """
+    WebSocket endpoint for real-time collaborative Exhibition Mode synchronization.
+    
+    Handles:
+    - Real-time state broadcasting to all connected clients
+    - Debounced persistence to MongoDB
+    - Version tracking and conflict detection
+    
+    Path parameters:
+    - client_name: Client identifier
+    - app_name: Application identifier
+    - project_name: Project identifier
+    """
+    await handle_exhibition_sync(websocket, client_name, app_name, project_name)
 
 
 @router.get("/configuration", response_model=ExhibitionConfigurationOut)

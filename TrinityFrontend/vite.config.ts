@@ -22,8 +22,11 @@ export default defineConfig(({ mode }) => {
       },
     },
     esbuild: {
-      // Remove console.log, console.warn, and console.error in production
-      drop: isProduction ? ['console', 'debugger'] : [],
+      // DISABLED: Console log removal to allow debugging
+      // Previously removed console.log, console.warn, and console.error in production
+      // Re-enable by uncommenting the line below when ready for production optimization
+      // drop: isProduction ? ['console', 'debugger'] : [],
+      drop: [], // Keep all console logs for debugging
     },
     build: {
       // Additional production optimizations

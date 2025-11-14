@@ -91,6 +91,8 @@ const WorkflowMode = () => {
   const [pendingMoleculeRemoval, setPendingMoleculeRemoval] = useState<string | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  // Ref to track if initial workflow has been loaded (to prevent autosave on initial load)
+  const hasInitialWorkflowLoadedRef = React.useRef(false);
 
   const removeFirstOccurrence = useCallback(<T,>(source: T[] | undefined, value: T): T[] => {
     const list = Array.isArray(source) ? [...source] : [];
@@ -255,16 +257,34 @@ const WorkflowMode = () => {
   }, []);
 
   const handleInsertMolecule = (referenceMoleculeId: string, position: 'left' | 'right') => {
+    // CRITICAL FIX: Generate unique ID by checking existing IDs, not just titles
+    // This prevents conflicts with renamed molecules that might have old ID patterns
+    const existingIds = new Set(canvasMolecules.map(m => m.id));
+    
     // Generate numbered name automatically
     const existingNewMolecules = canvasMolecules.filter(m => 
       m.title === 'New Molecule' || m.title.startsWith('New Molecule ')
     );
-    const nextNumber = existingNewMolecules.length + 1;
+    let nextNumber = existingNewMolecules.length + 1;
     const finalName = `New Molecule ${nextNumber}`;
     
     // Generate molecule ID in format: molecule_name-number
-    const moleculeName = finalName.toLowerCase().replace(/\s+/g, '-');
-    const moleculeId = `${moleculeName}-${nextNumber}`;
+    // CRITICAL: Ensure the ID is unique by checking against existing IDs
+    let moleculeName = finalName.toLowerCase().replace(/\s+/g, '-');
+    let moleculeId = `${moleculeName}-${nextNumber}`;
+    
+    // If ID already exists (e.g., from a renamed molecule), append timestamp to make it unique
+    if (existingIds.has(moleculeId)) {
+      console.warn('⚠️ [INSERT] Generated ID already exists, using timestamp to ensure uniqueness:', moleculeId);
+      moleculeId = `${moleculeName}-${Date.now()}`;
+    }
+    
+    console.log('🆕 [INSERT] Generating new molecule:', {
+      name: finalName,
+      id: moleculeId,
+      existingIdsCount: existingIds.size,
+      referenceMoleculeId
+    });
 
     const newMolecule = {
       id: moleculeId,
@@ -282,15 +302,44 @@ const WorkflowMode = () => {
     
     setCustomMolecules(prev => [...prev, newMolecule]);
     
-    // Find the index of the reference molecule
-    const referenceIndex = canvasMolecules.findIndex(m => m.id === referenceMoleculeId);
+    // DEBUG: Log all molecule IDs and the reference ID
+    console.log('🔍 [INSERT] Looking for reference molecule:', {
+      referenceMoleculeId,
+      allMoleculeIds: canvasMolecules.map(m => ({ id: m.id, title: m.title, isActive: m.isActive })),
+      totalMolecules: canvasMolecules.length
+    });
     
+    // Find the index of the reference molecule
+    // CRITICAL: Check both active and inactive molecules, but prioritize active ones
+    let referenceIndex = canvasMolecules.findIndex(m => m.id === referenceMoleculeId);
+    
+    // If not found by ID, try to find by title (fallback for renamed molecules)
     if (referenceIndex === -1) {
-      // Reference molecule not found, just append
+      console.warn('⚠️ [INSERT] Reference molecule not found by ID, trying to find by title...');
+      // This shouldn't happen, but if the ID doesn't match, we can't proceed safely
+      // The issue is likely that the molecule ID changed or the reference is incorrect
+      console.error('❌ [INSERT] Cannot find reference molecule by ID:', referenceMoleculeId);
+      console.error('❌ [INSERT] Available molecule IDs:', canvasMolecules.map(m => m.id));
+      
+      // Still append, but log the error
       setCanvasMolecules(prev => [...prev, newMolecule]);
-      console.log(`✅ Inserted molecule "${finalName}" (reference not found, appended)`);
+      toast({
+        title: 'Insertion Warning',
+        description: `Could not find reference molecule. New molecule "${finalName}" has been appended.`,
+        variant: 'destructive'
+      });
       return;
     }
+    
+    // Verify the reference molecule exists and log its details
+    const referenceMolecule = canvasMolecules[referenceIndex];
+    console.log('✅ [INSERT] Found reference molecule:', {
+      index: referenceIndex,
+      id: referenceMolecule?.id,
+      title: referenceMolecule?.title,
+      isActive: referenceMolecule?.isActive,
+      position
+    });
     
     // When inserting to the RIGHT of a molecule, we need to check if there are standalone chips
     // that should appear immediately after this molecule. If so, the new molecule should be
@@ -606,17 +655,67 @@ const WorkflowMode = () => {
   };
 
   const handleRenameMolecule = (moleculeId: string, newName: string) => {
+    // CRITICAL FIX: Update molecule ID when renaming to prevent ID conflicts
+    // Generate new ID from the new name to avoid conflicts with future insertions
+    const newMoleculeName = newName.toLowerCase().replace(/\s+/g, '-');
+    // Generate a unique ID by appending timestamp to avoid conflicts
+    const newMoleculeId = `${newMoleculeName}-${Date.now()}`;
+    
+    console.log('🔄 [RENAME] Renaming molecule:', {
+      oldId: moleculeId,
+      oldTitle: canvasMolecules.find(m => m.id === moleculeId)?.title,
+      newId: newMoleculeId,
+      newTitle: newName
+    });
+    
+    // Update custom molecules with new ID and title
     setCustomMolecules(prev => 
       prev.map(mol => 
-        mol.id === moleculeId ? { ...mol, title: newName } : mol
+        mol.id === moleculeId 
+          ? { ...mol, id: newMoleculeId, title: newName } 
+          : mol
       )
     );
     
+    // Update canvas molecules with new ID and title
     setCanvasMolecules(prev => 
       prev.map(mol => 
-        mol.id === moleculeId ? { ...mol, title: newName } : mol
+        mol.id === moleculeId 
+          ? { ...mol, id: newMoleculeId, title: newName } 
+          : mol
       )
     );
+    
+    // CRITICAL: Update standalone cards that reference this molecule
+    // Update all references to the old molecule ID to use the new ID
+    setStandaloneCards(prev => prev.map(card => {
+      const updated = { ...card };
+      
+      // Update betweenMolecules array if it contains the old ID
+      if (card.betweenMolecules && Array.isArray(card.betweenMolecules)) {
+        updated.betweenMolecules = card.betweenMolecules.map(id => 
+          id === moleculeId ? newMoleculeId : id
+        ) as [string, string];
+      }
+      
+      // Update afterMoleculeId
+      if (card.afterMoleculeId === moleculeId) {
+        updated.afterMoleculeId = newMoleculeId;
+      }
+      
+      // Update beforeMoleculeId
+      if (card.beforeMoleculeId === moleculeId) {
+        updated.beforeMoleculeId = newMoleculeId;
+      }
+      
+      return updated;
+    }));
+    
+    console.log('✅ [RENAME] Molecule ID updated:', {
+      oldId: moleculeId,
+      newId: newMoleculeId,
+      updatedStandaloneCards: true
+    });
     
     toast({
       title: 'Molecule Renamed',
@@ -2116,13 +2215,19 @@ const WorkflowMode = () => {
   // This performs the same sync logic as handleRenderWorkflow but without navigation
   const syncWorkflowToLaboratory = useCallback(async (): Promise<boolean> => {
     try {
+      console.log('🔄 [SYNC] Starting Workflow to Laboratory sync...');
+      console.log('🔄 [SYNC] Canvas molecules:', canvasMolecules.length, 'Standalone cards:', standaloneCards.length);
+      
       // Check if all molecules have at least one atom (only active molecules)
       const moleculesWithAtoms = canvasMolecules.filter(mol => mol.isActive !== false && mol.atoms && mol.atoms.length > 0);
       
       if (moleculesWithAtoms.length === 0) {
-        console.warn('⚠️ No molecules with atoms - skipping Laboratory sync');
+        console.warn('⚠️ [SYNC] No molecules with atoms - skipping Laboratory sync');
+        console.warn('⚠️ [SYNC] This is normal if you haven\'t assigned atoms to molecules yet');
         return false; // Skip sync if no molecules with atoms
       }
+      
+      console.log('🔄 [SYNC] Found', moleculesWithAtoms.length, 'molecules with atoms, proceeding with sync...');
 
       // Function to convert atom names to atom IDs for Laboratory mode
       const convertAtomNameToId = (atomName: string) => {
@@ -2730,6 +2835,92 @@ const WorkflowMode = () => {
     }
   }, [canvasMolecules, standaloneCards]);
 
+  // Autosave: Automatically save workflow when molecules or cards change
+  useEffect(() => {
+    // Skip autosave on initial load (wait for workflow to be loaded)
+    const hasWorkflowData = canvasMolecules.length > 0 || standaloneCards.length > 0;
+    if (!hasWorkflowData) {
+      // Mark that we've checked and there's no workflow yet
+      if (!hasInitialWorkflowLoadedRef.current) {
+        hasInitialWorkflowLoadedRef.current = true;
+      }
+      return;
+    }
+    
+    // Mark that initial workflow has been loaded
+    if (!hasInitialWorkflowLoadedRef.current) {
+      hasInitialWorkflowLoadedRef.current = true;
+      // Skip autosave on the very first load
+      return;
+    }
+
+    // Debounce autosave to avoid too frequent saves
+    const autosaveTimer = setTimeout(async () => {
+      console.log('🔄 [AUTOSAVE] Triggering workflow autosave...');
+      
+      try {
+        // Get environment variables for MongoDB saving
+        const envStr = localStorage.getItem('env');
+        const env = envStr ? JSON.parse(envStr) : {};
+        const client_name = env.CLIENT_NAME || 'default_client';
+        const app_name = env.APP_NAME || 'default_app';
+        const project_name = env.PROJECT_NAME || 'default_project';
+        
+        console.log('🔍 [AUTOSAVE] Saving workflow with:', { client_name, app_name, project_name });
+
+        // Save workflow configuration
+        const response = await fetch(`${MOLECULES_API}/workflow/save`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            workflow_name: workflowName,
+            canvas_molecules: serializeMoleculesForSave(canvasMolecules),
+            custom_molecules: serializeMoleculesForSave(customMolecules),
+            standalone_cards: standaloneCards,
+            user_id: '',
+            client_name: client_name,
+            app_name: app_name,
+            project_name: project_name
+          })
+        });
+
+        if (response.ok) {
+          console.log('✅ [AUTOSAVE] Workflow configuration saved successfully');
+          
+          // CRITICAL: Always sync to Laboratory Mode during autosave
+          // This ensures Laboratory Mode stays in sync with Workflow Mode changes
+          console.log('🔄 [AUTOSAVE] Syncing to Laboratory Mode...');
+          try {
+            const syncSuccess = await syncWorkflowToLaboratory();
+            
+            if (syncSuccess) {
+              console.log('✅ [AUTOSAVE] Workflow synced to Laboratory Mode successfully');
+            } else {
+              console.warn('⚠️ [AUTOSAVE] Workflow saved but Laboratory sync skipped (no molecules with atoms)');
+              // This is okay - sync is skipped when there are no molecules with atoms
+              // The workflow structure is still saved, and sync will happen when atoms are added
+            }
+          } catch (syncError) {
+            console.error('❌ [AUTOSAVE] Error during Laboratory sync:', syncError);
+            // Don't fail autosave if sync fails - workflow is still saved
+          }
+        } else {
+          const message = await response.text();
+          console.error('❌ [AUTOSAVE] Failed to save workflow configuration:', message);
+        }
+      } catch (error) {
+        console.error('❌ [AUTOSAVE] Autosave error:', error);
+      }
+    }, 3000); // 3 second debounce for autosave
+
+    return () => {
+      clearTimeout(autosaveTimer);
+    };
+  }, [canvasMolecules, customMolecules, standaloneCards, workflowName, syncWorkflowToLaboratory]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Function to save workflow configuration
   const saveWorkflowConfiguration = async () => {
     try {
@@ -2894,6 +3085,9 @@ const WorkflowMode = () => {
           setCanvasMolecules(allCanvasMolecules);
           setCustomMolecules(allCustomMolecules);
           setStandaloneCards(standalone_cards || []);
+          
+          // Mark that initial workflow has been loaded (reset autosave flag)
+          hasInitialWorkflowLoadedRef.current = false;
           
           toast({
             title: "Workflow Loaded",
