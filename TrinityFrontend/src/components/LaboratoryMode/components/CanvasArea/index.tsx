@@ -3226,16 +3226,25 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
   // Sync Laboratory changes to Workflow collection
   const syncWorkflowCollectionOnLaboratorySave = async () => {
     try {
-      console.log('🔄 Syncing Laboratory changes to Workflow collection...');
+      console.log('🔄 [SYNC START] Syncing Laboratory changes to Workflow collection...');
+      console.log('🔄 [SYNC] Function called with pendingChanges:', pendingChanges);
+      console.log('🔄 [SYNC] Current layoutCards count:', Array.isArray(layoutCards) ? layoutCards.length : 0);
 
       const hasPendingChanges = pendingChanges.deletedMolecules.length > 0 || 
                                 pendingChanges.deletedAtoms.length > 0 || 
                                 pendingChanges.addedAtoms.length > 0;
+      console.log('🔄 [SYNC] hasPendingChanges:', hasPendingChanges);
 
       // Get current workflow configuration
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
+      console.log('🔄 [SYNC] Environment config:', { 
+        CLIENT_NAME: env.CLIENT_NAME, 
+        APP_NAME: env.APP_NAME, 
+        PROJECT_NAME: env.PROJECT_NAME 
+      });
 
+      console.log('🔄 [SYNC] Fetching workflow data from:', `${MOLECULES_API}/workflow/get`);
       const response = await fetch(`${MOLECULES_API}/workflow/get`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3248,8 +3257,15 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         })
       });
 
+      console.log('🔄 [SYNC] Fetch response status:', response.status, response.ok);
+      
       if (response.ok) {
         const result = await response.json();
+        console.log('🔄 [SYNC] Fetch result:', { 
+          hasWorkflowData: !!result.workflow_data,
+          moleculesCount: result.workflow_data?.canvas_molecules?.length || 0
+        });
+        
         if (result.workflow_data) {
           // Fetch all molecules from MongoDB (workflow_model_molecule_configuration)
           let updatedCanvasMolecules = [...(result.workflow_data.canvas_molecules || [])];
@@ -3384,13 +3400,26 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           // FIX: Preserve atom order for ALL molecules from Laboratory Mode
           // This ensures that when atoms are added/reordered in Laboratory Mode,
           // their order is preserved in Workflow Mode
+          console.log('🔄 [SYNC] Starting atom order preservation logic...');
           const currentCards = Array.isArray(layoutCards) ? layoutCards : [];
           const allMoleculeCards = currentCards.filter(card => card.moleculeId);
+          console.log('🔄 [SYNC] Total cards:', currentCards.length, 'Molecule cards:', allMoleculeCards.length);
+
+          // CRITICAL FIX: Create a position map once for O(1) lookups instead of O(n) findIndex calls
+          // This maps card.id -> position in the original layoutCards array
+          // This preserves the exact order cards appear in Laboratory Mode, including
+          // when atoms are inserted between existing atoms
+          // MUST be created before grouping to use in logging
+          const cardPositionMap = new Map<string, number>();
+          currentCards.forEach((card, index) => {
+            cardPositionMap.set(card.id, index);
+          });
 
           // Build a map of moleculeId -> ordered atomIds from Laboratory Mode cards
           const moleculeAtomOrderMap = new Map<string, string[]>();
 
           // Group cards by moleculeId
+          // CRITICAL: Preserve the order cards appear in the original array when grouping
           const cardsByMolecule = new Map<string, typeof allMoleculeCards>();
           allMoleculeCards.forEach(card => {
             if (!card.moleculeId) return;
@@ -3400,36 +3429,96 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             cardsByMolecule.get(card.moleculeId)!.push(card);
           });
 
+          // Log initial grouping to verify card order
+          console.log(`🔄 [Sync] Grouped cards by molecule:`, 
+            Array.from(cardsByMolecule.entries()).map(([molId, cards]) => ({
+              moleculeId: molId,
+              cardCount: cards.length,
+              cards: cards.map((c, idx) => ({
+                cardId: c.id,
+                atomId: c.atoms[0]?.atomId,
+                positionInOriginalArray: cardPositionMap.get(c.id) ?? -1,
+                groupIndex: idx
+              }))
+            }))
+          );
+
           // For each molecule, sort cards by their visual order (order field) and extract atoms
           cardsByMolecule.forEach((moleculeCards, moleculeId) => {
-            // Sort cards by order field (if available) to preserve visual order
-            // Cards with lower order values appear first
+            // CRITICAL: Count cards within this molecule to ensure we have the correct count
+            const moleculeCardCount = moleculeCards.length;
+            console.log(`🔄 [Sync] Processing molecule ${moleculeId} with ${moleculeCardCount} cards`);
+
+            // CRITICAL FIX: Sort cards by their position in the original layoutCards array
+            // The positionInOriginalArray is the PRIMARY source of truth for visual order in Laboratory Mode
+            // This ensures that when atoms are inserted between existing atoms, their order is preserved
+            // The order field is SECONDARY and only used if positionInOriginalArray is not available
             const sortedCards = [...moleculeCards].sort((a, b) => {
+              // Priority 1: Use position in the original layoutCards array (currentCards)
+              // This is the PRIMARY source of truth - it reflects the exact visual order in Laboratory Mode
+              const indexA = cardPositionMap.get(a.id) ?? -1;
+              const indexB = cardPositionMap.get(b.id) ?? -1;
+              
+              // If both have valid positions, sort by position (this is the correct order)
+              if (indexA >= 0 && indexB >= 0) {
+                return indexA - indexB;
+              }
+              
+              // Priority 2: If only one has position, prioritize it
+              if (indexA >= 0) return -1;
+              if (indexB >= 0) return 1;
+              
+              // Priority 3: Fallback to order field if positions are not available
+              // This should rarely happen, but provides a fallback
               const orderA = typeof a.order === 'number' ? a.order : Infinity;
               const orderB = typeof b.order === 'number' ? b.order : Infinity;
-
-              // If both have order, sort by order
+              
               if (orderA !== Infinity && orderB !== Infinity) {
                 return orderA - orderB;
               }
-
-              // If only one has order, prioritize it
+              
               if (orderA !== Infinity) return -1;
               if (orderB !== Infinity) return 1;
-
-              // Otherwise, maintain original array order
-              const indexA = allMoleculeCards.indexOf(a);
-              const indexB = allMoleculeCards.indexOf(b);
-              return indexA - indexB;
+              
+              // Both not found (shouldn't happen), maintain relative order
+              return 0;
             });
 
-            // Extract atoms in order from sorted cards
+            // CRITICAL FIX: Extract atoms in order from sorted cards and assign molecule card index
+            // The moleculeCardIndex (0, 1, 2, ...) represents the position of the card within the molecule
+            // This index is used to build atomPositions with correct order values
             const orderedAtomIds: string[] = [];
-            sortedCards.forEach(card => {
+            const cardIndexMap = new Map<string, number>(); // Map card.id -> moleculeCardIndex
+            
+            sortedCards.forEach((card, moleculeCardIndex) => {
+              // Store the molecule card index for this card (0, 1, 2, ...)
+              cardIndexMap.set(card.id, moleculeCardIndex);
+              
               card.atoms.forEach(atom => {
                 // Preserve every occurrence (allow duplicate atoms)
+                // The order in orderedAtomIds array will be used to build atomPositions
                 orderedAtomIds.push(atom.atomId);
               });
+            });
+
+            // Verify the count matches
+            if (orderedAtomIds.length !== moleculeCardCount) {
+              console.warn(`⚠️ [Sync] Molecule ${moleculeId} atom count (${orderedAtomIds.length}) doesn't match card count (${moleculeCardCount})`);
+            }
+
+            console.log(`🔄 [Sync] Molecule ${moleculeId} atom order from Laboratory Mode:`, {
+              moleculeId,
+              cardCount: moleculeCardCount,
+              atomCount: orderedAtomIds.length,
+              atomOrder: orderedAtomIds,
+              cardOrder: sortedCards.map((c, moleculeCardIndex) => ({
+                cardId: c.id,
+                atomId: c.atoms[0]?.atomId,
+                moleculeCardIndex: moleculeCardIndex, // Index within molecule (0, 1, 2, ...)
+                positionInArray: cardPositionMap.get(c.id) ?? -1,
+                orderField: c.order,
+                expectedAtomPosition: moleculeCardIndex // This will be the order in atomPositions
+              }))
             });
 
             moleculeAtomOrderMap.set(moleculeId, orderedAtomIds);
@@ -3462,6 +3551,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           });
 
           // Ensure atomPositions is kept in sync with atomOrder for every molecule
+          // CRITICAL: buildAtomPositions uses the index in the array (0, 1, 2, ...) as the order value
+          // So the order of atoms in atomOrder array directly determines their order in atomPositions
           updatedCanvasMolecules = updatedCanvasMolecules.map(molecule => {
             const orderSource = Array.isArray(molecule.atomOrder) && molecule.atomOrder.length > 0
               ? [...molecule.atomOrder]
@@ -3470,6 +3561,20 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 : [];
 
             const atomPositions = buildAtomPositions(orderSource);
+            
+            // Log the final atomPositions to verify order
+            if (atomPositions.length > 0) {
+              console.log(`✅ [Sync] Final atomPositions for molecule ${molecule.id}:`, {
+                moleculeId: molecule.id,
+                atomCount: atomPositions.length,
+                atomPositions: atomPositions.map((ap, idx) => ({
+                  atomId: ap.atomId,
+                  order: ap.order,
+                  expectedOrder: idx, // Should match order
+                  matches: ap.order === idx
+                }))
+              });
+            }
 
             return {
               ...molecule,
@@ -3763,11 +3868,16 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             addedAtoms: []
           });
 
-          console.log('✅ Laboratory changes synced to Workflow collection');
+          console.log('✅ [SYNC END] Laboratory changes synced to Workflow collection');
+        } else {
+          console.warn('⚠️ [SYNC] No workflow_data, skipping sync');
         }
+      } else {
+        console.error('❌ [SYNC] Response not OK, skipping sync');
       }
     } catch (error) {
-      console.error('❌ Failed to sync Laboratory changes to Workflow collection:', error);
+      console.error('❌ [SYNC ERROR] Failed to sync Laboratory changes to Workflow collection:', error);
+      console.error('❌ [SYNC ERROR] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     }
   };
 
