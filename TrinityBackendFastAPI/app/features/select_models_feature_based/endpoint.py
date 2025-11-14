@@ -60,8 +60,20 @@ def _submit_task(name: str, dotted_path: str, kwargs: dict, metadata: dict) -> d
 
 
 @router.get("/list-model-results-files", response_model=FileListResponse)
-def get_model_result_files() -> FileListResponse:
-    payload = list_model_results_files()
+def get_model_result_files(
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="Application name"),
+    project_name: str = Query(..., description="Project name"),
+    prefix: str = Query("model-results/", description="Folder prefix inside the project"),
+    limit: int = Query(100, description="Maximum number of files to return"),
+) -> FileListResponse:
+    payload = list_model_results_files(
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        prefix=prefix,
+        limit=limit,
+    )
     return FileListResponse.model_validate(payload)
 
 
