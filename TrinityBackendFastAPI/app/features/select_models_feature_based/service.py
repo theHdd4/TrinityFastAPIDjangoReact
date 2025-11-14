@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import statistics
+from pathlib import PurePosixPath
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import count
@@ -273,8 +274,41 @@ class CurveRequestPayload(BaseModel):
     model_name: str
 
 
+def _normalise_file_key(file_key: str) -> str:
+    return file_key.strip().lstrip("/")
+
+
+def _file_key_tokens(file_key: str) -> set[str]:
+    """Return a set of match tokens for the provided object path.
+
+    We normalise the incoming MinIO object name and create multiple variants so
+    that deterministic demo data (``demo/results/feature-based.parquet``)
+    continues to work even when the UI now supplies Arrow artefacts from the
+    ``model-results`` directory.
+    """
+
+    if not file_key:
+        return set()
+
+    normalised = _normalise_file_key(file_key)
+    path = PurePosixPath(normalised)
+
+    tokens = {normalised, path.name}
+    if path.stem:
+        tokens.add(path.stem)
+    return {token.lower() for token in tokens if token}
+
+
 def _models_for_file(file_key: str, combination_id: str | None = None) -> List[ModelRecord]:
-    models = [record for record in MODEL_DATA if record.file_key == file_key]
+    target_tokens = _file_key_tokens(file_key)
+    if not target_tokens:
+        models = list(MODEL_DATA)
+    else:
+        models = [
+            record
+            for record in MODEL_DATA
+            if target_tokens & _file_key_tokens(record.file_key)
+        ]
     if combination_id and combination_id != "all":
         models = [record for record in models if record.combination_id == combination_id]
     if not models:
