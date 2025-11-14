@@ -6,7 +6,7 @@ import logging
 import math
 import statistics
 from pathlib import PurePosixPath
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from itertools import count
 from typing import Any, Dict, Iterable, List, Sequence
@@ -301,6 +301,7 @@ def _file_key_tokens(file_key: str) -> set[str]:
 
 def _models_for_file(file_key: str, combination_id: str | None = None) -> List[ModelRecord]:
     target_tokens = _file_key_tokens(file_key)
+    normalised_key = _normalise_file_key(file_key)
     if not target_tokens:
         models = list(MODEL_DATA)
     else:
@@ -323,7 +324,8 @@ def _models_for_file(file_key: str, combination_id: str | None = None) -> List[M
     if not models:
         raise ValueError(f"No models available for file '{file_key}'")
 
-    return models
+    replacement_key = normalised_key or models[0].file_key
+    return [replace(record, file_key=replacement_key) for record in models]
 
 
 def _normalise_prefix(prefix: str) -> str:
@@ -563,10 +565,11 @@ def get_variable_ranges(file_key: str, combination_id: str | None, variables: It
 def get_saved_combinations_status(file_key: str, atom_id: str) -> Dict[str, Any]:
     models = _models_for_file(file_key)
     combos = sorted({record.combination_id for record in models})
+    normalised_key = _normalise_file_key(file_key)
     saved_for_file = [
         details
         for details in SAVED_MODELS.values()
-        if details["file_key"] == file_key
+        if details["file_key"] == normalised_key
     ]
     saved_combo_ids = {entry["combination_id"] for entry in saved_for_file}
     pending = [combo for combo in combos if combo not in saved_combo_ids]
@@ -603,7 +606,7 @@ def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
         "model_id": model_id,
         "model_name": record.model_name,
         "combination_id": record.combination_id,
-        "file_key": record.file_key,
+        "file_key": _normalise_file_key(request.file_key),
         "saved_at": datetime.utcnow().isoformat() + "Z",
         "filter_criteria": request.filter_criteria,
         "description": request.description,
