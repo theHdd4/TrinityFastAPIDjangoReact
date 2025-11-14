@@ -1,0 +1,3 @@
+Issue: Combination dropdown showed `combo-online` and `combo-retail` because `_models_for_file` fell back to hard-coded `MODEL_DATA` demo records whenever a MinIO model-results Arrow file did not match the static demo key.
+Resolution: Combination IDs and saved status are now derived from the actual Arrow file stored in MinIO (when available) before falling back to the demo data.
+Hardcoded/Fallback: `MODEL_DATA` in `TrinityBackendFastAPI/app/features/select_models_feature_based/service.py` remains a demo fallback used when MinIO content cannot be loaded (e.g. local dev without results).
