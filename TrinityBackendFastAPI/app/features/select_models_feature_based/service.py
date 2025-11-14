@@ -309,10 +309,20 @@ def _models_for_file(file_key: str, combination_id: str | None = None) -> List[M
             for record in MODEL_DATA
             if target_tokens & _file_key_tokens(record.file_key)
         ]
+
+    if not models:
+        logger.warning(
+            "select_models_feature_based.no_models_for_file falling back to demo data file_key=%s",
+            file_key,
+        )
+        models = list(MODEL_DATA)
+
     if combination_id and combination_id != "all":
         models = [record for record in models if record.combination_id == combination_id]
+
     if not models:
         raise ValueError(f"No models available for file '{file_key}'")
+
     return models
 
 
