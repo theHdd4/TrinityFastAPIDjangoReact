@@ -19,12 +19,14 @@ class CombinationIdResponse(BaseModel):
     file_key: str
     unique_combination_ids: List[str] = Field(default_factory=list)
     total_combinations: int
+    note: Optional[str] = None
 
 
 class ModelVariablesResponse(BaseModel):
     file_key: str
     variables: List[str]
     total_variables: int
+    note: Optional[str] = None
 
 
 class FilterBounds(BaseModel):
@@ -39,6 +41,7 @@ class AvailableFiltersResponse(BaseModel):
     combination_id: Optional[str]
     variable: str
     available_filters: Dict[str, FilterBounds]
+    note: Optional[str] = None
 
 
 class ModelFilterRequest(BaseModel):
@@ -85,6 +88,7 @@ class VariableRangesResponse(BaseModel):
     file_key: str
     combination_id: Optional[str]
     variable_ranges: Dict[str, FilterBounds]
+    note: Optional[str] = None
 
 
 class SavedCombinationsStatusResponse(BaseModel):
@@ -138,6 +142,7 @@ class ActualVsPredictedRequest(BaseModel):
     client_name: str
     app_name: str
     project_name: str
+    file_key: str
     combination_name: str
     model_name: str
 
