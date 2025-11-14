@@ -12,6 +12,8 @@ export const cropLog = (...args: unknown[]) => {
 
 export type CropHandle = 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
 
+export type CropShape = 'rectangle' | 'circle' | 'rounded-rectangle';
+
 export interface ImageCropInsets {
   top: number;
   right: number;
@@ -19,8 +21,17 @@ export interface ImageCropInsets {
   left: number;
 }
 
+export interface ImageCropConfig {
+  insets: ImageCropInsets;
+  shape?: CropShape;
+  borderRadius?: number; // For rounded-rectangle (0-50, percentage)
+}
+
 const clampCropValue = (value: number) => Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), 95);
-const roundCropValue = (value: number) => Math.round(value * 100) / 100;
+// No rounding during live updates - keep full precision for continuous movement
+const roundCropValue = (value: number) => value; // No rounding - keep full precision
+// Only round to 2 decimal places for final storage
+const roundCropValueFinal = (value: number) => Math.round(value * 100) / 100;
 const MIN_VISIBLE_PERCENT = 5;
 
 export const DEFAULT_CROP_INSETS: ImageCropInsets = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -28,7 +39,7 @@ export const DEFAULT_CROP_INSETS: ImageCropInsets = { top: 0, right: 0, bottom: 
 export const areCropInsetsEqual = (a: ImageCropInsets, b: ImageCropInsets): boolean =>
   a.top === b.top && a.right === b.right && a.bottom === b.bottom && a.left === b.left;
 
-export const normalizeCropInsets = (value: unknown): ImageCropInsets => {
+export const normalizeCropInsets = (value: unknown, finalize: boolean = false): ImageCropInsets => {
   if (!value || typeof value !== 'object') {
     return DEFAULT_CROP_INSETS;
   }
@@ -48,11 +59,14 @@ export const normalizeCropInsets = (value: unknown): ImageCropInsets => {
   const maxRight = Math.max(0, 100 - MIN_VISIBLE_PERCENT - resolvedLeft);
   const resolvedRight = Math.min(right, maxRight);
 
+  // Use higher precision during live updates, round only when finalizing
+  const roundFn = finalize ? roundCropValueFinal : roundCropValue;
+
   return {
-    top: roundCropValue(resolvedTop),
-    right: roundCropValue(resolvedRight),
-    bottom: roundCropValue(resolvedBottom),
-    left: roundCropValue(resolvedLeft),
+    top: roundFn(resolvedTop),
+    right: roundFn(resolvedRight),
+    bottom: roundFn(resolvedBottom),
+    left: roundFn(resolvedLeft),
   } satisfies ImageCropInsets;
 };
 
@@ -104,6 +118,7 @@ const computeNextCrop = (
   deltaXPercent: number,
   deltaYPercent: number,
   initial: ImageCropInsets,
+  finalize: boolean = false,
 ): ImageCropInsets => {
   const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
   let nextTop = initial.top;
@@ -122,7 +137,7 @@ const computeNextCrop = (
     nextTop = proposedTop;
     nextRight = 100 - width - proposedLeft;
     nextBottom = 100 - height - proposedTop;
-    return normalizeCropInsets({ top: nextTop, right: nextRight, bottom: nextBottom, left: nextLeft });
+    return normalizeCropInsets({ top: nextTop, right: nextRight, bottom: nextBottom, left: nextLeft }, finalize);
   }
 
   if (handle.includes('n')) {
@@ -142,7 +157,7 @@ const computeNextCrop = (
     nextRight = clamp(initial.right - deltaXPercent, 0, maxRight);
   }
 
-  return normalizeCropInsets({ top: nextTop, right: nextRight, bottom: nextBottom, left: nextLeft });
+  return normalizeCropInsets({ top: nextTop, right: nextRight, bottom: nextBottom, left: nextLeft }, finalize);
 };
 
 export interface UseImageCropInteractionOptions {
@@ -228,17 +243,16 @@ export const useImageCropInteraction = ({
         return;
       }
 
+      // Calculate delta with full precision for smooth continuous movement
+      // No rounding or batching - update immediately for smoothness
       const deltaXPercent = ((event.clientX - startX) / containerRect.width) * 100;
       const deltaYPercent = ((event.clientY - startY) / containerRect.height) * 100;
-      const next = computeNextCrop(handle, deltaXPercent, deltaYPercent, initialCrop);
+      
+      // Compute next crop with full precision (no rounding during live updates)
+      const next = computeNextCrop(handle, deltaXPercent, deltaYPercent, initialCrop, false);
+      
+      // Update immediately without batching for continuous movement
       commitPreviewCrop(next);
-      cropLog('Pointer move', {
-        handle,
-        deltaXPercent,
-        deltaYPercent,
-        initialCrop,
-        next,
-      });
       onCropChange(next);
     },
     [commitPreviewCrop, onCropChange],
@@ -249,13 +263,21 @@ export const useImageCropInteraction = ({
       cropLog('Pointer up ignored – no drag state');
       return;
     }
+    
+    // Finalize the current preview crop with proper rounding for storage
+    const finalized = normalizeCropInsets(previewCropRef.current, true);
+    commitPreviewCrop(finalized);
+    onCropChange?.(finalized);
+    
     window.removeEventListener('pointermove', handleCropPointerMove);
     window.removeEventListener('pointerup', handleCropPointerUp);
     dragStateRef.current = null;
     setIsDragging(false);
     cropLog('Pointer up – committing crop');
-    onCropCommit?.(previewCropRef.current);
-  }, [handleCropPointerMove, onCropCommit]);
+    
+    // Commit with finalized (rounded) values
+    onCropCommit?.(finalized);
+  }, [handleCropPointerMove, onCropCommit, commitPreviewCrop, onCropChange]);
 
   useEffect(() => {
     return () => {
@@ -341,6 +363,9 @@ interface ImageCropOverlayProps {
   onBeginDrag: (handle: CropHandle, event: React.PointerEvent<HTMLElement>) => void;
   onResetCrop?: (() => void) | null;
   showReset?: boolean;
+  cropShape?: CropShape;
+  borderRadius?: number;
+  isReCropMode?: boolean; // True when re-cropping an already-cropped image
 }
 
 const cornerHandles: ReadonlyArray<{ handle: CropHandle; className: string }> = [
@@ -363,52 +388,166 @@ export const ImageCropOverlay: React.FC<ImageCropOverlayProps> = ({
   onBeginDrag,
   onResetCrop,
   showReset = true,
+  cropShape = 'rectangle',
+  borderRadius = 12,
+  isReCropMode = false,
 }) => {
+  const cropStyle: React.CSSProperties = {
+    top: `${cropInsets.top}%`,
+    right: `${cropInsets.right}%`,
+    bottom: `${cropInsets.bottom}%`,
+    left: `${cropInsets.left}%`,
+    cursor: isDragging ? 'grabbing' : 'grab',
+  };
+
+  // Calculate dimensions for shape-based overlay
+  const cropWidth = 100 - cropInsets.left - cropInsets.right;
+  const cropHeight = 100 - cropInsets.top - cropInsets.bottom;
+  const cropAspectRatio = cropWidth / cropHeight;
+
+  // For circle, use the smaller dimension to maintain aspect ratio
+  const circleSize = cropShape === 'circle' ? Math.min(cropWidth, cropHeight) : null;
+  const circleStyle: React.CSSProperties | undefined =
+    cropShape === 'circle' && circleSize
+      ? {
+          width: `${circleSize}%`,
+          height: `${circleSize}%`,
+          left: `${cropInsets.left + (cropWidth - circleSize) / 2}%`,
+          top: `${cropInsets.top + (cropHeight - circleSize) / 2}%`,
+          borderRadius: '50%',
+        }
+      : undefined;
+
+  const roundedRectBorderRadius =
+    cropShape === 'rounded-rectangle' ? `${Math.min(borderRadius, 50)}%` : undefined;
+
+  // Create SVG mask path for non-rectangular shapes
+  const getMaskPath = () => {
+    if (cropShape === 'circle' && circleSize) {
+      const centerX = cropInsets.left + cropWidth / 2;
+      const centerY = cropInsets.top + cropHeight / 2;
+      const radius = circleSize / 2;
+      // Create a mask that shows only the circle area
+      return `M 0 0 L 100 0 L 100 100 L 0 100 Z M ${centerX} ${centerY} m -${radius} 0 a ${radius} ${radius} 0 1 1 ${circleSize} 0 a ${radius} ${radius} 0 1 1 -${circleSize} 0 Z`;
+    }
+    return null;
+  };
+
+  const maskPath = getMaskPath();
+
   return (
     <>
-      <div className="pointer-events-none absolute inset-0 z-30">
-        <div className="absolute left-0 right-0 top-0 bg-black/40" style={{ height: `${cropInsets.top}%` }} />
-        <div
-          className="absolute left-0 right-0 bg-black/40"
-          style={{
-            top: `${100 - cropInsets.bottom}%`,
-            height: `${cropInsets.bottom}%`,
-          }}
-        />
-        <div
-          className="absolute left-0 bg-black/40"
-          style={{
-            top: `${cropInsets.top}%`,
-            bottom: `${cropInsets.bottom}%`,
-            width: `${cropInsets.left}%`,
-          }}
-        />
-        <div
-          className="absolute right-0 bg-black/40"
-          style={{
-            top: `${cropInsets.top}%`,
-            bottom: `${cropInsets.bottom}%`,
-            width: `${cropInsets.right}%`,
-          }}
-        />
+      {/* Overlay with shape-based masking */}
+      {/* In re-crop mode, use lighter overlay to show full image in background */}
+      <div 
+        className="pointer-events-none absolute inset-0 z-30 transition-opacity duration-100" 
+        style={{ willChange: 'opacity' }}
+      >
+        {maskPath ? (
+          <svg className="absolute inset-0 h-full w-full" style={{ pointerEvents: 'none' }}>
+            <defs>
+              <mask id={`crop-mask-${cropShape}`}>
+                <rect width="100%" height="100%" fill="black" />
+                <path d={maskPath} fill="white" fillRule="evenodd" />
+              </mask>
+            </defs>
+            <rect 
+              width="100%" 
+              height="100%" 
+              fill={isReCropMode ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.4)'} 
+              mask={`url(#crop-mask-${cropShape})`} 
+            />
+          </svg>
+        ) : (
+          <>
+            <div 
+              className="absolute left-0 right-0 top-0 bg-black/40" 
+              style={{ 
+                height: `${cropInsets.top}%`,
+                opacity: isReCropMode ? 0.6 : 1,
+              }} 
+            />
+            <div
+              className="absolute left-0 right-0 bg-black/40"
+              style={{
+                top: `${100 - cropInsets.bottom}%`,
+                height: `${cropInsets.bottom}%`,
+                opacity: isReCropMode ? 0.6 : 1,
+              }}
+            />
+            <div
+              className="absolute left-0 bg-black/40"
+              style={{
+                top: `${cropInsets.top}%`,
+                bottom: `${cropInsets.bottom}%`,
+                width: `${cropInsets.left}%`,
+                opacity: isReCropMode ? 0.6 : 1,
+              }}
+            />
+            <div
+              className="absolute right-0 bg-black/40"
+              style={{
+                top: `${cropInsets.top}%`,
+                bottom: `${cropInsets.bottom}%`,
+                width: `${cropInsets.right}%`,
+                opacity: isReCropMode ? 0.6 : 1,
+              }}
+            />
+          </>
+        )}
       </div>
+      {/* Crop boundary with shape styling */}
       <div
         className={cn(
-          'absolute z-40 border-2 border-primary/80 bg-transparent',
-          isDragging ? 'shadow-[0_0_0_999px_rgba(59,130,246,0.12)]' : 'shadow-[0_0_0_999px_rgba(15,23,42,0.25)]',
+          'absolute z-40 border-2 border-primary/80 bg-transparent transition-all duration-75 ease-out',
+          isDragging 
+            ? 'shadow-[0_0_0_999px_rgba(59,130,246,0.15)] border-primary' 
+            : 'shadow-[0_0_0_999px_rgba(15,23,42,0.3)]',
+          cropShape === 'circle' && 'rounded-full',
+          cropShape === 'rounded-rectangle' && 'rounded-2xl',
         )}
         style={{
-          top: `${cropInsets.top}%`,
-          right: `${cropInsets.right}%`,
-          bottom: `${cropInsets.bottom}%`,
-          left: `${cropInsets.left}%`,
-          cursor: isDragging ? 'grabbing' : 'grab',
+          ...(cropShape === 'circle' && circleStyle ? circleStyle : cropStyle),
+          borderRadius:
+            cropShape === 'circle'
+              ? '50%'
+              : cropShape === 'rounded-rectangle'
+                ? roundedRectBorderRadius
+                : undefined,
+          willChange: 'top, right, bottom, left, width, height',
+          // Disable transitions during dragging for instant updates
+          transition: isDragging ? 'none' : 'all 75ms ease-out',
         }}
         onPointerDown={event => onBeginDrag('move', event)}
       >
-        <div className="pointer-events-none absolute inset-0 border border-white/40" />
+        <div
+          className={cn(
+            'pointer-events-none absolute inset-0 border border-white/40',
+            cropShape === 'circle' && 'rounded-full',
+            cropShape === 'rounded-rectangle' && 'rounded-2xl',
+          )}
+          style={{
+            borderRadius:
+              cropShape === 'circle'
+                ? '50%'
+                : cropShape === 'rounded-rectangle'
+                  ? roundedRectBorderRadius
+                  : undefined,
+          }}
+        />
+        {/* Grid lines for better visual guidance */}
+        {cropShape !== 'circle' && (
+          <>
+            <div className="pointer-events-none absolute inset-0 border-t border-white/20" style={{ top: '33.33%' }} />
+            <div className="pointer-events-none absolute inset-0 border-t border-white/20" style={{ top: '66.66%' }} />
+            <div className="pointer-events-none absolute inset-0 border-l border-white/20" style={{ left: '33.33%' }} />
+            <div className="pointer-events-none absolute inset-0 border-l border-white/20" style={{ left: '66.66%' }} />
+          </>
+        )}
         <div className="absolute left-2 top-2 flex items-center gap-2 rounded-full bg-primary/90 px-3 py-1 text-xs font-medium text-white shadow">
-          Crop mode
+          <span className="capitalize">
+            {isReCropMode ? 'Re-crop' : 'Crop'} {cropShape.replace('-', ' ')}
+          </span>
           {showReset && onResetCrop && (
             <button
               type="button"
@@ -423,21 +562,75 @@ export const ImageCropOverlay: React.FC<ImageCropOverlayProps> = ({
               Reset
             </button>
           )}
+          <span className="text-[10px] text-white/60 ml-1">ESC to exit</span>
         </div>
-        {cornerHandles.map(def => (
-          <span
-            key={def.handle}
-            className={cn('absolute z-50 h-3 w-3 rounded-full border border-background bg-white', def.className)}
-            onPointerDown={event => onBeginDrag(def.handle, event)}
-          />
-        ))}
-        {edgeHandles.map(def => (
-          <span
-            key={def.handle}
-            className={cn('absolute z-50 h-3 w-3 rounded-full border border-background bg-white', def.className)}
-            onPointerDown={event => onBeginDrag(def.handle, event)}
-          />
-        ))}
+        {/* Only show handles for rectangle and rounded-rectangle */}
+        {cropShape !== 'circle' && (
+          <>
+            {cornerHandles.map(def => (
+              <span
+                key={def.handle}
+                className={cn(
+                  'absolute z-50 h-4 w-4 rounded-full border-2 border-primary/90 bg-white shadow-lg transition-all duration-100',
+                  'hover:scale-125 hover:border-primary hover:shadow-xl',
+                  isDragging && 'scale-110 border-primary shadow-xl',
+                  def.className,
+                )}
+                style={{ willChange: 'transform' }}
+                onPointerDown={event => onBeginDrag(def.handle, event)}
+              />
+            ))}
+            {edgeHandles.map(def => (
+              <span
+                key={def.handle}
+                className={cn(
+                  'absolute z-50 h-4 w-4 rounded-full border-2 border-primary/90 bg-white shadow-lg transition-all duration-100',
+                  'hover:scale-125 hover:border-primary hover:shadow-xl',
+                  isDragging && 'scale-110 border-primary shadow-xl',
+                  def.className,
+                )}
+                style={{ willChange: 'transform' }}
+                onPointerDown={event => onBeginDrag(def.handle, event)}
+              />
+            ))}
+          </>
+        )}
+        {/* Circle handles - 8 points around the circle */}
+        {cropShape === 'circle' && circleSize && (
+          <>
+            {[
+              { angle: 0, handle: 'e' },
+              { angle: 45, handle: 'ne' },
+              { angle: 90, handle: 'n' },
+              { angle: 135, handle: 'nw' },
+              { angle: 180, handle: 'w' },
+              { angle: 225, handle: 'sw' },
+              { angle: 270, handle: 's' },
+              { angle: 315, handle: 'se' },
+            ].map(({ angle, handle }) => {
+              const rad = (angle * Math.PI) / 180;
+              const radius = 50; // 50% of the circle container
+              const x = 50 + (radius * Math.cos(rad));
+              const y = 50 + (radius * Math.sin(rad));
+              return (
+                <span
+                  key={handle}
+                  className={cn(
+                    'absolute z-50 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary/90 bg-white shadow-lg transition-all duration-100',
+                    'hover:scale-125 hover:border-primary hover:shadow-xl',
+                    isDragging && 'scale-110 border-primary shadow-xl',
+                  )}
+                  style={{
+                    left: `${x}%`,
+                    top: `${y}%`,
+                    willChange: 'transform',
+                  }}
+                  onPointerDown={event => onBeginDrag(handle as CropHandle, event)}
+                />
+              );
+            })}
+          </>
+        )}
       </div>
     </>
   );

@@ -26,6 +26,35 @@ interface SelectedAtom {
   order: number;
 }
 
+const buildAtomPositions = (atoms: string[] = []) =>
+  atoms.map((atomId, index) => ({ atomId, order: index }));
+
+const serializeMoleculesForSave = (molecules: any[] = []) =>
+  molecules.map(mol => {
+    const orderSource =
+      Array.isArray(mol.atomPositions) && mol.atomPositions.length > 0
+        ? [...mol.atomPositions]
+            .filter((entry: any) => entry && typeof entry.atomId === 'string')
+            .sort((a: any, b: any) => {
+              const orderA = typeof a.order === 'number' ? a.order : 0;
+              const orderB = typeof b.order === 'number' ? b.order : 0;
+              return orderA - orderB;
+            })
+            .map((entry: any) => entry.atomId)
+        : Array.isArray(mol.atomOrder) && mol.atomOrder.length > 0
+          ? [...mol.atomOrder]
+          : Array.isArray(mol.atoms)
+            ? [...mol.atoms]
+            : [];
+
+    return {
+      ...mol,
+      atoms: Array.isArray(mol.atoms) ? [...orderSource] : [...orderSource],
+      atomOrder: [...orderSource],
+      atomPositions: buildAtomPositions(orderSource)
+    };
+  });
+
 const WorkflowMode = () => {
   const [selectedMoleculeId, setSelectedMoleculeId] = useState<string>();
   const [canvasMolecules, setCanvasMolecules] = useState<any[]>([]);
@@ -58,10 +87,51 @@ const WorkflowMode = () => {
   // FIX: Add confirmation dialogs for atom and molecule removal
   const [atomRemoveConfirmDialogOpen, setAtomRemoveConfirmDialogOpen] = useState(false);
   const [moleculeRemoveConfirmDialogOpen, setMoleculeRemoveConfirmDialogOpen] = useState(false);
-  const [pendingAtomRemoval, setPendingAtomRemoval] = useState<{ atomId: string; moleculeId: string } | null>(null);
+  const [pendingAtomRemoval, setPendingAtomRemoval] = useState<{ atomId: string; moleculeId: string; atomIndex?: number } | null>(null);
   const [pendingMoleculeRemoval, setPendingMoleculeRemoval] = useState<string | null>(null);
   const { toast } = useToast();
   const navigate = useNavigate();
+  // Ref to track if initial workflow has been loaded (to prevent autosave on initial load)
+  const hasInitialWorkflowLoadedRef = React.useRef(false);
+
+  const removeFirstOccurrence = useCallback(<T,>(source: T[] | undefined, value: T): T[] => {
+    const list = Array.isArray(source) ? [...source] : [];
+    const index = list.indexOf(value);
+    if (index === -1) {
+      return list;
+    }
+    list.splice(index, 1);
+    return list;
+  }, []);
+
+  const removeAtIndex = useCallback(<T,>(source: T[] | undefined, index: number): T[] => {
+    const list = Array.isArray(source) ? [...source] : [];
+    if (index < 0 || index >= list.length) {
+      return list;
+    }
+    list.splice(index, 1);
+    return list;
+  }, []);
+
+  const removeAtomInstance = useCallback(
+    (atoms: string[], atomOrder: string[], atomId: string, atomIndex?: number) => {
+      if (atomIndex !== undefined && atomIndex >= 0 && atomIndex < atomOrder.length) {
+        const newAtomOrder = removeAtIndex(atomOrder, atomIndex);
+        let newAtoms: string[];
+        if (atoms.length === atomOrder.length) {
+          newAtoms = removeAtIndex(atoms, atomIndex);
+        } else {
+          newAtoms = removeFirstOccurrence(atoms, atomId);
+        }
+        return { atoms: newAtoms, atomOrder: newAtomOrder };
+      }
+      return {
+        atoms: removeFirstOccurrence(atoms, atomId),
+        atomOrder: removeFirstOccurrence(atomOrder, atomId),
+      };
+    },
+    [removeAtIndex, removeFirstOccurrence]
+  );
 
   // Save workflow state to localStorage whenever it changes
   useEffect(() => {
@@ -156,17 +226,65 @@ const WorkflowMode = () => {
     console.log('✅ Updated molecule positions:', positions);
   };
 
+  const handleAtomOrderChange = useCallback((moleculeId: string, newOrder: string[]) => {
+    const nextOrder = Array.isArray(newOrder) ? [...newOrder] : [];
+
+    setCanvasMolecules(prev =>
+      prev.map(mol =>
+        mol.id === moleculeId
+          ? {
+              ...mol,
+              atomOrder: [...nextOrder],
+              atoms: [...nextOrder],
+              atomPositions: buildAtomPositions(nextOrder)
+            }
+          : mol
+      )
+    );
+
+    setCustomMolecules(prev =>
+      prev.map(mol =>
+        mol.id === moleculeId
+          ? {
+              ...mol,
+              atomOrder: [...nextOrder],
+              atoms: [...nextOrder],
+              atomPositions: buildAtomPositions(nextOrder)
+            }
+          : mol
+      )
+    );
+  }, []);
+
   const handleInsertMolecule = (referenceMoleculeId: string, position: 'left' | 'right') => {
+    // CRITICAL FIX: Generate unique ID by checking existing IDs, not just titles
+    // This prevents conflicts with renamed molecules that might have old ID patterns
+    const existingIds = new Set(canvasMolecules.map(m => m.id));
+    
     // Generate numbered name automatically
     const existingNewMolecules = canvasMolecules.filter(m => 
       m.title === 'New Molecule' || m.title.startsWith('New Molecule ')
     );
-    const nextNumber = existingNewMolecules.length + 1;
+    let nextNumber = existingNewMolecules.length + 1;
     const finalName = `New Molecule ${nextNumber}`;
     
     // Generate molecule ID in format: molecule_name-number
-    const moleculeName = finalName.toLowerCase().replace(/\s+/g, '-');
-    const moleculeId = `${moleculeName}-${nextNumber}`;
+    // CRITICAL: Ensure the ID is unique by checking against existing IDs
+    let moleculeName = finalName.toLowerCase().replace(/\s+/g, '-');
+    let moleculeId = `${moleculeName}-${nextNumber}`;
+    
+    // If ID already exists (e.g., from a renamed molecule), append timestamp to make it unique
+    if (existingIds.has(moleculeId)) {
+      console.warn('⚠️ [INSERT] Generated ID already exists, using timestamp to ensure uniqueness:', moleculeId);
+      moleculeId = `${moleculeName}-${Date.now()}`;
+    }
+    
+    console.log('🆕 [INSERT] Generating new molecule:', {
+      name: finalName,
+      id: moleculeId,
+      existingIdsCount: existingIds.size,
+      referenceMoleculeId
+    });
 
     const newMolecule = {
       id: moleculeId,
@@ -184,15 +302,44 @@ const WorkflowMode = () => {
     
     setCustomMolecules(prev => [...prev, newMolecule]);
     
-    // Find the index of the reference molecule
-    const referenceIndex = canvasMolecules.findIndex(m => m.id === referenceMoleculeId);
+    // DEBUG: Log all molecule IDs and the reference ID
+    console.log('🔍 [INSERT] Looking for reference molecule:', {
+      referenceMoleculeId,
+      allMoleculeIds: canvasMolecules.map(m => ({ id: m.id, title: m.title, isActive: m.isActive })),
+      totalMolecules: canvasMolecules.length
+    });
     
+    // Find the index of the reference molecule
+    // CRITICAL: Check both active and inactive molecules, but prioritize active ones
+    let referenceIndex = canvasMolecules.findIndex(m => m.id === referenceMoleculeId);
+    
+    // If not found by ID, try to find by title (fallback for renamed molecules)
     if (referenceIndex === -1) {
-      // Reference molecule not found, just append
+      console.warn('⚠️ [INSERT] Reference molecule not found by ID, trying to find by title...');
+      // This shouldn't happen, but if the ID doesn't match, we can't proceed safely
+      // The issue is likely that the molecule ID changed or the reference is incorrect
+      console.error('❌ [INSERT] Cannot find reference molecule by ID:', referenceMoleculeId);
+      console.error('❌ [INSERT] Available molecule IDs:', canvasMolecules.map(m => m.id));
+      
+      // Still append, but log the error
       setCanvasMolecules(prev => [...prev, newMolecule]);
-      console.log(`✅ Inserted molecule "${finalName}" (reference not found, appended)`);
+      toast({
+        title: 'Insertion Warning',
+        description: `Could not find reference molecule. New molecule "${finalName}" has been appended.`,
+        variant: 'destructive'
+      });
       return;
     }
+    
+    // Verify the reference molecule exists and log its details
+    const referenceMolecule = canvasMolecules[referenceIndex];
+    console.log('✅ [INSERT] Found reference molecule:', {
+      index: referenceIndex,
+      id: referenceMolecule?.id,
+      title: referenceMolecule?.title,
+      isActive: referenceMolecule?.isActive,
+      position
+    });
     
     // When inserting to the RIGHT of a molecule, we need to check if there are standalone chips
     // that should appear immediately after this molecule. If so, the new molecule should be
@@ -508,17 +655,67 @@ const WorkflowMode = () => {
   };
 
   const handleRenameMolecule = (moleculeId: string, newName: string) => {
+    // CRITICAL FIX: Update molecule ID when renaming to prevent ID conflicts
+    // Generate new ID from the new name to avoid conflicts with future insertions
+    const newMoleculeName = newName.toLowerCase().replace(/\s+/g, '-');
+    // Generate a unique ID by appending timestamp to avoid conflicts
+    const newMoleculeId = `${newMoleculeName}-${Date.now()}`;
+    
+    console.log('🔄 [RENAME] Renaming molecule:', {
+      oldId: moleculeId,
+      oldTitle: canvasMolecules.find(m => m.id === moleculeId)?.title,
+      newId: newMoleculeId,
+      newTitle: newName
+    });
+    
+    // Update custom molecules with new ID and title
     setCustomMolecules(prev => 
       prev.map(mol => 
-        mol.id === moleculeId ? { ...mol, title: newName } : mol
+        mol.id === moleculeId 
+          ? { ...mol, id: newMoleculeId, title: newName } 
+          : mol
       )
     );
     
+    // Update canvas molecules with new ID and title
     setCanvasMolecules(prev => 
       prev.map(mol => 
-        mol.id === moleculeId ? { ...mol, title: newName } : mol
+        mol.id === moleculeId 
+          ? { ...mol, id: newMoleculeId, title: newName } 
+          : mol
       )
     );
+    
+    // CRITICAL: Update standalone cards that reference this molecule
+    // Update all references to the old molecule ID to use the new ID
+    setStandaloneCards(prev => prev.map(card => {
+      const updated = { ...card };
+      
+      // Update betweenMolecules array if it contains the old ID
+      if (card.betweenMolecules && Array.isArray(card.betweenMolecules)) {
+        updated.betweenMolecules = card.betweenMolecules.map(id => 
+          id === moleculeId ? newMoleculeId : id
+        ) as [string, string];
+      }
+      
+      // Update afterMoleculeId
+      if (card.afterMoleculeId === moleculeId) {
+        updated.afterMoleculeId = newMoleculeId;
+      }
+      
+      // Update beforeMoleculeId
+      if (card.beforeMoleculeId === moleculeId) {
+        updated.beforeMoleculeId = newMoleculeId;
+      }
+      
+      return updated;
+    }));
+    
+    console.log('✅ [RENAME] Molecule ID updated:', {
+      oldId: moleculeId,
+      newId: newMoleculeId,
+      updatedStandaloneCards: true
+    });
     
     toast({
       title: 'Molecule Renamed',
@@ -601,7 +798,7 @@ const WorkflowMode = () => {
   };
 
   // Handle moving atom to different molecule
-  const handleMoveAtomToMolecule = (atomId: string, fromMoleculeId: string, toMoleculeId: string) => {
+  const handleMoveAtomToMolecule = (atomId: string, fromMoleculeId: string, toMoleculeId: string, atomIndex?: number) => {
     console.log('Moving atom:', atomId, 'from:', fromMoleculeId, 'to:', toMoleculeId);
     
     // Update customMolecules state
@@ -611,24 +808,23 @@ const WorkflowMode = () => {
           // Remove from source molecule
           const atoms = Array.isArray(mol.atoms) ? mol.atoms : [];
           const atomOrder = Array.isArray(mol.atomOrder) ? mol.atomOrder : [];
+          const { atoms: updatedAtoms, atomOrder: updatedAtomOrder } = removeAtomInstance(atoms, atomOrder, atomId, atomIndex);
           return {
             ...mol,
-            atoms: atoms.filter(id => id !== atomId),
-            atomOrder: atomOrder.filter(id => id !== atomId),
+            atoms: updatedAtoms,
+            atomOrder: updatedAtomOrder,
             selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
           };
         } else if (mol.id === toMoleculeId) {
-          // Add to target molecule only if it doesn't already exist
+          // Add to target molecule (allow duplicates)
           const atoms = Array.isArray(mol.atoms) ? mol.atoms : [];
           const atomOrder = Array.isArray(mol.atomOrder) ? mol.atomOrder : [];
-          if (!atoms.includes(atomId)) {
-            return {
-              ...mol,
-              atoms: [...atoms, atomId],
-              atomOrder: [...atomOrder, atomId],
-              selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
-            };
-          }
+          return {
+            ...mol,
+            atoms: [...atoms, atomId],
+            atomOrder: [...atomOrder, atomId],
+            selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
+          };
         }
         return mol;
       })
@@ -642,25 +838,24 @@ const WorkflowMode = () => {
           console.log('Removing atom from source molecule:', mol.title);
           const atoms = Array.isArray(mol.atoms) ? mol.atoms : [];
           const atomOrder = Array.isArray(mol.atomOrder) ? mol.atomOrder : [];
+          const { atoms: updatedAtoms, atomOrder: updatedAtomOrder } = removeAtomInstance(atoms, atomOrder, atomId, atomIndex);
           return {
             ...mol,
-            atoms: atoms.filter(id => id !== atomId),
-            atomOrder: atomOrder.filter(id => id !== atomId),
+            atoms: updatedAtoms,
+            atomOrder: updatedAtomOrder,
             selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
           };
         } else if (mol.id === toMoleculeId) {
-          // Add to target molecule only if it doesn't already exist
+          // Add to target molecule (allow duplicates)
           console.log('Adding atom to target molecule:', mol.title);
           const atoms = Array.isArray(mol.atoms) ? mol.atoms : [];
           const atomOrder = Array.isArray(mol.atomOrder) ? mol.atomOrder : [];
-          if (!atoms.includes(atomId)) {
-            return {
-              ...mol,
-              atoms: [...atoms, atomId],
-              atomOrder: [...atomOrder, atomId],
-              selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
-            };
-          }
+          return {
+            ...mol,
+            atoms: [...atoms, atomId],
+            atomOrder: [...atomOrder, atomId],
+            selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
+          };
         }
         return mol;
       })
@@ -673,9 +868,9 @@ const WorkflowMode = () => {
   };
 
   // Handle moving atom back to atom list - show confirmation dialog first
-  const handleMoveAtomToAtomList = (atomId: string, fromMoleculeId: string) => {
+  const handleMoveAtomToAtomList = (atomId: string, fromMoleculeId: string, atomIndex?: number) => {
     // Store pending removal data and show confirmation dialog
-    setPendingAtomRemoval({ atomId, moleculeId: fromMoleculeId });
+    setPendingAtomRemoval({ atomId, moleculeId: fromMoleculeId, atomIndex });
     setAtomRemoveConfirmDialogOpen(true);
   };
 
@@ -683,36 +878,29 @@ const WorkflowMode = () => {
   const performAtomRemoval = () => {
     if (!pendingAtomRemoval) return;
     
-    const { atomId, moleculeId } = pendingAtomRemoval;
+    const { atomId, moleculeId, atomIndex } = pendingAtomRemoval;
     console.log('Moving atom to atom list:', atomId, 'from molecule:', moleculeId);
     
+    const removeInstanceFromMolecule = (mol: any) => {
+      if (mol.id !== moleculeId) {
+        return mol;
+      }
+      const atoms = Array.isArray(mol.atoms) ? mol.atoms : [];
+      const atomOrder = Array.isArray(mol.atomOrder) ? mol.atomOrder : [];
+      const { atoms: updatedAtoms, atomOrder: updatedAtomOrder } = removeAtomInstance(atoms, atomOrder, atomId, atomIndex);
+      return {
+        ...mol,
+        atoms: updatedAtoms,
+        atomOrder: updatedAtomOrder,
+        selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
+      };
+    };
+
     // Update customMolecules state
-    setCustomMolecules(prev => 
-      prev.map(mol => 
-        mol.id === moleculeId
-          ? {
-              ...mol,
-              atoms: (Array.isArray(mol.atoms) ? mol.atoms : []).filter(id => id !== atomId),
-              atomOrder: (Array.isArray(mol.atomOrder) ? mol.atomOrder : []).filter(id => id !== atomId),
-              selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
-            }
-          : mol
-      )
-    );
+    setCustomMolecules(prev => prev.map(removeInstanceFromMolecule));
     
     // Update canvasMolecules state
-    setCanvasMolecules(prev => 
-      prev.map(mol => 
-        mol.id === moleculeId
-          ? {
-              ...mol,
-              atoms: (Array.isArray(mol.atoms) ? mol.atoms : []).filter(id => id !== atomId),
-              atomOrder: (Array.isArray(mol.atomOrder) ? mol.atomOrder : []).filter(id => id !== atomId),
-              selectedAtoms: { ...(mol.selectedAtoms || {}), [atomId]: false }
-            }
-          : mol
-      )
-    );
+    setCanvasMolecules(prev => prev.map(removeInstanceFromMolecule));
 
     // Clear pending removal and close dialog
     setPendingAtomRemoval(null);
@@ -1040,14 +1228,14 @@ const WorkflowMode = () => {
       const project_name = env.PROJECT_NAME || 'default_project';
       
       // Save all molecules (active + inactive) to preserve isActive state
-      await fetch(`${MOLECULES_API}/workflow/save`, {
+          await fetch(`${MOLECULES_API}/workflow/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           workflow_name: workflowName,
-          canvas_molecules: canvasMolecules, // All molecules (active + inactive with isActive flag)
-          custom_molecules: customMolecules, // All molecules (active + inactive with isActive flag)
+          canvas_molecules: serializeMoleculesForSave(canvasMolecules), // All molecules (active + inactive with isActive flag)
+          custom_molecules: serializeMoleculesForSave(customMolecules), // All molecules (active + inactive with isActive flag)
           standalone_cards: standaloneCards,
           user_id: '',
           client_name: client_name,
@@ -1331,53 +1519,103 @@ const WorkflowMode = () => {
       
       const workflowMoleculeIds = new Set(workflowMolecules.map(m => m.id)); // Active molecules only
       const allMoleculeIds = new Set(allMoleculesForIndexing.map(m => m.id)); // All molecules (active + inactive)
-      const finalCards: LayoutCard[] = [];
-      
-      // Step 1: Start with ALL existing cards (preserves all Laboratory changes)
-      const existingCardMap = new Map<string, LayoutCard>();
-      existingCards.forEach(card => {
-        if (card.moleculeId && card.atoms[0]?.atomId) {
-          // Create key for molecule cards
-          const key = `${card.moleculeId}:${card.atoms[0].atomId}`;
-          existingCardMap.set(key, card);
-        }
-        // Add all existing cards to finalCards (we'll update/remove duplicates later)
-        finalCards.push(card);
-      });
-      
+      const finalCards: LayoutCard[] = [...existingCards];
+
       console.log('📦 Starting with', existingCards.length, 'existing Laboratory cards');
 
-      // Step 2: Process each workflow molecule - update existing or add new
-      // Also build a map of workflow atoms for filtering
-      const workflowAtomMap = new Map<string, Set<string>>(); // moleculeId -> Set of atomIds
-      
+      // Buckets to match existing cards (supporting duplicates) by molecule and atom id
+      const existingCardBuckets = new Map<string, Map<string, LayoutCard[]>>();
+      existingCards.forEach(card => {
+        const moleculeId = card.moleculeId;
+        const atomId = card.atoms[0]?.atomId;
+        if (!moleculeId || !atomId) {
+          return;
+        }
+        const moleculeBuckets = existingCardBuckets.get(moleculeId) ?? new Map<string, LayoutCard[]>();
+        const atomBucket = moleculeBuckets.get(atomId) ?? [];
+        atomBucket.push(card);
+        moleculeBuckets.set(atomId, atomBucket);
+        existingCardBuckets.set(moleculeId, moleculeBuckets);
+      });
+
+      // Ensure deterministic matching order
+      existingCardBuckets.forEach(moleculeBuckets => {
+        moleculeBuckets.forEach((cards, atomId) => {
+          cards.sort((a, b) => {
+            const orderA = typeof a.order === 'number' ? a.order : Infinity;
+            const orderB = typeof b.order === 'number' ? b.order : Infinity;
+            if (orderA !== orderB) {
+              return orderA - orderB;
+            }
+            return a.id.localeCompare(b.id);
+          });
+        });
+      });
+
+      // Prepare workflow card buckets to reuse generated cards in order
+      const workflowCardBuckets = new Map<string, Map<string, LayoutCard[]>>();
+      workflowCards.forEach(card => {
+        const moleculeId = card.moleculeId;
+        const atomId = card.atoms[0]?.atomId;
+        if (!moleculeId || !atomId) {
+          return;
+        }
+        const moleculeBuckets = workflowCardBuckets.get(moleculeId) ?? new Map<string, LayoutCard[]>();
+        const atomBucket = moleculeBuckets.get(atomId) ?? [];
+        atomBucket.push(card);
+        moleculeBuckets.set(atomId, atomBucket);
+        workflowCardBuckets.set(moleculeId, moleculeBuckets);
+      });
+
+      // Track workflow atom multiplicities for later filtering
+      const workflowAtomCounts = new Map<string, Map<string, number>>();
+
       workflowMolecules.forEach(molecule => {
-        const atomSet = new Set<string>(molecule.atoms);
-        workflowAtomMap.set(molecule.id, atomSet);
-        
+        const atomCountMap = workflowAtomCounts.get(molecule.id) ?? new Map<string, number>();
+        workflowAtomCounts.set(molecule.id, atomCountMap);
+
         molecule.atoms.forEach(atomId => {
-          const key = `${molecule.id}:${atomId}`;
-          const existingCard = existingCardMap.get(key);
-          
+          atomCountMap.set(atomId, (atomCountMap.get(atomId) ?? 0) + 1);
+
+          const existingBucketsForMolecule = existingCardBuckets.get(molecule.id);
+          let existingCard: LayoutCard | undefined;
+          if (existingBucketsForMolecule) {
+            const atomBucket = existingBucketsForMolecule.get(atomId);
+            if (atomBucket && atomBucket.length > 0) {
+              existingCard = atomBucket.shift();
+            }
+          }
+
           if (existingCard) {
-            // Card exists - update molecule title but preserve all settings
-            const cardIndex = finalCards.findIndex(c => c.id === existingCard.id);
+            const cardIndex = finalCards.findIndex(c => c.id === existingCard!.id);
             if (cardIndex >= 0) {
               finalCards[cardIndex] = {
                 ...existingCard,
-                moleculeTitle: molecule.title, // Update title if molecule was renamed
+                moleculeTitle: molecule.title,
               };
               console.log(`🔄 Updated existing card: ${molecule.id}:${atomId}`);
             }
-          } else {
-            // Card doesn't exist - add new workflow card
-            const newCard = workflowCards.find(
+            return;
+          }
+
+          const workflowBucketsForMolecule = workflowCardBuckets.get(molecule.id);
+          let workflowCardCandidate: LayoutCard | undefined;
+          if (workflowBucketsForMolecule) {
+            const atomBucket = workflowBucketsForMolecule.get(atomId);
+            if (atomBucket && atomBucket.length > 0) {
+              workflowCardCandidate = atomBucket.shift();
+            }
+          }
+
+          if (!workflowCardCandidate) {
+            workflowCardCandidate = workflowCards.find(
               card => card.moleculeId === molecule.id && card.atoms[0]?.atomId === atomId
             );
-            if (newCard) {
-              finalCards.push(newCard);
-              console.log(`➕ Added new workflow atom: ${molecule.id}:${atomId}`);
-            }
+          }
+
+          if (workflowCardCandidate) {
+            finalCards.push(workflowCardCandidate);
+            console.log(`➕ Added new workflow atom: ${molecule.id}:${atomId}`);
           }
         });
       });
@@ -1416,6 +1654,13 @@ const WorkflowMode = () => {
       // Remove atoms that are no longer in workflow molecules
       // Remove cards for molecules that no longer exist in workflow (not even as inactive)
       // Remove standalone cards that were deleted from workflow
+      const workflowAtomCountClones = new Map<string, Map<string, number>>();
+      workflowAtomCounts.forEach((atomMap, moleculeId) => {
+        const clone = new Map<string, number>();
+        atomMap.forEach((value, key) => clone.set(key, value));
+        workflowAtomCountClones.set(moleculeId, clone);
+      });
+
       const filteredCards = finalCards.filter(card => {
         // For standalone cards: only keep if they exist in current workflow state
         if (!card.moleculeId) {
@@ -1442,12 +1687,16 @@ const WorkflowMode = () => {
         }
 
         // If molecule is active and exists in workflow, check if atom is still in workflow
-        const workflowAtoms = workflowAtomMap.get(card.moleculeId);
-        if (workflowAtoms) {
-          const atomId = card.atoms[0]?.atomId;
-          if (atomId && !workflowAtoms.has(atomId)) {
-            console.log(`🗑️ Removed atom from molecule: ${card.moleculeId}:${atomId}`);
-            return false;
+        const atomId = card.atoms[0]?.atomId;
+        if (atomId) {
+          const atomCounts = workflowAtomCountClones.get(card.moleculeId);
+          if (atomCounts) {
+            const remaining = atomCounts.get(atomId) ?? 0;
+            if (remaining <= 0) {
+              console.log(`🗑️ Removed atom from molecule: ${card.moleculeId}:${atomId}`);
+              return false;
+            }
+            atomCounts.set(atomId, remaining - 1);
           }
         }
 
@@ -1482,6 +1731,8 @@ const WorkflowMode = () => {
         const sortedCards: LayoutCard[] = [];
         const workflowCards = cardsToSort.filter(card => card.moleculeId);
         const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
+        const normalizeAtomId = (atomId?: string) =>
+          (atomId || '').toLowerCase().replace(/[\s_-]/g, '');
 
         // FIX 1: Create a map of moleculeId to moleculeIndex using FULL list (includes inactive)
         // This ensures consistent indexing with Laboratory Mode
@@ -1611,16 +1862,65 @@ const WorkflowMode = () => {
           const isActiveMolecule = workflowMoleculeIds.has(molecule.id);
           
           if (isActiveMolecule) {
-            // Add all workflow cards for this active molecule first (maintain their relative order)
-          const moleculeCards = workflowCards
-            .filter(card => card.moleculeId === molecule.id)
-            .sort((a, b) => {
-              // Maintain original order within molecule
-              const indexA = cardsToSort.findIndex(c => c.id === a.id);
-              const indexB = cardsToSort.findIndex(c => c.id === b.id);
-              return indexA - indexB;
+            const workflowOrder = Array.isArray(molecule.atomPositions) && molecule.atomPositions.length > 0
+              ? [...molecule.atomPositions]
+                  .filter(entry => entry && typeof entry.atomId === 'string')
+                  .sort((a, b) => {
+                    const orderA = typeof a.order === 'number' ? a.order : 0;
+                    const orderB = typeof b.order === 'number' ? b.order : 0;
+                    return orderA - orderB;
+                  })
+                  .map(entry => entry.atomId)
+              : Array.isArray(molecule.atomOrder) && molecule.atomOrder.length > 0
+                ? molecule.atomOrder
+                : Array.isArray(molecule.atoms)
+                  ? molecule.atoms
+                  : [];
+
+            const normalizedWorkflowOrder = workflowOrder.map(atom => normalizeAtomId(atom));
+            const positionLookup = new Map<string, number[]>();
+            normalizedWorkflowOrder.forEach((atom, idx) => {
+              const positions = positionLookup.get(atom) ?? [];
+              positions.push(idx);
+              positionLookup.set(atom, positions);
             });
-          sortedCards.push(...moleculeCards);
+            const usageCounter = new Map<string, number>();
+
+            const moleculeCards = workflowCards
+              .filter(card => card.moleculeId === molecule.id)
+              .map(card => {
+                const fallbackIndex = cardsToSort.findIndex(c => c.id === card.id);
+                const normalizedAtomId = normalizeAtomId(card.atoms[0]?.atomId);
+                const usageCount = usageCounter.get(normalizedAtomId) ?? 0;
+                usageCounter.set(normalizedAtomId, usageCount + 1);
+
+                const positions = positionLookup.get(normalizedAtomId);
+                let desiredOrder: number;
+                if (positions && positions.length > usageCount) {
+                  desiredOrder = positions[usageCount];
+                } else if (positions && positions.length > 0) {
+                  desiredOrder = positions[positions.length - 1] + (usageCount - positions.length + 1);
+                } else {
+                  desiredOrder = normalizedWorkflowOrder.length + (fallbackIndex === -1 ? usageCount : fallbackIndex + usageCount);
+                }
+
+                return { card, desiredOrder, fallbackIndex: fallbackIndex === -1 ? Number.MAX_SAFE_INTEGER : fallbackIndex, sequence: usageCount };
+              })
+              .sort((a, b) => {
+                if (a.desiredOrder !== b.desiredOrder) {
+                  return a.desiredOrder - b.desiredOrder;
+                }
+                if (a.sequence !== b.sequence) {
+                  return a.sequence - b.sequence;
+                }
+                return a.fallbackIndex - b.fallbackIndex;
+              })
+              .map((item, cardIndex) => ({
+                ...item.card,
+                order: (fullMoleculeIndex * 1000) + cardIndex
+              }));
+
+            sortedCards.push(...moleculeCards);
           }
 
           // Add standalone cards that should appear after this molecule (based on references)
@@ -1880,14 +2180,17 @@ const WorkflowMode = () => {
       // Save workflow molecules to localStorage in format expected by Laboratory Mode
       // This ensures Laboratory Mode can sort cards correctly based on workflow molecule order
       // Format: [{ moleculeId, moleculeTitle, atoms: [{ atomName, order }] }]
-      const workflowMoleculesForLab = workflowMolecules.map(mol => ({
-        moleculeId: mol.id,
-        moleculeTitle: mol.title,
-        atoms: mol.atoms.map((atomId, index) => ({
-          atomName: atomId,
-          order: index
-        }))
-      }));
+      const workflowMoleculesForLab = workflowMolecules.map(mol => {
+        const orderSource = mol.atomOrder && mol.atomOrder.length > 0 ? mol.atomOrder : mol.atoms;
+        return {
+          moleculeId: mol.id,
+          moleculeTitle: mol.title,
+          atoms: orderSource.map((atomId, index) => ({
+            atomName: atomId,
+            order: index
+          }))
+        };
+      });
       localStorage.setItem('workflow-molecules', JSON.stringify(workflowMoleculesForLab));
       console.log('💾 Saved workflow molecules to localStorage for Laboratory Mode sorting:', workflowMoleculesForLab);
     
@@ -1912,13 +2215,19 @@ const WorkflowMode = () => {
   // This performs the same sync logic as handleRenderWorkflow but without navigation
   const syncWorkflowToLaboratory = useCallback(async (): Promise<boolean> => {
     try {
+      console.log('🔄 [SYNC] Starting Workflow to Laboratory sync...');
+      console.log('🔄 [SYNC] Canvas molecules:', canvasMolecules.length, 'Standalone cards:', standaloneCards.length);
+      
       // Check if all molecules have at least one atom (only active molecules)
       const moleculesWithAtoms = canvasMolecules.filter(mol => mol.isActive !== false && mol.atoms && mol.atoms.length > 0);
       
       if (moleculesWithAtoms.length === 0) {
-        console.warn('⚠️ No molecules with atoms - skipping Laboratory sync');
+        console.warn('⚠️ [SYNC] No molecules with atoms - skipping Laboratory sync');
+        console.warn('⚠️ [SYNC] This is normal if you haven\'t assigned atoms to molecules yet');
         return false; // Skip sync if no molecules with atoms
       }
+      
+      console.log('🔄 [SYNC] Found', moleculesWithAtoms.length, 'molecules with atoms, proceeding with sync...');
 
       // Function to convert atom names to atom IDs for Laboratory mode
       const convertAtomNameToId = (atomName: string) => {
@@ -2102,40 +2411,94 @@ const WorkflowMode = () => {
       });
 
       // Merge workflow cards with existing cards (same logic as handleRenderWorkflow)
-      const finalCards: LayoutCard[] = [];
-      const existingCardMap = new Map<string, LayoutCard>();
+      const finalCards: LayoutCard[] = [...existingCards];
+
+      const existingCardBuckets = new Map<string, Map<string, LayoutCard[]>>();
       existingCards.forEach(card => {
-        if (card.moleculeId && card.atoms[0]?.atomId) {
-          const key = `${card.moleculeId}:${card.atoms[0].atomId}`;
-          existingCardMap.set(key, card);
+        const moleculeId = card.moleculeId;
+        const atomId = card.atoms[0]?.atomId;
+        if (!moleculeId || !atomId) {
+          return;
         }
-        finalCards.push(card);
+        const moleculeBuckets = existingCardBuckets.get(moleculeId) ?? new Map<string, LayoutCard[]>();
+        const atomBucket = moleculeBuckets.get(atomId) ?? [];
+        atomBucket.push(card);
+        moleculeBuckets.set(atomId, atomBucket);
+        existingCardBuckets.set(moleculeId, moleculeBuckets);
       });
 
-      const workflowAtomMap = new Map<string, Set<string>>();
+      existingCardBuckets.forEach(moleculeBuckets => {
+        moleculeBuckets.forEach(cards => {
+          cards.sort((a, b) => {
+            const orderA = typeof a.order === 'number' ? a.order : Infinity;
+            const orderB = typeof b.order === 'number' ? b.order : Infinity;
+            if (orderA !== orderB) {
+              return orderA - orderB;
+            }
+            return a.id.localeCompare(b.id);
+          });
+        });
+      });
+
+      const workflowCardBuckets = new Map<string, Map<string, LayoutCard[]>>();
+      workflowCards.forEach(card => {
+        const moleculeId = card.moleculeId;
+        const atomId = card.atoms[0]?.atomId;
+        if (!moleculeId || !atomId) {
+          return;
+        }
+        const moleculeBuckets = workflowCardBuckets.get(moleculeId) ?? new Map<string, LayoutCard[]>();
+        const atomBucket = moleculeBuckets.get(atomId) ?? [];
+        atomBucket.push(card);
+        moleculeBuckets.set(atomId, atomBucket);
+        workflowCardBuckets.set(moleculeId, moleculeBuckets);
+      });
+
+      const workflowAtomCounts = new Map<string, Map<string, number>>();
       workflowMolecules.forEach(molecule => {
-        const atomSet = new Set<string>(molecule.atoms);
-        workflowAtomMap.set(molecule.id, atomSet);
-        
+        const atomCountMap = workflowAtomCounts.get(molecule.id) ?? new Map<string, number>();
+        workflowAtomCounts.set(molecule.id, atomCountMap);
+
         molecule.atoms.forEach(atomId => {
-          const key = `${molecule.id}:${atomId}`;
-          const existingCard = existingCardMap.get(key);
-          
+          atomCountMap.set(atomId, (atomCountMap.get(atomId) ?? 0) + 1);
+
+          const existingBucketsForMolecule = existingCardBuckets.get(molecule.id);
+          let existingCard: LayoutCard | undefined;
+          if (existingBucketsForMolecule) {
+            const atomBucket = existingBucketsForMolecule.get(atomId);
+            if (atomBucket && atomBucket.length > 0) {
+              existingCard = atomBucket.shift();
+            }
+          }
+
           if (existingCard) {
-            const cardIndex = finalCards.findIndex(c => c.id === existingCard.id);
+            const cardIndex = finalCards.findIndex(c => c.id === existingCard!.id);
             if (cardIndex >= 0) {
               finalCards[cardIndex] = {
                 ...existingCard,
                 moleculeTitle: molecule.title,
               };
             }
-          } else {
-            const newCard = workflowCards.find(
+            return;
+          }
+
+          const workflowBucketsForMolecule = workflowCardBuckets.get(molecule.id);
+          let workflowCardCandidate: LayoutCard | undefined;
+          if (workflowBucketsForMolecule) {
+            const atomBucket = workflowBucketsForMolecule.get(atomId);
+            if (atomBucket && atomBucket.length > 0) {
+              workflowCardCandidate = atomBucket.shift();
+            }
+          }
+
+          if (!workflowCardCandidate) {
+            workflowCardCandidate = workflowCards.find(
               card => card.moleculeId === molecule.id && card.atoms[0]?.atomId === atomId
             );
-            if (newCard) {
-              finalCards.push(newCard);
-            }
+          }
+
+          if (workflowCardCandidate) {
+            finalCards.push(workflowCardCandidate);
           }
         });
       });
@@ -2163,6 +2526,13 @@ const WorkflowMode = () => {
 
       // Filter out deleted atoms/molecules
       const standaloneCardIds = new Set(standaloneCards.map(card => card.id));
+      const workflowAtomCountClones = new Map<string, Map<string, number>>();
+      workflowAtomCounts.forEach((atomMap, moleculeId) => {
+        const clone = new Map<string, number>();
+        atomMap.forEach((value, key) => clone.set(key, value));
+        workflowAtomCountClones.set(moleculeId, clone);
+      });
+
       const filteredCards = finalCards.filter(card => {
         if (!card.moleculeId) {
           return standaloneCardIds.has(card.id);
@@ -2173,11 +2543,15 @@ const WorkflowMode = () => {
         if (!workflowMoleculeIds.has(card.moleculeId)) {
           return false;
         }
-        const workflowAtoms = workflowAtomMap.get(card.moleculeId);
-        if (workflowAtoms) {
-          const atomId = card.atoms[0]?.atomId;
-          if (atomId && !workflowAtoms.has(atomId)) {
-            return false;
+        const atomId = card.atoms[0]?.atomId;
+        if (atomId) {
+          const atomCounts = workflowAtomCountClones.get(card.moleculeId);
+          if (atomCounts) {
+            const remaining = atomCounts.get(atomId) ?? 0;
+            if (remaining <= 0) {
+              return false;
+            }
+            atomCounts.set(atomId, remaining - 1);
           }
         }
         return true;
@@ -2200,6 +2574,8 @@ const WorkflowMode = () => {
         const sortedCards: LayoutCard[] = [];
         const workflowCards = cardsToSort.filter(card => card.moleculeId);
         const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
+        const normalizeAtomId = (atomId?: string) =>
+          (atomId || '').toLowerCase().replace(/[\s_-]/g, '');
 
         const moleculeIndexMap = new Map<string, number>();
         allMoleculesForIndexing.forEach((molecule, index) => {
@@ -2210,13 +2586,65 @@ const WorkflowMode = () => {
           const isActiveMolecule = workflowMoleculeIds.has(molecule.id);
           
           if (isActiveMolecule) {
+            const workflowOrder = Array.isArray(molecule.atomPositions) && molecule.atomPositions.length > 0
+              ? [...molecule.atomPositions]
+                  .filter(entry => entry && typeof entry.atomId === 'string')
+                  .sort((a, b) => {
+                    const orderA = typeof a.order === 'number' ? a.order : 0;
+                    const orderB = typeof b.order === 'number' ? b.order : 0;
+                    return orderA - orderB;
+                  })
+                  .map(entry => entry.atomId)
+              : Array.isArray(molecule.atomOrder) && molecule.atomOrder.length > 0
+                ? molecule.atomOrder
+                : Array.isArray(molecule.atoms)
+                  ? molecule.atoms
+                  : [];
+
+            const normalizedWorkflowOrder = workflowOrder.map(atom => normalizeAtomId(atom));
+
+            const positionLookup = new Map<string, number[]>();
+            normalizedWorkflowOrder.forEach((atom, idx) => {
+              const positions = positionLookup.get(atom) ?? [];
+              positions.push(idx);
+              positionLookup.set(atom, positions);
+            });
+            const usageCounter = new Map<string, number>();
+
             const moleculeCards = workflowCards
               .filter(card => card.moleculeId === molecule.id)
+              .map(card => {
+                const fallbackIndex = cardsToSort.findIndex(c => c.id === card.id);
+                const normalizedAtomId = normalizeAtomId(card.atoms[0]?.atomId);
+                const usageCount = usageCounter.get(normalizedAtomId) ?? 0;
+                usageCounter.set(normalizedAtomId, usageCount + 1);
+
+                const positions = positionLookup.get(normalizedAtomId);
+                let desiredOrder: number;
+                if (positions && positions.length > usageCount) {
+                  desiredOrder = positions[usageCount];
+                } else if (positions && positions.length > 0) {
+                  desiredOrder = positions[positions.length - 1] + (usageCount - positions.length + 1);
+                } else {
+                  desiredOrder = normalizedWorkflowOrder.length + (fallbackIndex === -1 ? usageCount : fallbackIndex + usageCount);
+                }
+
+                return { card, desiredOrder, fallbackIndex: fallbackIndex === -1 ? Number.MAX_SAFE_INTEGER : fallbackIndex, sequence: usageCount };
+              })
               .sort((a, b) => {
-                const indexA = cardsToSort.findIndex(c => c.id === a.id);
-                const indexB = cardsToSort.findIndex(c => c.id === b.id);
-                return indexA - indexB;
-              });
+                if (a.desiredOrder !== b.desiredOrder) {
+                  return a.desiredOrder - b.desiredOrder;
+                }
+                if (a.sequence !== b.sequence) {
+                  return a.sequence - b.sequence;
+                }
+                return a.fallbackIndex - b.fallbackIndex;
+              })
+              .map((item, cardIndex) => ({
+                ...item.card,
+                order: (fullMoleculeIndex * 1000) + cardIndex
+              }));
+
             sortedCards.push(...moleculeCards);
           }
 
@@ -2234,6 +2662,10 @@ const WorkflowMode = () => {
             return subOrderA - subOrderB;
           });
 
+          cardsAfterThisMolecule.forEach((card, index) => {
+            const subOrder = typeof card.order === 'number' ? (card.order % 1000) : (index + 1);
+            card.order = (fullMoleculeIndex * 1000) + subOrder;
+          });
           sortedCards.push(...cardsAfterThisMolecule);
         });
 
@@ -2382,14 +2814,17 @@ const WorkflowMode = () => {
       }
 
       // Save workflow molecules to localStorage
-      const workflowMoleculesForLab = workflowMolecules.map(mol => ({
-        moleculeId: mol.id,
-        moleculeTitle: mol.title,
-        atoms: mol.atoms.map((atomId, index) => ({
-          atomName: atomId,
-          order: index
-        }))
-      }));
+      const workflowMoleculesForLab = workflowMolecules.map(mol => {
+        const orderSource = mol.atomOrder && mol.atomOrder.length > 0 ? mol.atomOrder : mol.atoms;
+        return {
+          moleculeId: mol.id,
+          moleculeTitle: mol.title,
+          atoms: orderSource.map((atomId, index) => ({
+            atomName: atomId,
+            order: index
+          }))
+        };
+      });
       localStorage.setItem('workflow-molecules', JSON.stringify(workflowMoleculesForLab));
 
       console.log('✅ Laboratory configuration synced successfully');
@@ -2399,6 +2834,92 @@ const WorkflowMode = () => {
       return false;
     }
   }, [canvasMolecules, standaloneCards]);
+
+  // Autosave: Automatically save workflow when molecules or cards change
+  useEffect(() => {
+    // Skip autosave on initial load (wait for workflow to be loaded)
+    const hasWorkflowData = canvasMolecules.length > 0 || standaloneCards.length > 0;
+    if (!hasWorkflowData) {
+      // Mark that we've checked and there's no workflow yet
+      if (!hasInitialWorkflowLoadedRef.current) {
+        hasInitialWorkflowLoadedRef.current = true;
+      }
+      return;
+    }
+    
+    // Mark that initial workflow has been loaded
+    if (!hasInitialWorkflowLoadedRef.current) {
+      hasInitialWorkflowLoadedRef.current = true;
+      // Skip autosave on the very first load
+      return;
+    }
+
+    // Debounce autosave to avoid too frequent saves
+    const autosaveTimer = setTimeout(async () => {
+      console.log('🔄 [AUTOSAVE] Triggering workflow autosave...');
+      
+      try {
+        // Get environment variables for MongoDB saving
+        const envStr = localStorage.getItem('env');
+        const env = envStr ? JSON.parse(envStr) : {};
+        const client_name = env.CLIENT_NAME || 'default_client';
+        const app_name = env.APP_NAME || 'default_app';
+        const project_name = env.PROJECT_NAME || 'default_project';
+        
+        console.log('🔍 [AUTOSAVE] Saving workflow with:', { client_name, app_name, project_name });
+
+        // Save workflow configuration
+        const response = await fetch(`${MOLECULES_API}/workflow/save`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify({
+            workflow_name: workflowName,
+            canvas_molecules: serializeMoleculesForSave(canvasMolecules),
+            custom_molecules: serializeMoleculesForSave(customMolecules),
+            standalone_cards: standaloneCards,
+            user_id: '',
+            client_name: client_name,
+            app_name: app_name,
+            project_name: project_name
+          })
+        });
+
+        if (response.ok) {
+          console.log('✅ [AUTOSAVE] Workflow configuration saved successfully');
+          
+          // CRITICAL: Always sync to Laboratory Mode during autosave
+          // This ensures Laboratory Mode stays in sync with Workflow Mode changes
+          console.log('🔄 [AUTOSAVE] Syncing to Laboratory Mode...');
+          try {
+            const syncSuccess = await syncWorkflowToLaboratory();
+            
+            if (syncSuccess) {
+              console.log('✅ [AUTOSAVE] Workflow synced to Laboratory Mode successfully');
+            } else {
+              console.warn('⚠️ [AUTOSAVE] Workflow saved but Laboratory sync skipped (no molecules with atoms)');
+              // This is okay - sync is skipped when there are no molecules with atoms
+              // The workflow structure is still saved, and sync will happen when atoms are added
+            }
+          } catch (syncError) {
+            console.error('❌ [AUTOSAVE] Error during Laboratory sync:', syncError);
+            // Don't fail autosave if sync fails - workflow is still saved
+          }
+        } else {
+          const message = await response.text();
+          console.error('❌ [AUTOSAVE] Failed to save workflow configuration:', message);
+        }
+      } catch (error) {
+        console.error('❌ [AUTOSAVE] Autosave error:', error);
+      }
+    }, 3000); // 3 second debounce for autosave
+
+    return () => {
+      clearTimeout(autosaveTimer);
+    };
+  }, [canvasMolecules, customMolecules, standaloneCards, workflowName, syncWorkflowToLaboratory]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Function to save workflow configuration
   const saveWorkflowConfiguration = async () => {
@@ -2423,8 +2944,8 @@ const WorkflowMode = () => {
         credentials: 'include',
         body: JSON.stringify({
           workflow_name: workflowName,
-            canvas_molecules: canvasMolecules, // Save all molecules (active + inactive) - state already contains all
-            custom_molecules: customMolecules, // Save all molecules (active + inactive) - state already contains all
+          canvas_molecules: serializeMoleculesForSave(canvasMolecules), // Save all molecules (active + inactive) - state already contains all
+          custom_molecules: serializeMoleculesForSave(customMolecules), // Save all molecules (active + inactive) - state already contains all
             standalone_cards: standaloneCards,
           user_id: '', // Could be enhanced with actual user ID from session
           client_name: client_name,
@@ -2511,10 +3032,46 @@ const WorkflowMode = () => {
           // Load ALL molecules (active + inactive) into state
           // Filtering happens only when displaying (e.g., in WorkflowCanvas)
           // This preserves the isActive state and prevents position shifting
-          const allCanvasMolecules = (canvas_molecules || []).map((mol: any) => ({
-            ...mol,
-            isActive: mol.isActive !== false // Default to true if not specified
-          }));
+          const allCanvasMolecules = (canvas_molecules || []).map((mol: any) => {
+            const rawAtomPositions = Array.isArray(mol.atomPositions)
+              ? mol.atomPositions
+              : Array.isArray(mol.atom_positions)
+                ? mol.atom_positions
+                : undefined;
+
+            const normalizedPositions = rawAtomPositions
+              ? rawAtomPositions
+                  .filter((entry: any) => entry && typeof entry.atomId === 'string')
+                  .map((entry: any) => ({
+                    atomId: entry.atomId,
+                    order: typeof entry.order === 'number' ? entry.order : 0
+                  }))
+              : undefined;
+
+            const atomsFromPositions = normalizedPositions && normalizedPositions.length > 0
+              ? [...normalizedPositions].sort((a, b) => a.order - b.order).map(entry => entry.atomId)
+              : undefined;
+
+            const atomsArray = atomsFromPositions && atomsFromPositions.length > 0
+              ? atomsFromPositions
+              : Array.isArray(mol.atoms)
+                ? mol.atoms
+                : [];
+
+            const atomOrderArray = atomsFromPositions && atomsFromPositions.length > 0
+              ? atomsFromPositions
+              : Array.isArray(mol.atomOrder) && mol.atomOrder.length > 0
+                ? mol.atomOrder
+                : atomsArray;
+
+            return {
+              ...mol,
+              atoms: atomsArray,
+              atomOrder: atomOrderArray,
+              atomPositions: normalizedPositions,
+              isActive: mol.isActive !== false // Default to true if not specified
+            };
+          });
           const allCustomMolecules = (custom_molecules || []).map((mol: any) => ({
             ...mol,
             isActive: mol.isActive !== false
@@ -2528,6 +3085,9 @@ const WorkflowMode = () => {
           setCanvasMolecules(allCanvasMolecules);
           setCustomMolecules(allCustomMolecules);
           setStandaloneCards(standalone_cards || []);
+          
+          // Mark that initial workflow has been loaded (reset autosave flag)
+          hasInitialWorkflowLoadedRef.current = false;
           
           toast({
             title: "Workflow Loaded",
@@ -2919,6 +3479,7 @@ const WorkflowMode = () => {
             onMoleculeReplace={handleMoleculeReplace}
             onMoleculePositionsUpdate={handleMoleculePositionsUpdate}
             onInsertMolecule={handleInsertMolecule}
+            onAtomOrderChange={handleAtomOrderChange}
             isLibraryVisible={isLibraryVisible}
             isRightPanelVisible={isRightPanelVisible}
             isAtomLibraryVisible={isAtomLibraryVisible}

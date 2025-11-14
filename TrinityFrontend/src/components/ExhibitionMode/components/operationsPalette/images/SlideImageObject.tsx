@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Crop, FlipHorizontal, FlipVertical, CircleDashed, Maximize2, Move, Sparkles, Trash2 } from 'lucide-react';
+import { Crop, FlipHorizontal, FlipVertical, CircleDashed, Maximize2, Move, Sparkles, Trash2, Square, Circle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
@@ -11,6 +11,7 @@ import {
 import { cn } from '@/lib/utils';
 import {
   CropHandle,
+  CropShape,
   DEFAULT_CROP_INSETS,
   ImageCropInsets,
   ImageCropOverlay,
@@ -27,12 +28,14 @@ interface ImageToolbarProps {
   previewSrc?: string | null;
   fitMode: 'cover' | 'contain';
   isCropping: boolean;
+  cropShape?: CropShape;
   flipHorizontal: boolean;
   flipVertical: boolean;
   isAnimated: boolean;
   opacity: number;
   onToggleFit?: () => void;
   onToggleCrop?: () => void;
+  onCropShapeChange?: (shape: CropShape) => void;
   onFlipHorizontal?: () => void;
   onFlipVertical?: () => void;
   onToggleAnimate?: () => void;
@@ -50,12 +53,14 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
   previewSrc,
   fitMode,
   isCropping,
+  cropShape = 'rectangle',
   flipHorizontal,
   flipVertical,
   isAnimated,
   opacity,
   onToggleFit,
   onToggleCrop,
+  onCropShapeChange,
   onFlipHorizontal,
   onFlipVertical,
   onToggleAnimate,
@@ -108,6 +113,65 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
           <Crop className="h-4 w-4" />
           Crop
         </Button>
+        {isCropping && onCropShapeChange && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onMouseDown={handleToolbarMouseDown}
+                className={controlChipClasses(true)}
+                aria-haspopup="menu"
+              >
+                {cropShape === 'circle' ? (
+                  <Circle className="h-4 w-4" />
+                ) : cropShape === 'rounded-rectangle' ? (
+                  <Square className="h-4 w-4 rounded-sm" />
+                ) : (
+                  <Square className="h-4 w-4" />
+                )}
+                <span className="capitalize ml-1">{cropShape.replace('-', ' ')}</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              side="top"
+              align="center"
+              className="z-[4000] min-w-[160px] rounded-xl border border-border/70 bg-background/95 p-1.5 shadow-2xl"
+            >
+              <DropdownMenuItem
+                onSelect={event => {
+                  event.preventDefault();
+                  onCropShapeChange('rectangle');
+                }}
+                className="gap-2 text-sm"
+              >
+                <Square className="h-4 w-4" />
+                Rectangle
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={event => {
+                  event.preventDefault();
+                  onCropShapeChange('rounded-rectangle');
+                }}
+                className="gap-2 text-sm"
+              >
+                <Square className="h-4 w-4 rounded-sm" />
+                Rounded Rectangle
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={event => {
+                  event.preventDefault();
+                  onCropShapeChange('circle');
+                }}
+                className="gap-2 text-sm"
+              >
+                <Circle className="h-4 w-4" />
+                Circle
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -150,7 +214,8 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
               className="gap-2 text-sm"
             >
               <FlipHorizontal className="h-4 w-4" />
-              Flip horizontal
+              <span className="flex-1">Flip horizontal</span>
+              <span className="text-xs text-muted-foreground">H</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               disabled={!onFlipVertical}
@@ -161,7 +226,8 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
               className="gap-2 text-sm"
             >
               <FlipVertical className="h-4 w-4" />
-              Flip vertical
+              <span className="flex-1">Flip vertical</span>
+              <span className="text-xs text-muted-foreground">V</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -262,6 +328,8 @@ interface SlideImageObjectProps {
   fullBleed?: boolean;
   fitMode?: 'cover' | 'contain';
   isCropping?: boolean;
+  cropShape?: CropShape;
+  cropBorderRadius?: number;
   flipHorizontal?: boolean;
   flipVertical?: boolean;
   isAnimated?: boolean;
@@ -271,6 +339,7 @@ interface SlideImageObjectProps {
   onToolbarStateChange: (objectId: string, toolbar: React.ReactNode | null) => void;
   onToggleFit?: (objectId: string) => void;
   onToggleCrop?: (objectId: string) => void;
+  onCropShapeChange?: (objectId: string, shape: CropShape) => void;
   onFlipHorizontal?: (objectId: string) => void;
   onFlipVertical?: (objectId: string) => void;
   onToggleAnimate?: (objectId: string) => void;
@@ -291,6 +360,8 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   fullBleed = false,
   fitMode = 'cover',
   isCropping = false,
+  cropShape = 'rectangle',
+  cropBorderRadius = 12,
   flipHorizontal = false,
   flipVertical = false,
   isAnimated = false,
@@ -300,6 +371,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   onToolbarStateChange,
   onToggleFit,
   onToggleCrop,
+  onCropShapeChange,
   onFlipHorizontal,
   onFlipVertical,
   onToggleAnimate,
@@ -343,6 +415,98 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     setLocalOpacity(clampOpacity(opacity));
   }, [opacity]);
 
+  // Handle ESC key to exit crop mode
+  useEffect(() => {
+    if (!isCropping || !onToggleCrop) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        cropLog('ESC pressed - exiting crop mode', { id });
+        onToggleCrop(id);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isCropping, id, onToggleCrop]);
+
+  // Handle keyboard shortcuts for flip operations
+  useEffect(() => {
+    if (!canEdit || !isSelected || isCropping) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Only handle shortcuts when no input/textarea is focused
+      const target = event.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      // H key for horizontal flip
+      if (event.key === 'h' || event.key === 'H') {
+        if (onFlipHorizontal) {
+          event.preventDefault();
+          event.stopPropagation();
+          onFlipHorizontal(id);
+        }
+        return;
+      }
+
+      // V key for vertical flip
+      if (event.key === 'v' || event.key === 'V') {
+        if (onFlipVertical) {
+          event.preventDefault();
+          event.stopPropagation();
+          onFlipVertical(id);
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [canEdit, isSelected, isCropping, id, onFlipHorizontal, onFlipVertical]);
+
+  // Handle click outside to finalize crop
+  useEffect(() => {
+    if (!isCropping || !onToggleCrop || !containerRef.current) {
+      return;
+    }
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      // Check if click is outside the crop container
+      if (containerRef.current && !containerRef.current.contains(target)) {
+        // Check if click is not on the toolbar
+        const toolbar = document.querySelector('[data-image-toolbar-root]');
+        if (toolbar && toolbar.contains(target)) {
+          return; // Don't exit if clicking on toolbar
+        }
+        cropLog('Click outside - finalizing crop', { id });
+        onToggleCrop(id);
+      }
+    };
+
+    // Use a small delay to avoid immediate exit when entering crop mode
+    const timeoutId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+    }, 100);
+
+    return () => {
+      clearTimeout(timeoutId);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isCropping, id, onToggleCrop]);
+
   const handleToggleFit = useCallback(() => {
     if (!onToggleFit) {
       return;
@@ -382,10 +546,11 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     if (!onToggleCrop) {
       return;
     }
-    onInteract();
+    // Don't call onInteract here to prevent deselection when entering crop mode
+    // The crop toggle itself should maintain selection
     cropLog('Toggle crop request', { id });
     onToggleCrop(id);
-  }, [id, onInteract, onToggleCrop]);
+  }, [id, onToggleCrop]);
 
   const handleFlipHorizontal = useCallback(() => {
     if (!onFlipHorizontal) {
@@ -445,6 +610,17 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     [beginCropDrag, onInteract],
   );
 
+  const handleCropShapeChange = useCallback(
+    (shape: CropShape) => {
+      if (!onCropShapeChange) {
+        return;
+      }
+      onInteract();
+      onCropShapeChange(id, shape);
+    },
+    [id, onInteract, onCropShapeChange],
+  );
+
   const toolbar = useMemo(() => {
     if (!canEdit) {
       return null;
@@ -456,12 +632,14 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
         previewSrc={src}
         fitMode={localFitMode}
         isCropping={isCropping}
+        cropShape={cropShape}
         flipHorizontal={localFlipHorizontal}
         flipVertical={localFlipVertical}
         isAnimated={localAnimated}
         opacity={localOpacity}
         onToggleFit={onToggleFit ? handleToggleFit : undefined}
         onToggleCrop={onToggleCrop ? handleToggleCrop : undefined}
+        onCropShapeChange={onCropShapeChange ? handleCropShapeChange : undefined}
         onFlipHorizontal={onFlipHorizontal ? handleFlipHorizontal : undefined}
         onFlipVertical={onFlipVertical ? handleFlipVertical : undefined}
         onToggleAnimate={onToggleAnimate ? handleToggleAnimate : undefined}
@@ -475,6 +653,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     handleToggleAnimate,
     handleToggleFit,
     handleToggleCrop,
+    handleCropShapeChange,
     handleFlipHorizontal,
     handleFlipVertical,
     handleOpacityChange,
@@ -484,12 +663,14 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     localFlipVertical,
     localFitMode,
     isCropping,
+    cropShape,
     localOpacity,
     name,
     onRequestPositionPanel,
     onToggleAnimate,
     onToggleFit,
     onToggleCrop,
+    onCropShapeChange,
     onFlipHorizontal,
     onFlipVertical,
     onOpacityChange,
@@ -506,12 +687,15 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       };
     }
 
-    onToolbarStateChange(id, isSelected ? toolbar : null);
+    // Keep toolbar visible when cropping, even if not selected
+    // This ensures the crop controls remain accessible
+    const shouldShowToolbar = isSelected || isCropping;
+    onToolbarStateChange(id, shouldShowToolbar ? toolbar : null);
 
     return () => {
       onToolbarStateChange(id, null);
     };
-  }, [canEdit, id, isSelected, onToolbarStateChange, toolbar]);
+  }, [canEdit, id, isSelected, isCropping, onToolbarStateChange, toolbar]);
 
   const resolvedName = name && name.trim().length > 0 ? name : 'Slide image';
   const hasCrop = hasActiveCrop(liveCrop);
@@ -523,10 +707,18 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   }, [id, liveCrop]);
 
   const cropWrapperTransform = useMemo(() => {
+    // State 1: No crop applied - show full image
     if (!hasCrop && !isCropping) {
       return 'translate3d(0, 0, 0) scale(1, 1)';
     }
 
+    // State 2: Re-crop mode - show full original image in background
+    // Don't apply transform so user can see the full image and expand crop area
+    if (hasCrop && isCropping) {
+      return 'translate3d(0, 0, 0) scale(1, 1)';
+    }
+
+    // State 3: Crop finalized - apply transform to show only cropped portion
     const { translateXPercent, translateYPercent, scaleX, scaleY } = cropRenderMetrics;
     return `translate3d(-${translateXPercent}%, -${translateYPercent}%, 0) scale(${scaleX}, ${scaleY})`;
   }, [cropRenderMetrics, hasCrop, isCropping]);
@@ -536,8 +728,13 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       transform: cropWrapperTransform,
       transformOrigin: 'top left',
       willChange: 'transform',
+      // No transition during cropping for instant updates, smooth transition when exiting
+      transition: isCropping ? 'none' : 'transform 0.2s ease-out',
+      // Ensure sub-pixel rendering for smooth movement
+      backfaceVisibility: 'hidden',
+      perspective: 1000,
     }),
-    [cropWrapperTransform],
+    [cropWrapperTransform, isCropping],
   );
 
   useEffect(() => {
@@ -570,15 +767,27 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       const scaleX = localFlipHorizontal ? -1 : 1;
       const scaleY = localFlipVertical ? -1 : 1;
 
-      return {
+      const baseStyle: React.CSSProperties = {
         '--image-flip-scale-x': `${scaleX}`,
         '--image-flip-scale-y': `${scaleY}`,
         transform: `scaleX(${scaleX}) scaleY(${scaleY})`,
         transformOrigin: 'center center',
         opacity: clampOpacity(localOpacity),
-      } as React.CSSProperties;
+      };
+
+      // Apply crop shape mask when not in crop mode
+      if (hasCrop && !isCropping) {
+        if (cropShape === 'circle') {
+          baseStyle.borderRadius = '50%';
+          baseStyle.clipPath = 'circle(50% at 50% 50%)';
+        } else if (cropShape === 'rounded-rectangle') {
+          baseStyle.borderRadius = `${Math.min(cropBorderRadius, 50)}%`;
+        }
+      }
+
+      return baseStyle;
     },
-    [localFlipHorizontal, localFlipVertical, localOpacity],
+    [localFlipHorizontal, localFlipVertical, localOpacity, hasCrop, isCropping, cropShape, cropBorderRadius],
   );
 
   return (
@@ -607,12 +816,39 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
               />
             </div>
           </div>
+          {/* Re-crop mode: Show current crop area as overlay on full image */}
+          {isCropping && hasCrop && (
+            <div
+              className="pointer-events-none absolute z-20 border-2 border-dashed border-yellow-400/60 bg-yellow-400/10"
+              style={{
+                top: `${liveCrop.top}%`,
+                right: `${liveCrop.right}%`,
+                bottom: `${liveCrop.bottom}%`,
+                left: `${liveCrop.left}%`,
+                borderRadius:
+                  cropShape === 'circle'
+                    ? '50%'
+                    : cropShape === 'rounded-rectangle'
+                      ? `${Math.min(cropBorderRadius, 50)}%`
+                      : undefined,
+              }}
+            >
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="rounded-full bg-yellow-400/90 px-3 py-1 text-xs font-medium text-yellow-900 shadow-lg">
+                  Current crop area
+                </span>
+              </div>
+            </div>
+          )}
           {isCropping && (
             <ImageCropOverlay
               cropInsets={liveCrop}
               isDragging={isCropDragging}
               onBeginDrag={handleCropPointerDown}
               onResetCrop={onResetCrop && hasCrop ? handleResetCrop : undefined}
+              cropShape={cropShape}
+              borderRadius={cropBorderRadius}
+              isReCropMode={hasCrop}
             />
           )}
         </>

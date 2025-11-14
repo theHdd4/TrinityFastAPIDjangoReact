@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import Table from '@/templates/tables/table';
 import groupbyWtgAvg from '../index';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
@@ -124,9 +125,14 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ csv_data, filename }),
       });
+      let payload: any = {};
+      try {
+        payload = await response.json();
+      } catch {}
       if (!response.ok) {
         throw new Error(`Save failed: ${response.statusText}`);
       }
+      await resolveTaskResponse(payload);
       setSaveSuccess(true);
       toast({ title: 'Success', description: 'DataFrame saved successfully.' });
       setShowSaveModal(false);
@@ -307,8 +313,18 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       
       const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(fullDataSource)}`;
       const res = await fetch(url);
-      const data = await res.json();
-      
+      let payload: any = {};
+      try {
+        payload = await res.json();
+      } catch {}
+
+      if (!res.ok) {
+        const detail = typeof payload?.detail === 'string' ? payload.detail : res.statusText;
+        throw new Error(detail || 'Failed to fetch cardinality data');
+      }
+
+      const data = (await resolveTaskResponse(payload)) || {};
+
       if (data.status === 'SUCCESS' && data.cardinality) {
         setCardinalityData(data.cardinality);
       } else {
@@ -533,9 +549,19 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
       console.log('📤 Calling GroupBy backend:', `${GROUPBY_API}/run`);
       
       const res = await fetch(`${GROUPBY_API}/run`, { method: 'POST', body: formData });
-      const data = await res.json();
-      
-      console.log('📥 GroupBy backend response:', data);
+      let payload: any = {};
+      try {
+        payload = await res.json();
+      } catch {}
+
+      console.log('📥 GroupBy backend response:', payload);
+
+      if (!res.ok) {
+        const detail = typeof payload?.detail === 'string' ? payload.detail : res.statusText;
+        throw new Error(detail || 'GroupBy run failed');
+      }
+
+      const data = (await resolveTaskResponse(payload)) || {};
       
       if (data.status === 'SUCCESS' && data.result_file) {
         // 🔧 CRITICAL FIX: Use the data returned directly from /run endpoint
@@ -587,6 +613,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           
           // Try to get results from the cached_dataframe endpoint
           try {
+<<<<<<< HEAD
             const totalRows = typeof data.row_count === 'number' ? data.row_count : 1000;
             const pageSize = Math.min(Math.max(totalRows, 50), 1000);
             const cachedUrl = `${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(
@@ -596,6 +623,17 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
             if (cachedRes.ok) {
               const cachedJson = await cachedRes.json();
               const csvText = cachedJson?.data ?? '';
+=======
+            const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(data.result_file)}`);
+            let cachedPayload: any = {};
+            try {
+              cachedPayload = await cachedRes.json();
+            } catch {}
+            if (cachedRes.ok) {
+              const cachedData = (await resolveTaskResponse(cachedPayload)) || {};
+              const csvText = String(cachedData?.data ?? '');
+              // Parse CSV to get results
+>>>>>>> 802df61f4163f6713a286ae8a78af506e361601a
               const lines = csvText.split('\n');
               if (lines.length <= 1) {
                 throw new Error('No data rows found in CSV');
@@ -635,7 +673,8 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                 description: `GroupBy completed! ${rows.length} rows processed.`,
               });
             } else {
-              throw new Error('Failed to fetch cached results');
+              const detail = typeof cachedPayload?.detail === 'string' ? cachedPayload.detail : undefined;
+              throw new Error(detail || 'Failed to fetch cached results');
             }
           } catch (fetchError) {
             console.error('❌ Error fetching cached results:', fetchError);

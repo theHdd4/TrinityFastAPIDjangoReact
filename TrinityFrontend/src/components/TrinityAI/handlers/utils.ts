@@ -1,5 +1,6 @@
 import { Message, EnvironmentContext } from './types';
 import { MERGE_API, CONCAT_API, GROUPBY_API, CREATECOLUMN_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 /**
@@ -454,7 +455,8 @@ export const autoSaveStepResult = async ({
       }
 
       const payload = await response.json();
-      const savedPath = payload?.result_file || payload?.filename || filename;
+      const saveResult = await resolveTaskResponse<Record<string, any>>(payload);
+      const savedPath = saveResult?.result_file || saveResult?.filename || filename;
 
       updateAtomSettings(atomId, {
         createColumnResults: {

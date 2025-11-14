@@ -1,4 +1,5 @@
 import { FEATURE_OVERVIEW_API } from './api';
+import { resolveTaskResponse } from './taskQueue';
 
 type FetchDimensionMappingOptions = {
   objectName?: string;
@@ -48,7 +49,8 @@ export async function fetchDimensionMapping(
       return { mapping: {} };
     }
     if (res.ok) {
-      const data = await res.json();
+      const raw = await res.json();
+      const data = await resolveTaskResponse(raw);
       const mapping =
         (data && typeof data === 'object' && data.mapping && typeof data.mapping === 'object'
           ? data.mapping

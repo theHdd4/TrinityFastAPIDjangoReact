@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 const normalizeColumnName = (value: string | undefined | null) => {
@@ -106,7 +107,8 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
     );
     let summary: ColumnInfo[] = [];
     if (res.ok) {
-      const data = await res.json();
+      const raw = await res.json();
+      const data = await resolveTaskResponse<{ summary?: ColumnInfo[] }>(raw);
       summary = (data.summary || []).filter(Boolean);
       setColumns(summary);
     }
@@ -134,14 +136,16 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
       try {
         const resp = await fetch(`${GROUPBY_API}/init`, { method: 'POST', body: formData });
         console.log('[GroupBy] /init status', resp.status);
-        let data: any = {};
-        try { data = await resp.clone().json(); } catch {}
-        console.log('[GroupBy] /init payload', data);
+        let payload: any = {};
+        try {
+          payload = await resp.json();
+        } catch {}
+        console.log('[GroupBy] /init payload', payload);
         if (resp.ok) {
-          // if json already parsed above use that
-          if (!data || Object.keys(data).length === 0) data = await resp.json();
-          fetchedIdentifiers = Array.isArray(data.identifiers) ? data.identifiers.filter(Boolean) : [];
-          fetchedMeasures = Array.isArray(data.measures) ? data.measures.filter(Boolean) : [];
+          const result = await resolveTaskResponse(payload);
+          const resolved = result || {};
+          fetchedIdentifiers = Array.isArray(resolved.identifiers) ? resolved.identifiers.filter(Boolean) : [];
+          fetchedMeasures = Array.isArray(resolved.measures) ? resolved.measures.filter(Boolean) : [];
           setIdentifiers(fetchedIdentifiers);
           setMeasures(fetchedMeasures);
         }
