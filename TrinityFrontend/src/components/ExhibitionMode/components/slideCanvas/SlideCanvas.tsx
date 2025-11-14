@@ -112,7 +112,7 @@ import {
 } from './utils';
 import { resolveFeatureOverviewTransparency, resolveSlideBackground } from './background';
 import { formattingShallowEqual, readTableState, tableStatesEqual, type TableState } from './table';
-import { ImageCropInsets, sanitizeImageCrop } from '../operationsPalette/images/toolbar/Crop';
+import { CropShape, ImageCropInsets, sanitizeImageCrop } from '../operationsPalette/images/toolbar/Crop';
 import type { CardEditor } from '@/hooks/useCollaborativeSyncExhibition';
 
 
@@ -2465,6 +2465,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [updateImageProps],
     );
 
+    const handleSetImageCropShape = useCallback(
+      (objectId: string, shape: CropShape) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          cropShape: shape,
+        }));
+      },
+      [updateImageProps],
+    );
+
     const handleToggleImageCrop = useCallback(
       (objectId: string) => {
         const object = objectsMap.get(objectId);
@@ -2480,10 +2490,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
+        const isCurrentlyCropping = activeImageCropId === objectId;
         setActiveImageCropId(prev => (prev === objectId ? null : objectId));
+        
+        // Ensure image is selected when entering crop mode
+        if (!isCurrentlyCropping && !selectedIds.includes(objectId)) {
+          setSelectedIds(prev => [...prev, objectId]);
+        }
+        
         onInteract();
       },
-      [objectsMap, onInteract],
+      [objectsMap, onInteract, activeImageCropId, selectedIds],
     );
 
     const handleToggleImageAnimation = useCallback(
@@ -2883,10 +2900,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       }
 
       const target = objectsMap.get(activeImageCropId);
-      if (!target || target.type !== 'image' || !selectedIds.includes(activeImageCropId) || !canEdit) {
+      // Only clear crop mode if the image is deleted, type changes, or editing is disabled
+      // Don't clear just because the image is deselected - allow cropping even when deselected
+      if (!target || target.type !== 'image' || !canEdit) {
         setActiveImageCropId(null);
       }
-    }, [activeImageCropId, canEdit, objectsMap, selectedIds]);
+    }, [activeImageCropId, canEdit, objectsMap]);
 
     const handleTextToolbarStateChange = useCallback(
       (objectId: string, node: ReactNode | null) => {
@@ -4600,6 +4619,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const imageCropInsets = isImageObject
               ? sanitizeImageCrop((rawImageProps as { crop?: unknown }).crop)
               : sanitizeImageCrop(null);
+            const imageCropShape: CropShape =
+              isImageObject && typeof rawImageProps.cropShape === 'string' && ['rectangle', 'circle', 'rounded-rectangle'].includes(rawImageProps.cropShape)
+                ? (rawImageProps.cropShape as CropShape)
+                : 'rectangle';
+            const imageCropBorderRadius =
+              isImageObject && typeof rawImageProps.cropBorderRadius === 'number'
+                ? Math.min(Math.max(rawImageProps.cropBorderRadius, 0), 50)
+                : 12;
             const isImageAnimated = isImageObject && rawImageProps.animate === true;
             const isCroppingImage = isImageObject && activeImageCropId === object.id;
             const isEditingTextBox =
@@ -4846,6 +4873,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       fullBleed={isFullBleedImage}
                       fitMode={imageFitMode}
                       isCropping={isCroppingImage}
+                      cropShape={imageCropShape}
+                      cropBorderRadius={imageCropBorderRadius}
                       flipHorizontal={imageFlipHorizontal}
                       flipVertical={imageFlipVertical}
                       isAnimated={isImageAnimated}
@@ -4855,6 +4884,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onToolbarStateChange={handleTextToolbarStateChange}
                       onToggleFit={handleToggleImageFit}
                       onToggleCrop={handleToggleImageCrop}
+                      onCropShapeChange={handleSetImageCropShape}
                       onFlipHorizontal={handleFlipImageHorizontal}
                       onFlipVertical={handleFlipImageVertical}
                       onToggleAnimate={handleToggleImageAnimation}
