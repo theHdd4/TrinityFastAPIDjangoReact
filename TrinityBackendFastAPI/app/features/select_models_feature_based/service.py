@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 import math
 import statistics
-from pathlib import PurePosixPath
-from dataclasses import dataclass, replace
+import json
+from dataclasses import dataclass
 from datetime import datetime
 from itertools import count
 from typing import Any, Dict, Iterable, List, Sequence
@@ -22,6 +22,10 @@ from .database import MINIO_BUCKET, get_minio_df, minio_client
 logger = logging.getLogger("app.features.select_models_feature_based.service")
 
 
+class ModelDataUnavailableError(RuntimeError):
+    """Raised when model results cannot be loaded for a given request."""
+
+
 @dataclass(frozen=True)
 class ModelSeries:
     dates: Sequence[str]
@@ -35,7 +39,7 @@ class ModelRecord:
     combination_id: str
     combination: Dict[str, str]
     model_name: str
-    metrics: Dict[str, float]
+    metrics: Dict[str, float | None]
     variable_impacts: Dict[str, float]
     variable_averages: Dict[str, float]
     price_variable: str
@@ -48,178 +52,22 @@ class ModelRecord:
     def base_revenue(self) -> float:
         return self.base_price * self.base_volume
 
-
-MODEL_DATA: List[ModelRecord] = [
-    ModelRecord(
-        file_key="demo/results/feature-based.parquet",
-        combination_id="combo-retail",
-        combination={"Channel": "Retail", "Brand": "Trinity", "PPG": "Premium"},
-        model_name="RetailBaseline",
-        metrics={
-            "mape_train": 0.07,
-            "mape_test": 0.09,
-            "r2_train": 0.93,
-            "r2_test": 0.9,
-            "aic": 124.5,
-            "bic": 142.1,
-            "self_elasticity": -1.18,
-            "self_beta": -0.82,
-            "self_avg": -1.01,
-            "self_roi": 1.48,
-        },
-        variable_impacts={"price": -1.18, "promo": 0.42, "season": 0.26},
-        variable_averages={"price": 12.4, "promo": 0.35, "season": 0.5},
-        price_variable="price",
-        base_price=12.4,
-        base_volume=980.0,
-        rpi_competitors={"Competitor A": 11.8, "Competitor B": 12.9},
-        series=ModelSeries(
-            dates=[f"2023-{month:02d}-01" for month in range(1, 13)],
-            actual=[
-                915.0,
-                920.0,
-                932.0,
-                941.0,
-                955.0,
-                962.0,
-                978.0,
-                981.0,
-                995.0,
-                1001.0,
-                1008.0,
-                1015.0,
-            ],
-            predicted=[
-                910.0,
-                924.0,
-                934.0,
-                939.0,
-                951.0,
-                963.0,
-                976.0,
-                980.0,
-                994.0,
-                999.0,
-                1006.0,
-                1012.0,
-            ],
-        ),
-    ),
-    ModelRecord(
-        file_key="demo/results/feature-based.parquet",
-        combination_id="combo-retail",
-        combination={"Channel": "Retail", "Brand": "Trinity", "PPG": "Premium"},
-        model_name="RetailPromotionFocus",
-        metrics={
-            "mape_train": 0.09,
-            "mape_test": 0.11,
-            "r2_train": 0.91,
-            "r2_test": 0.88,
-            "aic": 131.2,
-            "bic": 148.0,
-            "self_elasticity": -0.94,
-            "self_beta": -0.68,
-            "self_avg": -0.87,
-            "self_roi": 1.32,
-        },
-        variable_impacts={"price": -0.94, "promo": 0.56, "season": 0.31},
-        variable_averages={"price": 12.4, "promo": 0.35, "season": 0.5},
-        price_variable="price",
-        base_price=12.4,
-        base_volume=980.0,
-        rpi_competitors={"Competitor A": 11.8, "Competitor B": 12.9},
-        series=ModelSeries(
-            dates=[f"2023-{month:02d}-01" for month in range(1, 13)],
-            actual=[
-                914.0,
-                921.0,
-                930.0,
-                938.0,
-                949.0,
-                963.0,
-                975.0,
-                980.0,
-                994.0,
-                1000.0,
-                1009.0,
-                1011.0,
-            ],
-            predicted=[
-                912.0,
-                919.0,
-                929.0,
-                940.0,
-                952.0,
-                964.0,
-                975.0,
-                982.0,
-                995.0,
-                1003.0,
-                1007.0,
-                1013.0,
-            ],
-        ),
-    ),
-    ModelRecord(
-        file_key="demo/results/feature-based.parquet",
-        combination_id="combo-online",
-        combination={"Channel": "Online", "Brand": "Trinity", "PPG": "Value"},
-        model_name="OnlineSeasonalBlend",
-        metrics={
-            "mape_train": 0.06,
-            "mape_test": 0.085,
-            "r2_train": 0.94,
-            "r2_test": 0.91,
-            "aic": 117.7,
-            "bic": 135.4,
-            "self_elasticity": -1.32,
-            "self_beta": -0.91,
-            "self_avg": -1.11,
-            "self_roi": 1.55,
-        },
-        variable_impacts={"price": -1.32, "promo": 0.38, "season": 0.45},
-        variable_averages={"price": 9.8, "promo": 0.28, "season": 0.6},
-        price_variable="price",
-        base_price=9.8,
-        base_volume=1240.0,
-        rpi_competitors={"Competitor A": 9.4, "Competitor C": 10.1},
-        series=ModelSeries(
-            dates=[f"2023-{month:02d}-01" for month in range(1, 13)],
-            actual=[
-                1205.0,
-                1210.0,
-                1218.0,
-                1222.0,
-                1236.0,
-                1245.0,
-                1250.0,
-                1255.0,
-                1262.0,
-                1269.0,
-                1278.0,
-                1284.0,
-            ],
-            predicted=[
-                1200.0,
-                1208.0,
-                1215.0,
-                1220.0,
-                1234.0,
-                1241.0,
-                1249.0,
-                1254.0,
-                1261.0,
-                1268.0,
-                1274.0,
-                1280.0,
-            ],
-        ),
-    ),
-]
-
-
 SAVED_MODELS: Dict[str, Dict[str, Any]] = {}
 _saved_counter = count(1)
+
+
+METRIC_KEYS = [
+    "mape_train",
+    "mape_test",
+    "r2_train",
+    "r2_test",
+    "aic",
+    "bic",
+    "self_elasticity",
+    "self_beta",
+    "self_avg",
+    "self_roi",
+]
 
 
 class ModelFilterPayload(BaseModel):
@@ -272,6 +120,7 @@ class CurveRequestPayload(BaseModel):
     client_name: str
     app_name: str
     project_name: str
+    file_key: str
     combination_name: str
     model_name: str
 
@@ -279,26 +128,6 @@ class CurveRequestPayload(BaseModel):
 def _normalise_file_key(file_key: str) -> str:
     return file_key.strip().lstrip("/")
 
-
-def _file_key_tokens(file_key: str) -> set[str]:
-    """Return a set of match tokens for the provided object path.
-
-    We normalise the incoming MinIO object name and create multiple variants so
-    that deterministic demo data (``demo/results/feature-based.parquet``)
-    continues to work even when the UI now supplies Arrow artefacts from the
-    ``model-results`` directory.
-    """
-
-    if not file_key:
-        return set()
-
-    normalised = _normalise_file_key(file_key)
-    path = PurePosixPath(normalised)
-
-    tokens = {normalised, path.name}
-    if path.stem:
-        tokens.add(path.stem)
-    return {token.lower() for token in tokens if token}
 
 
 def _load_dataframe(file_key: str) -> pd.DataFrame | None:
@@ -351,33 +180,353 @@ def _combination_ids_from_minio(file_key: str) -> List[str] | None:
     return sorted(combinations)
 
 
-def _models_for_file(file_key: str, combination_id: str | None = None) -> List[ModelRecord]:
-    target_tokens = _file_key_tokens(file_key)
-    normalised_key = _normalise_file_key(file_key)
-    if not target_tokens:
-        models = list(MODEL_DATA)
+
+
+def _detect_model_name_column(frame: pd.DataFrame) -> str | None:
+    for column in frame.columns:
+        col_lower = column.lower()
+        if col_lower in {"model_name", "model", "modelname"}:
+            return column
+        if col_lower.endswith("_model") or col_lower.startswith("model_"):
+            return column
+        if "model" in col_lower and "name" in col_lower:
+            return column
+    return None
+
+
+def _coerce_optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    try:
+        if pd.isna(value):  # type: ignore[arg-type]
+            return None
+    except Exception:  # pragma: no cover - defensive
+        pass
+    text = str(value).strip()
+    return text or None
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    return None
+
+
+def _row_value(row: pd.Series, lookup: Dict[str, str], key: str) -> Any:
+    column = lookup.get(key.lower())
+    if column is None:
+        return None
+    return row.get(column)
+
+
+def _parse_mapping(value: Any) -> Dict[str, float]:
+    result: Dict[str, float] = {}
+    if isinstance(value, dict):
+        for key, raw in value.items():
+            if key is None:
+                continue
+            number = _coerce_optional_float(raw)
+            if number is None:
+                continue
+            key_text = _coerce_optional_str(key)
+            if key_text:
+                result[key_text] = number
+        return result
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return result
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return _parse_mapping(parsed)
+        for part in text.split(","):
+            if ":" not in part:
+                continue
+            key, raw = part.split(":", 1)
+            number = _coerce_optional_float(raw)
+            key_text = _coerce_optional_str(key)
+            if key_text and number is not None:
+                result[key_text] = number
+    return result
+
+
+def _parse_float_sequence(value: Any) -> List[float]:
+    if isinstance(value, (list, tuple)):
+        return [num for num in (_coerce_optional_float(item) for item in value) if num is not None]
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, (list, tuple)):
+            return _parse_float_sequence(list(parsed))
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+        return [num for num in (_coerce_optional_float(part) for part in parts) if num is not None]
+    return []
+
+
+def _parse_str_sequence(value: Any) -> List[str]:
+    if isinstance(value, (list, tuple)):
+        return [text for text in (_coerce_optional_str(item) for item in value) if text]
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, (list, tuple)):
+            return _parse_str_sequence(list(parsed))
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+        return [part for part in parts if part]
+    return []
+
+
+def _row_variable_impacts(row: pd.Series, ignore: set[str], column_lookup: Dict[str, str]) -> Dict[str, float]:
+    impacts = _parse_mapping(_row_value(row, column_lookup, "variable_impacts"))
+    for column in row.index:
+        column_name = str(column)
+        col_lower = column_name.lower()
+        if col_lower in ignore:
+            continue
+        if col_lower in METRIC_KEYS:
+            continue
+        if col_lower.startswith("variable_"):
+            continue
+        if col_lower.endswith("_values") or col_lower.endswith("_series"):
+            continue
+        if col_lower.endswith("_elasticity"):
+            variable = column_name[: -len("_elasticity")]
+        elif col_lower.startswith("elasticity_"):
+            variable = column_name[len("elasticity_"):]
+        elif col_lower.endswith("_impact"):
+            variable = column_name[: -len("_impact")]
+        elif col_lower.startswith("impact_"):
+            variable = column_name[len("impact_"):]
+        elif col_lower.endswith("_beta") and not col_lower.startswith("self_"):
+            variable = column_name[: -len("_beta")]
+        else:
+            continue
+        variable = variable.strip()
+        if not variable:
+            continue
+        value = _coerce_optional_float(row[column])
+        if value is None:
+            continue
+        impacts[variable] = value
+    return impacts
+
+
+def _row_variable_averages(row: pd.Series, ignore: set[str], column_lookup: Dict[str, str]) -> Dict[str, float]:
+    averages = _parse_mapping(_row_value(row, column_lookup, "variable_averages"))
+    for column in row.index:
+        column_name = str(column)
+        col_lower = column_name.lower()
+        if col_lower in ignore:
+            continue
+        if col_lower.startswith("variable_"):
+            continue
+        if col_lower.endswith("_average"):
+            variable = column_name[: -len("_average")]
+        elif col_lower.endswith("_avg"):
+            variable = column_name[: -len("_avg")]
+        elif col_lower.startswith("avg_"):
+            variable = column_name[len("avg_"):]
+        else:
+            continue
+        variable = variable.strip()
+        if not variable:
+            continue
+        value = _coerce_optional_float(row[column])
+        if value is None:
+            continue
+        averages[variable] = value
+    return averages
+
+
+def _row_rpi_competitors(row: pd.Series, column_lookup: Dict[str, str]) -> Dict[str, float]:
+    competitors = _parse_mapping(_row_value(row, column_lookup, "rpi_competitors"))
+    for column in row.index:
+        column_name = str(column)
+        col_lower = column_name.lower()
+        if not col_lower.startswith("rpi_"):
+            continue
+        competitor = column_name[len("rpi_"):]
+        if not competitor:
+            continue
+        value = _coerce_optional_float(row[column])
+        if value is None:
+            continue
+        competitors[competitor] = value
+    return competitors
+
+
+def _row_combination_metadata(
+    row: pd.Series,
+    combination_column: str,
+    model_column: str,
+    string_like_columns: set[str],
+) -> Dict[str, str]:
+    metadata: Dict[str, str] = {}
+    combo_value = _coerce_optional_str(row.get(combination_column))
+    if combo_value:
+        metadata[combination_column] = combo_value
+    for column in string_like_columns:
+        if column in {combination_column, model_column}:
+            continue
+        col_lower = column.lower()
+        if col_lower in METRIC_KEYS:
+            continue
+        if col_lower.startswith("variable_"):
+            continue
+        if col_lower.startswith("rpi_"):
+            continue
+        if col_lower.endswith("_values") or col_lower.endswith("_series"):
+            continue
+        value = _coerce_optional_str(row.get(column))
+        if not value:
+            continue
+        metadata[column] = value
+    return metadata
+
+
+def _build_series_from_row(row: pd.Series, column_lookup: Dict[str, str]) -> ModelSeries:
+    actual = _parse_float_sequence(_row_value(row, column_lookup, "actual_values"))
+    if not actual:
+        actual = _parse_float_sequence(_row_value(row, column_lookup, "actual"))
+    predicted = _parse_float_sequence(_row_value(row, column_lookup, "predicted_values"))
+    if not predicted:
+        predicted = _parse_float_sequence(_row_value(row, column_lookup, "predicted"))
+    dates = _parse_str_sequence(_row_value(row, column_lookup, "dates"))
+    if not dates:
+        dates = _parse_str_sequence(_row_value(row, column_lookup, "periods"))
+    length = min(len(actual), len(predicted))
+    if length == 0:
+        return ModelSeries(dates=[], actual=[], predicted=[])
+    actual = actual[:length]
+    predicted = predicted[:length]
+    if dates:
+        dates = dates[:length]
     else:
-        models = [
-            record
-            for record in MODEL_DATA
-            if target_tokens & _file_key_tokens(record.file_key)
-        ]
+        dates = [f"Period {index + 1}" for index in range(length)]
+    return ModelSeries(dates=dates, actual=actual, predicted=predicted)
 
-    if not models:
-        logger.warning(
-            "select_models_feature_based.no_models_for_file falling back to demo data file_key=%s",
-            file_key,
+
+def _models_for_file(file_key: str, combination_id: str | None = None) -> List[ModelRecord]:
+    frame = _load_dataframe(file_key)
+    if frame is None or frame.empty:
+        raise ModelDataUnavailableError(f"Model data not available for file '{file_key}'")
+
+    combination_column = _detect_combination_column(frame)
+    if combination_column is None:
+        raise ModelDataUnavailableError(
+            f"Unable to determine combination column for file '{file_key}'"
         )
-        models = list(MODEL_DATA)
 
-    if combination_id and combination_id != "all":
-        models = [record for record in models if record.combination_id == combination_id]
+    model_column = _detect_model_name_column(frame)
+    if model_column is None:
+        raise ModelDataUnavailableError(
+            f"Unable to determine model column for file '{file_key}'"
+        )
 
-    if not models:
-        raise ValueError(f"No models available for file '{file_key}'")
+    ignore_columns = {
+        combination_column.lower(),
+        model_column.lower(),
+        "file_key",
+        "object_name",
+        "csv_name",
+        "price_variable",
+        "base_price",
+        "base_volume",
+    }
+    ignore_columns.update(METRIC_KEYS)
 
-    replacement_key = normalised_key or models[0].file_key
-    return [replace(record, file_key=replacement_key) for record in models]
+    string_like_columns = {
+        column
+        for column in frame.columns
+        if pd.api.types.is_string_dtype(frame[column])
+    }
+    column_lookup = {column.lower(): column for column in frame.columns}
+
+    normalised_key = _normalise_file_key(file_key)
+    records: List[ModelRecord] = []
+
+    for _, row in frame.iterrows():
+        combo_value = _coerce_optional_str(row.get(combination_column))
+        if not combo_value:
+            continue
+        if combination_id and combination_id != "all" and combo_value != combination_id:
+            continue
+
+        model_name = _coerce_optional_str(row.get(model_column)) or f"model-{len(records) + 1}"
+        metrics = {
+            key: _coerce_optional_float(_row_value(row, column_lookup, key))
+            for key in METRIC_KEYS
+        }
+        impacts = _row_variable_impacts(row, ignore_columns, column_lookup)
+        averages = _row_variable_averages(row, ignore_columns, column_lookup)
+        competitors = _row_rpi_competitors(row, column_lookup)
+        combination_meta = _row_combination_metadata(
+            row,
+            combination_column,
+            model_column,
+            string_like_columns,
+        )
+
+        price_variable = _coerce_optional_str(_row_value(row, column_lookup, "price_variable"))
+        if not price_variable:
+            price_variable = next((name for name in impacts if "price" in name.lower()), "price")
+
+        base_price = _coerce_optional_float(_row_value(row, column_lookup, "base_price")) or 0.0
+        base_volume = _coerce_optional_float(_row_value(row, column_lookup, "base_volume")) or 0.0
+        series = _build_series_from_row(row, column_lookup)
+
+        records.append(
+            ModelRecord(
+                file_key=normalised_key,
+                combination_id=combo_value,
+                combination=combination_meta,
+                model_name=model_name,
+                metrics=metrics,
+                variable_impacts=impacts,
+                variable_averages=averages,
+                price_variable=price_variable,
+                base_price=base_price,
+                base_volume=base_volume,
+                rpi_competitors=competitors,
+                series=series,
+            )
+        )
+
+    if not records:
+        message = f"Model data not available for file '{file_key}'"
+        if combination_id and combination_id != "all":
+            message += f" and combination '{combination_id}'"
+        raise ModelDataUnavailableError(message)
+
+    return records
 
 
 def _normalise_prefix(prefix: str) -> str:
@@ -452,19 +601,34 @@ def list_model_results_files(
 
 
 def list_combination_ids(file_key: str) -> Dict[str, Any]:
+    note: str | None = None
     combo_ids = _combination_ids_from_minio(file_key)
     if combo_ids is None:
-        models = _models_for_file(file_key)
-        combo_ids = sorted({record.combination_id for record in models})
+        try:
+            models = _models_for_file(file_key)
+        except ModelDataUnavailableError as exc:
+            combo_ids = []
+            note = str(exc)
+        else:
+            combo_ids = sorted({record.combination_id for record in models})
     return {
         "file_key": file_key,
         "unique_combination_ids": combo_ids,
         "total_combinations": len(combo_ids),
+        "note": note,
     }
 
 
 def list_variables(file_key: str, mode: str | None = None) -> Dict[str, Any]:
-    models = _models_for_file(file_key)
+    try:
+        models = _models_for_file(file_key)
+    except ModelDataUnavailableError as exc:
+        return {
+            "file_key": file_key,
+            "variables": [],
+            "total_variables": 0,
+            "note": str(exc),
+        }
     variables = sorted({var for record in models for var in record.variable_impacts})
     if mode == "base":
         variables = [var for var in variables if not var.endswith("_beta")]
@@ -472,6 +636,7 @@ def list_variables(file_key: str, mode: str | None = None) -> Dict[str, Any]:
         "file_key": file_key,
         "variables": variables,
         "total_variables": len(variables),
+        "note": None,
     }
 
 
@@ -481,7 +646,16 @@ def _collect_metric_values(models: Iterable[ModelRecord], key: str) -> List[floa
 
 
 def get_filter_options(file_key: str, combination_id: str | None, variable: str) -> Dict[str, Any]:
-    models = _models_for_file(file_key, combination_id)
+    try:
+        models = _models_for_file(file_key, combination_id)
+    except ModelDataUnavailableError as exc:
+        return {
+            "file_key": file_key,
+            "combination_id": combination_id,
+            "variable": variable,
+            "available_filters": {},
+            "note": str(exc),
+        }
     available_filters: Dict[str, Dict[str, float]] = {}
 
     metric_keys = [
@@ -522,6 +696,7 @@ def get_filter_options(file_key: str, combination_id: str | None, variable: str)
         "combination_id": combination_id,
         "variable": variable,
         "available_filters": available_filters,
+        "note": None,
     }
 
 
@@ -591,7 +766,15 @@ def filter_models_with_existing(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def get_variable_ranges(file_key: str, combination_id: str | None, variables: Iterable[str]) -> Dict[str, Any]:
-    models = _models_for_file(file_key, combination_id)
+    try:
+        models = _models_for_file(file_key, combination_id)
+    except ModelDataUnavailableError as exc:
+        return {
+            "file_key": file_key,
+            "combination_id": combination_id,
+            "variable_ranges": {},
+            "note": str(exc),
+        }
     ranges: Dict[str, Dict[str, float]] = {}
 
     for variable in variables:
@@ -613,18 +796,25 @@ def get_variable_ranges(file_key: str, combination_id: str | None, variables: It
         "file_key": file_key,
         "combination_id": combination_id,
         "variable_ranges": ranges,
+        "note": None,
     }
 
 
 def get_saved_combinations_status(file_key: str, atom_id: str) -> Dict[str, Any]:
     combos_from_file = _combination_ids_from_minio(file_key)
+    note: str | None
     if combos_from_file is None:
-        models = _models_for_file(file_key)
-        combos = sorted({record.combination_id for record in models})
-        data_source_note = "Demo data – persisted in memory only"
+        try:
+            models = _models_for_file(file_key)
+        except ModelDataUnavailableError as exc:
+            combos = []
+            note = str(exc)
+        else:
+            combos = sorted({record.combination_id for record in models})
+            note = "Derived from available model rows"
     else:
         combos = combos_from_file
-        data_source_note = "Computed from MinIO model results"
+        note = "Computed from MinIO model results"
     normalised_key = _normalise_file_key(file_key)
     saved_for_file = [
         details
@@ -644,14 +834,17 @@ def get_saved_combinations_status(file_key: str, atom_id: str) -> Dict[str, Any]
         "saved_count": len(saved_combo_ids),
         "pending_count": len(pending),
         "completion_percentage": round(completion, 2),
-        "note": data_source_note,
+        "note": note,
     }
 
 
 def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = GenericSavePayload(**payload)
     combination_id = request.filter_criteria.get("combination_id")
-    models = _models_for_file(request.file_key, combination_id)
+    try:
+        models = _models_for_file(request.file_key, combination_id)
+    except ModelDataUnavailableError as exc:
+        raise ValueError(str(exc)) from exc
     try:
         record = next(
             model
@@ -799,10 +992,14 @@ def _actual_vs_predicted_payload(record: ModelRecord) -> Dict[str, Any]:
 
 def calculate_actual_vs_predicted(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
-    models = _models_for_file("demo/results/feature-based.parquet", request.combination_name)
+    models = _models_for_file(request.file_key, request.combination_name)
     record = next((model for model in models if model.model_name == request.model_name), None)
     if record is None:
         raise ValueError("Requested model not found")
+    if not record.series.actual or not record.series.predicted:
+        raise ModelDataUnavailableError(
+            f"Actual vs predicted series unavailable for model '{request.model_name}'"
+        )
     return _actual_vs_predicted_payload(record)
 
 
@@ -818,10 +1015,14 @@ def _compute_year_over_year(series: Sequence[float]) -> List[float]:
 
 def calculate_yoy(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
-    models = _models_for_file("demo/results/feature-based.parquet", request.combination_name)
+    models = _models_for_file(request.file_key, request.combination_name)
     record = next((model for model in models if model.model_name == request.model_name), None)
     if record is None:
         raise ValueError("Requested model not found")
+    if not record.series.actual or not record.series.predicted:
+        raise ModelDataUnavailableError(
+            f"Series data unavailable for model '{request.model_name}'"
+        )
 
     actual_yoy = _compute_year_over_year(record.series.actual)
     predicted_yoy = _compute_year_over_year(record.series.predicted)
@@ -963,10 +1164,18 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def generate_s_curve(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
-    models = _models_for_file("demo/results/feature-based.parquet", request.combination_name)
+    models = _models_for_file(request.file_key, request.combination_name)
     record = next((model for model in models if model.model_name == request.model_name), None)
     if record is None:
         raise ValueError("Requested model not found")
+    if not record.variable_impacts:
+        raise ModelDataUnavailableError(
+            f"Elasticity inputs unavailable for model '{request.model_name}'"
+        )
+    if record.base_price <= 0 or record.base_volume <= 0:
+        raise ModelDataUnavailableError(
+            f"Base price or volume missing for model '{request.model_name}'"
+        )
 
     prices = [round(record.base_price * (0.8 + 0.05 * index), 2) for index in range(9)]
     curve_data = []

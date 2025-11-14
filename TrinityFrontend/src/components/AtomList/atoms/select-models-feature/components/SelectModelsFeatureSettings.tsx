@@ -103,14 +103,16 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
       
 
       const result = await fetchAndResolve(url, undefined, 'Failed to fetch combination IDs');
-      
+
       if (result.unique_combination_ids && result.unique_combination_ids.length > 0) {
-        onDataChange({ 
+        setCombinationError(result.note || '');
+        onDataChange({
           availableCombinationIds: result.unique_combination_ids,
           selectedCombinationId: ''
         });
       } else {
-        throw new Error('No combination_id values found in the file');
+        const message = result.note || 'No combination_id values found in the file';
+        throw new Error(message);
       }
       
     } catch (error) {

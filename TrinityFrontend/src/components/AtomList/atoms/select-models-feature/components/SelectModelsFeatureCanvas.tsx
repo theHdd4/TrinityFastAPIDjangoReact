@@ -1492,28 +1492,32 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch actual vs predicted data
   const fetchActualVsPredicted = async (modelName: string, combinationId: string) => {
-    if (!modelName || combinationId === 'all') {
+    if (!modelName || combinationId === 'all' || !data.selectedDataset) {
       return;
     }
-    
+
     try {
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/actual-vs-predicted`;
-      const params = new URLSearchParams({
+      const requestBody = {
         client_name: env.CLIENT_NAME || '',
         app_name: env.APP_NAME || '',
         project_name: env.PROJECT_NAME || '',
+        file_key: data.selectedDataset,
         combination_name: combinationId,
         model_name: modelName
-      });
-      const url = `${baseUrl}?${params.toString()}`;
-      
+      };
+
       const result = await fetchAndResolve(
-        url,
+        baseUrl,
         {
-          method: 'POST'
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
         },
         'Failed to fetch actual vs predicted data',
       );
@@ -1595,28 +1599,32 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch YoY data
   const fetchYoYData = async (modelName: string, combinationId: string) => {
-    if (!modelName || combinationId === 'all') {
+    if (!modelName || combinationId === 'all' || !data.selectedDataset) {
       return;
     }
-    
+
     try {
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/yoy-calculation`;
-      const params = new URLSearchParams({
+      const requestBody = {
         client_name: env.CLIENT_NAME || '',
         app_name: env.APP_NAME || '',
         project_name: env.PROJECT_NAME || '',
+        file_key: data.selectedDataset,
         combination_name: combinationId,
         model_name: modelName
-      });
-      const url = `${baseUrl}?${params.toString()}`;
-      
+      };
+
       const result = await fetchAndResolve(
-        url,
+        baseUrl,
         {
-          method: 'POST'
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
         },
         'Failed to fetch YoY data',
       );
@@ -1878,7 +1886,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch S-curve data
   const fetchSCurveData = async (combinationId: string, modelName: string) => {
-    if (!combinationId || combinationId === 'all' || !modelName || modelName === 'no-models') {
+    if (!combinationId || combinationId === 'all' || !modelName || modelName === 'no-models' || !data.selectedDataset) {
       return;
     }
     
@@ -1892,6 +1900,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         client_name: env.CLIENT_NAME || '',
         app_name: env.APP_NAME || '',
         project_name: env.PROJECT_NAME || '',
+        file_key: data.selectedDataset,
         combination_name: combinationId,
         model_name: modelName
       };
