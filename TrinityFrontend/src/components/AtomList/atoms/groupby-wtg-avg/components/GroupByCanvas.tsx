@@ -613,18 +613,12 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           
           // Try to get results from the cached_dataframe endpoint
           try {
-<<<<<<< HEAD
             const totalRows = typeof data.row_count === 'number' ? data.row_count : 1000;
             const pageSize = Math.min(Math.max(totalRows, 50), 1000);
             const cachedUrl = `${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(
               data.result_file
             )}&page=1&page_size=${pageSize}`;
             const cachedRes = await fetch(cachedUrl);
-            if (cachedRes.ok) {
-              const cachedJson = await cachedRes.json();
-              const csvText = cachedJson?.data ?? '';
-=======
-            const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(data.result_file)}`);
             let cachedPayload: any = {};
             try {
               cachedPayload = await cachedRes.json();
@@ -633,7 +627,6 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               const cachedData = (await resolveTaskResponse(cachedPayload)) || {};
               const csvText = String(cachedData?.data ?? '');
               // Parse CSV to get results
->>>>>>> 802df61f4163f6713a286ae8a78af506e361601a
               const lines = csvText.split('\n');
               if (lines.length <= 1) {
                 throw new Error('No data rows found in CSV');

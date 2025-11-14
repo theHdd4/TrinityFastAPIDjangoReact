@@ -49,6 +49,8 @@ class ChatSummary(BaseModel):
     chat_id: str
     updated_at: Optional[datetime] = None
     total_messages: Optional[int] = None
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    history_summary: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

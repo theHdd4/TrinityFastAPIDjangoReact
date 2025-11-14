@@ -1,5 +1,5 @@
 import { Message, EnvironmentContext } from './types';
-import { MERGE_API, CONCAT_API, GROUPBY_API, CREATECOLUMN_API } from '@/lib/api';
+import { MERGE_API, CONCAT_API, GROUPBY_API, CREATECOLUMN_API, DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
@@ -474,6 +474,107 @@ export const autoSaveStepResult = async ({
       sendMessage(`💾 Create Column output saved automatically as ${savedPath}`);
       return;
     }
+
+    if (atomType === 'dataframe-operations') {
+      let csvData: string | null = null;
+      const tableData = result?.tableData;
+
+      if (typeof result?.csv_data === 'string') {
+        csvData = result.csv_data;
+      } else if (Array.isArray(result?.rows) && Array.isArray(result?.headers)) {
+        csvData = convertTableDataToCsv(result.headers, result.rows);
+      } else if (tableData?.headers && Array.isArray(tableData?.rows)) {
+        csvData = convertTableDataToCsv(tableData.headers, tableData.rows);
+      } else if (Array.isArray(result?.unsaved_data)) {
+        csvData = convertRowsToCsv(result.unsaved_data);
+      }
+
+      if (!csvData) {
+        console.warn('⚠️ DataFrame Operations auto-save skipped: No CSV data available');
+        return;
+      }
+
+      const inferBaseName = (): string => {
+        const candidates = [
+          result?.baseFileName,
+          result?.selectedFile,
+          currentSettings.selectedFile,
+          currentSettings.tableData?.fileName
+        ];
+        for (const candidate of candidates) {
+          if (typeof candidate === 'string' && candidate.trim().length > 0) {
+            const cleaned = getFilename(candidate).replace(/\.[^/.]+$/, '');
+            if (cleaned) {
+              return sanitizeFileName(cleaned);
+            }
+          }
+        }
+        return 'dataframe';
+      };
+
+      const baseName = inferBaseName() || 'dataframe';
+      let nextSerial = 1;
+
+      try {
+        const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          const files = Array.isArray(data?.files) ? data.files : [];
+          const maxSerial = files.reduce((max: number, file: any) => {
+            const match = file?.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/i);
+            if (match) {
+              const value = parseInt(match[1], 10);
+              if (!Number.isNaN(value)) {
+                return Math.max(max, value);
+              }
+            }
+            return max;
+          }, 0);
+          nextSerial = maxSerial + 1;
+        }
+      } catch (err) {
+        console.warn('⚠️ list_saved_dataframes failed for DataFrame auto-save:', err);
+      }
+
+      const dfOpsFilename = `DF_OPS_${nextSerial}_${baseName}`;
+      const savePayload = {
+        csv_data: csvData,
+        filename: `${dfOpsFilename}.arrow`
+      };
+
+      const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(savePayload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'DataFrame Operations save failed');
+      }
+
+      const payload = await response.json();
+      const savedPath = payload?.result_file || payload?.object_name || savePayload.filename;
+      const dfIdFromSave = payload?.df_id || result?.dfId || currentSettings.fileId;
+
+      const nextSettings: Record<string, any> = {
+        lastAutoSavedAlias: aliasKey,
+        autoSavedFile: savedPath,
+        fileId: dfIdFromSave,
+        currentDfId: dfIdFromSave
+      };
+
+      if (tableData?.headers && Array.isArray(tableData.rows)) {
+        nextSettings.tableData = {
+          ...tableData,
+          fileName: `${dfOpsFilename}.arrow`
+        };
+      }
+
+      updateAtomSettings(atomId, nextSettings);
+      sendMessage(`💾 DataFrame saved automatically as ${savedPath}`);
+      return;
+    }
   } catch (error) {
     console.error(`Auto-save failed for ${atomType}:`, error);
     const message = error instanceof Error ? error.message : 'Unknown error';
@@ -497,6 +598,30 @@ const convertRowsToCsv = (rows: any[]): string => {
         }
         return value;
       })
+      .join(',')
+  );
+
+  return [headerRow, ...valueRows].join('\n');
+};
+
+const convertTableDataToCsv = (headers: string[], rows: Record<string, any>[]): string => {
+  if (!Array.isArray(headers) || headers.length === 0 || !Array.isArray(rows) || rows.length === 0) {
+    return '';
+  }
+
+  const sanitizeValue = (value: any): string => {
+    if (value === null || value === undefined) return '';
+    const str = String(value);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const headerRow = headers.join(',');
+  const valueRows = rows.map(row =>
+    headers
+      .map(header => sanitizeValue(row?.[header]))
       .join(',')
   );
 

@@ -38,6 +38,13 @@ try:
 except ImportError:  # pragma: no cover
     aiohttp = None  # type: ignore
 
+try:
+    from memory_service import storage as memory_storage_module  # type: ignore
+    from memory_service.summarizer import summarize_messages as summarize_chat_messages  # type: ignore
+except Exception:  # pragma: no cover - memory service optional
+    memory_storage_module = None
+    summarize_chat_messages = None
+
 logger = logging.getLogger("trinity.trinityai.websocket")
 
 
@@ -129,6 +136,7 @@ class StreamWebSocketOrchestrator:
         self._step_execution_cache: Dict[str, Dict[int, Dict[str, Any]]] = {}
         self._step_output_files: Dict[str, Dict[int, str]] = {}
         self._sequence_available_files: Dict[str, List[str]] = {}
+        self._output_alias_registry: Dict[str, Dict[str, str]] = {}
 
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
@@ -150,6 +158,13 @@ class StreamWebSocketOrchestrator:
         
         # Load atom mapping for endpoints
         self._load_atom_mapping()
+
+        self._memory_storage = memory_storage_module
+        self._memory_summarizer = summarize_chat_messages
+        if self._memory_storage and self._memory_summarizer:
+            logger.info("🧠 Chat memory summaries enabled via MinIO storage")
+        else:
+            logger.info("ℹ️ Chat memory summaries disabled (memory service unavailable)")
         
         logger.info("✅ StreamWebSocketOrchestrator initialized")
     
@@ -1000,6 +1015,17 @@ WORKFLOW PLANNING RULES:
         available_files = list(available_files or [])
         self._sequence_available_files[sequence_id] = available_files
 
+        history_summary = self._load_persisted_chat_summary(frontend_chat_id, project_context)
+        if history_summary:
+            logger.info(
+                "🧠 Loaded persisted chat summary for %s (%d chars)",
+                frontend_chat_id,
+                len(history_summary),
+            )
+        else:
+            logger.info("ℹ️ No persisted chat summary found for %s", frontend_chat_id)
+        effective_user_prompt = self._apply_history_context(user_prompt, history_summary)
+
         try:
             # Send connected event
             await self._send_event(
@@ -1021,7 +1047,7 @@ WORKFLOW PLANNING RULES:
             # Use LLM to generate intelligent workflow with retry mechanism
             try:
                 workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                    user_prompt=user_prompt,
+                    user_prompt=effective_user_prompt,
                     available_files=available_files
                 )
             except RetryableJSONGenerationError as e:
@@ -1114,13 +1140,14 @@ WORKFLOW PLANNING RULES:
                         additional_info = approval_msg.get('additional_info', '')
                         original_prompt = approval_msg.get('original_prompt', user_prompt)
                         combined_prompt = f"{original_prompt}. Additional requirements: {additional_info}"
+                        combined_with_history = self._apply_history_context(combined_prompt, history_summary)
                         
                         logger.info(f"➕ Regenerating workflow with additional info: {additional_info}")
                         
                         # Regenerate workflow with combined prompt (with retry mechanism)
                         try:
                             workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                                user_prompt=combined_prompt,
+                                user_prompt=combined_with_history,
                                 available_files=available_files
                             )
                         except RetryableJSONGenerationError as e:
@@ -1204,7 +1231,7 @@ WORKFLOW PLANNING RULES:
                     step=step,
                     plan=plan,
                     sequence_id=sequence_id,
-                    original_prompt=user_prompt,
+                    original_prompt=effective_user_prompt,
                     project_context=project_context,
                     user_id=user_id,
                     available_files=available_files
@@ -1283,10 +1310,11 @@ WORKFLOW PLANNING RULES:
                                 if remaining_steps:
                                     # Combine original prompt with additional info for remaining steps
                                     combined_prompt = f"{original_prompt}. Additional requirements for remaining steps: {additional_info}"
+                                    combined_with_history = self._apply_history_context(combined_prompt, history_summary)
                                     
                                     # Regenerate workflow and filter to remaining steps
                                     new_workflow_steps, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                                        user_prompt=combined_prompt,
+                                        user_prompt=combined_with_history,
                                         available_files=available_files
                                     )
                                     
@@ -1403,6 +1431,9 @@ WORKFLOW PLANNING RULES:
             # ================================================================
             logger.info(f"📍 Step {step_number}/{plan.total_steps}: {atom_id}")
             
+            # Ensure downstream steps reference freshly saved files instead of aliases
+            self._resolve_step_dependencies(sequence_id, step)
+            
             # Build enriched description with file details
             enriched_description = self._build_enriched_description(step, available_files)
             
@@ -1515,13 +1546,24 @@ WORKFLOW PLANNING RULES:
                 parameters=parameters,
                 session_id=sequence_id
             )
+
+            execution_success = bool(execution_result.get("success", True))
+            insight_text = await self._generate_step_insight(
+                step=step,
+                total_steps=plan.total_steps,
+                atom_prompt=atom_prompt,
+                parameters=parameters,
+                execution_result=execution_result,
+                execution_success=execution_success
+            )
             
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
             self._record_step_execution_result(
                 sequence_id=sequence_id,
                 step_number=step_number,
                 atom_id=atom_id,
-                execution_result=execution_result
+                execution_result=execution_result,
+                insight=insight_text
             )
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
@@ -1538,7 +1580,8 @@ WORKFLOW PLANNING RULES:
                         "result": execution_result,  # merge_json, groupby_json, etc.
                         "sequence_id": sequence_id,
                         "output_alias": step.output_alias,
-                        "summary": f"Executed {atom_id}"
+                        "summary": f"Executed {atom_id}",
+                        "insight": insight_text
                     }
                 ),
                 f"agent_executed event (step {step_number})"
@@ -1557,7 +1600,8 @@ WORKFLOW PLANNING RULES:
                         "atom_id": atom_id,
                         "card_id": card_id,
                         "summary": f"Step {step_number} completed",
-                        "sequence_id": sequence_id
+                        "sequence_id": sequence_id,
+                        "insight": insight_text
                     }
                 ),
                 f"step_completed event (step {step_number})"
@@ -1585,6 +1629,221 @@ WORKFLOW PLANNING RULES:
                 f"step_failed event (step {step_number})"
             )
     
+    def _resolve_step_dependencies(self, sequence_id: str, step: WorkflowStepPlan) -> None:
+        """Replace alias placeholders with the actual file paths produced earlier."""
+        alias_map = self._output_alias_registry.get(sequence_id)
+        if not alias_map:
+            return
+
+        def resolve_list(values: Optional[List[str]]) -> Optional[List[str]]:
+            if not values:
+                return values
+            updated: List[str] = []
+            changed = False
+            for entry in values:
+                resolved = self._resolve_alias_value(sequence_id, entry)
+                if resolved != entry:
+                    changed = True
+                updated.append(resolved)
+            return updated if changed else values
+
+        resolved_inputs = resolve_list(step.inputs)
+        if resolved_inputs is not step.inputs:
+            step.inputs = resolved_inputs or []
+
+        resolved_files = resolve_list(step.files_used)
+        if resolved_files is not step.files_used:
+            step.files_used = resolved_files or []
+
+        if not step.files_used and step.inputs:
+            step.files_used = step.inputs.copy()
+
+    def _register_output_alias(self, sequence_id: str, alias: Optional[str], file_path: Optional[str]) -> None:
+        """Track which file path was produced for a given output alias."""
+        if not alias or not file_path:
+            return
+        alias_map = self._output_alias_registry.setdefault(sequence_id, {})
+        normalized = self._normalize_alias_token(alias)
+        alias_map[alias.strip()] = file_path
+        alias_map[normalized] = file_path
+
+    def _resolve_alias_value(self, sequence_id: str, token: Optional[str]) -> Optional[str]:
+        """Resolve an alias token to the stored file path if available."""
+        if not token:
+            return token
+        alias_map = self._output_alias_registry.get(sequence_id)
+        if not alias_map:
+            return token
+        stripped = token.strip()
+        normalized = self._normalize_alias_token(stripped)
+        return alias_map.get(stripped) or alias_map.get(normalized) or token
+
+    def _normalize_alias_token(self, alias: str) -> str:
+        """Normalize alias references (strip braces, spaces, lowercase)."""
+        return re.sub(r"\s+", "", alias.strip("{} ").lower())
+    
+    async def _generate_step_insight(
+        self,
+        step: WorkflowStepPlan,
+        total_steps: int,
+        atom_prompt: str,
+        parameters: Dict[str, Any],
+        execution_result: Dict[str, Any],
+        execution_success: bool
+    ) -> Optional[str]:
+        """Summarize a completed step using a dedicated LLM call."""
+        if aiohttp is None:
+            logger.debug("🔇 Skipping insight generation (aiohttp not available)")
+            return None
+        if not self.llm_api_url or not self.llm_model:
+            logger.debug("🔇 Skipping insight generation (LLM config missing)")
+            return None
+
+        try:
+            insight_prompt = self._build_step_insight_prompt(
+                step=step,
+                total_steps=total_steps,
+                atom_prompt=atom_prompt,
+                parameters=parameters,
+                execution_result=execution_result,
+                execution_success=execution_success
+            )
+            if not insight_prompt:
+                return None
+            return await self._call_insight_llm(insight_prompt)
+        except Exception as insight_error:
+            logger.warning(f"⚠️ Step insight generation failed: {insight_error}")
+            return None
+
+    def _build_step_insight_prompt(
+        self,
+        step: WorkflowStepPlan,
+        total_steps: int,
+        atom_prompt: str,
+        parameters: Dict[str, Any],
+        execution_result: Dict[str, Any],
+        execution_success: bool
+    ) -> str:
+        """Construct the narrative prompt for the insight LLM."""
+        base_prompt = atom_prompt or step.atom_prompt or step.prompt or ""
+        if not base_prompt and not execution_result:
+            return ""
+
+        params_str = self._safe_json_dumps(parameters or {}, fallback="{}")
+        result_preview = self._extract_result_preview(execution_result)
+
+        status_text = "SUCCESS" if execution_success else "FAILED"
+        output_alias = step.output_alias or "not_specified"
+        files_used = ", ".join(step.files_used or []) or "none"
+        inputs_used = ", ".join(step.inputs or []) or "none"
+
+        return (
+            "You are Workstream AI Insights, a narrator that explains each workflow step in plain language.\n"
+            "Summarize what the step accomplished, what tangible outputs we now possess, "
+            "and how it positions the user for the following step.\n\n"
+            "STEP CONTEXT\n"
+            f"- Step: {step.step_number} of {total_steps}\n"
+            f"- Atom ID: {step.atom_id}\n"
+            f"- Planner Description: {step.description}\n"
+            f"- Files Referenced: {files_used}\n"
+            f"- Inputs: {inputs_used}\n"
+            f"- Output Handle: {output_alias}\n"
+            f"- Execution Status: {status_text}\n\n"
+            "PROMPT SENT TO ATOM\n"
+            f"{base_prompt}\n\n"
+            "ATOM PARAMETERS\n"
+            f"{params_str}\n\n"
+            "RESULT SNAPSHOT\n"
+            f"{result_preview}\n\n"
+            "RESPONSE REQUIREMENTS\n"
+            "- Keep total response under 120 words.\n"
+            "- Use Markdown with three sections in this order:\n"
+            "  1. Step Summary – 1-2 sentences describing what happened and outcome.\n"
+            "  2. What We Obtained – bullet list (max 3) referencing concrete outputs, mention "
+            f"`{output_alias}` when relevant.\n"
+            "  3. Ready For Next Step – single sentence explaining how the result can be used next.\n"
+            "- Call out blockers or missing data if the step failed.\n"
+            "- Do not fabricate metrics; rely only on the supplied snapshot.\n"
+        )
+
+    async def _call_insight_llm(self, prompt: str) -> Optional[str]:
+        """Invoke the configured LLM to obtain a step insight."""
+        if not prompt.strip():
+            return None
+        if aiohttp is None:
+            return None
+
+        headers = {"Content-Type": "application/json"}
+        if self.bearer_token:
+            headers["Authorization"] = f"Bearer {self.bearer_token}"
+
+        payload = {
+            "model": self.llm_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Workstream AI Insights, producing concise narratives for each workflow step. "
+                        "Follow the requested output structure exactly."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 600,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.llm_api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=90),
+                ) as response:
+                    if response.status >= 400:
+                        error_text = await response.text()
+                        logger.warning(
+                            f"⚠️ Insight LLM call failed: HTTP {response.status} {error_text[:200]}"
+                        )
+                        return None
+                    body = await response.json()
+        except Exception as req_error:
+            logger.warning(f"⚠️ Insight LLM request error: {req_error}")
+            return None
+
+        content = ""
+        if isinstance(body, dict):
+            choices = body.get("choices")
+            if choices:
+                content = choices[0].get("message", {}).get("content", "")
+            elif "message" in body:
+                content = body["message"].get("content", "")
+
+        return content.strip() or None
+
+    def _extract_result_preview(self, data: Any, max_chars: int = 2000) -> str:
+        """Serialize execution result data into a bounded-length snippet."""
+        if data is None:
+            return "No execution result payload returned."
+        try:
+            serialized = json.dumps(data, indent=2, default=str)
+        except (TypeError, ValueError):
+            serialized = str(data)
+
+        if len(serialized) > max_chars:
+            return f"{serialized[:max_chars]}... (truncated)"
+        return serialized
+
+    def _safe_json_dumps(self, payload: Any, fallback: str = "{}") -> str:
+        """Serialize parameters safely for inclusion in prompts."""
+        if payload is None:
+            return fallback
+        try:
+            return json.dumps(payload, indent=2, default=str)
+        except (TypeError, ValueError):
+            return str(payload)
+
     async def _auto_save_step(
         self,
         sequence_id: str,
@@ -1642,6 +1901,7 @@ WORKFLOW PLANNING RULES:
 
         # Track saved output
         self._step_output_files.setdefault(sequence_id, {})[step_number] = saved_path
+        self._register_output_alias(sequence_id, workflow_step.output_alias, saved_path)
         step_cache["saved_path"] = saved_path
         step_cache["auto_saved_at"] = datetime.utcnow().isoformat()
         step_cache["auto_save_response"] = auto_save_response
@@ -1664,7 +1924,8 @@ WORKFLOW PLANNING RULES:
                     "atom_id": atom_id,
                     "auto_saved": True,
                     "output_file": saved_path,
-                    "saved_at": step_cache["auto_saved_at"]
+                    "saved_at": step_cache["auto_saved_at"],
+                    "insight": step_cache.get("insight")
                 }
                 self.result_storage.store_result(
                     sequence_id=sequence_id,
@@ -2023,14 +2284,16 @@ WORKFLOW PLANNING RULES:
         sequence_id: str,
         step_number: int,
         atom_id: str,
-        execution_result: Dict[str, Any]
+        execution_result: Dict[str, Any],
+        insight: Optional[str] = None
     ) -> None:
-        """Cache step execution results for later auto-save and lineage tracking."""
+        """Cache step execution results and generated insights for later use."""
         cache = self._step_execution_cache.setdefault(sequence_id, {})
         cache[step_number] = {
             "atom_id": atom_id,
             "execution_result": execution_result,
-            "recorded_at": datetime.utcnow().isoformat()
+            "recorded_at": datetime.utcnow().isoformat(),
+            "insight": insight
         }
 
     async def _send_event(
@@ -2057,6 +2320,74 @@ WORKFLOW PLANNING RULES:
         self._step_execution_cache.pop(sequence_id, None)
         self._step_output_files.pop(sequence_id, None)
         self._sequence_available_files.pop(sequence_id, None)
+        self._output_alias_registry.pop(sequence_id, None)
+
+    def _load_persisted_chat_summary(
+        self,
+        chat_id: Optional[str],
+        project_context: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        if not chat_id or not self._memory_storage:
+            return None
+
+        context = project_context or {}
+        client_name = context.get("client_name")
+        app_name = context.get("app_name")
+        project_name = context.get("project_name")
+
+        try:
+            record = self._memory_storage.load_chat(
+                chat_id,
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("⚠️ Failed to load persisted chat %s: %s", chat_id, exc)
+            return None
+
+        if not record:
+            return None
+
+        messages = record.get("messages") or []
+        if not messages:
+            return None
+
+        if self._memory_summarizer:
+            return self._memory_summarizer(messages)
+        return self._fallback_history_summary(messages)
+
+    def _fallback_history_summary(
+        self,
+        messages: List[Dict[str, Any]],
+        limit: int = 6,
+    ) -> str:
+        lines: List[str] = []
+        for msg in messages[-limit:]:
+            sender_raw = str(msg.get("sender") or msg.get("role") or "assistant").strip()
+            sender = sender_raw.capitalize() or "Assistant"
+            content = self._condense_text(str(msg.get("content") or ""))
+            if not content:
+                continue
+            if len(content) > 180:
+                content = content[:177].rstrip() + "..."
+            lines.append(f"{sender}: {content}")
+        return "\n".join(lines)
+
+    def _apply_history_context(self, latest_prompt: str, history_summary: Optional[str]) -> str:
+        if not history_summary:
+            return latest_prompt
+        summary = history_summary.strip()
+        if not summary:
+            return latest_prompt
+        latest = latest_prompt.strip()
+        combined = (
+            "Previous conversation summary (use it for continuity, avoid repeating completed work):\n"
+            f"{summary}\n\n"
+            "Latest user request:\n"
+            f"{latest}"
+        )
+        return combined.strip()
 
     def _determine_fastapi_base_url(self) -> str:
         """Resolve FastAPI base URL for downstream atom services."""
@@ -2108,11 +2439,12 @@ WORKFLOW PLANNING RULES:
         description_summary = self._condense_text(step_description)
 
         header_lines: List[str] = [
-            f"You are configuring the `{atom_id}` atom inside Trinity Stream AI's automated workflow executor.",
-            f"User goal summary: {user_summary}"
+            f"Atom: `{atom_id}`",
+            f"User goal: {user_summary}"
         ]
         if description_summary:
-            header_lines.append(f"Planner step description: {description_summary}")
+            header_lines.append(f"Step goal: {description_summary}")
+        header_lines.append("Respond with configuration details only – no filler text.")
 
         header_section = "\n".join(header_lines)
         dataset_section = self._build_dataset_section(atom_id, files_used, inputs, output_alias)
@@ -2191,6 +2523,8 @@ WORKFLOW PLANNING RULES:
             return self._build_concat_section(original_prompt, files_used)
         if atom_id == "dataframe-operations":
             return self._build_dataframe_operations_section(original_prompt, inputs or files_used)
+        if atom_id == "chart-maker":
+            return self._build_chart_section(original_prompt, inputs or files_used)
         return self._build_generic_section(atom_id, original_prompt)
 
     def _build_available_files_section(self, available_files: List[str]) -> str:
@@ -2386,6 +2720,83 @@ WORKFLOW PLANNING RULES:
         lines.append("  * Ensure operations are ordered correctly (load first, then transformations)")
         
         return "\n".join(lines)
+
+    def _build_chart_section(self, original_prompt: str, possible_inputs: List[str]) -> str:
+        """
+        Build precise configuration instructions for chart-maker atom.
+        Emphasizes returning structured JSON with exact column names.
+        """
+        prompt_lower = original_prompt.lower()
+        chart_type = self._detect_chart_type(prompt_lower)
+        focus_columns = self._extract_focus_entities(prompt_lower)
+        filters = self._extract_filter_clauses(original_prompt)
+
+        lines: List[str] = ["Chart configuration (return JSON only):"]
+        lines.append("{")
+        lines.append('  "chart_type": "<bar|line|pie|scatter|area|combo>",')
+        lines.append('  "data_source": "<input dataset name>",')
+        lines.append('  "x_column": "<categorical column>",')
+        lines.append('  "y_column": "<numeric measure>",')
+        lines.append('  "breakdown_columns": ["<optional category columns>"],')
+        lines.append('  "filters": [{"column": "<column>", "operator": "==|>|<|contains", "value": "<exact value>"}],')
+        lines.append('  "title": "<human friendly title>"')
+        lines.append("}")
+        lines.append("")
+        lines.append("Rules:")
+        lines.append("- Use EXACT column names from dataset metadata (case-sensitive, spaces preserved).")
+        lines.append("- If the user used abbreviations (e.g., 'reg', 'rev'), map them to the canonical column names before filling the JSON.")
+        lines.append("- Choose chart_type based on user request (default to 'bar' if unspecified).")
+        lines.append("- x_column should be a categorical column (e.g., Region, Brand, Month).")
+        lines.append("- y_column must be a numeric measure (e.g., Sales, Revenue, Quantity).")
+        lines.append("- Filters: capture regions/brands/time ranges mentioned by the user; use equality comparisons unless a range is specified.")
+        lines.append("- Title: Summarize the chart purpose (e.g., 'Sales of Brand GERC in Rajasthan').")
+
+        if chart_type:
+            lines.append(f"- Detected chart type hint: {chart_type}")
+        if focus_columns:
+            lines.append(f"- Entities mentioned by user: {', '.join(focus_columns)} (ensure these map to actual columns)")
+        if filters:
+            lines.append("- Filter hints from prompt:")
+            for flt in filters:
+                lines.append(f"  * {flt}")
+
+        if possible_inputs:
+            lines.append(f"- Use dataset: `{possible_inputs[0]}` as data_source.")
+
+        lines.append("- Output must be pure JSON (no prose).")
+        return "\n".join(lines)
+
+    def _detect_chart_type(self, prompt_lower: str) -> Optional[str]:
+        chart_keywords = {
+            "bar": ["bar", "column"],
+            "line": ["line", "trend"],
+            "pie": ["pie", "share", "distribution"],
+            "scatter": ["scatter", "correlation", "relationship"],
+            "area": ["area"],
+            "combo": ["combo", "combined"]
+        }
+        for chart, keywords in chart_keywords.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                return chart
+        return None
+
+    def _extract_focus_entities(self, prompt_lower: str) -> List[str]:
+        tokens = re.findall(r"[A-Za-z0-9_]+", prompt_lower)
+        common_entities = {"brand", "region", "market", "channel", "product", "country", "customer"}
+        entities = [token for token in tokens if token in common_entities]
+        return list(dict.fromkeys(entities))
+
+    def _extract_filter_clauses(self, prompt: str) -> List[str]:
+        clauses = []
+        patterns = [
+            r"in\s+(?:the\s+)?([A-Za-z0-9_\s]+)",
+            r"for\s+(?:the\s+)?([A-Za-z0-9_\s]+)",
+            r"where\s+([A-Za-z0-9_\s><=]+)"
+        ]
+        for pattern in patterns:
+            for match in re.findall(pattern, prompt, flags=re.IGNORECASE):
+                clauses.append(match.strip())
+        return clauses
     
     def _build_generic_section(self, atom_id: str, original_prompt: str) -> str:
         lines = [

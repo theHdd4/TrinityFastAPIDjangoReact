@@ -611,6 +611,27 @@ class ChartMakerAgent:
         # Update result payload
         result["chart_json"] = normalized_charts
 
+        # Validate chart columns/filters against file metadata (ensures exact matches before hitting backend)
+        file_name = result.get("file_name")
+        file_columns = self._get_columns_for_file(file_name)
+        unique_values = self._get_unique_values_for_file(file_name)
+        validation_errors: List[str] = []
+
+        if file_columns:
+            for chart in normalized_charts:
+                validation_errors.extend(
+                    self._validate_chart_against_file(chart, file_columns, unique_values)
+                )
+
+        if validation_errors:
+            logger.warning(f"⚠️ Chart validation failed: {validation_errors}")
+            result["success"] = False
+            result["message"] = "Chart configuration references columns or filter values not present in the selected file."
+            result["smart_response"] = (
+                "I need to use the exact column names and filter values that exist in your file. "
+                f"Please check the requested fields. Issues: {', '.join(validation_errors[:3])}"
+            )
+
         if result.get("success") and not normalized_charts:
             # If we expected success but have no charts, downgrade the response
             logger.warning("⚠️ Response flagged success but no valid chart configurations were produced.")
@@ -636,6 +657,94 @@ class ChartMakerAgent:
             result["file_name"] = result["data_source"]
 
         return result
+
+    def _get_metadata_for_file(self, file_name: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not file_name or not self.files_metadata:
+            return None
+
+        candidates = [file_name]
+        if "/" in file_name:
+            candidates.append(file_name.split("/")[-1])
+
+        for candidate in candidates:
+            if candidate in self.files_metadata:
+                return self.files_metadata[candidate]
+
+        # Fall back to suffix match (handles stored keys with full prefixes)
+        simple = file_name.split("/")[-1]
+        for key, value in self.files_metadata.items():
+            if key.endswith(simple):
+                return value
+        return None
+
+    def _get_columns_for_file(self, file_name: Optional[str]) -> List[str]:
+        metadata = self._get_metadata_for_file(file_name)
+        if metadata:
+            columns = metadata.get("columns", [])
+            if isinstance(columns, dict):
+                columns = list(columns.keys())
+            if isinstance(columns, list):
+                return columns
+
+        if file_name:
+            for candidate in [file_name, file_name.split("/")[-1] if "/" in file_name else file_name]:
+                if candidate in self.files_with_columns:
+                    return self.files_with_columns[candidate]
+        return []
+
+    def _get_unique_values_for_file(self, file_name: Optional[str]) -> Dict[str, List[str]]:
+        metadata = self._get_metadata_for_file(file_name)
+        if not metadata:
+            return {}
+
+        unique_values = metadata.get("unique_values", {})
+        if isinstance(unique_values, dict):
+            cleaned = {}
+            for col, vals in unique_values.items():
+                if isinstance(vals, list):
+                    cleaned[col] = vals
+            return cleaned
+        return {}
+
+    def _validate_chart_against_file(
+        self,
+        chart: Dict[str, Any],
+        file_columns: List[str],
+        unique_values: Dict[str, List[str]]
+    ) -> List[str]:
+        if not chart:
+            return []
+
+        errors: List[str] = []
+        column_set = set(file_columns)
+
+        def _check_column(column_value: Optional[str], context: str):
+            if column_value and column_value not in column_set:
+                errors.append(f"{context} '{column_value}' not found in file")
+
+        segregated_field = chart.get("segregated_field") or chart.get("legend_field")
+        _check_column(segregated_field, "segregated_field")
+
+        for trace in chart.get("traces", []):
+            _check_column(trace.get("x_column"), "x_column")
+            _check_column(trace.get("y_column"), "y_column")
+            _check_column(trace.get("legend_field"), "legend_field")
+
+            for col, values in (trace.get("filters") or {}).items():
+                _check_column(col, "trace filter column")
+                if values and col in unique_values:
+                    missing = [val for val in values if val not in unique_values[col]]
+                    if missing:
+                        errors.append(f"trace filter values {missing} not in '{col}'")
+
+        for col, values in (chart.get("filters") or {}).items():
+            _check_column(col, "chart filter column")
+            if values and col in unique_values:
+                missing = [val for val in values if val not in unique_values[col]]
+                if missing:
+                    errors.append(f"chart filter values {missing} not in '{col}'")
+
+        return errors
 
     def list_available_files(self) -> Dict[str, Any]:
         """🔧 ENHANCED: Get available files from MinIO like Merge agent"""

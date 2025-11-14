@@ -14,6 +14,7 @@ from .schemas import (
     SessionPayload,
     SessionResponse,
 )
+from .summarizer import summarize_messages
 
 router = APIRouter(prefix="/memory", tags=["Trinity AI Memory"])
 
@@ -134,6 +135,16 @@ def list_chat_histories(
     client: Optional[str] = Query(None, description="Client name"),
     app: Optional[str] = Query(None, description="App name"),
     project: Optional[str] = Query(None, description="Project name"),
+    include_messages: bool = Query(
+        True,
+        description="Include message payloads in the listing response (defaults to True for backward compatibility).",
+    ),
+    message_limit: Optional[int] = Query(
+        8,
+        ge=1,
+        le=storage.MAX_MESSAGES_DEFAULT,
+        description="Maximum number of messages to include per chat when include_messages is true.",
+    ),
 ) -> ChatListResponse:
     """Return summaries of stored chat transcripts."""
     try:
@@ -144,11 +155,23 @@ def list_chat_histories(
 
     summaries: List[ChatSummary] = []
     for record in records:
+        raw_messages = list(record.get("messages") or [])
+        trimmed_messages = raw_messages
+        if include_messages and raw_messages:
+            limit = message_limit or storage.MAX_MESSAGES_DEFAULT
+            trimmed_messages = raw_messages[-limit:]
+        elif not include_messages:
+            trimmed_messages = []
+
+        history_summary = summarize_messages(raw_messages) if raw_messages else None
+
         summaries.append(
             ChatSummary(
                 chat_id=record["chat_id"],
                 updated_at=record["updated_at"],
                 total_messages=record["total_messages"],
+                messages=trimmed_messages,
+                history_summary=history_summary,
                 metadata=record["metadata"],
             )
         )

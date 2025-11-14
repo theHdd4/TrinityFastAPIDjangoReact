@@ -92,6 +92,7 @@ class StreamSequenceGenerator:
         self.api_url = self.config["api_url"]
         self.model_name = self.config["model_name"]
         self.bearer_token = self.config["bearer_token"]
+        self._last_alias_lookup: Dict[str, str] = {}
         
         # Initialize RAG engine
         self.rag_engine = None
@@ -295,6 +296,9 @@ class StreamSequenceGenerator:
             file_context_section += "- If the user uses an abbreviation (e.g., 'reg', 'rev', 'qty'), map it to the closest matching column from the alias map above BEFORE building steps.\n"
             file_context_section += "- If a requested column/value is not found in the metadata, pick the closest match that exists or ask the user to clarify. NEVER invent new columns.\n"
         
+        column_alias_lookup = self._build_alias_lookup(file_details_for_aliases or file_details_loaded)
+        self._last_alias_lookup = column_alias_lookup
+
         prompt = f"""You are Trinity AI, an intelligent atom sequencing system for data analysis.
 
 **USER QUERY**: "{user_query}"
@@ -595,6 +599,79 @@ Generate the sequence now:"""
 
         alias_set.discard("")
         return [alias for alias in alias_set if alias]
+
+    def _build_alias_lookup(self, file_details: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """
+        Build lookup of alias -> canonical column/value name based on file metadata.
+        Ensures we can rewrite prompts/params to actual schema names.
+        """
+        lookup: Dict[str, str] = {}
+        if not file_details:
+            return lookup
+
+        for file_name, info in self._iter_file_detail_entries(file_details):
+            columns = info.get("columns") or []
+            unique_values = info.get("unique_values") or {}
+
+            for column_name in columns:
+                canonical = column_name.strip()
+                if not canonical:
+                    continue
+                aliases = self._generate_column_aliases(canonical)
+                for alias in aliases:
+                    alias_key = alias.lower()
+                    if alias_key and alias_key not in lookup:
+                        lookup[alias_key] = canonical
+
+            for column_name, values in unique_values.items():
+                for value in values or []:
+                    aliases = self._generate_value_aliases(value)
+                    for alias in aliases:
+                        alias_key = alias.lower()
+                        if alias_key and alias_key not in lookup:
+                            lookup[alias_key] = str(value)
+
+        return lookup
+
+    def _canonicalize_sequence_aliases(self, sequence_json: Dict[str, Any], alias_lookup: Dict[str, str]) -> Dict[str, Any]:
+        """Rewrite step descriptions/prompts/parameters to use canonical column/value names."""
+        if not alias_lookup:
+            return sequence_json
+
+        sequence = sequence_json.get("sequence") or []
+        for step in sequence:
+            for field in ["description", "prompt"]:
+                value = step.get(field)
+                if isinstance(value, str):
+                    step[field] = self._canonicalize_text(value, alias_lookup)
+
+            params = step.get("parameters")
+            if isinstance(params, dict):
+                step["parameters"] = self._canonicalize_parameters(params, alias_lookup)
+
+        return sequence_json
+
+    def _canonicalize_text(self, text: str, alias_lookup: Dict[str, str]) -> str:
+        if not text:
+            return text
+        result = text
+        for alias in sorted(alias_lookup.keys(), key=len, reverse=True):
+            canonical = alias_lookup[alias]
+            pattern = re.compile(rf"\b{re.escape(alias)}\b", re.IGNORECASE)
+            result = pattern.sub(canonical, result)
+        return result
+
+    def _canonicalize_parameters(self, params: Dict[str, Any], alias_lookup: Dict[str, str]) -> Dict[str, Any]:
+        def transform(value: Any) -> Any:
+            if isinstance(value, str):
+                return self._canonicalize_text(value, alias_lookup)
+            if isinstance(value, list):
+                return [transform(item) for item in value]
+            if isinstance(value, dict):
+                return {key: transform(val) for key, val in value.items()}
+            return value
+
+        return transform(params)
     
     async def generate_sequence(
         self,
@@ -617,6 +694,7 @@ Generate the sequence now:"""
         
         # Build prompt
         prompt = self._build_sequence_prompt(user_query, file_context)
+        column_alias_lookup = getattr(self, "_last_alias_lookup", {}) or {}
         
         # Try to generate sequence with retries
         for attempt in range(max_retries):
@@ -644,6 +722,8 @@ Generate the sequence now:"""
                 
                 # Enhance with endpoints
                 sequence_json = self._enhance_sequence_with_endpoints(sequence_json)
+                if column_alias_lookup:
+                    sequence_json = self._canonicalize_sequence_aliases(sequence_json, column_alias_lookup)
                 
                 logger.info(f"✅ Sequence generated successfully ({len(sequence_json.get('sequence', []))} atoms)")
                 return {

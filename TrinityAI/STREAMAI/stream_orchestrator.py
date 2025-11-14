@@ -185,7 +185,8 @@ class StreamOrchestrator:
                         "step": i,
                         "success": True,
                         "output_name": atom.get("output_name"),
-                        "duration": atom_result.get("duration", 0)
+                        "duration": atom_result.get("duration", 0),
+                        "insight": atom_result.get("insight")
                     })
                     
                     # Store result
@@ -198,7 +199,8 @@ class StreamOrchestrator:
                             {
                                 "atom_id": atom_id,
                                 "step": i,
-                                "timestamp": datetime.now().isoformat()
+                                "timestamp": datetime.now().isoformat(),
+                                "insight": atom_result.get("insight")
                             }
                         )
                     
@@ -215,7 +217,8 @@ class StreamOrchestrator:
                         "atom_id": atom_id,
                         "step": i,
                         "success": False,
-                        "error": error_msg
+                        "error": error_msg,
+                        "insight": atom_result.get("insight")
                     })
                     
                     logger.error(f"❌ Atom {i}/{total_atoms} failed: {error_msg}")
@@ -346,11 +349,21 @@ class StreamOrchestrator:
         logger.info("🔍 ===== STREAM AI PROMPT (END) =====")
         
         execute_result = await self._step3_execute_atom(atom, prompt)
+        insight_text = await self._generate_step_insight(
+            atom=atom,
+            atom_index=atom_index,
+            total_atoms=total_atoms,
+            prompt=prompt,
+            execute_result=execute_result,
+            execution_success=execute_result.get("success", False)
+        )
+
         if not execute_result.get("success"):
             return {
                 "success": False,
                 "error": f"Step 3 failed: {execute_result.get('error')}",
-                "duration": time.time() - start_time
+                "duration": time.time() - start_time,
+                "insight": insight_text
             }
         
         logger.info(f"  ✅ Atom executed successfully")
@@ -365,7 +378,8 @@ class StreamOrchestrator:
             "card_id": card_id,
             "data": execute_result.get("data", {}),
             "type": execute_result.get("type", "unknown"),
-            "duration": duration
+            "duration": duration,
+            "insight": insight_text
         }
     
     async def _step1_add_card(self, atom_id: str, session_id: str) -> Dict[str, Any]:
@@ -651,6 +665,168 @@ class StreamOrchestrator:
         context_block = "\n\n--- STREAM FILE CONTEXT ---\n" + "\n\n".join(context_sections)
         logger.debug("Appending STREAM file context to prompt")
         return f"{prompt}{context_block}"
+
+    async def _generate_step_insight(
+        self,
+        atom: Dict[str, Any],
+        atom_index: int,
+        total_atoms: int,
+        prompt: str,
+        execute_result: Dict[str, Any],
+        execution_success: bool
+    ) -> Optional[str]:
+        """Call LLM to summarize what happened in this Workstream step."""
+        try:
+            insight_prompt = self._build_step_insight_prompt(
+                atom=atom,
+                atom_index=atom_index,
+                total_atoms=total_atoms,
+                prompt=prompt,
+                execute_result=execute_result,
+                execution_success=execution_success
+            )
+            if not insight_prompt:
+                return None
+            return await self._call_insight_llm(insight_prompt)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to generate step insight: {e}")
+            return None
+
+    def _build_step_insight_prompt(
+        self,
+        atom: Dict[str, Any],
+        atom_index: int,
+        total_atoms: int,
+        prompt: str,
+        execute_result: Dict[str, Any],
+        execution_success: bool
+    ) -> str:
+        """Create a condensed insight prompt from the atom metadata and results."""
+        if not prompt and not execute_result:
+            return ""
+
+        params_str = self._safe_json_dumps(atom.get("parameters") or {}, "{}")
+        result_preview = ""
+        if execution_success:
+            result_preview = self._extract_result_preview(
+                execute_result.get("data")
+            )
+        else:
+            result_preview = execute_result.get("error") or "Unknown error"
+
+        status_text = "SUCCESS" if execution_success else "FAILED"
+        output_name = atom.get("output_name", "not_specified")
+
+        return (
+            f"You are Workstream AI Insights, responsible for narrating each step of a data workstream.\n"
+            f"Summarize the following step so the user instantly understands what happened, "
+            f"why it matters, and what artifacts were produced.\n\n"
+            f"STEP CONTEXT\n"
+            f"- Step: {atom_index} of {total_atoms}\n"
+            f"- Atom ID: {atom.get('atom_id')}\n"
+            f"- Purpose: {atom.get('purpose', 'N/A')}\n"
+            f"- Output Handle: {output_name}\n"
+            f"- Execution Status: {status_text}\n"
+            f"- Endpoint: {atom.get('endpoint')}\n\n"
+            f"USER PROMPT\n{prompt}\n\n"
+            f"PARAMETERS\n{params_str}\n\n"
+            f"RESULT SNAPSHOT\n{result_preview}\n\n"
+            f"RESPONSE REQUIREMENTS\n"
+            f"- Keep the total response under 120 words.\n"
+            f"- Use Markdown with three sections exactly in this order:\n"
+            f"  1. Step Summary: 1-2 sentences describing what was attempted and outcome.\n"
+            f"  2. What We Obtained: bullet list (max 3) covering tangible outputs/insights, "
+            f"referencing `{output_name}` when relevant.\n"
+            f"  3. Ready For Next Step: single sentence guiding how this output can be used next.\n"
+            f"- Highlight blockers if the step failed.\n"
+            f"- Do not invent data; rely only on the supplied prompt/result snapshot.\n"
+        )
+
+    async def _call_insight_llm(self, prompt: str) -> Optional[str]:
+        """Invoke the configured LLM to obtain an insight summary."""
+        api_url = self.config.get("api_url")
+        model_name = self.config.get("model_name")
+        bearer_token = self.config.get("bearer_token")
+
+        if not api_url or not model_name:
+            logger.warning("⚠️ Insight LLM configuration incomplete")
+            return None
+
+        headers = {
+            "Content-Type": "application/json",
+        }
+        if bearer_token:
+            headers["Authorization"] = f"Bearer {bearer_token}"
+
+        payload = {
+            "model": model_name,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Workstream AI Insights, a precise narrator that explains each data-processing "
+                        "step clearly and concisely."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            "options": {
+                "temperature": 0.2,
+                "num_predict": 800,
+            },
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=90),
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.warning(f"⚠️ Insight LLM call failed: {response.status} {error_text[:200]}")
+                        return None
+                    result = await response.json()
+        except Exception as e:
+            logger.warning(f"⚠️ Insight LLM request error: {e}")
+            return None
+
+        message_content = ""
+        if isinstance(result, dict):
+            message_content = result.get("message", {}).get("content", "")
+            if not message_content and result.get("choices"):
+                first_choice = result["choices"][0]
+                message_content = first_choice.get("message", {}).get("content", "")
+
+        return message_content.strip() if message_content else None
+
+    def _extract_result_preview(self, data: Any, max_chars: int = 1800) -> str:
+        """Serialize result payload into a bounded-length string."""
+        if data is None:
+            return "No structured result payload returned."
+        try:
+            if isinstance(data, (dict, list)):
+                serialized = json.dumps(data, indent=2, default=str)
+            else:
+                serialized = str(data)
+        except (TypeError, ValueError):
+            serialized = str(data)
+
+        if len(serialized) > max_chars:
+            return f"{serialized[:max_chars]}... (truncated)"
+        return serialized
+
+    def _safe_json_dumps(self, payload: Any, fallback: str = "{}") -> str:
+        """Safely serialize parameters or return a fallback string."""
+        if payload is None:
+            return fallback
+        try:
+            return json.dumps(payload, indent=2, default=str)
+        except (TypeError, ValueError):
+            return str(payload)
 
 
 # Global instance

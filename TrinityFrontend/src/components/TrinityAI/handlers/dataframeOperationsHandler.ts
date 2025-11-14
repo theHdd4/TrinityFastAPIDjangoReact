@@ -8,7 +8,8 @@ import {
   createErrorMessage,
   processSmartResponse,
   validateFileInput,
-  createProgressTracker 
+  createProgressTracker,
+  autoSaveStepResult
 } from './utils';
 
 // Import the dataframe operations API functions
@@ -661,6 +662,9 @@ export const dataframeOperationsHandler: AtomHandler = {
           (op.api_endpoint === "/load_cached" || op.api_endpoint === "/load_file") && op._uiData
         );
         const lastDataOperation = [...config.operations].reverse().find(op => op._uiData);
+        let mappedFile: string | null = null;
+        let tableDataForAutoSave: any = lastDataOperation?._uiData?.tableData || null;
+        let autoSaveSelectedFile: string | null = null;
         
         if (loadOperation && lastDataOperation) {
           console.log(`🔄 AI OPERATIONS COMPLETE: Syncing with Properties panel`);
@@ -668,7 +672,7 @@ export const dataframeOperationsHandler: AtomHandler = {
           console.log(`📊 Final operation: ${lastDataOperation.operation_name}`);
           
           // 🔧 CRITICAL: Map AI file path to object_name (same as concat/merge handlers)
-          let mappedFile = loadOperation.parameters.object_name;
+          mappedFile = loadOperation.parameters.object_name;
           
           try {
             console.log('🔄 Fetching frames to map AI file path to object_name...');
@@ -835,6 +839,8 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
             }, 100);
             
             console.log(`✅ Data updated - Properties dropdown + Canvas + Operations all synced`);
+            tableDataForAutoSave = lastDataOperation._uiData.tableData;
+            autoSaveSelectedFile = mappedFile;
           }
           
         } else if (lastDataOperation) {
@@ -867,6 +873,8 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
           });
           
           console.log(`✅ Operations applied - Canvas updated, dropdown unchanged`);
+          tableDataForAutoSave = lastDataOperation._uiData.tableData;
+          autoSaveSelectedFile = existingSettings?.selectedFile || mappedFile || loadOperation?.parameters?.object_name || null;
           
         } else {
           console.log(`⚠️ FALLBACK: No operation data found`);
@@ -885,6 +893,34 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
             lastLoadedFileName: loadOp?.parameters?.object_name || fallbackSettings?.lastLoadedFileName, // 🔧 Track last loaded file
             lastSessionId: sessionId // 🔧 Track current session
           });
+        }
+        const shouldAutoSave =
+          !!tableDataForAutoSave &&
+          (
+            !loadOperation ||
+            config.operations.some(op => op.api_endpoint !== "/load_cached" && op.api_endpoint !== "/load_file")
+          );
+        
+        if (shouldAutoSave) {
+          try {
+            const autoSaveAlias = `${atomId}_dfops_${sessionId || 'session'}`;
+            await autoSaveStepResult({
+              atomType: 'dataframe-operations',
+              atomId,
+              stepAlias: `${autoSaveAlias}_${Date.now()}`,
+              result: {
+                tableData: tableDataForAutoSave,
+                selectedFile: autoSaveSelectedFile || mappedFile || loadOperation?.parameters?.object_name || '',
+                baseFileName: tableDataForAutoSave?.fileName || getFilename(autoSaveSelectedFile || mappedFile || loadOperation?.parameters?.object_name || ''),
+                dfId: currentDfId
+              },
+              updateAtomSettings,
+              setMessages,
+              isStreamMode: context.isStreamMode || false
+            });
+          } catch (autoSaveError) {
+            console.error('⚠️ DataFrame auto-save failed:', autoSaveError);
+          }
         }
         
         // 🔧 SMART RESPONSE FIX: Don't add duplicate message if smart_response was already shown

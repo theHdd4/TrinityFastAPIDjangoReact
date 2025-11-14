@@ -90,6 +90,8 @@ interface Chat {
   messages: Message[];
   createdAt: Date;
   sessionId?: string; // Backend session ID for this chat
+  totalMessages: number;
+  historySummary?: string;
 }
 
 interface TrinityAIBackgroundStatus {
@@ -254,14 +256,19 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       if (msg.type !== 'workflow_preview') {
         return false;
       }
-      const sequenceKey = msg.data?.sequence_id ?? msg.id;
+      const sequenceKey = msg.data?.sequence_id
+        ? `${msg.data.sequence_id}-${msg.id}`
+        : msg.id;
       return !tracker.workflowSequences.has(sequenceKey);
     });
 
     if (pendingPreviews.length > 0) {
       pendingPreviews.forEach((msg) => {
         const sequenceId = msg.data?.sequence_id ?? msg.id;
-        tracker.workflowSequences.add(sequenceId);
+        const trackerKey = msg.data?.sequence_id
+          ? `${sequenceId}-${msg.id}`
+          : msg.id;
+        tracker.workflowSequences.add(trackerKey);
         if (!autoRunRef.current) {
           autoRunRef.current = true;
         }
@@ -328,6 +335,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       messages: [initialMessage],
       createdAt,
       sessionId: newSessionId,
+      totalMessages: 1,
     };
 
     memoryPersistSkipRef.current = true;
@@ -388,6 +396,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       messages,
       createdAt,
       sessionId,
+      totalMessages: record.totalMessages ?? messages.length,
+      historySummary: record.historySummary,
     };
   }, []);
 
@@ -483,6 +493,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               messages, 
               title: messages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || chat.title,
               sessionId: currentSessionId || chat.sessionId,
+              totalMessages: messages.length,
             }
           : chat
       ));
@@ -1581,7 +1592,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                           {chat.title}
                         </h4>
                         <p className="text-gray-500 font-inter text-xs mt-1">
-                          {new Date(chat.createdAt).toLocaleDateString()} • {chat.messages.length} messages
+                          {new Date(chat.createdAt).toLocaleDateString()} • {(chat.totalMessages ?? chat.messages.length)} messages
                         </p>
                       </div>
                       {chat.id === currentChatId && (
