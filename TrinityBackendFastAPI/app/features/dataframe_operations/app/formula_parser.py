@@ -141,6 +141,20 @@ class _FunctionRegistry:
             raise FormulaEvaluationError("Expected scalar value, received a sequence.")
         return value  # scalar or None
 
+    def _to_numeric_series(self, value: Any) -> pd.Series:
+        series = self._to_series(value)
+        numeric = pd.to_numeric(series, errors="coerce")
+        return numeric
+
+    def _scalar_to_int(self, value: Any, default: int = 0) -> int:
+        scalar = self._as_scalar(value)
+        if scalar is None:
+            return default
+        try:
+            return int(float(scalar))
+        except (TypeError, ValueError):
+            return default
+
     @staticmethod
     def _clean_mapping(mapping: Any) -> Dict[Any, Any]:
         if isinstance(mapping, Mapping):
@@ -393,6 +407,117 @@ class _FunctionRegistry:
         delta = end_series - start_series
         return delta.dt.days
 
+    def func_abs(self, value: Any) -> pd.Series:
+        series = self._to_numeric_series(value)
+        return series.abs()
+
+    def func_floor(self, value: Any) -> pd.Series:
+        series = self._to_numeric_series(value)
+        return np.floor(series)
+
+    def func_ceil(self, value: Any) -> pd.Series:
+        series = self._to_numeric_series(value)
+        return np.ceil(series)
+
+    def func_exp(self, value: Any) -> pd.Series:
+        series = self._to_numeric_series(value)
+        return np.exp(series)
+
+    def func_log(self, value: Any) -> pd.Series:
+        series = self._to_numeric_series(value)
+        safe = series.where(series > 0)
+        return np.log(safe)
+
+    def func_sqrt(self, value: Any) -> pd.Series:
+        series = self._to_numeric_series(value)
+        safe = series.where(series >= 0)
+        return np.sqrt(safe)
+
+    def func_if(self, condition: Any, true_value: Any, false_value: Any) -> pd.Series:
+        cond_series = self._to_series(condition).astype(bool)
+        true_series = self._to_series(true_value)
+        false_series = self._to_series(false_value)
+        return true_series.where(cond_series, false_series)
+
+    def func_isnull(self, value: Any) -> pd.Series:
+        series = self._to_series(value)
+        string_series = series.astype("string")
+        blank_mask = string_series.str.strip().eq("").fillna(False)
+        return series.isna() | blank_mask
+
+    def func_lower(self, value: Any) -> pd.Series:
+        series = self._to_series(value).astype("string")
+        return series.str.lower()
+
+    def func_upper(self, value: Any) -> pd.Series:
+        series = self._to_series(value).astype("string")
+        return series.str.upper()
+
+    def func_len(self, value: Any) -> pd.Series:
+        series = self._to_series(value).astype("string")
+        result = series.str.len()
+        return result.fillna(0).astype(int)
+
+    def func_substr(self, value: Any, start: Any, end: Any | None = None) -> pd.Series:
+        series = self._to_series(value).astype("string")
+        start_idx = self._scalar_to_int(start, 0)
+        end_idx = None
+        scalar_end = self._as_scalar(end)
+        if scalar_end is not None:
+            try:
+                end_idx = int(float(scalar_end))
+            except (TypeError, ValueError):
+                end_idx = None
+        return series.str.slice(start_idx, end_idx)
+
+    def func_str_replace(self, value: Any, old: Any, new: Any) -> pd.Series:
+        series = self._to_series(value).astype("string")
+        replacement_series = self._to_series(new).astype("string")
+        old_scalar = "" if old is None else str(old)
+
+        if old_scalar == "":
+            mask = series.isna() | series.str.strip().eq("").fillna(False)
+            return series.where(~mask, replacement_series)
+
+        def _replace(val: Any, rep: Any) -> Any:
+            if val is None or (isinstance(val, float) and math.isnan(val)):
+                return val
+            text = str(val)
+            if pd.isna(rep):
+                replacement_text = ""
+            else:
+                replacement_text = str(rep)
+            return text.replace(old_scalar, replacement_text)
+
+        if isinstance(new, (pd.Series, list, tuple, np.ndarray)):
+            return series.combine(replacement_series, _replace)
+
+        replacement_text = "" if new is None else str(new)
+        return series.str.replace(old_scalar, replacement_text, regex=False)
+
+    def func_year(self, value: Any) -> pd.Series:
+        series = pd.to_datetime(self._to_series(value), errors="coerce")
+        return series.dt.year
+
+    def func_month(self, value: Any) -> pd.Series:
+        series = pd.to_datetime(self._to_series(value), errors="coerce")
+        return series.dt.month
+
+    def func_day(self, value: Any) -> pd.Series:
+        series = pd.to_datetime(self._to_series(value), errors="coerce")
+        return series.dt.day
+
+    def func_weekday(self, value: Any) -> pd.Series:
+        series = pd.to_datetime(self._to_series(value), errors="coerce")
+        return series.dt.day_name()
+
+    def func_fillblank(self, value: Any, replacement: Any) -> pd.Series:
+        series = self._to_series(value)
+        string_series = series.astype("string")
+        mask = string_series.isna() | string_series.str.strip().eq("").fillna(False)
+        replacement_series = self._to_series(replacement)
+        return series.where(~mask, replacement_series)
+
 
 class FormulaEngine:
     """Parse and evaluate Excel-style formulas against a pandas DataFrame."""
@@ -405,6 +530,12 @@ class FormulaEngine:
         "MIN": "MIN",
         "PROD": "PROD",
         "DIV": "DIV",
+        "ABS": "ABS",
+        "FLOOR": "FLOOR",
+        "CEIL": "CEIL",
+        "EXP": "EXP",
+        "LOG": "LOG",
+        "SQRT": "SQRT",
         "MEDIAN": "MEDIAN",
         "PERCENTILE": "PERCENTILE",
         "PERCENTILE_INC": "PERCENTILE",
@@ -423,10 +554,22 @@ class FormulaEngine:
         "ROUND": "ROUND",
         "ZSCORE": "ZSCORE",
         "NORM": "NORM",
+        "IF": "IF",
+        "ISNULL": "ISNULL",
+        "LOWER": "LOWER",
+        "UPPER": "UPPER",
+        "LEN": "LEN",
+        "SUBSTR": "SUBSTR",
+        "STR_REPLACE": "STR_REPLACE",
         "FILLNA": "FILLNA",
+        "FILLBLANK": "FILLBLANK",
         "MAP": "MAP",
         "BIN": "BIN",
         "DATE_DIFF": "DATE_DIFF",
+        "YEAR": "YEAR",
+        "MONTH": "MONTH",
+        "DAY": "DAY",
+        "WEEKDAY": "WEEKDAY",
     }
 
     _string_pattern = re.compile(r'("([^"\\]|\\.)*"|\'([^\'\\]|\\.)*\')')
@@ -524,6 +667,12 @@ class FormulaEngine:
             "MIN": registry.func_min,
             "PROD": registry.func_prod,
             "DIV": registry.func_div,
+            "ABS": registry.func_abs,
+            "FLOOR": registry.func_floor,
+            "CEIL": registry.func_ceil,
+            "EXP": registry.func_exp,
+            "LOG": registry.func_log,
+            "SQRT": registry.func_sqrt,
             "MEDIAN": registry.func_median,
             "PERCENTILE": registry.func_percentile,
             "STD": registry.func_std,
@@ -541,10 +690,22 @@ class FormulaEngine:
             "ROUND": registry.func_round,
             "ZSCORE": registry.func_zscore,
             "NORM": registry.func_norm,
+            "IF": registry.func_if,
+            "ISNULL": registry.func_isnull,
+            "LOWER": registry.func_lower,
+            "UPPER": registry.func_upper,
+            "LEN": registry.func_len,
+            "SUBSTR": registry.func_substr,
+            "STR_REPLACE": registry.func_str_replace,
             "FILLNA": registry.func_fillna,
+            "FILLBLANK": registry.func_fillblank,
             "MAP": registry.func_map,
             "BIN": registry.func_bin,
             "DATE_DIFF": registry.func_date_diff,
+            "YEAR": registry.func_year,
+            "MONTH": registry.func_month,
+            "DAY": registry.func_day,
+            "WEEKDAY": registry.func_weekday,
         }
 
         env.update(function_map)

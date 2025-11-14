@@ -668,6 +668,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     pivotSettingsRef.current = pivotSettings;
   }, [pivotSettings]);
 
+  useEffect(() => {
+    return () => {
+      if (headerClickTimeoutRef.current) {
+        clearTimeout(headerClickTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Track if this is the initial load to preserve restored data from MongoDB
   const isInitialLoadRef = useRef(true);
   const lastComputedSignatureRef = useRef<string | null>(null);
@@ -1167,6 +1175,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
+  const headerClickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowRefs = useRef<{ [key: number]: HTMLTableRowElement | null }>({});
   const [resizingCol, setResizingCol] = useState<{ key: string; startX: number; startWidth: number } | null>(null);
   const [resizingRow, setResizingRow] = useState<{ index: number; startY: number; startHeight: number } | null>(null);
@@ -2768,9 +2777,18 @@ const activateFormulaBar = (column: string) => {
   // setSelectedCell(null);  // ← REMOVED - This was clearing the active cell indicator!
   setIsFormulaMode(true);
   setIsFormulaBarFrozen(false); // Unfreeze formula bar when explicitly activated
-  setFormulaInput('');
+  // 🔧 BUG FIX: Load stored formula if it exists, otherwise clear the input
+  // This ensures the formula is displayed when reselecting a column with a formula
+  const storedFormula = columnFormulas[column];
+  if (storedFormula) {
+    setFormulaInput(storedFormula);
+    setIsEditingFormula(false); // Don't allow editing until user clicks on formula bar
+  } else {
+    setFormulaInput('');
+    setIsEditingFormula(false);
+  }
   showValidationError(null);
-  console.log('[DataFrameOperations] Formula bar activated for column:', column);
+  console.log('[DataFrameOperations] Formula bar activated for column:', column, storedFormula ? `with stored formula: ${storedFormula}` : 'new column');
 };
 
 // Helper function to replace next ColX with column name (Excel-like behavior)
@@ -2864,10 +2882,8 @@ const handleHeaderClick = (header: string) => {
   // 🔧 Excel-like: Clear cell selection when clicking column header (select entire column)
   setSelectedCell(null);
   
-  // 🔧 Excel-like: Set selectedColumn for entire column highlighting
-  setSelectedColumn(header);
-  
   // Normal column selection behavior - activate formula bar
+  // activateFormulaBar will set selectedColumn, so we don't need to set it twice
   activateFormulaBar(header);
   
   console.log('[DataFrameOperations] Column header clicked:', header, 'Cell selection cleared');
@@ -3815,8 +3831,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     });
   };
 
-  const handleColumnMultiSelect = (header: string, event: React.MouseEvent) => {
-    if (event.ctrlKey || event.metaKey) {
+  const handleColumnMultiSelect = (
+    header: string,
+    modifiers?: { ctrlKey?: boolean; metaKey?: boolean },
+  ) => {
+    const isMultiSelect = modifiers?.ctrlKey || modifiers?.metaKey;
+    if (isMultiSelect) {
       // Multi-select mode
       setMultiSelectedColumns(prev => {
         const newSet = new Set(prev);
@@ -4600,11 +4620,25 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       onClick={(e) => {
                         // Only handle multi-select if not in formula mode
                         if (!isFormulaMode || !formulaInput.trim().startsWith('=')) {
-                          handleColumnMultiSelect(header, e);
+                          handleColumnMultiSelect(header, { ctrlKey: e.ctrlKey, metaKey: e.metaKey });
                         }
-                        handleHeaderClick(header);
+
+                        if (headerClickTimeoutRef.current) {
+                          clearTimeout(headerClickTimeoutRef.current);
+                        }
+
+                        headerClickTimeoutRef.current = setTimeout(() => {
+                          handleHeaderClick(header);
+                          headerClickTimeoutRef.current = null;
+                        }, 180);
                       }}
-                      onDoubleClick={() => {
+                      onDoubleClick={(e) => {
+                        if (headerClickTimeoutRef.current) {
+                          clearTimeout(headerClickTimeoutRef.current);
+                          headerClickTimeoutRef.current = null;
+                        }
+                        e.stopPropagation();
+                        e.preventDefault();
                         // Always allow header editing regardless of enableEditing setting
                         setEditingHeader(colIdx);
                         setEditingHeaderValue(header);

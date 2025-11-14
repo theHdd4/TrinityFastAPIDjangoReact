@@ -1,4 +1,4 @@
- import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
@@ -193,10 +193,10 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     isExhibited: !!card.isExhibited,
     moleculeId: card.moleculeId,
     moleculeTitle: card.moleculeTitle,
-    variables: normalizeCardVariables(card.variables, card.id),
     order: card.order,
     afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
     beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
+    variables: normalizeCardVariables(card.variables, card.id),
   }));
 };
 
@@ -275,14 +275,12 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
           id: card.id,
           atoms: card.atoms || [],
           isExhibited: card.isExhibited || false,
-          moleculeId,
-          moleculeTitle,
-          collapsed: card.collapsed || false,
-          scroll_position: card.scroll_position || 0,
-          variables: normalizeCardVariables(card.variables, card.id),
+          moleculeId: moleculeId, // Preserve undefined/null to distinguish standalone cards
+          moleculeTitle: moleculeTitle,
           order: card.order,
           afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
           beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
+          variables: normalizeCardVariables(card.variables, card.id),
         };
 
         // Validation: Log warning if we expected moleculeId but it's missing
@@ -318,7 +316,10 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
       const workflowMoleculesRaw = data.workflow_molecules || [];
       let workflowMolecules: WorkflowMolecule[] = [];
 
-      if (workflowMoleculesRaw.length > 0 && workflowMoleculesRaw[0].hasOwnProperty('moleculeIndex')) {
+      if (
+        workflowMoleculesRaw.length > 0 &&
+        Object.prototype.hasOwnProperty.call(workflowMoleculesRaw[0], 'moleculeIndex')
+      ) {
         // New format with moleculeIndex - sort by it and preserve isActive
         workflowMoleculesRaw.sort((a: any, b: any) => {
           const indexA = a.moleculeIndex !== undefined ? a.moleculeIndex : 999999;
@@ -418,6 +419,53 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   const initialLoad = React.useRef(true);
   const { setCards } = useExhibitionStore();
   const { toast } = useToast();
+
+  const renderAppendedVariables = (card: LayoutCard) => {
+    const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
+    if (appendedVariables.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="mt-4 space-y-3">
+        {appendedVariables.map(variable => {
+          const originCard = Array.isArray(layoutCards)
+            ? layoutCards.find(c => c.id === variable.originCardId)
+            : undefined;
+          const originTitle =
+            variable.originCardId === card.id ? 'This card' : resolveCardTitle(originCard);
+          const originAtomTitle = variable.originAtomId
+            ? originCard?.atoms.find(a => a.id === variable.originAtomId)?.title
+            : undefined;
+          const infoText = originAtomTitle
+            ? `Origin atom: ${originAtomTitle}`
+            : variable.originCardId !== card.id
+            ? originTitle
+            : '';
+
+          return (
+            <div
+              key={variable.id}
+              className="border border-blue-200 bg-blue-50/70 rounded-xl p-4 shadow-sm flex flex-col gap-2"
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-blue-600 font-medium">
+                    Variable
+                  </p>
+                  <h4 className="text-base font-semibold text-gray-900">{variable.name}</h4>
+                </div>
+                <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">
+                  Appended
+                </span>
+              </div>
+              {infoText && <div className="text-xs text-gray-500">{infoText}</div>}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   useEffect(() => {
     if (!expandedCard) {
@@ -1577,7 +1625,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                   atomName: atomId,
                   moleculeId: molecule.id,
                   moleculeTitle: molecule.title,
-                  order: atomIndex,
+                  order: atomIndex
                 });
               });
             }
@@ -1763,9 +1811,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   }, [layoutCards, workflowMolecules]);
 
   // Sync cards with exhibition store
-  useEffect(() => {
-    setCards(layoutCards);
-  }, [layoutCards, setCards]);
+  // useEffect(() => {
+  //   setCards(layoutCards);
+  // }, [layoutCards, setCards]);
 
   // Persist workflowMolecules to localStorage only when we have cards with molecule info
   useEffect(() => {
@@ -2073,6 +2121,7 @@ const addNewCardWorkflow = (moleculeId?: string, position?: number, targetMolecu
     isExhibited: false,
     moleculeId,
     moleculeTitle: workflowMolecule?.moleculeTitle,
+    variables: [],
   };
 
   // If adding to a molecule, insert at specific position within molecule
@@ -3115,32 +3164,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     }
   };
 
-const handleCardDoubleClick = (
-  e: React.MouseEvent,
-  cardId: string,
-  exhibited: boolean
-) => {
-  e.stopPropagation();
-  const target = e.target as HTMLElement | null;
-  const atomNode = target?.closest('[data-atom-id]');
-
-  if (atomNode) {
-    const atomId = atomNode.getAttribute('data-atom-id');
-    if (atomId) {
-      if (onAtomSelect) {
-        onAtomSelect(atomId);
-      }
-      onToggleSettingsPanel?.();
-      return;
-    }
-  }
-
-  if (onCardSelect) {
-    onCardSelect(cardId, exhibited);
-  }
-  onToggleSettingsPanel?.();
-  };
-
   const toggleCardCollapse = (id: string) => {
     setCollapsedCards(prev => ({ ...prev, [id]: !prev[id] }));
   };
@@ -3320,16 +3343,25 @@ const handleCardDoubleClick = (
   // Sync Laboratory changes to Workflow collection
   const syncWorkflowCollectionOnLaboratorySave = async () => {
     try {
-      console.log('🔄 Syncing Laboratory changes to Workflow collection...');
+      console.log('🔄 [SYNC START] Syncing Laboratory changes to Workflow collection...');
+      console.log('🔄 [SYNC] Function called with pendingChanges:', pendingChanges);
+      console.log('🔄 [SYNC] Current layoutCards count:', Array.isArray(layoutCards) ? layoutCards.length : 0);
 
       const hasPendingChanges = pendingChanges.deletedMolecules.length > 0 || 
                                 pendingChanges.deletedAtoms.length > 0 || 
                                 pendingChanges.addedAtoms.length > 0;
+      console.log('🔄 [SYNC] hasPendingChanges:', hasPendingChanges);
 
       // Get current workflow configuration
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
+      console.log('🔄 [SYNC] Environment config:', { 
+        CLIENT_NAME: env.CLIENT_NAME, 
+        APP_NAME: env.APP_NAME, 
+        PROJECT_NAME: env.PROJECT_NAME 
+      });
 
+      console.log('🔄 [SYNC] Fetching workflow data from:', `${MOLECULES_API}/workflow/get`);
       const response = await fetch(`${MOLECULES_API}/workflow/get`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3342,8 +3374,15 @@ const handleCardDoubleClick = (
         })
       });
 
+      console.log('🔄 [SYNC] Fetch response status:', response.status, response.ok);
+      
       if (response.ok) {
         const result = await response.json();
+        console.log('🔄 [SYNC] Fetch result:', { 
+          hasWorkflowData: !!result.workflow_data,
+          moleculesCount: result.workflow_data?.canvas_molecules?.length || 0
+        });
+        
         if (result.workflow_data) {
           // Fetch all molecules from MongoDB (workflow_model_molecule_configuration)
           let updatedCanvasMolecules = [...(result.workflow_data.canvas_molecules || [])];
@@ -3478,13 +3517,26 @@ const handleCardDoubleClick = (
           // FIX: Preserve atom order for ALL molecules from Laboratory Mode
           // This ensures that when atoms are added/reordered in Laboratory Mode,
           // their order is preserved in Workflow Mode
+          console.log('🔄 [SYNC] Starting atom order preservation logic...');
           const currentCards = Array.isArray(layoutCards) ? layoutCards : [];
           const allMoleculeCards = currentCards.filter(card => card.moleculeId);
+          console.log('🔄 [SYNC] Total cards:', currentCards.length, 'Molecule cards:', allMoleculeCards.length);
+
+          // CRITICAL FIX: Create a position map once for O(1) lookups instead of O(n) findIndex calls
+          // This maps card.id -> position in the original layoutCards array
+          // This preserves the exact order cards appear in Laboratory Mode, including
+          // when atoms are inserted between existing atoms
+          // MUST be created before grouping to use in logging
+          const cardPositionMap = new Map<string, number>();
+          currentCards.forEach((card, index) => {
+            cardPositionMap.set(card.id, index);
+          });
 
           // Build a map of moleculeId -> ordered atomIds from Laboratory Mode cards
           const moleculeAtomOrderMap = new Map<string, string[]>();
 
           // Group cards by moleculeId
+          // CRITICAL: Preserve the order cards appear in the original array when grouping
           const cardsByMolecule = new Map<string, typeof allMoleculeCards>();
           allMoleculeCards.forEach(card => {
             if (!card.moleculeId) return;
@@ -3494,36 +3546,96 @@ const handleCardDoubleClick = (
             cardsByMolecule.get(card.moleculeId)!.push(card);
           });
 
+          // Log initial grouping to verify card order
+          console.log(`🔄 [Sync] Grouped cards by molecule:`, 
+            Array.from(cardsByMolecule.entries()).map(([molId, cards]) => ({
+              moleculeId: molId,
+              cardCount: cards.length,
+              cards: cards.map((c, idx) => ({
+                cardId: c.id,
+                atomId: c.atoms[0]?.atomId,
+                positionInOriginalArray: cardPositionMap.get(c.id) ?? -1,
+                groupIndex: idx
+              }))
+            }))
+          );
+
           // For each molecule, sort cards by their visual order (order field) and extract atoms
           cardsByMolecule.forEach((moleculeCards, moleculeId) => {
-            // Sort cards by order field (if available) to preserve visual order
-            // Cards with lower order values appear first
+            // CRITICAL: Count cards within this molecule to ensure we have the correct count
+            const moleculeCardCount = moleculeCards.length;
+            console.log(`🔄 [Sync] Processing molecule ${moleculeId} with ${moleculeCardCount} cards`);
+
+            // CRITICAL FIX: Sort cards by their position in the original layoutCards array
+            // The positionInOriginalArray is the PRIMARY source of truth for visual order in Laboratory Mode
+            // This ensures that when atoms are inserted between existing atoms, their order is preserved
+            // The order field is SECONDARY and only used if positionInOriginalArray is not available
             const sortedCards = [...moleculeCards].sort((a, b) => {
+              // Priority 1: Use position in the original layoutCards array (currentCards)
+              // This is the PRIMARY source of truth - it reflects the exact visual order in Laboratory Mode
+              const indexA = cardPositionMap.get(a.id) ?? -1;
+              const indexB = cardPositionMap.get(b.id) ?? -1;
+              
+              // If both have valid positions, sort by position (this is the correct order)
+              if (indexA >= 0 && indexB >= 0) {
+                return indexA - indexB;
+              }
+              
+              // Priority 2: If only one has position, prioritize it
+              if (indexA >= 0) return -1;
+              if (indexB >= 0) return 1;
+              
+              // Priority 3: Fallback to order field if positions are not available
+              // This should rarely happen, but provides a fallback
               const orderA = typeof a.order === 'number' ? a.order : Infinity;
               const orderB = typeof b.order === 'number' ? b.order : Infinity;
-
-              // If both have order, sort by order
+              
               if (orderA !== Infinity && orderB !== Infinity) {
                 return orderA - orderB;
               }
-
-              // If only one has order, prioritize it
+              
               if (orderA !== Infinity) return -1;
               if (orderB !== Infinity) return 1;
-
-              // Otherwise, maintain original array order
-              const indexA = allMoleculeCards.indexOf(a);
-              const indexB = allMoleculeCards.indexOf(b);
-              return indexA - indexB;
+              
+              // Both not found (shouldn't happen), maintain relative order
+              return 0;
             });
 
-            // Extract atoms in order from sorted cards
+            // CRITICAL FIX: Extract atoms in order from sorted cards and assign molecule card index
+            // The moleculeCardIndex (0, 1, 2, ...) represents the position of the card within the molecule
+            // This index is used to build atomPositions with correct order values
             const orderedAtomIds: string[] = [];
-            sortedCards.forEach(card => {
+            const cardIndexMap = new Map<string, number>(); // Map card.id -> moleculeCardIndex
+            
+            sortedCards.forEach((card, moleculeCardIndex) => {
+              // Store the molecule card index for this card (0, 1, 2, ...)
+              cardIndexMap.set(card.id, moleculeCardIndex);
+              
               card.atoms.forEach(atom => {
                 // Preserve every occurrence (allow duplicate atoms)
+                // The order in orderedAtomIds array will be used to build atomPositions
                 orderedAtomIds.push(atom.atomId);
               });
+            });
+
+            // Verify the count matches
+            if (orderedAtomIds.length !== moleculeCardCount) {
+              console.warn(`⚠️ [Sync] Molecule ${moleculeId} atom count (${orderedAtomIds.length}) doesn't match card count (${moleculeCardCount})`);
+            }
+
+            console.log(`🔄 [Sync] Molecule ${moleculeId} atom order from Laboratory Mode:`, {
+              moleculeId,
+              cardCount: moleculeCardCount,
+              atomCount: orderedAtomIds.length,
+              atomOrder: orderedAtomIds,
+              cardOrder: sortedCards.map((c, moleculeCardIndex) => ({
+                cardId: c.id,
+                atomId: c.atoms[0]?.atomId,
+                moleculeCardIndex: moleculeCardIndex, // Index within molecule (0, 1, 2, ...)
+                positionInArray: cardPositionMap.get(c.id) ?? -1,
+                orderField: c.order,
+                expectedAtomPosition: moleculeCardIndex // This will be the order in atomPositions
+              }))
             });
 
             moleculeAtomOrderMap.set(moleculeId, orderedAtomIds);
@@ -3556,6 +3668,8 @@ const handleCardDoubleClick = (
           });
 
           // Ensure atomPositions is kept in sync with atomOrder for every molecule
+          // CRITICAL: buildAtomPositions uses the index in the array (0, 1, 2, ...) as the order value
+          // So the order of atoms in atomOrder array directly determines their order in atomPositions
           updatedCanvasMolecules = updatedCanvasMolecules.map(molecule => {
             const orderSource = Array.isArray(molecule.atomOrder) && molecule.atomOrder.length > 0
               ? [...molecule.atomOrder]
@@ -3564,6 +3678,20 @@ const handleCardDoubleClick = (
                 : [];
 
             const atomPositions = buildAtomPositions(orderSource);
+            
+            // Log the final atomPositions to verify order
+            if (atomPositions.length > 0) {
+              console.log(`✅ [Sync] Final atomPositions for molecule ${molecule.id}:`, {
+                moleculeId: molecule.id,
+                atomCount: atomPositions.length,
+                atomPositions: atomPositions.map((ap, idx) => ({
+                  atomId: ap.atomId,
+                  order: ap.order,
+                  expectedOrder: idx, // Should match order
+                  matches: ap.order === idx
+                }))
+              });
+            }
 
             return {
               ...molecule,
@@ -3857,11 +3985,16 @@ const handleCardDoubleClick = (
             addedAtoms: []
           });
 
-          console.log('✅ Laboratory changes synced to Workflow collection');
+          console.log('✅ [SYNC END] Laboratory changes synced to Workflow collection');
+        } else {
+          console.warn('⚠️ [SYNC] No workflow_data, skipping sync');
         }
+      } else {
+        console.error('❌ [SYNC] Response not OK, skipping sync');
       }
     } catch (error) {
-      console.error('❌ Failed to sync Laboratory changes to Workflow collection:', error);
+      console.error('❌ [SYNC ERROR] Failed to sync Laboratory changes to Workflow collection:', error);
+      console.error('❌ [SYNC ERROR] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     }
   };
 
@@ -3912,6 +4045,19 @@ const handleCardDoubleClick = (
           cancelLabel="Cancel"
           confirmButtonClass="bg-red-500 hover:bg-red-600"
         />
+        <ConfirmationDialog
+          open={deleteAtomDialogOpen}
+          onOpenChange={handleDeleteAtomDialogOpenChange}
+          onConfirm={confirmDeleteAtom}
+          onCancel={cancelDeleteAtom}
+          title="Delete atom?"
+          description={`Are you sure you want to delete "${atomToDelete?.atomTitle || ''}"? This action cannot be undone.`}
+          icon={<Trash2 className="w-6 h-6 text-white" />}
+          iconBgClass="bg-red-500"
+          confirmLabel="Yes, delete"
+          cancelLabel="Cancel"
+          confirmButtonClass="bg-red-500 hover:bg-red-600"
+        />
       <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
           <div className="p-6 space-y-6">
@@ -3924,6 +4070,7 @@ const handleCardDoubleClick = (
                   ? layoutCards.filter(card => card.moleculeId === molecule.moleculeId)
                   : [];
                 const atomCount = moleculeCards.reduce((sum, card) => sum + (card.atoms?.length || 0), 0);
+
                 return (
                   <React.Fragment key={molecule.moleculeId}>
                     <Card 
@@ -3999,7 +4146,10 @@ const handleCardDoubleClick = (
                 {/* Molecule Content */}
                 {!isCollapsed && (
                 <div className="p-6 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
-                    {moleculeCards.map((card, index) => {
+                    {Array.isArray(layoutCards) &&
+                      layoutCards
+                        .filter(card => card.moleculeId === molecule.moleculeId)
+                        .map((card, index) => {
                         const cardTitle = card.moleculeTitle
                           ? card.atoms.length > 0
                             ? `${card.moleculeTitle} - ${card.atoms[0].title}`
@@ -4022,7 +4172,6 @@ const handleCardDoubleClick = (
                           }`}
                           draggable={canEdit}
                           onDragStart={(e) => handleCardDragStart(e, card.id)}
-                          onDoubleClick={(e) => handleCardDoubleClick(e, card.id, card.isExhibited)}
                           onDragOver={(e) => {
                             handleCardDragOver(e, card.id);
                             handleDragOver(e, card.id); // Keep existing functionality
@@ -4056,15 +4205,14 @@ const handleCardDoubleClick = (
                                 onAddAtom={(id, atom) => addAtomByName(id, atom)}
                                 disabled={card.atoms.length > 0}
                               />
-                              {card.atoms.length > 0 && (
-                                <button
-                                  onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                                  className="p-1 hover:bg-gray-100 rounded"
-                                  title="Card Settings"
-                                >
-                                  <Settings className="w-4 h-4 text-gray-400" />
-                                </button>
-                              )}
+                              <button
+                                onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                                className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="Card Settings"
+                                disabled={!canEdit}
+                              >
+                                <Settings className="w-4 h-4 text-gray-400" />
+                              </button>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
@@ -4130,7 +4278,6 @@ const handleCardDoubleClick = (
                                 {card.atoms.map(atom => (
                                   <AtomBox
                                     key={atom.id}
-                                    data-atom-id={atom.id}
                                     className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                     onClick={(e) => handleAtomClick(e, atom.id)}
                                   >
@@ -4218,55 +4365,7 @@ const handleCardDoubleClick = (
                                 ))}
                               </div>
                             )}
-
-                              {(() => {
-                                const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
-                                if (appendedVariables.length === 0) {
-                                  return null;
-                                }
-
-                                return (
-                                  <div className="mt-4 space-y-3">
-                                    {appendedVariables.map(variable => {
-                                      const originCard = Array.isArray(layoutCards)
-                                        ? layoutCards.find(c => c.id === variable.originCardId)
-                                        : undefined;
-                                      const originTitle =
-                                        variable.originCardId === card.id ? 'This card' : resolveCardTitle(originCard);
-                                      const originAtomTitle = variable.originAtomId
-                                        ? originCard?.atoms.find(a => a.id === variable.originAtomId)?.title
-                                        : undefined;
-                                      const infoText = originAtomTitle
-                                        ? `Origin atom: ${originAtomTitle}`
-                                        : variable.originCardId !== card.id
-                                        ? 'Global'
-                                        : '';
-
-                                      return (
-                                        <div
-                                          key={variable.id}
-                                          className="border border-blue-200 bg-blue-50/70 rounded-xl p-4 shadow-sm flex flex-col gap-2"
-                                        >
-                                          <div className="flex items-start justify-between">
-                                            <div>
-                                              <p className="text-xs uppercase tracking-wide text-blue-600 font-medium">
-                                                Variable
-                                              </p>
-                                              <h4 className="text-base font-semibold text-gray-900">{variable.name}</h4>
-                                            </div>
-                                            <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">
-                                              Appended
-                                            </span>
-                                          </div>
-                                          {infoText && (
-                                            <div className="text-xs text-gray-500">{infoText}</div>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                );
-                              })()}
+                            {renderAppendedVariables(card)}
                           </div>
                         </Card>
 
@@ -4291,16 +4390,44 @@ const handleCardDoubleClick = (
                             </span>
                           </button>
                         </div>
-                    </React.Fragment>
-                  );
-                })}
+                        </React.Fragment>
+                        );
+                      })}
 
                 </div>
                 )}
               </Card>
-            </React.Fragment>
-          );
-        } else if (item.type === 'standalone-card' && item.cardData) {
+
+              {/* Add New Card Button - After molecule container */}
+              <div className="flex justify-center my-4">
+                <button
+                  onClick={() => {
+                    if (item.moleculeIndex !== undefined) {
+                      addNewCardWorkflow(undefined, undefined, item.moleculeIndex, 0);
+                    }
+                  }}
+                  onDragEnter={e => handleAddDragEnter(e, `after-molecule-${molecule.moleculeId}`)}
+                  onDragLeave={handleAddDragLeave}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => {
+                    if (item.moleculeIndex !== undefined) {
+                      void handleDropNewCardWorkflow(e, undefined, undefined, item.moleculeIndex, 0);
+                    }
+                  }}
+                  className={`flex flex-col items-center justify-center px-2 py-2 bg-white border-2 border-dashed rounded-xl hover:border-[#458EE2] hover:bg-blue-50 transition-all duration-500 ease-in-out group ${addDragTarget === `after-molecule-${molecule.moleculeId}` ? 'min-h-[160px] w-full border-[#458EE2] bg-blue-50' : 'border-gray-300'}`}
+                  title="Add standalone card after molecule"
+                >
+                  <Plus className={`w-5 h-5 text-gray-400 group-hover:text-[#458EE2] transition-transform duration-500 ${addDragTarget === `after-molecule-${molecule.moleculeId}` ? 'scale-125 mb-2' : ''}`} />
+                  <span
+                    className="w-0 h-0 overflow-hidden ml-0 group-hover:ml-2 group-hover:w-[120px] group-hover:h-auto text-gray-600 group-hover:text-[#458EE2] font-medium whitespace-nowrap transition-all duration-500 ease-in-out"
+                  >
+                    Add Standalone Card
+                  </span>
+                </button>
+              </div>
+                  </React.Fragment>
+                );
+              } else if (item.type === 'standalone-card' && item.cardData) {
                 // Render standalone card
                 const card = item.cardData;
                 const cardTitle = card.moleculeTitle
@@ -4340,15 +4467,14 @@ const handleCardDoubleClick = (
                             onAddAtom={(id, atom) => addAtomByName(id, atom)}
                             disabled={card.atoms.length > 0}
                           />
-                          {card.atoms.length > 0 && (
-                            <button
-                              onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                              className="p-1 hover:bg-gray-100 rounded"
-                              title="Card Settings"
-                            >
-                              <Settings className="w-4 h-4 text-gray-400" />
-                            </button>
-                          )}
+                          <button
+                            onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                            className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Card Settings"
+                            disabled={!canEdit}
+                          >
+                            <Settings className="w-4 h-4 text-gray-400" />
+                          </button>
                           <button
                             onClick={e => {
                               e.stopPropagation();
@@ -4515,6 +4641,7 @@ const handleCardDoubleClick = (
                             ))}
                           </div>
                         )}
+                        {renderAppendedVariables(card)}
                       </div>
                     </Card>
 
@@ -4553,302 +4680,6 @@ const handleCardDoubleClick = (
                 </div>
           </div>
         </div>
-
-        {/* Cards without moleculeId (standalone cards) */}
-        {(() => {
-          const standaloneCards = Array.isArray(layoutCards)
-            ? layoutCards.filter(card => !card.moleculeId)
-            : [];
-
-          if (standaloneCards.length === 0) {
-            return null;
-          }
-
-          return (
-            <div className="p-6 space-y-6">
-              {standaloneCards.map((card, index) => {
-                const cardTitle = card.moleculeTitle
-                  ? card.atoms.length > 0
-                    ? `${card.moleculeTitle} - ${card.atoms[0].title}`
-                    : card.moleculeTitle
-                  : card.atoms.length > 0
-                  ? card.atoms[0].title
-                  : 'Card';
-
-                return (
-                  <React.Fragment key={card.id}>
-                    <Card
-                      data-card-id={card.id}
-                      className={`w-full ${collapsedCards[card.id] ? '' : 'min-h-[200px]'} bg-white rounded-2xl border-2 transition-all duration-300 flex flex-col overflow-hidden ${
-                        dragOverCardId === card.id
-                          ? 'border-blue-500 bg-blue-50 shadow-lg'
-                          : draggedCardId === card.id
-                          ? 'opacity-50'
-                          : dragOver === card.id
-                          ? 'border-[#458EE2] bg-gradient-to-br from-blue-50 to-blue-100 shadow-lg'
-                          : 'border-gray-200 shadow-sm hover:shadow-md'
-                      }`}
-                      draggable={canEdit}
-                      onDragStart={e => handleCardDragStart(e, card.id)}
-                      onDoubleClick={e => handleCardDoubleClick(e, card.id, card.isExhibited)}
-                      onDragOver={e => {
-                        handleCardDragOver(e, card.id);
-                        handleDragOver(e, card.id); // Keep existing functionality
-                      }}
-                      onDragLeave={e => {
-                        handleCardDragLeave(e);
-                        handleDragLeave(e); // Keep existing functionality
-                      }}
-                      onDrop={e => {
-                        handleCardDrop(e, card.id);
-                        handleDrop(e, card.id); // Keep existing functionality
-                      }}
-                    >
-                      <div className="flex items-center justify-between p-4 border-b border-gray-100">
-                        <div className="flex items-center space-x-2">
-                          {canEdit && (
-                            <div
-                              className="cursor-move p-1 hover:bg-gray-100 rounded"
-                              onMouseDown={e => e.stopPropagation()}
-                              title="Drag to reorder"
-                            >
-                              <GripVertical className="w-3 h-3 text-gray-400" />
-                            </div>
-                          )}
-                          <span className="text-sm font-medium text-gray-700">{cardTitle}</span>
-                          <AIChatBot
-                            cardId={card.id}
-                            cardTitle={cardTitle}
-                            onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                            disabled={card.atoms.length > 0}
-                          />
-                          <button
-                            onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                            className="p-1 hover:bg-gray-100 rounded"
-                            title="Card Settings"
-                          >
-                            <Settings className="w-4 h-4 text-gray-400" />
-                          </button>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              deleteCard(card.id);
-                            }}
-                            className="p-1 hover:bg-gray-100 rounded"
-                          >
-                            <Trash2 className="w-4 h-4 text-gray-400" />
-                          </button>
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              toggleCardExpand(card.id);
-                            }}
-                            className="p-1 hover:bg-gray-100 rounded"
-                            title="Expand Card"
-                          >
-                            <Maximize2 className="w-4 h-4 text-gray-400" />
-                          </button>
-                          <button
-                            onClick={e => {
-                              e.stopPropagation();
-                              toggleCardCollapse(card.id);
-                            }}
-                            className="p-1 hover:bg-gray-100 rounded"
-                            title="Toggle Card"
-                          >
-                            {collapsedCards[card.id] ? (
-                              <ChevronDown className="w-4 h-4 text-gray-400" />
-                            ) : (
-                              <Minus className="w-4 h-4 text-gray-400" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
-                        {card.atoms.length === 0 ? (
-                          <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
-                            <AtomSuggestion
-                              cardId={card.id}
-                              isVisible={true}
-                              onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
-                              onAddAtom={handleAddAtomFromSuggestion}
-                            />
-                          </div>
-                        ) : (
-                          <div
-                            className={`grid gap-4 w-full ${
-                              card.atoms.length === 1 ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
-                            }`}
-                          >
-                            {card.atoms.map(atom => (
-                              <AtomBox
-                                key={atom.id}
-                                data-atom-id={atom.id}
-                                className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
-                                onClick={e => handleAtomClick(e, atom.id)}
-                              >
-                                {/* Atom Header */}
-                                <div className="flex items-center justify-between mb-3">
-                                  <div className="flex items-center space-x-1">
-                                    <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
-                                    <AtomAIChatBot
-                                      atomId={atom.id}
-                                      atomType={atom.atomId}
-                                      atomTitle={atom.title}
-                                      disabled={!LLM_MAP[atom.atomId]}
-                                      className="transition-transform hover:scale-110"
-                                    />
-                                    <button
-                                      onClick={e => handleAtomSettingsClick(e, atom.id)}
-                                      className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
-                                      title="Atom Settings"
-                                    >
-                                      <Settings className="w-4 h-4 text-gray-400" />
-                                    </button>
-                                    <button
-                                      onClick={e => {
-                                        e.stopPropagation();
-                                        if (onAtomSelect) {
-                                          onAtomSelect(atom.id);
-                                        }
-                                        onToggleHelpPanel?.();
-                                      }}
-                                      className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
-                                      title="Help"
-                                    >
-                                      <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">
-                                        ?
-                                      </span>
-                                    </button>
-                                  </div>
-                                  <button
-                                    onClick={e => {
-                                      e.stopPropagation();
-                                      removeAtom(card.id, atom.id);
-                                    }}
-                                    className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
-                                  >
-                                    <Trash2 className="w-4 h-4 text-gray-400" />
-                                  </button>
-                                </div>
-
-                                {/* Atom Content */}
-                                {atom.atomId === 'text-box' ? (
-                                  <TextBoxEditor textId={atom.id} />
-                                ) : atom.atomId === 'data-upload-validate' ? (
-                                  <DataUploadValidateAtom atomId={atom.id} />
-                                ) : atom.atomId === 'feature-overview' ? (
-                                  <FeatureOverviewAtom atomId={atom.id} />
-                                ) : atom.atomId === 'clustering' ? (
-                                  <ClusteringAtom atomId={atom.id} />
-                                ) : atom.atomId === 'explore' ? (
-                                  <ExploreAtom atomId={atom.id} />
-                                ) : atom.atomId === 'chart-maker' ? (
-                                  <ChartMakerAtom atomId={atom.id} />
-                                ) : atom.atomId === 'concat' ? (
-                                  <ConcatAtom atomId={atom.id} />
-                                ) : atom.atomId === 'merge' ? (
-                                  <MergeAtom atomId={atom.id} />
-                                ) : atom.atomId === 'column-classifier' ? (
-                                  <ColumnClassifierAtom atomId={atom.id} />
-                                ) : atom.atomId === 'dataframe-operations' ? (
-                                  <DataFrameOperationsAtom atomId={atom.id} />
-                                ) : atom.atomId === 'create-column' ? (
-                                  <CreateColumnAtom atomId={atom.id} />
-                                ) : atom.atomId === 'groupby-wtg-avg' ? (
-                                  <GroupByAtom atomId={atom.id} />
-                                ) : atom.atomId === 'build-model-feature-based' ? (
-                                  <BuildModelFeatureBasedAtom atomId={atom.id} />
-                                ) : atom.atomId === 'scenario-planner' ? (
-                                  <ScenarioPlannerAtom atomId={atom.id} />
-                                ) : atom.atomId === 'select-models-feature' ? (
-                                  <SelectModelsFeatureAtom atomId={atom.id} />
-                                ) : atom.atomId === 'evaluate-models-feature' ? (
-                                  <EvaluateModelsFeatureAtom atomId={atom.id} />
-                                ) : atom.atomId === 'scope-selector' ? (
-                                  <ScopeSelectorAtom atomId={atom.id} />
-                                ) : atom.atomId === 'correlation' ? (
-                                  <CorrelationAtom atomId={atom.id} />
-                                ) : atom.atomId === 'auto-regressive-models' ? (
-                                  <AutoRegressiveModelsAtom atomId={atom.id} />
-                                ) : atom.atomId === 'select-models-auto-regressive' ? (
-                                  <SelectModelsAutoRegressiveAtom atomId={atom.id} />
-                                ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
-                                  <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
-                                ) : (
-                                  <div>
-                                    <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
-                                    <p className="text-xs text-gray-600 mb-2">{atom.category}</p>
-                                    <p className="text-xs text-gray-500">Configure this atom for your application</p>
-                                  </div>
-                                )}
-                              </AtomBox>
-                            ))}
-                          </div>
-                        )}
-
-                        {(() => {
-                          const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
-                          if (appendedVariables.length === 0) {
-                            return null;
-                          }
-
-                          return (
-                            <div className="mt-4 space-y-3">
-                              {appendedVariables.map(variable => {
-                                const originCard = Array.isArray(layoutCards)
-                                  ? layoutCards.find(c => c.id === variable.originCardId)
-                                  : undefined;
-                                const originTitle =
-                                  variable.originCardId === card.id ? 'This card' : resolveCardTitle(originCard);
-                                const originAtomTitle = variable.originAtomId
-                                  ? originCard?.atoms.find(a => a.id === variable.originAtomId)?.title
-                                  : undefined;
-                                const infoText = originAtomTitle
-                                  ? `Origin atom: ${originAtomTitle}`
-                                  : variable.originCardId !== card.id
-                                  ? 'Global'
-                                  : '';
-
-                                return (
-                                  <div
-                                    key={variable.id}
-                                    className="border border-blue-200 bg-blue-50/70 rounded-xl p-4 shadow-sm flex flex-col gap-2"
-                                  >
-                                    <div className="flex items-start justify-between">
-                                      <div>
-                                        <p className="text-xs uppercase tracking-wide text-blue-600 font-medium">
-                                          Variable
-                                        </p>
-                                        <h4 className="text-base font-semibold text-gray-900">{variable.name}</h4>
-                                      </div>
-                                      <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">
-                                        Appended
-                                      </span>
-                                    </div>
-                                    {infoText && <div className="text-xs text-gray-500">{infoText}</div>}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </Card>
-                    {index < standaloneCards.length - 1 && (
-                      <div className="flex justify-center my-4">
-                        <div className="h-0.5 w-full max-w-md bg-gray-200 rounded-full" />
-                      </div>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </div>
-          );
-        })()}
 
         {/* Fullscreen Card Modal */}
         {expandedCard &&
@@ -5067,7 +4898,6 @@ const handleCardDoubleClick = (
               boxShadow: `0 0 0 2px ${editor.user_color}40`,
             } : undefined}
             onClick={(e) => handleCardClick(e, card.id, card.isExhibited)}
-            onDoubleClick={(e) => handleCardDoubleClick(e, card.id, card.isExhibited)}
             onDragOver={(e) => handleDragOver(e, card.id)}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, card.id)}
@@ -5101,13 +4931,14 @@ const handleCardDoubleClick = (
                   onAddAtom={(id, atom) => addAtomByName(id, atom)}
                   disabled={card.atoms.length > 0}
                 />
-                  <button
-                    onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                    className="p-1 hover:bg-gray-100 rounded"
-                    title="Card Settings"
-                  >
-                    <Settings className="w-4 h-4 text-gray-400" />
-                  </button>
+                          <button
+                            onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
+                            className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                            title="Card Settings"
+                            disabled={!canEdit}
+                          >
+                  <Settings className="w-4 h-4 text-gray-400" />
+                </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
@@ -5175,7 +5006,6 @@ const handleCardDoubleClick = (
                   {card.atoms.map((atom) => (
                     <AtomBox
                       key={atom.id}
-                      data-atom-id={atom.id}
                       className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                       onClick={(e) => handleAtomClick(e, atom.id)}
                     >
@@ -5280,55 +5110,7 @@ const handleCardDoubleClick = (
                   ))}
                 </div>
               )}
-
-              {(() => {
-                const appendedVariables = (card.variables ?? []).filter(variable => variable.appended);
-                if (appendedVariables.length === 0) {
-                  return null;
-                }
-
-                return (
-                  <div className="mt-4 space-y-3">
-                    {appendedVariables.map(variable => {
-                      const originCard = Array.isArray(layoutCards)
-                        ? layoutCards.find(c => c.id === variable.originCardId)
-                        : undefined;
-                      const originTitle =
-                        variable.originCardId === card.id ? 'This card' : resolveCardTitle(originCard);
-                      const originAtomTitle = variable.originAtomId
-                        ? originCard?.atoms.find(a => a.id === variable.originAtomId)?.title
-                        : undefined;
-                      const infoText = originAtomTitle
-                        ? `Origin atom: ${originAtomTitle}`
-                        : variable.originCardId !== card.id
-                        ? 'Global'
-                        : '';
-
-                      return (
-                        <div
-                          key={variable.id}
-                          className="border border-blue-200 bg-blue-50/70 rounded-xl p-4 shadow-sm flex flex-col gap-2"
-                        >
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <p className="text-xs uppercase tracking-wide text-blue-600 font-medium">
-                                Variable
-                              </p>
-                              <h4 className="text-base font-semibold text-gray-900">{variable.name}</h4>
-                            </div>
-                            <span className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-xs font-semibold">
-                              Appended
-                            </span>
-                          </div>
-                          {infoText && (
-                            <div className="text-xs text-gray-500">{infoText}</div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
+              {renderAppendedVariables(card)}
             </div>
           </Card>
           {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
