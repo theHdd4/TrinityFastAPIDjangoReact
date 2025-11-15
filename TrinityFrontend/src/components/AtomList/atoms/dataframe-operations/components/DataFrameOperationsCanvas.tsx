@@ -75,6 +75,12 @@ interface DataFrameOperationsCanvasProps {
   originalData?: DataFrameData | null;
 }
 
+type UndoSnapshot = {
+  data: DataFrameData;
+  columnFormulas: Record<string, string>;
+  selectedColumn: string | null;
+};
+
 interface NumberFilterComponentProps {
   column: string;
   data: DataFrameData;
@@ -522,7 +528,13 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [formulaInput, setFormulaInput] = useState('');
   const [isEditingFormula, setIsEditingFormula] = useState(false);
+  const editingSessionRef = useRef(false);
+  const setEditingState = useCallback((next: boolean) => {
+    editingSessionRef.current = next;
+    setIsEditingFormula(next);
+  }, []);
   const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>(settings.columnFormulas || {});
+  const settingsColumnFormulasRef = useRef<Record<string, string>>(settings.columnFormulas || {});
   const [formulaValidationError, setFormulaValidationError] = useState<string | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [forceRefresh, setForceRefresh] = useState(0);
@@ -1299,6 +1311,10 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   useEffect(() => {
     const incoming = settings.columnFormulas || {};
+    if (areFormulaMapsEqual(incoming, settingsColumnFormulasRef.current)) {
+      return;
+    }
+    settingsColumnFormulasRef.current = incoming;
     setColumnFormulas(prev => (areFormulaMapsEqual(prev, incoming) ? prev : incoming));
   }, [settings.columnFormulas]);
 
@@ -1365,20 +1381,24 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         if (nextFormula !== formulaInput) {
           setFormulaInput(nextFormula);
         }
-        setIsEditingFormula(storedFormula === undefined);
+        setEditingState(false);
         setFormulaValidationError(null);
       } else {
-        setIsEditingFormula(false);
+        setEditingState(false);
         setFormulaValidationError(null);
       }
       return;
     }
 
-    if (selectedColumn && storedFormula !== undefined && storedFormula !== formulaInput) {
+    if (
+      selectedColumn &&
+      storedFormula !== undefined &&
+      storedFormula !== formulaInput &&
+      !isEditingFormula
+    ) {
       setFormulaInput(storedFormula);
-      setIsEditingFormula(false);
     }
-  }, [selectedColumn, columnFormulas, formulaInput]);
+  }, [selectedColumn, columnFormulas, formulaInput, isEditingFormula]);
   
   // Initialize column order when data changes
   useEffect(() => {
@@ -1461,8 +1481,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [insertLoading, setInsertLoading] = useState(false);
   
   // Undo/Redo state management
-  const [undoStack, setUndoStack] = useState<DataFrameData[]>([]);
-  const [redoStack, setRedoStack] = useState<DataFrameData[]>([]);
+  const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<UndoSnapshot[]>([]);
   const [isUndoRedoOperation, setIsUndoRedoOperation] = useState(false);
 
   // History panel state
@@ -1503,36 +1523,74 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     setHistoryOperations(prev => [operation, ...prev].slice(0, 100)); // Keep last 100 operations
   }, []);
 
+  const createSnapshot = useCallback(
+    (sourceData?: DataFrameData): UndoSnapshot | null => {
+      const baseData = sourceData ?? data;
+      if (!baseData) return null;
+      return {
+        data: JSON.parse(JSON.stringify(baseData)),
+        columnFormulas: JSON.parse(JSON.stringify(columnFormulas || {})),
+        selectedColumn,
+      };
+    },
+    [data, columnFormulas, selectedColumn],
+  );
+
+  const applySnapshot = useCallback(
+    (snapshot: UndoSnapshot) => {
+      const restoredData = JSON.parse(JSON.stringify(snapshot.data));
+      const restoredFormulas = JSON.parse(JSON.stringify(snapshot.columnFormulas || {}));
+      onDataChange(restoredData);
+      setColumnFormulas(restoredFormulas);
+      onSettingsChange({ columnFormulas: restoredFormulas });
+      setSelectedColumn(snapshot.selectedColumn);
+      if (snapshot.selectedColumn) {
+        setFormulaInput(restoredFormulas[snapshot.selectedColumn] || '');
+        setIsFormulaMode(true);
+      } else {
+        setFormulaInput('');
+        setIsFormulaMode(false);
+      }
+      setEditingState(false);
+    },
+    [onDataChange, onSettingsChange, setColumnFormulas, setSelectedColumn, setFormulaInput, setIsFormulaMode, setEditingState],
+  );
+
   // Function to save current state to undo stack
-  const saveToUndoStack = useCallback((currentData: DataFrameData) => {
-    if (isUndoRedoOperation) return; // Don't save during undo/redo operations
-    
-    setUndoStack(prev => {
-      const newStack = [...prev, JSON.parse(JSON.stringify(currentData))];
-      // Limit undo stack to 50 operations
-      return newStack.slice(-50);
-    });
-    // Clear redo stack when new operation is performed
-    setRedoStack([]);
-  }, [isUndoRedoOperation]);
+  const saveToUndoStack = useCallback(
+    (currentData?: DataFrameData) => {
+      if (isUndoRedoOperation) return; // Don't save during undo/redo operations
+      const snapshot = createSnapshot(currentData);
+      if (!snapshot) return;
+      setUndoStack(prev => {
+        const newStack = [...prev, snapshot];
+        // Limit undo stack to 50 operations
+        return newStack.slice(-50);
+      });
+      // Clear redo stack when new operation is performed
+      setRedoStack([]);
+    },
+    [isUndoRedoOperation, createSnapshot],
+  );
 
   // Function to undo last operation
   const handleUndo = useCallback(() => {
-    if (undoStack.length === 0 || !data) return;
+    if (undoStack.length === 0) return;
+    
+    const previousState = undoStack[undoStack.length - 1];
+    if (!previousState) return;
     
     setIsUndoRedoOperation(true);
     
-    // Move current state to redo stack
-    setRedoStack(prev => [...prev, JSON.parse(JSON.stringify(data))]);
+    const currentSnapshot = createSnapshot();
+    if (currentSnapshot) {
+      setRedoStack(prev => [...prev, currentSnapshot]);
+    }
     
-    // Restore previous state
-    const previousState = undoStack[undoStack.length - 1];
     setUndoStack(prev => prev.slice(0, -1));
     
-    // Update the data
-    onDataChange(previousState);
+    applySnapshot(previousState);
     
-    // Add to history
     addToHistory('Undo', 'Reverted last operation');
     
     toast({
@@ -1540,34 +1598,34 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       description: "Last operation has been undone",
     });
     
-    // Reset flag after a short delay
     setTimeout(() => setIsUndoRedoOperation(false), 100);
-  }, [undoStack, data, onDataChange, addToHistory]);
+  }, [undoStack, createSnapshot, applySnapshot, addToHistory]);
 
   // Function to redo last undone operation
   const handleRedo = useCallback(() => {
-    if (redoStack.length === 0 || !data) return;
+    if (redoStack.length === 0) return;
+    
+    const nextState = redoStack[redoStack.length - 1];
+    if (!nextState) return;
     
     setIsUndoRedoOperation(true);
     
-    // Move current state to undo stack
-    setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(data))]);
+    const currentSnapshot = createSnapshot();
+    if (currentSnapshot) {
+      setUndoStack(prev => [...prev, currentSnapshot]);
+    }
     
-    // Restore next state
-    const nextState = redoStack[redoStack.length - 1];
     setRedoStack(prev => prev.slice(0, -1));
     
-    // Update the data
-    onDataChange(nextState);
+    applySnapshot(nextState);
     
     toast({
       title: "Redo Applied",
       description: "Last undone operation has been redone",
     });
     
-    // Reset flag after a short delay
     setTimeout(() => setIsUndoRedoOperation(false), 100);
-  }, [redoStack, data, onDataChange]);
+  }, [redoStack, createSnapshot, applySnapshot]);
 
   // Helper to convert current table to CSV (includes filtered and deleted state)
   const toCSV = () => {
@@ -2748,9 +2806,7 @@ const handleCellClick = (rowIndex: number, column: string) => {
   // 🔧 Excel-like: Set selectedColumn so the column header is highlighted
   setSelectedColumn(column);
   
-  // When clicking on a cell, activate formula bar for that column (like small screen behavior)
-  activateFormulaBar(column);
-  
+  // When clicking on a cell, just highlight column; user must click formula bar to edit
   // 🔧 FIX: Clear row AND column multi-selections when clicking a cell
   // Multi-selections should only persist when explicitly using Ctrl+Click
   setMultiSelectedRows(new Set());
@@ -2766,26 +2822,22 @@ const resetFormulaBar = () => {
   setSelectedCell(null);
   setIsFormulaMode(false); // Disable formula bar after reset
   setIsFormulaBarFrozen(false); // Don't freeze formula bar - allow continued use
+  setEditingState(false);
   showValidationError(null);
   console.log('[DataFrameOperations] Formula bar completely reset and frozen');
 };
 
 // Function to activate formula bar for a specific column
-const activateFormulaBar = (column: string) => {
+const activateFormulaBar = (column: string, options?: { editMode?: boolean }) => {
   setSelectedColumn(column);
-  // 🔧 CRITICAL FIX: Don't clear selectedCell - we need it for row number highlighting!
-  // setSelectedCell(null);  // ← REMOVED - This was clearing the active cell indicator!
   setIsFormulaMode(true);
-  setIsFormulaBarFrozen(false); // Unfreeze formula bar when explicitly activated
-  // 🔧 BUG FIX: Load stored formula if it exists, otherwise clear the input
-  // This ensures the formula is displayed when reselecting a column with a formula
+  setIsFormulaBarFrozen(false);
   const storedFormula = columnFormulas[column];
-  if (storedFormula) {
-    setFormulaInput(storedFormula);
-    setIsEditingFormula(false); // Don't allow editing until user clicks on formula bar
+  setFormulaInput(storedFormula || '');
+  if (options?.editMode) {
+    setEditingState(true);
   } else {
-    setFormulaInput('');
-    setIsEditingFormula(false);
+    setEditingState(false);
   }
   showValidationError(null);
   console.log('[DataFrameOperations] Formula bar activated for column:', column, storedFormula ? `with stored formula: ${storedFormula}` : 'new column');
@@ -2804,7 +2856,7 @@ const replaceNextColPlaceholder = (expression: string, columnName: string): stri
 
 const insertColumnIntoFormula = (columnName: string) => {
   // Only insert column into formula if formula bar is already active
-  if (!isFormulaMode) {
+  if (!isFormulaMode || !editingSessionRef.current) {
     return;
   }
   
@@ -2871,9 +2923,11 @@ const insertColumnIntoFormula = (columnName: string) => {
 
 const handleHeaderClick = (header: string) => {
   resetSaveSuccess();
-  
-  // Check if we're in formula mode (formula input starts with =)
-  if (formulaInput.trim().startsWith('=')) {
+
+  const isEditingActiveFormula = isFormulaMode && editingSessionRef.current;
+
+  // Only treat header clicks as column insertions when actively editing a formula
+  if (isEditingActiveFormula) {
     // Insert column name into formula at cursor position
     insertColumnIntoFormula(header);
     return;
@@ -2882,9 +2936,15 @@ const handleHeaderClick = (header: string) => {
   // 🔧 Excel-like: Clear cell selection when clicking column header (select entire column)
   setSelectedCell(null);
   
-  // Normal column selection behavior - activate formula bar
-  // activateFormulaBar will set selectedColumn, so we don't need to set it twice
-  activateFormulaBar(header);
+  // Normal column selection behavior - update selection only
+  setSelectedCell(null);
+  setSelectedColumn(header);
+  setIsFormulaMode(true);
+  setIsFormulaBarFrozen(false);
+  const storedFormula = columnFormulas[header];
+  setFormulaInput(storedFormula || '');
+  setEditingState(false);
+  showValidationError(null);
   
   console.log('[DataFrameOperations] Column header clicked:', header, 'Cell selection cleared');
 };
@@ -3900,7 +3960,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         const firstVisibleColumn = data.headers.filter(h => !(data.hiddenColumns || []).includes(h))[0];
         if (firstVisibleColumn) {
           setSelectedCell({ row: originalRowIndex, col: firstVisibleColumn });
-          activateFormulaBar(firstVisibleColumn);
+          activateFormulaBar(firstVisibleColumn, { editMode: true });
         }
       }
     }
@@ -4102,6 +4162,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const handleKeyDown = (e: KeyboardEvent) => {
       // Handle Ctrl+Z for undo
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        if (isEditingFormula) {
+          return;
+        }
         e.preventDefault();
         handleUndo();
         return;
@@ -4109,6 +4172,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       
       // Handle Ctrl+Y or Ctrl+Shift+Z for redo
       if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'z')) {
+        if (isEditingFormula) {
+          return;
+        }
         e.preventDefault();
         handleRedo();
         return;
@@ -4144,7 +4210,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo]);
+  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo, isEditingFormula]);
 
   // Debounced search effect
   useEffect(() => {
@@ -4415,7 +4481,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     formulaLoading={formulaLoading}
                     columnFormulas={columnFormulas}
                     isEditingFormula={isEditingFormula}
-                    onEditingStateChange={setIsEditingFormula}
+                    onEditingStateChange={setEditingState}
                   />
                 </div>
                 <button
@@ -4617,9 +4683,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         });
                         setRowContextMenu(null);
                       }}
-                      onClick={(e) => {
-                        // Only handle multi-select if not in formula mode
-                        if (!isFormulaMode || !formulaInput.trim().startsWith('=')) {
+                    onClick={(e) => {
+                        const isFormulaEditingActive =
+                          isFormulaMode && isEditingFormula;
+                        // Only handle multi-select if not actively editing a formula
+                        if (!isFormulaEditingActive) {
                           handleColumnMultiSelect(header, { ctrlKey: e.ctrlKey, metaKey: e.metaKey });
                         }
 

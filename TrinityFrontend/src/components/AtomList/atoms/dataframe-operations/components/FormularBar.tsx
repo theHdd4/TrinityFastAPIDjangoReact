@@ -153,6 +153,37 @@ const replaceNextColPlaceholderWithContent = (expression: string, newContent: st
   return { newExpression: expression, newCursorPosition: cursorPosition };
 };
 
+const stripQuotedStrings = (expression: string): string =>
+  expression.replace(/"([^"\\]|\\.)*"/g, '').replace(/'([^'\\]|\\.)*'/g, '');
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const maskKnownColumns = (
+  expression: string,
+  columns: string[],
+): { sanitizedExpression: string; matchedColumns: Set<string> } => {
+  if (!columns.length) {
+    return { sanitizedExpression: stripQuotedStrings(expression), matchedColumns: new Set() };
+  }
+
+  const matchedColumns = new Set<string>();
+  let sanitizedExpression = stripQuotedStrings(expression);
+  const sortedColumns = [...columns]
+    .filter(col => Boolean(col))
+    .sort((a, b) => b.length - a.length);
+
+  sortedColumns.forEach(column => {
+    const escaped = escapeRegExp(column);
+    const columnRegex = new RegExp(`(^|[^A-Za-z0-9_])(${escaped})(?=[^A-Za-z0-9_]|$)`, 'g');
+    sanitizedExpression = sanitizedExpression.replace(columnRegex, (_match, prefix) => {
+      matchedColumns.add(column);
+      return `${prefix} `;
+    });
+  });
+
+  return { sanitizedExpression, matchedColumns };
+};
+
 // Enhanced validation system for Excel-like behavior
 interface ValidationResult {
   isValid: boolean;
@@ -276,12 +307,11 @@ const validateFormulaColumns = (expression: string, availableColumns: string[]):
     };
   }
   
-  // First, remove all quoted strings from the expression to avoid false positives
-  const expressionWithoutQuotes = expression.replace(/"[^"]*"/g, '').replace(/'[^']*'/g, '');
+  const { sanitizedExpression, matchedColumns } = maskKnownColumns(expression, availableColumns);
   
   // Extract only actual column references (not function names, numbers, or quoted strings)
   const columnPattern = /\b[A-Za-z_][A-Za-z0-9_]*\b/g;
-  const matches = expressionWithoutQuotes.match(columnPattern) || [];
+  const matches = sanitizedExpression.match(columnPattern) || [];
   
   // Filter out function names, numbers, and other non-column references
   const functionNames = ['SUM', 'AVG', 'MAX', 'MIN', 'DIV', 'PROD', 'ABS', 'ROUND', 'FLOOR', 'CEIL', 'EXP', 'LOG', 'SQRT', 'MEAN', 'CORR', 'COV', 'ZSCORE', 'NORM', 'COUNT', 'MEDIAN', 'PERCENTILE', 'STD', 'VAR', 'CUMSUM', 'CUMPROD', 'CUMMAX', 'CUMMIN', 'DIFF', 'PCT_CHANGE', 'LAG', 'IF', 'ISNULL', 'LOWER', 'UPPER', 'LEN', 'SUBSTR', 'STR_REPLACE', 'YEAR', 'MONTH', 'DAY', 'WEEKDAY', 'DATE_DIFF', 'MAP', 'FILLNA', 'FILLBLANK', 'BIN', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE'];
@@ -304,7 +334,7 @@ const validateFormulaColumns = (expression: string, availableColumns: string[]):
   }
   
   // Validate column references against actual dataframe columns
-  const invalidColumns = columnReferences.filter(col => !availableColumns.includes(col));
+  const invalidColumns = columnReferences.filter(col => !availableColumns.includes(col) && !matchedColumns.has(col));
   if (invalidColumns.length > 0) {
     const suggestions: string[] = [];
     invalidColumns.forEach(invalidCol => {
@@ -1126,10 +1156,10 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
   // Ensure input is focusable and working (simplified)
   useEffect(() => {
-    if (isFormulaMode && formulaInputRef.current) {
+    if (isFormulaMode && isEditingFormula && formulaInputRef.current) {
       formulaInputRef.current.focus();
     }
-  }, [isFormulaMode]);
+  }, [isFormulaMode, isEditingFormula]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1224,6 +1254,11 @@ const FormularBar: React.FC<FormularBarProps> = ({
   };
 
   const handleFormulaSelect = (formula: FormulaItem) => {
+    if (!isColumnSelected) {
+      onValidationError?.('Select a target column before inserting a formula');
+      return;
+    }
+
     setSelectedFormula(formula);
     setActiveTab(formula.category);
     const expression = formatExampleExpression(formula);
@@ -1233,9 +1268,25 @@ const FormularBar: React.FC<FormularBarProps> = ({
     // Update all states together to prevent conflicts
     onFormulaInputChange(expressionWithColNumbers);
     onFormulaModeChange(true);
+    onEditingStateChange(true);
     
     setIsLibraryOpen(false);
     onValidationError?.(null);
+
+    // Position cursor at first placeholder to encourage editing
+    setTimeout(() => {
+      if (!formulaInputRef.current) return;
+      const placeholderMatch = expressionWithColNumbers.match(/Col\d+/);
+      if (placeholderMatch) {
+        const start = expressionWithColNumbers.indexOf(placeholderMatch[0]);
+        const end = start + placeholderMatch[0].length;
+        formulaInputRef.current.setSelectionRange(start, end);
+      } else {
+        const position = expressionWithColNumbers.length;
+        formulaInputRef.current.setSelectionRange(position, position);
+      }
+      formulaInputRef.current.focus();
+    }, 0);
   };
 
   const handleLibraryOpenChange = (open: boolean) => {
