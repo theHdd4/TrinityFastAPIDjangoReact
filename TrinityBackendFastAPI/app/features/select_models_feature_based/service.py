@@ -1162,44 +1162,134 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _curve_analysis(
+    media_values: Sequence[float],
+    total_volumes: Sequence[float],
+    percent_changes: Sequence[float],
+) -> Dict[str, Any]:
+    if not media_values or not total_volumes:
+        return {}
+
+    def _point(index: int) -> Dict[str, float | None]:
+        return {
+            "media_value": round(float(media_values[index]), 4),
+            "volume_prediction": round(float(total_volumes[index]), 4),
+            "percent_change": round(float(percent_changes[index]), 4)
+            if index < len(percent_changes)
+            else None,
+        }
+
+    max_index = max(range(len(total_volumes)), key=lambda idx: total_volumes[idx])
+    min_index = min(range(len(total_volumes)), key=lambda idx: total_volumes[idx])
+    base_index = min(
+        range(len(percent_changes)),
+        key=lambda idx: abs(percent_changes[idx]),
+    )
+
+    analysis: Dict[str, Any] = {
+        "max_point": _point(max_index),
+        "min_point": _point(min_index),
+    }
+    analysis["base_point"] = _point(base_index)
+    return analysis
+
+
+def _price_curve_series(record: ModelRecord) -> Dict[str, Any]:
+    percent_steps = [-50, -25, -10, 0, 10, 25, 50]
+    elasticity = record.metrics.get("self_elasticity") or -1.0
+
+    media_values: List[float] = []
+    total_volumes: List[float] = []
+    percent_changes: List[float] = []
+    for change in percent_steps:
+        multiplier = 1 + change / 100.0
+        price = max(record.base_price * multiplier, 0.0)
+        demand = max(record.base_volume * multiplier ** elasticity, 0.0)
+        media_values.append(round(price, 4))
+        total_volumes.append(round(demand, 4))
+        percent_changes.append(float(change))
+
+    return {
+        "media_values": media_values,
+        "total_volumes": total_volumes,
+        "percent_changes": percent_changes,
+        "curve_analysis": _curve_analysis(media_values, total_volumes, percent_changes),
+    }
+
+
+def _variable_curve_series(
+    record: ModelRecord,
+    variable: str,
+    impact: float,
+) -> Dict[str, Any]:
+    percent_steps = [-50, -25, -10, 0, 10, 25, 50]
+    base_metric = record.variable_averages.get(variable)
+    if base_metric is None or base_metric == 0:
+        base_metric = 1.0
+
+    media_values: List[float] = []
+    total_volumes: List[float] = []
+    percent_changes: List[float] = []
+    for change in percent_steps:
+        multiplier = 1 + change / 100.0
+        media_value = max(base_metric * multiplier, 0.0)
+        demand_multiplier = 1 + (impact or 0.0) * (change / 100.0)
+        demand = max(record.base_volume * demand_multiplier, 0.0)
+        media_values.append(round(media_value, 4))
+        total_volumes.append(round(demand, 4))
+        percent_changes.append(float(change))
+
+    return {
+        "media_values": media_values,
+        "total_volumes": total_volumes,
+        "percent_changes": percent_changes,
+        "curve_analysis": _curve_analysis(media_values, total_volumes, percent_changes),
+    }
+
+
 def generate_s_curve(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
     models = _models_for_file(request.file_key, request.combination_name)
     record = next((model for model in models if model.model_name == request.model_name), None)
     if record is None:
         raise ValueError("Requested model not found")
-    if not record.variable_impacts:
-        raise ModelDataUnavailableError(
-            f"Elasticity inputs unavailable for model '{request.model_name}'"
-        )
     if record.base_price <= 0 or record.base_volume <= 0:
         raise ModelDataUnavailableError(
             f"Base price or volume missing for model '{request.model_name}'"
         )
 
-    prices = [round(record.base_price * (0.8 + 0.05 * index), 2) for index in range(9)]
-    curve_data = []
-    elasticity = record.metrics.get("self_elasticity", -1.0)
-    for price in prices:
-        demand = record.base_volume * (price / record.base_price) ** elasticity
-        revenue = demand * price
-        curve_data.append(
-            {
-                "price": round(price, 2),
-                "demand": round(demand, 2),
-                "revenue": round(revenue, 2),
-                "elasticity": round(elasticity, 3),
-            }
-        )
+    price_series = _price_curve_series(record)
 
-    optimal = max(curve_data, key=lambda item: item["revenue"])
+    revenues = [
+        round(media * volume, 4)
+        for media, volume in zip(
+            price_series["media_values"], price_series["total_volumes"]
+        )
+    ]
+    optimal_index = max(range(len(revenues)), key=lambda idx: revenues[idx])
+    optimal_revenue = {
+        "price": price_series["media_values"][optimal_index],
+        "demand": price_series["total_volumes"][optimal_index],
+        "revenue": revenues[optimal_index],
+        "percent_change": price_series["percent_changes"][optimal_index],
+    }
+
+    s_curves: Dict[str, Any] = {record.price_variable: price_series}
+    for variable, impact in record.variable_impacts.items():
+        if variable == record.price_variable:
+            continue
+        try:
+            s_curves[variable] = _variable_curve_series(record, variable, impact)
+        except Exception:  # pragma: no cover - safeguard unexpected input
+            logger.exception(
+                "Failed to construct curve series for variable %s", variable
+            )
 
     return {
-        "selection": {
-            "method": "model_name",
-            "model_name": request.model_name,
-            "filters": {"combination_id": request.combination_name},
-        },
+        "success": True,
+        "file_key": request.file_key,
+        "combination_id": request.combination_name,
+        "model_name": request.model_name,
         "price_variable": record.price_variable,
         "intercept": record.metrics.get("self_beta", -0.8),
         "base_price": record.base_price,
@@ -1212,8 +1302,23 @@ def generate_s_curve(payload: Dict[str, Any]) -> Dict[str, Any]:
             "r2_test": record.metrics.get("r2_test"),
             "best_model": record.model_name,
         },
-        "curve_data": curve_data,
-        "optimal_revenue": optimal,
+        "s_curves": s_curves,
+        "curve_data": [
+            {
+                "price": media,
+                "demand": volume,
+                "revenue": revenue,
+                "elasticity": record.metrics.get("self_elasticity"),
+                "percent_change": change,
+            }
+            for media, volume, revenue, change in zip(
+                price_series["media_values"],
+                price_series["total_volumes"],
+                revenues,
+                price_series["percent_changes"],
+            )
+        ],
+        "optimal_revenue": optimal_revenue,
     }
 
 
