@@ -198,18 +198,30 @@ class SCurveRequest(BaseModel):
     model_name: str
 
 
+class SCurveSeries(BaseModel):
+    media_values: List[float]
+    total_volumes: List[float]
+    percent_changes: List[float]
+    curve_analysis: Dict[str, Any]
+
+
 class SCurveResponse(BaseModel):
-    selection: Dict[str, Any]
-    price_variable: str
-    intercept: float
-    base_price: float
-    base_volume: float
-    base_revenue: float
-    elasticity_at_base: Optional[float]
-    rpi_competitor_prices: Dict[str, float]
-    quality: Dict[str, Optional[float]]
-    curve_data: List[Dict[str, float]]
-    optimal_revenue: Dict[str, float]
+    success: bool
+    file_key: str
+    combination_id: str
+    model_name: str
+    price_variable: Optional[str] = None
+    intercept: Optional[float] = None
+    base_price: Optional[float] = None
+    base_volume: Optional[float] = None
+    base_revenue: Optional[float] = None
+    elasticity_at_base: Optional[float] = None
+    rpi_competitor_prices: Dict[str, float] = Field(default_factory=dict)
+    quality: Dict[str, Optional[float]] = Field(default_factory=dict)
+    s_curves: Dict[str, SCurveSeries] = Field(default_factory=dict)
+    curve_data: List[Dict[str, float]] = Field(default_factory=list)
+    optimal_revenue: Optional[Dict[str, float]] = None
+    note: Optional[str] = None
 
 
 class ApplicationTypeResponse(BaseModel):
@@ -237,6 +249,7 @@ __all__ = [
     "PerformanceResponse",
     "SCurveRequest",
     "SCurveResponse",
+    "SCurveSeries",
     "SavedCombinationsStatusResponse",
     "SavedModelResponse",
     "VariableRangesResponse",
