@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { PivotTableSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { SCOPE_SELECTOR_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 
 type PivotStyleOptions = {
   rowHeaders: boolean;
@@ -459,7 +460,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           throw new Error(text || `Failed to load unique values (${response.status})`);
         }
 
-        const json = await response.json();
+        const json = await resolveTaskResponse<{ unique_values?: unknown[] }>(await response.json());
         const rawValues = Array.isArray(json.unique_values) ? json.unique_values : [];
         const values = rawValues
           .map((value: unknown) =>
