@@ -1487,6 +1487,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // History panel state
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [historyPanelMinimized, setHistoryPanelMinimized] = useState(false);
   const [historyPanelPosition, setHistoryPanelPosition] = useState({ x: 0, y: 0 });
   
@@ -4455,7 +4456,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             >
             {data && (
               <div 
-                className="flex items-center border-b border-slate-200 min-h-0"
+                className="flex items-center border-b border-slate-200 min-h-0 mt-2"
                 onClick={(e) => {
                   // Deselect column when clicking in formula bar area
                   if (selectedColumn && e.target === e.currentTarget) {
@@ -4499,6 +4500,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
+                </button>
+                <button
+                  onClick={() => setShowResetConfirm(true)}
+                  className="p-2 mx-1 hover:bg-gray-100 rounded-md transition-colors"
+                  title="Reset dataframe"
+                >
+                  <RotateCcw className="w-6 h-6 text-gray-500" />
                 </button>
               </div>
             )}
@@ -5662,6 +5670,31 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
         </div>
       )}
+
+      <Dialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset everything?</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              This will restore the original dataframe and undo all operations.
+            </p>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowResetConfirm(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setShowResetConfirm(false);
+                onClearAll();
+              }}
+            >
+              Reset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmModal.isOpen && (

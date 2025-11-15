@@ -1642,28 +1642,6 @@ const FormularBar: React.FC<FormularBarProps> = ({
   return (
     <div ref={barContainerRef} className='flex-shrink-0 border-b border-border bg-gradient-to-r from-card via-card/95 to-card shadow-sm w-full relative z-[1400]'>
       <div className='flex items-center h-12 px-4 space-x-3 w-full min-w-0 relative overflow-visible'>
-        <div className='flex items-center space-x-2 flex-shrink-0 z-30'>
-          <div 
-            className='flex items-center space-x-2 bg-primary/10 rounded-lg px-3 py-1.5 border border-primary/20 shadow-sm cursor-pointer hover:bg-primary/15 transition-colors'
-            onClick={(e) => {
-              e.stopPropagation();
-              console.log('[FormularBar] Target column clicked, state:', { selectedColumn, isFormulaMode });
-              // Always activate formula bar when target column is clicked
-              if (selectedColumn) {
-                onFormulaModeChange(true);
-              }
-            }}
-          >
-            <Hash className='w-4 h-4 text-primary' />
-            <div className='flex flex-col leading-tight'>
-              <span className='text-[10px] uppercase tracking-wide text-primary/70'>Target column</span>
-              <span className='text-xs font-semibold text-primary max-w-[160px] truncate'>
-                {selectedColumn ?? (selectedCell ? selectedCell.col : 'Select a column')}
-              </span>
-            </div>
-          </div>
-        </div>
-
         <div className='flex items-center flex-1 space-x-2 min-w-0'>
           <Popover open={isUsageGuideOpen} onOpenChange={setIsUsageGuideOpen}>
             <PopoverTrigger asChild>
