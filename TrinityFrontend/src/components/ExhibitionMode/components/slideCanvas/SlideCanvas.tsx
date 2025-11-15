@@ -112,7 +112,8 @@ import {
 } from './utils';
 import { resolveFeatureOverviewTransparency, resolveSlideBackground } from './background';
 import { formattingShallowEqual, readTableState, tableStatesEqual, type TableState } from './table';
-import { ImageCropInsets, sanitizeImageCrop } from '../operationsPalette/images/toolbar/Crop';
+import { CropShape, ImageCropInsets, sanitizeImageCrop } from '../operationsPalette/images/toolbar/Crop';
+import type { CardEditor } from '@/hooks/useCollaborativeSyncExhibition';
 
 
 
@@ -140,6 +141,9 @@ interface SlideCanvasProps {
   onUndo?: () => void;
   presentationMode?: boolean;
   variant?: 'default' | 'preview';
+  cardEditor?: CardEditor | null;
+  onFocusCard?: (cardId: string) => void;
+  onBlurCard?: (cardId: string) => void;
 }
 
 export const SlideCanvas: React.FC<SlideCanvasProps> = ({
@@ -160,6 +164,9 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
   onUndo,
   presentationMode = false,
   variant = 'default',
+  cardEditor = null,
+  onFocusCard,
+  onBlurCard,
 }) => {
   const isPreview = variant === 'preview';
   const [isDragOver, setIsDragOver] = useState(false);
@@ -1313,6 +1320,73 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
     settings.fullBleed,
   ]);
 
+  const editorColor = cardEditor?.user_color ?? '#3B82F6';
+  const editorInitials = useMemo(() => {
+    const source = cardEditor?.user_name || cardEditor?.user_email || '';
+    if (!source) {
+      return '';
+    }
+    return source
+      .split(' ')
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => part.charAt(0))
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  }, [cardEditor]);
+
+  const editorDisplayName = useMemo(() => {
+    return cardEditor?.user_name || cardEditor?.user_email || '';
+  }, [cardEditor]);
+
+  const slideStyle = useMemo<React.CSSProperties>(() => {
+    if (presentationMode) {
+      const height =
+        (presentationBaseDimensionsRef.current?.height ?? canvasDimensions.height) || CANVAS_STAGE_HEIGHT;
+      const width =
+        (presentationBaseDimensionsRef.current?.width ?? canvasDimensions.width) || effectiveCanvasWidth;
+
+      const base: React.CSSProperties = {
+        ...slideThemeStyle,
+        height,
+        width,
+        transform: `scale(${presentationScale})`,
+        transformOrigin: 'center center',
+        margin: '0 auto',
+      };
+
+      return base;
+    }
+
+    const base: React.CSSProperties = {
+      ...slideThemeStyle,
+      height: CANVAS_STAGE_HEIGHT,
+      width: effectiveCanvasWidth,
+      margin: '0 auto',
+    };
+
+    if (cardEditor) {
+      const highlightShadow = `0 0 0 2px ${editorColor}33, 0 20px 45px -22px ${editorColor}66`;
+      base.boxShadow = base.boxShadow ? `${base.boxShadow}, ${highlightShadow}` : highlightShadow;
+      if (!settings.fullBleed) {
+        base.borderColor = editorColor;
+      }
+    }
+
+    return base;
+  }, [
+    presentationMode,
+    slideThemeStyle,
+    presentationScale,
+    cardEditor,
+    editorColor,
+    settings.fullBleed,
+    canvasDimensions.height,
+    canvasDimensions.width,
+    effectiveCanvasWidth,
+  ]);
+
   return (
     <div className={containerClassName} style={accessibilityStyle}>
       <div
@@ -1369,7 +1443,10 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                     slideBackgroundClass,
                     settings.fullBleed
                       ? 'rounded-none border-0'
-                      : 'rounded-[28px] border border-border/60',
+                      : cn(
+                          'rounded-[28px] border border-border/60',
+                          cardEditor && !presentationMode ? 'border-2' : undefined,
+                        ),
                     isDragOver && canEdit && draggedAtom ? 'scale-[0.98] ring-4 ring-primary/20' : undefined,
                     !canEdit && !presentationMode && 'opacity-90',
                     isCanvasActive && !presentationMode
@@ -1380,38 +1457,34 @@ export const SlideCanvas: React.FC<SlideCanvasProps> = ({
                   data-exhibition-slide-id={card.id}
                   onPointerEnter={() => {
                     setIsCanvasActive(true);
+                    onFocusCard?.(card.id);
                   }}
                   onPointerLeave={() => {
                     const activeElement = document.activeElement;
                     if (!activeElement || !canvasRef.current?.contains(activeElement)) {
                       setIsCanvasActive(false);
                     }
+                    onBlurCard?.(card.id);
                   }}
-                style={
-                  presentationMode
-                    ? {
-                        ...slideThemeStyle,
-                        height:
-                          (presentationBaseDimensionsRef.current?.height ?? canvasDimensions.height) ||
-                          CANVAS_STAGE_HEIGHT,
-                        width:
-                          (presentationBaseDimensionsRef.current?.width ?? canvasDimensions.width) ||
-                          effectiveCanvasWidth,
-                        transform: `scale(${presentationScale})`,
-                        transformOrigin: 'center center',
-                        margin: '0 auto',
-                      }
-                    : {
-                        ...slideThemeStyle,
-                        height: CANVAS_STAGE_HEIGHT,
-                        width: effectiveCanvasWidth,
-                        margin: '0 auto',
-                      }
-                }
+                style={slideStyle}
                 onDragOver={presentationMode ? undefined : handleDragOver}
                 onDragLeave={presentationMode ? undefined : handleDragLeave}
                 onDrop={presentationMode ? undefined : handleDrop}
               >
+                {cardEditor && !presentationMode && editorDisplayName && (
+                  <div
+                    className="pointer-events-none absolute left-3 top-4 flex items-center gap-2 rounded-full border bg-white/95 px-2 py-1 text-xs font-medium shadow-sm"
+                    style={{ borderColor: editorColor, color: editorColor }}
+                  >
+                    <span
+                      className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                      style={{ backgroundColor: editorColor }}
+                    >
+                      {editorInitials || '•'}
+                    </span>
+                    <span className="max-w-[140px] truncate">{editorDisplayName}</span>
+                  </div>
+                )}
                 <CanvasStage
                   ref={canvasRef}
                   canEdit={canEdit}
@@ -2392,6 +2465,16 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [updateImageProps],
     );
 
+    const handleSetImageCropShape = useCallback(
+      (objectId: string, shape: CropShape) => {
+        updateImageProps(objectId, props => ({
+          ...props,
+          cropShape: shape,
+        }));
+      },
+      [updateImageProps],
+    );
+
     const handleToggleImageCrop = useCallback(
       (objectId: string) => {
         const object = objectsMap.get(objectId);
@@ -2407,10 +2490,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           return;
         }
 
+        const isCurrentlyCropping = activeImageCropId === objectId;
         setActiveImageCropId(prev => (prev === objectId ? null : objectId));
+        
+        // Ensure image is selected when entering crop mode
+        if (!isCurrentlyCropping && !selectedIds.includes(objectId)) {
+          setSelectedIds(prev => [...prev, objectId]);
+        }
+        
         onInteract();
       },
-      [objectsMap, onInteract],
+      [objectsMap, onInteract, activeImageCropId, selectedIds],
     );
 
     const handleToggleImageAnimation = useCallback(
@@ -2810,10 +2900,12 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       }
 
       const target = objectsMap.get(activeImageCropId);
-      if (!target || target.type !== 'image' || !selectedIds.includes(activeImageCropId) || !canEdit) {
+      // Only clear crop mode if the image is deleted, type changes, or editing is disabled
+      // Don't clear just because the image is deselected - allow cropping even when deselected
+      if (!target || target.type !== 'image' || !canEdit) {
         setActiveImageCropId(null);
       }
-    }, [activeImageCropId, canEdit, objectsMap, selectedIds]);
+    }, [activeImageCropId, canEdit, objectsMap]);
 
     const handleTextToolbarStateChange = useCallback(
       (objectId: string, node: ReactNode | null) => {
@@ -4432,7 +4524,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [layout, cardColor, accentImage, accentImageName, fullBleed],
     );
 
-    const canvasBorderClass = (() => {
+  const canvasBorderClass = (() => {
       if (isDragOver) {
         return 'ring-2 ring-primary/20 shadow-xl scale-[0.99]';
       }
@@ -4441,8 +4533,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         return 'border-0';
       }
 
-      return fullBleed ? 'border-0' : 'border-0 shadow-lg shadow-black/5';
-    })();
+    return fullBleed ? 'border-0' : 'border-0 shadow-lg shadow-black/5';
+  })();
 
     const backgroundLockLabel = backgroundLocked ? 'Unlock background' : 'Lock background';
 
@@ -4527,6 +4619,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const imageCropInsets = isImageObject
               ? sanitizeImageCrop((rawImageProps as { crop?: unknown }).crop)
               : sanitizeImageCrop(null);
+            const imageCropShape: CropShape =
+              isImageObject && typeof rawImageProps.cropShape === 'string' && ['rectangle', 'circle', 'rounded-rectangle'].includes(rawImageProps.cropShape)
+                ? (rawImageProps.cropShape as CropShape)
+                : 'rectangle';
+            const imageCropBorderRadius =
+              isImageObject && typeof rawImageProps.cropBorderRadius === 'number'
+                ? Math.min(Math.max(rawImageProps.cropBorderRadius, 0), 50)
+                : 12;
             const isImageAnimated = isImageObject && rawImageProps.animate === true;
             const isCroppingImage = isImageObject && activeImageCropId === object.id;
             const isEditingTextBox =
@@ -4773,6 +4873,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       fullBleed={isFullBleedImage}
                       fitMode={imageFitMode}
                       isCropping={isCroppingImage}
+                      cropShape={imageCropShape}
+                      cropBorderRadius={imageCropBorderRadius}
                       flipHorizontal={imageFlipHorizontal}
                       flipVertical={imageFlipVertical}
                       isAnimated={isImageAnimated}
@@ -4782,6 +4884,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onToolbarStateChange={handleTextToolbarStateChange}
                       onToggleFit={handleToggleImageFit}
                       onToggleCrop={handleToggleImageCrop}
+                      onCropShapeChange={handleSetImageCropShape}
                       onFlipHorizontal={handleFlipImageHorizontal}
                       onFlipVertical={handleFlipImageVertical}
                       onToggleAnimate={handleToggleImageAnimation}

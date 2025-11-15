@@ -247,33 +247,53 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           cellColors: {},
           hiddenColumns: [],
         };
+        // Preserve existing pivot settings if they have valid results
+        // Only update dataSource and dataSourceColumns, but keep pivot configuration intact
+        const existingPivotSettings = (settings.pivotSettings || {}) as Partial<PivotSettings>;
+        const hasValidPivotResults = existingPivotSettings.pivotResults && 
+                                     Array.isArray(existingPivotSettings.pivotResults) && 
+                                     existingPivotSettings.pivotResults.length > 0;
+        
+        // If we have valid pivot results, preserve them along with the configuration
+        // Otherwise, reset to defaults but keep dataSource if it exists
+        const updatedPivotSettings: PivotSettings = hasValidPivotResults
+          ? {
+              ...DEFAULT_PIVOT_TABLE_SETTINGS,
+              ...existingPivotSettings,
+              // Only update these fields that depend on the dataframe structure
+              dataSource: existingPivotSettings.dataSource || settings.selectedFile || resp.df_id || '',
+              dataSourceColumns: resp.headers,
+              fields: resp.headers,
+              selectedFields: resp.headers,
+            }
+          : {
+              ...DEFAULT_PIVOT_TABLE_SETTINGS,
+              ...existingPivotSettings,
+              dataSource:
+                existingPivotSettings.dataSource ||
+                (settings.selectedFile ?? resp.df_id ?? ''),
+              dataSourceColumns: resp.headers,
+              fields: resp.headers,
+              selectedFields: resp.headers,
+              // Only reset these if we don't have valid results
+              rowFields: existingPivotSettings.rowFields || [],
+              columnFields: existingPivotSettings.columnFields || [],
+              filterFields: existingPivotSettings.filterFields || [],
+              valueFields: existingPivotSettings.valueFields || [],
+              pivotResults: existingPivotSettings.pivotResults || [],
+              pivotStatus: existingPivotSettings.pivotStatus || 'idle',
+              pivotError: existingPivotSettings.pivotError || null,
+              pivotRowCount: existingPivotSettings.pivotRowCount || 0,
+              pivotFilterOptions: existingPivotSettings.pivotFilterOptions || {},
+              pivotFilterSelections: existingPivotSettings.pivotFilterSelections || {},
+              collapsedKeys: existingPivotSettings.collapsedKeys || [],
+            };
+
         updateSettings(atomId, {
           tableData: newData,
           selectedColumns: resp.headers,
           fileId: resp.df_id,
-          pivotSettings: {
-            ...DEFAULT_PIVOT_TABLE_SETTINGS,
-            ...(settings.pivotSettings || {}),
-            dataSource:
-              settings.selectedFile ??
-              resp.df_id ??
-              settings.pivotSettings?.dataSource ??
-              '',
-            dataSourceColumns: resp.headers,
-            fields: resp.headers,
-            selectedFields: resp.headers,
-            rowFields: [],
-            columnFields: [],
-            filterFields: [],
-            valueFields: [],
-            pivotResults: [],
-            pivotStatus: 'idle',
-            pivotError: null,
-            pivotRowCount: 0,
-            pivotFilterOptions: {},
-            pivotFilterSelections: {},
-            collapsedKeys: [],
-          },
+          pivotSettings: updatedPivotSettings,
           operationCompleted: true,
           hasData: true,
           dataLoaded: true,

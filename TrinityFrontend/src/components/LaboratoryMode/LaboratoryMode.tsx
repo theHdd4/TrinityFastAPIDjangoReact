@@ -56,6 +56,8 @@ const LaboratoryMode = () => {
   const [isPreparingAnimation, setIsPreparingAnimation] = useState(!initialReduceMotion);
   // Ref for CanvasArea to access sync function
   const canvasAreaRef = useRef<CanvasAreaRef>(null);
+  // Ref to track if initial cards have been loaded (to prevent autosave on initial load)
+  const hasInitialCardsLoadedRef = useRef(false);
   
   // Real-time collaborative sync
   const { isConnected: isSyncConnected, activeUsers, cardEditors, notifyCardFocus, notifyCardBlur } = useCollaborativeSync({
@@ -176,6 +178,217 @@ const LaboratoryMode = () => {
   // Note: Workflow data loading is now handled entirely by CanvasArea component
   // This prevents conflicts and ensures proper molecule container restoration
 
+  // Function to sort cards in workflow order using order field (grid approach)
+  // Uses the same logic as buildUnifiedRenderArray to ensure consistency
+  // order = (moleculeIndex * 1000) + subOrder
+  const sortCardsInWorkflowOrder = (cardsToSort: LayoutCard[], workflowMolecules: any[]): LayoutCard[] => {
+    if (!workflowMolecules || workflowMolecules.length === 0) {
+      // No workflow molecules - sort by order field if available
+      return [...cardsToSort].sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : Infinity;
+        const orderB = typeof b.order === 'number' ? b.order : Infinity;
+        return orderA - orderB;
+      });
+    }
+
+    const sortedCards: LayoutCard[] = [];
+    
+    // Separate cards into workflow and standalone
+    const workflowCards = cardsToSort.filter(card => card.moleculeId);
+    const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
+    
+    // Create a map of moleculeId to moleculeIndex for quick lookup
+    const moleculeIndexMap = new Map<string, number>();
+    workflowMolecules.forEach((molecule, index) => {
+      moleculeIndexMap.set(molecule.moleculeId, index);
+    });
+    
+         // Process each molecule and its associated cards
+     workflowMolecules.forEach((molecule, moleculeIndex) => {
+       // Add all workflow cards for this molecule first (maintain their relative order)
+       const moleculeCards = workflowCards
+         .filter(card => card.moleculeId === molecule.moleculeId)
+         .sort((a, b) => {
+           // Maintain original order within molecule
+           const indexA = cardsToSort.findIndex(c => c.id === a.id);
+           const indexB = cardsToSort.findIndex(c => c.id === b.id);
+           return indexA - indexB;
+         });
+       sortedCards.push(...moleculeCards);
+       
+       // Find standalone cards that should appear after this molecule
+       // Based on order field: order = (moleculeIndex * 1000) + subOrder
+       const cardsAfterThisMolecule = standaloneCards.filter(card => {
+         if (card.order !== undefined && typeof card.order === 'number') {
+           const cardMoleculeIndex = Math.floor(card.order / 1000);
+           return cardMoleculeIndex === moleculeIndex;
+         }
+         return false;
+       });
+       
+       // Sort standalone cards by subOrder
+       cardsAfterThisMolecule.sort((a, b) => {
+         const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
+         const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
+         return subOrderA - subOrderB;
+       });
+       
+       // Add standalone cards that appear after this molecule (between molecules)
+       sortedCards.push(...cardsAfterThisMolecule);
+     });
+    
+    // Add standalone cards that should appear after the last molecule (orphans)
+    const placedStandaloneIds = new Set(sortedCards.map(c => c.id));
+    const orphanCards = standaloneCards.filter(card => !placedStandaloneIds.has(card.id));
+    sortedCards.push(...orphanCards);
+    
+    // Add any remaining workflow cards that weren't in any molecule (shouldn't happen, but safety check)
+    const allProcessedIds = new Set(sortedCards.map(c => c.id));
+    const remaining = cardsToSort.filter(c => !allProcessedIds.has(c.id));
+    sortedCards.push(...remaining);
+    
+    return sortedCards;
+  };
+
+  // Autosave: Automatically save and sync when cards change
+  useEffect(() => {
+    if (!canEdit) return;
+    
+    // Skip autosave on initial load (wait for cards to be loaded)
+    const hasInitialCards = cards && cards.length > 0;
+    if (!hasInitialCards) {
+      // Mark that we've checked and there are no cards yet
+      if (!hasInitialCardsLoadedRef.current) {
+        hasInitialCardsLoadedRef.current = true;
+      }
+      return;
+    }
+    
+    // Mark that initial cards have been loaded
+    if (!hasInitialCardsLoadedRef.current) {
+      hasInitialCardsLoadedRef.current = true;
+      // Skip autosave on the very first load
+      return;
+    }
+
+    // Debounce autosave to avoid too frequent saves
+    const autosaveTimer = setTimeout(async () => {
+      console.log('🔄 [AUTOSAVE] Triggering autosave...');
+      
+      try {
+        const exhibitedCards = (cards || []).filter(card => card.isExhibited);
+        setExhibitionCards(cards);
+
+        // Get workflow molecules to sort cards correctly
+        const storedWorkflowMolecules = localStorage.getItem('workflow-molecules');
+        let workflowMolecules: any[] = [];
+        if (storedWorkflowMolecules) {
+          try {
+            workflowMolecules = JSON.parse(storedWorkflowMolecules);
+          } catch (e) {
+            console.warn('[AUTOSAVE] Failed to parse workflow molecules for sorting', e);
+          }
+        }
+
+        // Sort cards in workflow order before saving
+        const sortedCards = workflowMolecules.length > 0 
+          ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
+          : cards || [];
+
+        // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
+        const workflowMoleculesForSave = (sortedCards.length === 0) 
+          ? []
+          : workflowMolecules.map((molecule, index) => ({
+              moleculeId: molecule.moleculeId,
+              moleculeTitle: molecule.moleculeTitle,
+              atoms: molecule.atoms || [],
+              isActive: molecule.isActive !== false,
+              moleculeIndex: index
+            }));
+
+        // Save the current laboratory configuration with sorted cards
+        const labConfig = {
+          cards: sortedCards,
+          exhibitedCards,
+          timestamp: new Date().toISOString(),
+        };
+        const sanitized = sanitizeLabConfig(labConfig);
+
+        const projectContext = getActiveProjectContext();
+        if (projectContext) {
+          const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+          const payload = {
+            client_name: projectContext.client_name,
+            app_name: projectContext.app_name,
+            project_name: projectContext.project_name,
+            cards: sanitized.cards || [],
+            workflow_molecules: workflowMoleculesForSave,
+            mode: 'laboratory',
+          };
+
+          try {
+            const response = await fetch(requestUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify(payload),
+            });
+            if (!response.ok) {
+              console.error('[AUTOSAVE] Failed to persist configuration', await response.text());
+            } else {
+              console.log('✅ [AUTOSAVE] Configuration saved successfully');
+            }
+          } catch (apiError) {
+            console.error('[AUTOSAVE] Error while saving configuration', apiError);
+          }
+        }
+
+        // Save to localStorage
+        const current = localStorage.getItem('current-project');
+        if (current) {
+          try {
+            const proj = JSON.parse(current);
+            await fetch(`${REGISTRY_API}/projects/${proj.id}/`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                state: { laboratory_config: sanitized },
+              }),
+            });
+            proj.state = { ...(proj.state || {}), laboratory_config: sanitized };
+            saveCurrentProject(proj);
+          } catch (apiError) {
+            console.error('[AUTOSAVE] API error during save:', apiError);
+          }
+        }
+
+        persistLaboratoryConfig(sanitized);
+        
+        // CRITICAL: Sync changes to Workflow collection during autosave
+        console.log('🔄 [AUTOSAVE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
+        if (canvasAreaRef.current) {
+          try {
+            console.log('🔄 [AUTOSAVE] Calling syncWorkflowCollection...');
+            await canvasAreaRef.current.syncWorkflowCollection();
+            console.log('✅ [AUTOSAVE] Laboratory changes synced to Workflow collection');
+          } catch (syncError) {
+            console.error('❌ [AUTOSAVE] Failed to sync Laboratory changes to Workflow collection:', syncError);
+            console.error('❌ [AUTOSAVE] Sync error details:', syncError instanceof Error ? syncError.stack : syncError);
+          }
+        } else {
+          console.warn('⚠️ [AUTOSAVE] canvasAreaRef.current is null, cannot sync workflow collection');
+        }
+      } catch (error) {
+        console.error('[AUTOSAVE] Autosave error:', error);
+      }
+    }, 3000); // 3 second debounce for autosave
+
+    return () => {
+      clearTimeout(autosaveTimer);
+    };
+  }, [cards, canEdit, setExhibitionCards, sortCardsInWorkflowOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleUndo = async () => {
     if (!canEdit) return;
     const current = localStorage.getItem('current-project');
@@ -263,78 +476,6 @@ const LaboratoryMode = () => {
     const context = getActiveProjectContext();
     setProjectContext(context);
     setIsShareOpen(true);
-  };
-
-  // Function to sort cards in workflow order using order field (grid approach)
-  // Uses the same logic as buildUnifiedRenderArray to ensure consistency
-  // order = (moleculeIndex * 1000) + subOrder
-  const sortCardsInWorkflowOrder = (cardsToSort: LayoutCard[], workflowMolecules: any[]): LayoutCard[] => {
-    if (!workflowMolecules || workflowMolecules.length === 0) {
-      // No workflow molecules - sort by order field if available
-      return [...cardsToSort].sort((a, b) => {
-        const orderA = typeof a.order === 'number' ? a.order : Infinity;
-        const orderB = typeof b.order === 'number' ? b.order : Infinity;
-        return orderA - orderB;
-      });
-    }
-
-    const sortedCards: LayoutCard[] = [];
-    
-    // Separate cards into workflow and standalone
-    const workflowCards = cardsToSort.filter(card => card.moleculeId);
-    const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
-    
-    // Create a map of moleculeId to moleculeIndex for quick lookup
-    const moleculeIndexMap = new Map<string, number>();
-    workflowMolecules.forEach((molecule, index) => {
-      moleculeIndexMap.set(molecule.moleculeId, index);
-    });
-    
-         // Process each molecule and its associated cards
-     workflowMolecules.forEach((molecule, moleculeIndex) => {
-       // Add all workflow cards for this molecule first (maintain their relative order)
-       const moleculeCards = workflowCards
-         .filter(card => card.moleculeId === molecule.moleculeId)
-         .sort((a, b) => {
-           // Maintain original order within molecule
-           const indexA = cardsToSort.findIndex(c => c.id === a.id);
-           const indexB = cardsToSort.findIndex(c => c.id === b.id);
-           return indexA - indexB;
-         });
-       sortedCards.push(...moleculeCards);
-       
-       // Find standalone cards that should appear after this molecule
-       // Based on order field: order = (moleculeIndex * 1000) + subOrder
-       const cardsAfterThisMolecule = standaloneCards.filter(card => {
-         if (card.order !== undefined && typeof card.order === 'number') {
-           const cardMoleculeIndex = Math.floor(card.order / 1000);
-           return cardMoleculeIndex === moleculeIndex;
-         }
-         return false;
-       });
-       
-       // Sort standalone cards by subOrder
-       cardsAfterThisMolecule.sort((a, b) => {
-         const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
-         const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
-         return subOrderA - subOrderB;
-       });
-       
-       // Add standalone cards that appear after this molecule (between molecules)
-       sortedCards.push(...cardsAfterThisMolecule);
-     });
-    
-    // Add standalone cards that should appear after the last molecule (orphans)
-    const placedStandaloneIds = new Set(sortedCards.map(c => c.id));
-    const orphanCards = standaloneCards.filter(card => !placedStandaloneIds.has(card.id));
-    sortedCards.push(...orphanCards);
-    
-    // Add any remaining workflow cards that weren't in any molecule (shouldn't happen, but safety check)
-    const allProcessedIds = new Set(sortedCards.map(c => c.id));
-    const remaining = cardsToSort.filter(c => !allProcessedIds.has(c.id));
-    sortedCards.push(...remaining);
-    
-    return sortedCards;
   };
 
   const handleSave = async () => {
@@ -478,14 +619,19 @@ const LaboratoryMode = () => {
       const storageSuccess = persistLaboratoryConfig(sanitized);
       
       // Sync changes to Workflow collection
+      console.log('🔄 [LAB MODE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
       if (canvasAreaRef.current) {
         try {
+          console.log('🔄 [LAB MODE] Calling syncWorkflowCollection...');
           await canvasAreaRef.current.syncWorkflowCollection();
-          console.log('✅ Laboratory changes synced to Workflow collection');
+          console.log('✅ [LAB MODE] Laboratory changes synced to Workflow collection');
         } catch (syncError) {
-          console.error('❌ Failed to sync Laboratory changes to Workflow collection:', syncError);
+          console.error('❌ [LAB MODE] Failed to sync Laboratory changes to Workflow collection:', syncError);
+          console.error('❌ [LAB MODE] Sync error details:', syncError instanceof Error ? syncError.stack : syncError);
           // Don't show error to user, just log it
         }
+      } else {
+        console.warn('⚠️ [LAB MODE] canvasAreaRef.current is null, cannot sync workflow collection');
       }
       
       if (storageSuccess) {
@@ -615,7 +761,7 @@ const LaboratoryMode = () => {
               <Share2 className="w-4 h-4 mr-2" />
               Share
             </Button>
-            {canEdit && (
+            {/* {canEdit && (
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
                 {isSyncConnected ? (
                   <>
@@ -629,7 +775,7 @@ const LaboratoryMode = () => {
                   </>
                 )}
               </div>
-            )}
+            )} */}
             <Button
               className={`bg-gradient-to-r from-[#41C185] to-[#3ba876] text-white shadow-lg font-medium ${canEdit ? 'hover:from-[#3ba876] to-[#339966]' : 'opacity-50 cursor-not-allowed'}`}
               disabled={!canEdit}
