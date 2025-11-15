@@ -191,6 +191,7 @@ class WeightedEnsembleResponse(BaseModel):
 
 
 class SCurveRequest(BaseModel):
+    file_key: str
     client_name: str
     app_name: str
     project_name: str
