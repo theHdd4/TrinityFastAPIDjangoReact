@@ -1,0 +1,144 @@
+Celery Implementation Guide
+===========================
+
+Overview in Simple Terms
+------------------------
+Celery is like a factory that lets our applications hand off slow or background jobs to workers instead of making users wait. We put tasks onto queues, workers pick them up, and a message broker (Redis or RabbitMQ) passes the messages around. Results can optionally be stored in a backend (Redis, database, S3, etc.).
+
+Key Building Blocks
+-------------------
+1. Celery App: The configuration brain that knows broker URL, result backend, task modules, serializers, retry defaults, etc.
+2. Tasks: Python callables decorated with `@app.task`. They describe the work to do (send email, crunch numbers, sync data).
+3. Broker: The mailroom (Redis/RabbitMQ) that holds tasks until workers grab them.
+4. Workers: Separate processes (or pods) that run the tasks. They can be sharded into separate "nodes" or groups to handle different loads.
+5. Beat: Optional scheduler for repeating tasks.
+
+Implementation Steps for This Project
+------------------------------------
+1. **Pick or confirm the broker and result backend.** Redis already appears in the repository, so we can reuse it for both broker and backend to keep operations simple.
+2. **Create a shared Celery app module.** Put a single `celery.py` under the Django project package (e.g., `TrinityBackendDjango/trinity_backend/celery.py`) that loads Django settings and autodiscovers tasks.
+3. **Expose the app instance.** In Django's `__init__.py`, import the app so Django starts Celery when Django loads.
+4. **Register tasks from both Django and FastAPI services.**
+   - Django: add `tasks.py` in each Django app and decorate functions with `@shared_task` or `@app.task`.
+   - FastAPI: create a Celery app module (e.g., `TrinityBackendFastAPI/app/celery_app.py`) that imports the same configuration (shared settings file or environment variables) and registers tasks.
+5. **Provide a single configuration file or environment mapping.** Use `.env` entries like `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` that both frameworks read.
+6. **Run workers via process manager.** In Docker Compose or Kubernetes, add services like `celery-worker-django`, `celery-worker-fastapi`, and optionally a `celery-beat` for scheduled jobs.
+7. **Ensure idempotency and timeouts.** Tasks must tolerate retries; add `acks_late=True`, `autoretry_for`, and `max_retries` where needed.
+8. **Instrument and monitor.** Hook into existing monitoring stack (Prometheus, Sentry) to track task latency, retries, and failures.
+
+Answering the Specific Questions
+--------------------------------
+- **How should we implement Celery?**
+  - Use a shared Celery configuration but separate worker processes for Django and FastAPI tasks. Configure the app through environment variables so both frameworks stay in sync.
+  - Define tasks close to the code that owns the business logic (platform-level tasks in the platform Django app, atom-level tasks in the FastAPI services).
+  - Use Redis (already in project) as broker/result backend to minimize infrastructure.
+  - Add Docker Compose services for workers and beat, and document commands (`celery -A trinity_backend worker -Q platform`, etc.).
+
+- **What extra features can Celery give us?**
+  - **Retries and Backoff:** automatic retries for flaky APIs or transient errors.
+  - **Scheduling:** Celery Beat can run periodic jobs (hourly cleanups, nightly reports).
+  - **Chords, Chains, Groups:** combine tasks to run in parallel or sequentially (e.g., gather data from multiple sources, then aggregate results).
+  - **Rate Limiting and Throttling:** limit API call volume.
+  - **Task Routing:** direct work to specialized queues/workers (GPU-heavy tasks vs. lightweight tasks).
+  - **Monitoring:** Flower dashboard to inspect live queues, failures, and runtime.
+
+- **Are we currently creating multiple task queues and nodes? Should we?**
+  - No evidence in the repo indicates multiple queues. Today, Celery likely runs with the default queue and a single worker node.
+  - We *should* introduce multiple queues only where we have clearly different workloads or SLAs. For example, long-running ML jobs should not block quick notification tasks. Start simple (platform queue + atom queue) and expand as needs appear.
+
+- **Separate queue for platform-level operations vs. atom operations?**
+  - Yes, create at least two queues: `platform` for Django-centric tasks (account provisioning, reporting) and `atom` for FastAPI/ML tasks.
+  - Configure workers to listen to one or both queues depending on their responsibilities.
+  - Use Celery's `task_routes` or `@app.task(queue="platform")` to send tasks to the right queue.
+
+- **Separate queues/nodes for Django web and FastAPI services?**
+  - Use separate worker deployments for each service to respect their dependencies and release cadence, but they can share the same broker cluster.
+  - Each worker can listen to one or multiple queues. Example: Django worker listens to `platform` queue; FastAPI worker listens to `atom` (and optionally `platform` if needed for redundancy).
+  - Keep the web processes (Django `gunicorn`, FastAPI `uvicorn`) separate from Celery workers to avoid resource contention.
+
+- **Should Celery create multiple task queues and nodes right now?**
+  - Start with two queues (`platform`, `atom`) and one worker group per queue. Evaluate load before scaling further. Use horizontal scaling (more worker processes) instead of many queues unless we truly need strict isolation.
+
+Operational Recommendations
+---------------------------
+1. **Configuration Management:**
+   - `.env`: `CELERY_BROKER_URL=redis://redis:6379/0`, `CELERY_RESULT_BACKEND=redis://redis:6379/1`
+   - Celery app config: set `task_default_queue="platform"`, `task_routes` mapping.
+
+2. **Docker Compose Example:**
+   ```yaml
+   services:
+     redis:
+       image: redis:6
+     celery-worker-platform:
+       build: ./TrinityBackendDjango
+       command: celery -A trinity_backend worker -l info -Q platform
+       depends_on: [redis]
+     celery-worker-atom:
+       build: ./TrinityBackendFastAPI
+       command: celery -A app.celery_app worker -l info -Q atom
+       depends_on: [redis]
+     celery-beat:
+       build: ./TrinityBackendDjango
+       command: celery -A trinity_backend beat -l info
+       depends_on: [redis]
+   ```
+
+3. **Task Routing Example:**
+   ```python
+   app.conf.task_routes = {
+       "trinity_backend.platform.tasks.*": {"queue": "platform"},
+       "app.atom.tasks.*": {"queue": "atom"},
+   }
+   ```
+
+4. **FastAPI Integration Pattern:**
+   ```python
+   # TrinityBackendFastAPI/app/celery_app.py
+   from celery import Celery
+   import os
+
+   celery_app = Celery(
+       "trinity",
+       broker=os.environ["CELERY_BROKER_URL"],
+       backend=os.environ["CELERY_RESULT_BACKEND"],
+   )
+   celery_app.conf.task_default_queue = "atom"
+   celery_app.autodiscover_tasks(["app.atom"])
+   ```
+
+5. **Django Integration Pattern:**
+   ```python
+   # TrinityBackendDjango/trinity_backend/celery.py
+   import os
+   from celery import Celery
+
+   os.environ.setdefault("DJANGO_SETTINGS_MODULE", "trinity_backend.settings")
+   app = Celery("trinity")
+   app.config_from_object("django.conf:settings", namespace="CELERY")
+   app.autodiscover_tasks()
+   ```
+
+6. **Monitoring:**
+   - Run `flower` with `celery -A trinity_backend flower --port=5555` for dashboard.
+   - Use structured logging to send task metrics to existing monitoring stack.
+
+Checklist for Adoption
+----------------------
+- [ ] Define CELERY_* environment variables in each service.
+- [ ] Add Celery app modules in Django and FastAPI.
+- [ ] Create at least two queues (`platform`, `atom`) and route tasks explicitly.
+- [ ] Update Docker Compose / deployment manifests with worker and beat services.
+- [ ] Document how to run workers locally (`make celery-platform`, `make celery-atom`).
+- [ ] Configure monitoring (Flower, Prometheus exporters).
+
+Glossary in Plain Language
+--------------------------
+- **Queue:** A line of tasks waiting to be done.
+- **Worker:** The employee doing tasks from the queue.
+- **Broker:** The receptionist who keeps the line organized.
+- **Node:** A machine or container running worker processes.
+- **Beat:** The alarm clock that triggers scheduled tasks.
+- **Task Routing:** Choosing which line a task should join.
+- **Result Backend:** The filing cabinet where finished task results are stored.
+
