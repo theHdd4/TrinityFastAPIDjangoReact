@@ -1719,6 +1719,11 @@ export interface PivotTableSettings {
   pivotLastSavedAt?: string | null;
   pivotFilterOptions?: Record<string, string[]>;
   pivotFilterSelections?: Record<string, string[]>;
+  pivotSorting?: Record<string, { 
+    type: 'asc' | 'desc' | 'value_asc' | 'value_desc';
+    level?: number;
+    preserve_hierarchy?: boolean;
+  }>;
   grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
   subtotalsMode?: 'off' | 'top' | 'bottom';
   percentageMode?: 'off' | 'row' | 'column' | 'grand_total';
@@ -1753,6 +1758,7 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   pivotLastSavedAt: null,
   pivotFilterOptions: {},
   pivotFilterSelections: {},
+  pivotSorting: {},
   grandTotalsMode: 'off',
   subtotalsMode: 'off',
   percentageMode: 'off',

@@ -19,6 +19,7 @@ from app.session_state import load_state, save_state
 
 # Configure logging
 logger = logging.getLogger(__name__)
+logger.disabled = True  # Disable all logs from project_state routes
 
 # MongoDB connection constants
 DEFAULT_MONGO_URI = build_host_mongo_uri()

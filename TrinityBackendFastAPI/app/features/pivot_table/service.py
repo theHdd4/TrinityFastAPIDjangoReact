@@ -178,6 +178,230 @@ def _value_to_key(value: Any) -> str:
     return str(value)
 
 
+def _sort_hierarchy_nodes(
+    nodes: List[Dict[str, Any]],
+    row_fields: List[str],
+    sorting: Dict[str, Any],
+    value_columns: List[str],
+) -> List[Dict[str, Any]]:
+    """Sort hierarchy nodes hierarchically, preserving parent-child relationships.
+    
+    This function builds a tree structure, sorts at each level based on the sorting
+    configuration, then flattens back to a list while preserving hierarchical order.
+    
+    Args:
+        nodes: Flat list of hierarchy nodes
+        row_fields: List of row field names (defines hierarchy levels)
+        sorting: Sorting configuration dict {fieldName: {type: 'asc'|'desc'|'value_asc'|'value_desc', level: int, preserve_hierarchy: bool}}
+        value_columns: List of value column names for value-based sorting
+    
+    Returns:
+        Sorted flat list of hierarchy nodes with preserved parent-child relationships
+    """
+    if not nodes or not row_fields:
+        return nodes
+    
+    # Build tree structure
+    node_map: Dict[str, Dict[str, Any]] = {}
+    roots: List[Dict[str, Any]] = []
+    
+    for node in nodes:
+        key = node.get("key", "")
+        if not key:
+            continue
+        # Create a copy with children list
+        tree_node = {**node, "children": []}
+        node_map[key] = tree_node
+    
+    # Build parent-child relationships
+    for node in node_map.values():
+        parent_key = node.get("parent_key")
+        if parent_key and parent_key in node_map:
+            node_map[parent_key]["children"].append(node)
+        else:
+            roots.append(node)
+    
+    # Helper to get sort value for a node
+    def get_sort_value(node: Dict[str, Any], field: str, sort_type: str) -> Any:
+        """Get the value to sort by for a node."""
+        # Find the label for this field
+        labels = node.get("labels", [])
+        field_label = next((l for l in labels if l.get("field") == field), None)
+        
+        if sort_type in ("asc", "desc"):
+            # Alphabetical sorting by field value
+            if field_label:
+                value = field_label.get("value")
+                # Handle None/NaN values
+                if value is None or (isinstance(value, float) and pd.isna(value)):
+                    return ""  # Sort None/NaN to end
+                return str(value).lower()
+            return ""
+        elif sort_type in ("value_asc", "value_desc"):
+            # Value-based sorting by aggregated values
+            values = node.get("values", {})
+            # Sum all value columns for this node
+            total = 0
+            for col in value_columns:
+                val = values.get(col)
+                if isinstance(val, (int, float)) and not pd.isna(val):
+                    total += val
+            return total
+        return 0
+    
+    # Helper to sort children of a node recursively
+    def sort_node_children(node: Dict[str, Any], level: int) -> None:
+        """Recursively sort node and its children."""
+        children = node.get("children", [])
+        if not children:
+            return
+        
+        # Determine which field to sort by at this level
+        if level < len(row_fields):
+            field = row_fields[level]
+            
+            # Check if this field has sorting configured (case-insensitive)
+            sort_config = None
+            field_lower = field.lower()
+            
+            # First, try exact match
+            if field in sorting:
+                sort_config = sorting[field]
+            else:
+                # Try case-insensitive match
+                for sort_field, config in sorting.items():
+                    if sort_field.lower() == field_lower:
+                        sort_config = config
+                        break
+                
+                # If still not found, check if any sorting config targets this level
+                if sort_config is None:
+                    for sort_field, config in sorting.items():
+                        if isinstance(config, dict):
+                            config_level = config.get("level")
+                            if config_level is not None and config_level == level:
+                                # Check if this field matches (case-insensitive)
+                                if sort_field.lower() == field_lower:
+                                    sort_config = config
+                                    break
+            
+            if sort_config:
+                # Extract sort type
+                if isinstance(sort_config, dict):
+                    sort_type = sort_config.get("type", "asc")
+                    preserve = sort_config.get("preserve_hierarchy", True)
+                else:
+                    sort_type = str(sort_config)
+                    preserve = True
+                
+                # Sort children at this level
+                ascending = sort_type in ("asc", "value_asc")
+                
+                # Get sort values
+                children_with_sort = [
+                    (child, get_sort_value(child, field, sort_type))
+                    for child in children
+                ]
+                
+                # Sort by the sort value
+                children_with_sort.sort(
+                    key=lambda x: x[1],
+                    reverse=not ascending
+                )
+                
+                # Handle None/NaN values - move to end
+                if ascending:
+                    children_with_sort.sort(
+                        key=lambda x: (x[1] == "", x[1])
+                    )
+                else:
+                    children_with_sort.sort(
+                        key=lambda x: (x[1] != "", x[1]),
+                        reverse=True
+                    )
+                
+                # Update children order
+                node["children"] = [child for child, _ in children_with_sort]
+        
+        # Recursively sort children's children
+        for child in node["children"]:
+            sort_node_children(child, level + 1)
+    
+    # Sort root nodes
+    if roots:
+        # Sort root level (level 0)
+        if 0 < len(row_fields):
+            field = row_fields[0]
+            field_lower = field.lower()
+            
+            # Try to find sort config (case-insensitive)
+            sort_config = None
+            if field in sorting:
+                sort_config = sorting[field]
+            else:
+                for sort_field, config in sorting.items():
+                    if sort_field.lower() == field_lower:
+                        sort_config = config
+                        break
+            
+            if sort_config:
+                if isinstance(sort_config, dict):
+                    sort_type = sort_config.get("type", "asc")
+                else:
+                    sort_type = str(sort_config)
+                
+                ascending = sort_type in ("asc", "value_asc")
+                roots_with_sort = [
+                    (root, get_sort_value(root, field, sort_type))
+                    for root in roots
+                ]
+                roots_with_sort.sort(
+                    key=lambda x: x[1],
+                    reverse=not ascending
+                )
+                # Handle None/NaN
+                if ascending:
+                    roots_with_sort.sort(key=lambda x: (x[1] == "", x[1]))
+                else:
+                    roots_with_sort.sort(key=lambda x: (x[1] != "", x[1]), reverse=True)
+                roots = [root for root, _ in roots_with_sort]
+        
+        # Recursively sort all children
+        for root in roots:
+            sort_node_children(root, 1)
+    
+    # Flatten tree back to list (depth-first traversal)
+    # Update order property to reflect the new sorted order
+    def flatten_tree(node: Dict[str, Any], result: List[Dict[str, Any]], order_counter: List[int]) -> None:
+        """Flatten tree node and its children to result list, updating order property."""
+        # Create a copy without children for the result
+        node_copy = {k: v for k, v in node.items() if k != "children"}
+        # Update order to reflect sorted position
+        node_copy["order"] = order_counter[0]
+        order_counter[0] += 1
+        result.append(node_copy)
+        
+        # Add children (already sorted)
+        for child in node.get("children", []):
+            flatten_tree(child, result, order_counter)
+    
+    sorted_nodes: List[Dict[str, Any]] = []
+    order_counter = [0]
+    for root in roots:
+        flatten_tree(root, sorted_nodes, order_counter)
+    
+    # Preserve any nodes that weren't in the tree (shouldn't happen, but defensive)
+    existing_keys = {node.get("key") for node in sorted_nodes}
+    for node in nodes:
+        if node.get("key") not in existing_keys:
+            node_copy = dict(node)
+            node_copy["order"] = order_counter[0]
+            order_counter[0] += 1
+            sorted_nodes.append(node_copy)
+    
+    return sorted_nodes
+
+
 def _build_hierarchy_nodes(
     df: pd.DataFrame,
     row_fields: List[str],
@@ -531,6 +755,125 @@ def _drop_margin_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _apply_sorting(
+    pivot_df: pd.DataFrame,
+    row_fields: List[str],
+    column_fields: List[str],
+    sorting: Dict[str, Any],
+    value_columns: List[str],
+    agg_map: Dict[str, Any],
+) -> pd.DataFrame:
+    """Apply sorting to pivot table based on sorting configuration.
+    
+    Args:
+        pivot_df: The computed pivot DataFrame (may have MultiIndex)
+        row_fields: List of row field names
+        column_fields: List of column field names
+        sorting: Dict mapping field names to sort configs {type: 'asc'|'desc'|'value_asc'|'value_desc'}
+        value_columns: List of value column names for value-based sorting
+        agg_map: Aggregation map for identifying value columns
+    
+    Returns:
+        Sorted pivot DataFrame
+    """
+    if not sorting:
+        return pivot_df
+    
+    result_df = pivot_df.copy()
+    
+    # Apply row field sorting
+    for field in row_fields:
+        if field not in sorting:
+            continue
+        
+        sort_config = sorting[field]
+        sort_type = sort_config.get("type") if isinstance(sort_config, dict) else sort_config
+        
+        if sort_type in ("asc", "desc"):
+            # Alphabetical sorting on row index
+            if isinstance(result_df.index, pd.MultiIndex):
+                # Find the level of this field
+                field_level = None
+                for level_idx, level_name in enumerate(result_df.index.names):
+                    if level_name == field:
+                        field_level = level_idx
+                        break
+                
+                if field_level is not None:
+                    ascending = sort_type == "asc"
+                    result_df = result_df.sort_index(level=field_level, ascending=ascending, sort_remaining=False)
+            else:
+                # Single index
+                if result_df.index.name == field:
+                    ascending = sort_type == "asc"
+                    result_df = result_df.sort_index(ascending=ascending)
+        
+        elif sort_type in ("value_asc", "value_desc"):
+            # Sort by aggregated value
+            ascending = sort_type == "value_asc"
+            
+            # Use first value column for sorting (or sum of all if multiple)
+            if value_columns:
+                # Calculate sum across all value columns for each row
+                if isinstance(result_df.index, pd.MultiIndex):
+                    # For MultiIndex, we need to sort by the sum of value columns
+                    sort_values = result_df[value_columns].sum(axis=1, numeric_only=True)
+                    sort_indices = sort_values.argsort()
+                    if not ascending:
+                        sort_indices = sort_indices[::-1]
+                    result_df = result_df.iloc[sort_indices]
+                else:
+                    # Single index
+                    sort_values = result_df[value_columns].sum(axis=1, numeric_only=True)
+                    sort_indices = sort_values.argsort()
+                    if not ascending:
+                        sort_indices = sort_indices[::-1]
+                    result_df = result_df.iloc[sort_indices]
+    
+    # Apply column field sorting
+    for field in column_fields:
+        if field not in sorting:
+            continue
+        
+        sort_config = sorting[field]
+        sort_type = sort_config.get("type") if isinstance(sort_config, dict) else sort_config
+        
+        if sort_type in ("asc", "desc"):
+            # Alphabetical sorting on column index
+            if isinstance(result_df.columns, pd.MultiIndex):
+                # Find the level of this field
+                field_level = None
+                for level_idx, level_name in enumerate(result_df.columns.names):
+                    if level_name == field:
+                        field_level = level_idx
+                        break
+                
+                if field_level is not None:
+                    ascending = sort_type == "asc"
+                    result_df = result_df.sort_index(axis=1, level=field_level, ascending=ascending, sort_remaining=False)
+            else:
+                # Single column index (shouldn't happen with column fields, but handle it)
+                ascending = sort_type == "asc"
+                result_df = result_df.sort_index(axis=1, ascending=ascending)
+        
+        elif sort_type in ("value_asc", "value_desc"):
+            # Sort columns by aggregated value (sum across rows)
+            ascending = sort_type == "value_asc"
+            
+            if isinstance(result_df.columns, pd.MultiIndex):
+                # Calculate sum across rows for each column
+                column_sums = result_df.sum(axis=0, numeric_only=True)
+                sorted_cols = column_sums.sort_values(ascending=ascending).index
+                result_df = result_df.reindex(columns=sorted_cols)
+            else:
+                # Single column index
+                column_sums = result_df.sum(axis=0, numeric_only=True)
+                sorted_cols = column_sums.sort_values(ascending=ascending).index
+                result_df = result_df.reindex(columns=sorted_cols)
+    
+    return result_df
+
+
 def _store_status(config_id: str, status: str, message: Optional[str], rows: Optional[int]) -> None:
     payload = {
         "config_id": config_id,
@@ -597,6 +940,7 @@ def _load_status(config_id: str) -> PivotStatusResponse:
 
 async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotComputeResponse:
     logger.info("Pivot compute requested for %s", config_id)
+    logger.info("Pivot compute payload - sorting: %s, rows: %s, columns: %s", payload.sorting, payload.rows, payload.columns)
     _store_status(config_id, "pending", "Computing pivot table", None)
 
     try:
@@ -729,6 +1073,45 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         if payload.grand_totals in ("rows", "off"):
             pivot_df = _drop_margin_columns(pivot_df)
 
+    # Apply column field sorting before reset_index (columns need to be sorted on MultiIndex)
+    logger.info("Checking sorting - payload.sorting: %s, type: %s", payload.sorting, type(payload.sorting))
+    
+    if payload.sorting and column_fields:
+        sorting_dict = {}
+        for k, v in payload.sorting.items():
+            if hasattr(v, 'dict'):
+                sorting_dict[k] = v.dict()
+            elif hasattr(v, 'type'):
+                sorting_dict[k] = {'type': v.type}
+            else:
+                sorting_dict[k] = v
+        
+        # Only sort columns here (rows will be sorted after reset_index)
+        for field in column_fields:
+            if field not in sorting_dict:
+                continue
+            
+            sort_config = sorting_dict[field]
+            sort_type = sort_config.get("type") if isinstance(sort_config, dict) else sort_config
+            
+            if sort_type in ("asc", "desc"):
+                if isinstance(pivot_df.columns, pd.MultiIndex):
+                    field_level = None
+                    for level_idx, level_name in enumerate(pivot_df.columns.names):
+                        if level_name == field:
+                            field_level = level_idx
+                            break
+                    
+                    if field_level is not None:
+                        ascending = sort_type == "asc"
+                        pivot_df = pivot_df.sort_index(axis=1, level=field_level, ascending=ascending, sort_remaining=False)
+            elif sort_type in ("value_asc", "value_desc"):
+                ascending = sort_type == "value_asc"
+                if isinstance(pivot_df.columns, pd.MultiIndex):
+                    column_sums = pivot_df.sum(axis=0, numeric_only=True)
+                    sorted_cols = column_sums.sort_values(ascending=ascending).index
+                    pivot_df = pivot_df.reindex(columns=sorted_cols)
+
     series_converted = False
     if isinstance(pivot_df, pd.Series):
         pivot_df = pivot_df.to_frame(name=list(agg_map.keys())[0])
@@ -800,6 +1183,84 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
             pivot_df = pivot_df.reset_index(drop=True)
 
     pivot_df = _flatten_columns(pivot_df)
+
+    # Apply sorting again after reset_index and flattening (for value-based sorting and to ensure order is preserved)
+    if payload.sorting:
+        sorting_dict = {}
+        for k, v in payload.sorting.items():
+            if hasattr(v, 'dict'):
+                sorting_dict[k] = v.dict()
+            elif hasattr(v, 'type'):
+                sorting_dict[k] = {'type': v.type}
+            elif isinstance(v, dict):
+                sorting_dict[k] = v
+            else:
+                sorting_dict[k] = v
+        
+        logger.info("Sorting dict after conversion: %s", sorting_dict)
+        
+        # Create case-insensitive lookup for sorting
+        sorting_lookup = {}
+        for k, v in sorting_dict.items():
+            sorting_lookup[k.lower()] = (k, v)  # Store original key and value
+        
+        # Get actual value columns that exist in the flattened DataFrame (exclude Grand Total and row fields)
+        actual_value_cols = [
+            col for col in pivot_df.columns 
+            if col not in row_fields and 'grand total' not in col.lower()
+        ]
+        
+        logger.info("Available columns for sorting: %s, Row fields: %s, Value cols: %s", 
+                     list(pivot_df.columns), row_fields, actual_value_cols)
+        logger.info("Sorting lookup (case-insensitive): %s", sorting_lookup)
+        
+        # Sort the flattened DataFrame
+        for field in row_fields:
+            field_lower = field.lower()
+            if field_lower not in sorting_lookup:
+                logger.info("Field %s (lowercase: %s) not in sorting_lookup, skipping", field, field_lower)
+                continue
+            
+            original_key, sort_config = sorting_lookup[field_lower]
+            sort_type = sort_config.get("type") if isinstance(sort_config, dict) else sort_config
+            
+            logger.info("Applying sort to field %s (original key: %s): type=%s", field, original_key, sort_type)
+            
+            if sort_type in ("asc", "desc"):
+                # Alphabetical sorting on the field column
+                if field in pivot_df.columns:
+                    ascending = sort_type == "asc"
+                    logger.info("Sorting DataFrame by field %s, ascending=%s, before shape: %s", field, ascending, pivot_df.shape)
+                    # Convert column to string to handle mixed types (str and int) for alphabetical sorting
+                    # Create a temporary column for sorting that converts all values to strings
+                    temp_sort_col = f"__temp_sort_{field}__"
+                    pivot_df[temp_sort_col] = pivot_df[field].astype(str)
+                    # Replace 'nan' and 'None' strings with empty string for proper sorting
+                    pivot_df[temp_sort_col] = pivot_df[temp_sort_col].replace('nan', '').replace('None', '')
+                    # Sort by the temporary column
+                    pivot_df = pivot_df.sort_values(by=temp_sort_col, ascending=ascending, na_position='last')
+                    # Drop the temporary column
+                    pivot_df = pivot_df.drop(columns=[temp_sort_col])
+                    logger.info("Sorted by %s %s, after shape: %s", field, sort_type, pivot_df.shape)
+                else:
+                    logger.warning("Field %s not found in pivot_df.columns: %s", field, list(pivot_df.columns))
+            elif sort_type in ("value_asc", "value_desc"):
+                # Sort by aggregated value (sum of value columns)
+                ascending = sort_type == "value_asc"
+                if actual_value_cols:
+                    logger.info("Sorting by value, using columns: %s", actual_value_cols)
+                    # Calculate sum across value columns for each row
+                    sort_values = pivot_df[actual_value_cols].sum(axis=1, numeric_only=True)
+                    sort_indices = sort_values.argsort()
+                    if not ascending:
+                        sort_indices = sort_indices[::-1]
+                    pivot_df = pivot_df.iloc[sort_indices]
+                    logger.info("Sorted by value %s, shape: %s", sort_type, pivot_df.shape)
+                else:
+                    logger.warning("No value columns available for sorting")
+        
+        # For column fields, we need to sort columns (this is trickier after flattening)
+        # Column sorting is mainly handled in the column hierarchy building
 
     records = [_convert_numpy(record) for record in pivot_df.to_dict(orient="records")]
 
@@ -896,6 +1357,30 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
         include_grand_total=include_grand_total_row,
         grand_total_values=grand_total_values,
     )
+    
+    # Apply hierarchical sorting if sorting is configured
+    if hierarchy_nodes and payload.sorting and row_fields:
+        # Convert Pydantic models to dicts if needed
+        sorting_dict = {}
+        for k, v in payload.sorting.items():
+            if hasattr(v, 'dict'):
+                sorting_dict[k] = v.dict()
+            elif hasattr(v, 'type'):
+                sorting_dict[k] = {'type': v.type, 'level': getattr(v, 'level', None), 'preserve_hierarchy': getattr(v, 'preserve_hierarchy', True)}
+            elif isinstance(v, dict):
+                sorting_dict[k] = v
+            else:
+                sorting_dict[k] = {'type': str(v)}
+        
+        hierarchy_nodes = _sort_hierarchy_nodes(
+            hierarchy_nodes,
+            row_fields,
+            sorting_dict,
+            effective_leaf_columns,
+        )
+    elif hierarchy_nodes:
+        # Fallback to simple order-based sorting
+        hierarchy_nodes.sort(key=lambda node: node.get("order", 0))
 
     updated_at = datetime.now(timezone.utc)
 

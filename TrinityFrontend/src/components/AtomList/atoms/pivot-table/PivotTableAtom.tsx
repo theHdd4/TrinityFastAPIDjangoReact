@@ -99,6 +99,30 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
       }
       return acc;
     }, {});
+    
+    // Normalize sorting for signature (similar to how it's done in the API call)
+    const sortingSnapshot: Record<string, { type: string; level?: number; preserve_hierarchy?: boolean }> = {};
+    if (settings.pivotSorting) {
+      Object.entries(settings.pivotSorting).forEach(([field, config]) => {
+        if (config && typeof config === 'object' && 'type' in config) {
+          // Use the exact field name from rowFields/columnFields to ensure case matching
+          const exactField = settings.rowFields.find(f => f.toLowerCase() === field.toLowerCase()) ||
+                            settings.columnFields.find(f => f.toLowerCase() === field.toLowerCase()) ||
+                            field;
+          
+          // Determine hierarchy level for this field
+          const fieldIndex = settings.rowFields.findIndex(f => f.toLowerCase() === field.toLowerCase());
+          const level = fieldIndex >= 0 ? fieldIndex : undefined;
+          
+          sortingSnapshot[exactField] = {
+            type: config.type,
+            level: config.level !== undefined ? config.level : level,
+            preserve_hierarchy: config.preserve_hierarchy !== undefined ? config.preserve_hierarchy : true,
+          };
+        }
+      });
+    }
+    
     const payload = {
       dataSource: settings.dataSource,
       rows: settings.rowFields,
@@ -107,6 +131,7 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
       filters: settings.filterFields,
       selections: selectionsSnapshot,
       grandTotals: settings.grandTotalsMode,
+      sorting: sortingSnapshot,
     };
     return JSON.stringify(payload);
   }, [
@@ -117,6 +142,7 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     settings.filterFields,
     settings.pivotFilterSelections,
     settings.grandTotalsMode,
+    settings.pivotSorting,
   ]);
 
   React.useEffect(() => {
@@ -145,6 +171,32 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
       });
 
       try {
+        const sortingPayload: Record<string, { type: string; level?: number; preserve_hierarchy?: boolean }> = {};
+        if (settings.pivotSorting) {
+          Object.entries(settings.pivotSorting).forEach(([field, config]) => {
+            if (config && typeof config === 'object' && 'type' in config) {
+              // Use the exact field name from rowFields/columnFields to ensure case matching
+              const exactField = settings.rowFields.find(f => f.toLowerCase() === field.toLowerCase()) ||
+                                settings.columnFields.find(f => f.toLowerCase() === field.toLowerCase()) ||
+                                field;
+              
+              // Determine hierarchy level for this field
+              const fieldIndex = settings.rowFields.findIndex(f => f.toLowerCase() === field.toLowerCase());
+              const level = fieldIndex >= 0 ? fieldIndex : undefined;
+              
+              sortingPayload[exactField] = {
+                type: config.type,
+                level: config.level !== undefined ? config.level : level,
+                preserve_hierarchy: config.preserve_hierarchy !== undefined ? config.preserve_hierarchy : true,
+              };
+            }
+          });
+        }
+        
+        console.log('Sorting payload before send:', sortingPayload);
+        console.log('Row fields:', settings.rowFields);
+        console.log('Column fields:', settings.columnFields);
+
         const payload = {
           data_source: settings.dataSource,
           rows: settings.rowFields.filter(Boolean),
@@ -174,8 +226,11 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
               ? { field, include: includeValues }
               : { field };
           }),
+          sorting: sortingPayload,
           grand_totals: settings.grandTotalsMode || 'off',
         };
+
+        console.log('Pivot compute payload:', JSON.stringify(payload, null, 2));
 
         const response = await fetch(
           `${PIVOT_API}/${encodeURIComponent(atomId)}/compute`,

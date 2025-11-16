@@ -40,7 +40,7 @@ router = APIRouter(
 async def compute_pivot_endpoint(config_id: str, payload: PivotComputeRequest) -> PivotComputeResponse:
     """Generate a pivot table for the supplied configuration."""
 
-    logger.info("pivot.compute config_id=%s rows=%s", config_id, len(payload.rows or []))
+    logger.info("pivot.compute config_id=%s rows=%s sorting=%s", config_id, len(payload.rows or []), payload.sorting)
     response = await compute_pivot(config_id, payload)
     logger.info(
         "pivot.compute.completed config_id=%s status=%s rows=%s",

@@ -227,7 +227,7 @@ async def get_object_prefix(
     else:
         env, env_source = fresh, "unknown"
 
-    print(f"🔧 fetched env {env} (source={env_source})")
+    # print(f"🔧 fetched env {env} (source={env_source})")  # Disabled
     client = env.get("CLIENT_NAME", os.getenv("CLIENT_NAME", "default_client"))
     app = env.get("APP_NAME", os.getenv("APP_NAME", "default_app"))
     project = env.get("PROJECT_NAME", os.getenv("PROJECT_NAME", "default_project"))
@@ -247,9 +247,9 @@ async def get_object_prefix(
     os.environ["APP_NAME"] = app
     os.environ["PROJECT_NAME"] = project
     prefix = f"{client}/{app}/{project}/"
-    print(
-        f"📦 prefix {prefix} (CLIENT_ID={client_id or os.getenv('CLIENT_ID','')} APP_ID={app_id or os.getenv('APP_ID','')} PROJECT_ID={PROJECT_ID})"
-    )
+    # print(
+    #     f"📦 prefix {prefix} (CLIENT_ID={client_id or os.getenv('CLIENT_ID','')} APP_ID={app_id or os.getenv('APP_ID','')} PROJECT_ID={PROJECT_ID})"
+    # )  # Disabled
     if include_env:
         return prefix, env, env_source
     return prefix
@@ -3166,9 +3166,9 @@ async def list_saved_dataframes(
     )
 
     try:
-        print(
-            f"🪣 listing from bucket '{MINIO_BUCKET}' prefix '{prefix}' (source={env_source})"
-        )
+        # print(
+        #     f"🪣 listing from bucket '{MINIO_BUCKET}' prefix '{prefix}' (source={env_source})"
+        # )  # Disabled
         objects = list(
             minio_client.list_objects(
                 MINIO_BUCKET, prefix=prefix, recursive=True
@@ -3466,6 +3466,79 @@ async def rename_dataframe(object_name: str = Form(...), new_filename: str = For
             redis_client.delete(object_name)
             raise HTTPException(status_code=404, detail="File not found")
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/copy_dataframe")
+async def copy_dataframe(object_name: str = Form(...), new_filename: str = Form(...)):
+    """Copy a saved dataframe to a new file"""
+    prefix = await get_object_prefix()
+    if not object_name.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    new_object = f"{prefix}{new_filename}"
+    if new_object == object_name:
+        raise HTTPException(status_code=400, detail="New filename must be different from original")
+    
+    # Check if the new file already exists
+    try:
+        minio_client.stat_object(MINIO_BUCKET, new_object)
+        raise HTTPException(status_code=400, detail="File with this name already exists")
+    except S3Error as e:
+        if e.code != "NoSuchKey":
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    try:
+        from minio.commonconfig import CopySource
+        # Copy the MinIO object
+        minio_client.copy_object(
+            MINIO_BUCKET,
+            new_object,
+            CopySource(MINIO_BUCKET, object_name),
+        )
+        
+        # Copy Redis cache if it exists
+        content = redis_client.get(object_name)
+        if content is not None:
+            redis_client.setex(new_object, 3600, content)
+        
+        # Copy arrow object registration (flight registry)
+        try:
+            from app.DataStorageRetrieval.flight_registry import get_arrow_for_flight_path, set_ticket, FILEKEY_TO_CSV
+            original_arrow = get_arrow_for_flight_path(object_name)
+            if original_arrow:
+                # Register the new arrow object with the same arrow path
+                csv_name = FILEKEY_TO_CSV.get(object_name, new_filename.replace('.arrow', '.csv'))
+                set_ticket(new_object, csv_name, original_arrow)
+        except Exception as e:
+            logger.warning(f"Failed to copy arrow object registration: {e}")
+        
+        # Note: Arrow dataset registration in the database is typically handled
+        # when the file is first accessed/validated, so we don't need to copy it here
+        
+        # Get file stats for response
+        try:
+            stat = minio_client.stat_object(MINIO_BUCKET, new_object)
+            return {
+                "old_name": object_name,
+                "new_name": new_object,
+                "last_modified": stat.last_modified.isoformat() if hasattr(stat.last_modified, 'isoformat') else str(stat.last_modified),
+                "size": stat.size
+            }
+        except Exception:
+            return {
+                "old_name": object_name,
+                "new_name": new_object,
+                "last_modified": None,
+                "size": None
+            }
+    except S3Error as e:
+        code = getattr(e, "code", "")
+        if code in {"NoSuchKey", "NoSuchBucket"}:
+            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

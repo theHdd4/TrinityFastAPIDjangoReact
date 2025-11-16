@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VALIDATE_API, SESSION_API, CLASSIFIER_API } from '@/lib/api';
+import { VALIDATE_API, SESSION_API, CLASSIFIER_API, SHARE_LINKS_API } from '@/lib/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   DropdownMenu,
@@ -19,6 +19,12 @@ import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface Props {
   isOpen: boolean;
@@ -81,6 +87,11 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [showDimensionTableByObject, setShowDimensionTableByObject] = useState<Record<string, boolean>>({});
   const [columnDimensionByObject, setColumnDimensionByObject] = useState<Record<string, Record<string, string>>>({});
   const [businessOpenByObject, setBusinessOpenByObject] = useState<Record<string, boolean>>({});
+  const [shareDialog, setShareDialog] = useState<{ open: boolean; objectName: string; filename: string } | null>(null);
+  const [shareLink, setShareLink] = useState<string>('');
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const shareLinkInputRef = React.useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
 
   const getDimensionTextClass = (dimensionName: string, orderedDims: string[]): string => {
@@ -611,6 +622,101 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     }
   };
 
+  const handleCopyFile = async (obj: string, filename: string) => {
+    try {
+      // Generate copy filename: add "_copy" before the extension
+      const baseFilename = filename || obj.split('/').pop() || 'dataframe';
+      const nameWithoutExt = baseFilename.replace(/\.arrow$/, '');
+      
+      // Remove the prefix (client/app/project) from the object path
+      // and preserve only the folder structure after the prefix
+      const relativePath = obj.startsWith(prefix) ? obj.substring(prefix.length) : obj;
+      const lastSlashIndex = relativePath.lastIndexOf('/');
+      const folderPath = lastSlashIndex !== -1 ? relativePath.substring(0, lastSlashIndex + 1) : '';
+      
+      // Find an available copy filename by checking existing files
+      const getAvailableCopyName = (baseName: string, folder: string): string => {
+        // Get all existing file names in the same folder (with prefix)
+        const existingFiles = files
+          .filter(f => {
+            const fRelative = f.object_name.startsWith(prefix) 
+              ? f.object_name.substring(prefix.length) 
+              : f.object_name;
+            return fRelative.startsWith(folder) && fRelative !== relativePath;
+          })
+          .map(f => {
+            const fRelative = f.object_name.startsWith(prefix) 
+              ? f.object_name.substring(prefix.length) 
+              : f.object_name;
+            return fRelative.substring(folder.length); // Get just the filename
+          });
+        
+        // Try base_copy.arrow first
+        let copyName = `${baseName}_copy.arrow`;
+        if (!existingFiles.includes(copyName)) {
+          return copyName;
+        }
+        
+        // If base_copy.arrow exists, try incrementing numbers
+        let counter = 1;
+        while (true) {
+          copyName = `${baseName}_copy_${counter}.arrow`;
+          if (!existingFiles.includes(copyName)) {
+            return copyName;
+          }
+          counter++;
+          // Safety limit to prevent infinite loop
+          if (counter > 1000) {
+            throw new Error('Too many copies exist. Please rename manually.');
+          }
+        }
+      };
+      
+      const copyFilename = getAvailableCopyName(nameWithoutExt, folderPath);
+      const newFilePath = folderPath + copyFilename;
+      
+      const form = new FormData();
+      form.append('object_name', obj);
+      form.append('new_filename', newFilePath);
+      
+      const response = await fetch(`${VALIDATE_API}/copy_dataframe`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Failed to duplicate file');
+      }
+      
+      const data = await response.json();
+      const copyNameWithoutExt = copyFilename.replace(/\.arrow$/, '');
+      const newFile: Frame = {
+        object_name: data.new_name || (prefix + newFilePath),
+        csv_name: copyNameWithoutExt,
+        arrow_name: copyFilename,
+        last_modified: data.last_modified,
+        size: data.size
+      };
+      
+      // Add the new file to the list
+      setFiles(prev => [...prev, newFile]);
+      
+      toast({ 
+        title: 'File duplicated', 
+        description: `Duplicate created: ${copyFilename}` 
+      });
+    } catch (error: any) {
+      console.error('Duplicate file failed:', error);
+      toast({
+        title: 'Duplicate failed',
+        description: error.message || 'Failed to duplicate file',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const promptDeleteAll = () => setConfirmDelete({ type: 'all' });
 
   const promptDeleteOne = (obj: string) =>
@@ -703,7 +809,87 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     });
   };
 
-  const handleContextMenuAction = (action: 'edit' | 'delete' | 'classify') => {
+  const handleShareFile = async (obj: string, filename: string) => {
+    setShareDialog({ open: true, objectName: obj, filename });
+    setShareLink('');
+    setShareError(null);
+    setShareLoading(true);
+    
+    try {
+      // Get project context
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      
+      const payload = {
+        object_name: obj,
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || '',
+      };
+      
+      const response = await fetch(`${SHARE_LINKS_API}/dataframe/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      
+      if (!response.ok) {
+        let errorMessage = 'Failed to create share link';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData?.detail || errorData?.error || errorMessage;
+          if (typeof errorData === 'string') {
+            errorMessage = errorData;
+          }
+        } catch {
+          const text = await response.text().catch(() => '');
+          if (text) {
+            try {
+              const parsed = JSON.parse(text);
+              errorMessage = parsed?.detail || parsed?.error || text;
+            } catch {
+              errorMessage = text || `HTTP ${response.status}: ${response.statusText}`;
+            }
+          } else {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          }
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const data = await response.json();
+      const resolvedLink = data.share_url.startsWith('http') 
+        ? data.share_url 
+        : `${window.location.origin}${data.share_url.startsWith('/') ? '' : '/'}${data.share_url}`;
+      setShareLink(resolvedLink);
+      toast({ title: 'Share link generated', description: 'Link copied to clipboard' });
+      
+      // Auto-copy to clipboard (with fallback)
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(resolvedLink);
+        }
+      } catch {
+        // Fallback if clipboard API fails - user can use the copy button
+      }
+    } catch (error: any) {
+      console.error('Failed to generate share link:', error);
+      const errorMessage = error.message || 'Failed to generate share link';
+      setShareError(errorMessage);
+      toast({
+        title: 'Share failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const handleContextMenuAction = (action: 'edit' | 'delete' | 'classify' | 'downloadCSV' | 'downloadExcel' | 'copy' | 'share') => {
     if (!contextMenu) return;
     
     if (action === 'edit') {
@@ -712,6 +898,14 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       promptDeleteOne(contextMenu.target);
     } else if (action === 'classify') {
       void onToggleExpand(contextMenu.target);
+    } else if (action === 'downloadCSV') {
+      handleDownloadCSV(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    } else if (action === 'downloadExcel') {
+      handleDownloadExcel(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    } else if (action === 'copy') {
+      handleCopyFile(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    } else if (action === 'share') {
+      handleShareFile(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
     }
     
     setContextMenu(null);
@@ -1274,6 +1468,34 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             <span>Rename</span>
           </button>
           <button
+            onClick={() => handleContextMenuAction('copy')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+          >
+            <Copy className="w-4 h-4" />
+            <span>Duplicate</span>
+          </button>
+          <button
+            onClick={() => handleContextMenuAction('downloadCSV')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+          >
+            <Download className="w-4 h-4" />
+            <span>Download as CSV</span>
+          </button>
+          <button
+            onClick={() => handleContextMenuAction('downloadExcel')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+          >
+            <Download className="w-4 h-4" />
+            <span>Download as Excel</span>
+          </button>
+          <button
+            onClick={() => handleContextMenuAction('share')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+          >
+            <Share2 className="w-4 h-4" />
+            <span>Share</span>
+          </button>
+          <button
             onClick={() => handleContextMenuAction('delete')}
             className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
           >
@@ -1283,6 +1505,156 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         </div>,
         document.body
       )}
+      
+      {/* Share Dialog */}
+      <Dialog
+        open={shareDialog?.open || false}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShareDialog(null);
+            setShareLink('');
+            setShareError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Share2 className="h-5 w-5" />
+              Share DataFrame
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <p className="text-sm text-muted-foreground mb-2">
+                {shareDialog?.filename || 'DataFrame'}
+              </p>
+            </div>
+            
+            {shareLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                <span className="ml-2 text-sm text-gray-600">Generating share link...</span>
+              </div>
+            ) : shareError ? (
+              <div className="space-y-3">
+                <p className="text-sm text-destructive">
+                  {shareError}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Note: The database migration for DataFrameShareLink may need to be run. Please contact your administrator.
+                </p>
+              </div>
+            ) : shareLink ? (
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    ref={shareLinkInputRef}
+                    value={shareLink}
+                    readOnly
+                    className="flex-1 text-sm bg-muted"
+                    onClick={(e) => {
+                      // Select all text when clicking on the input
+                      (e.target as HTMLInputElement).select();
+                    }}
+                  />
+                  <Button
+                    onClick={async () => {
+                      const copyToClipboard = async (text: string, fallbackTarget?: HTMLInputElement | null) => {
+                        // Try native clipboard API first
+                        if (navigator.clipboard && window.isSecureContext) {
+                          try {
+                            await navigator.clipboard.writeText(text);
+                            return true;
+                          } catch (error) {
+                            console.warn('navigator.clipboard.writeText failed, trying fallback', error);
+                          }
+                        }
+                        
+                        // Fallback: Use the input element with execCommand
+                        if (fallbackTarget) {
+                          try {
+                            const wasReadOnly = fallbackTarget.readOnly;
+                            fallbackTarget.readOnly = false;
+                            fallbackTarget.focus();
+                            fallbackTarget.select();
+                            fallbackTarget.setSelectionRange(0, text.length);
+                            const successful = document.execCommand('copy');
+                            fallbackTarget.readOnly = wasReadOnly;
+                            fallbackTarget.blur();
+                            return successful;
+                          } catch (error) {
+                            console.warn('execCommand copy failed', error);
+                          }
+                        }
+                        
+                        // Last resort: Create temporary textarea
+                        try {
+                          const textarea = document.createElement('textarea');
+                          textarea.value = text;
+                          textarea.style.position = 'fixed';
+                          textarea.style.left = '-9999px';
+                          textarea.style.top = '0';
+                          textarea.setAttribute('readonly', '');
+                          document.body.appendChild(textarea);
+                          textarea.focus();
+                          textarea.select();
+                          textarea.setSelectionRange(0, text.length);
+                          const successful = document.execCommand('copy');
+                          document.body.removeChild(textarea);
+                          return successful;
+                        } catch (error) {
+                          console.warn('textarea fallback copy failed', error);
+                          return false;
+                        }
+                      };
+                      
+                      try {
+                        const success = await copyToClipboard(shareLink, shareLinkInputRef.current);
+                        if (success) {
+                          toast({ title: 'Link copied', description: 'Share link copied to clipboard' });
+                        } else {
+                          // If all methods fail, select the text in the input so user can manually copy
+                          if (shareLinkInputRef.current) {
+                            shareLinkInputRef.current.focus();
+                            shareLinkInputRef.current.select();
+                            toast({ 
+                              title: 'Select the link', 
+                              description: 'Link selected - press Ctrl+C to copy', 
+                              variant: 'default' 
+                            });
+                          } else {
+                            throw new Error('Copy not supported');
+                          }
+                        }
+                      } catch (error: any) {
+                        console.error('Copy failed:', error);
+                        toast({ 
+                          title: 'Copy failed', 
+                          description: 'Please select and copy the link manually', 
+                          variant: 'destructive' 
+                        });
+                      }
+                    }}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Anyone with this link can view the dataframe with pagination.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-destructive">
+                Failed to generate share link. Please try again.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
