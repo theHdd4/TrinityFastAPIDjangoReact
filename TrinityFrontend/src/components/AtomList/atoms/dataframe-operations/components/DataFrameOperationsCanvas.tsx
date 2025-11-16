@@ -3112,6 +3112,57 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     return frontendIndex;
   }, [data]);
 
+  // Global ESC handler to clear selection (non-destructive)
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Guard: if editing formula, let FormularBar handle ESC
+      if (isEditingFormula) return;
+      // Guard: if any modal/panel is open, don't interfere
+      if (
+        historyPanelOpen ||
+        findReplaceModalOpen ||
+        deleteConfirmModal.isOpen ||
+        rowDeleteConfirmModal.isOpen ||
+        showOverwriteConfirmDialog ||
+        showResetConfirm
+      ) {
+        return;
+      }
+      // Guard: if focus is in an editable element, don't steal ESC
+      const active = document.activeElement as HTMLElement | null;
+      if (active) {
+        const tag = active.tagName?.toLowerCase();
+        const isEditable =
+          tag === 'input' ||
+          tag === 'textarea' ||
+          active.getAttribute('contenteditable') === 'true' ||
+          active.getAttribute('role') === 'textbox';
+        if (isEditable) return;
+      }
+      // Clear non-destructive selection and transient UI
+      setSelectedCell(null);
+      setSelectedColumn(null);
+      setMultiSelectedRows(new Set());
+      setMultiSelectedColumns(new Set());
+      setSelectAllRows(false);
+      setContextMenu(null);
+      setOpenDropdown(null);
+      setInsertMenuOpen(false);
+      setDeleteMenuOpen(false);
+    };
+    window.addEventListener('keydown', onEsc, { passive: true });
+    return () => window.removeEventListener('keydown', onEsc as EventListener);
+  }, [
+    isEditingFormula,
+    historyPanelOpen,
+    findReplaceModalOpen,
+    deleteConfirmModal.isOpen,
+    rowDeleteConfirmModal.isOpen,
+    showOverwriteConfirmDialog,
+    showResetConfirm,
+  ]);
+
   // Simple and direct insert column implementation
   const handleInsertColumn = async (colIdx: number) => {
     // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop

@@ -1075,6 +1075,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const [isUsageGuideOpen, setIsUsageGuideOpen] = useState(false);
   const formulaInputRef = useRef<HTMLInputElement>(null);
   const preservedColumnRef = useRef<string | null>(null);
+  // Track last interaction source to control when autocomplete appears
+  const lastInputSourceRef = useRef<'keyboard' | 'mouse' | null>(null);
   
   // Real-time validation state
   const [validationResult, setValidationResult] = useState<ValidationResult>({
@@ -1163,6 +1165,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      // Any document click is considered a mouse interaction
+      lastInputSourceRef.current = 'mouse';
       if (barContainerRef.current && !barContainerRef.current.contains(event.target as Node)) {
         setShowAutoComplete(false);
         setAutoCompleteSuggestions([]);
@@ -1306,6 +1310,10 @@ const FormularBar: React.FC<FormularBarProps> = ({
       const newValue = replaceNextColPlaceholder(formulaInput, column);
       onFormulaInputChange(newValue);
       onFormulaModeChange(true);
+      // Hide suggestions during mouse-driven insertions
+      lastInputSourceRef.current = 'mouse';
+      setShowAutoComplete(false);
+      setAutoCompleteSuggestions([]);
       
       // Don't change target column when inserting columns into formula
       // The target column should remain stable during formula editing
@@ -1352,6 +1360,10 @@ const FormularBar: React.FC<FormularBarProps> = ({
     
     onFormulaInputChange(newValue);
     onFormulaModeChange(true);
+    // Hide suggestions during mouse-driven insertions
+    lastInputSourceRef.current = 'mouse';
+    setShowAutoComplete(false);
+    setAutoCompleteSuggestions([]);
     
     
     // Don't automatically set the inserted column as target - let user explicitly select target
@@ -1436,7 +1448,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
       return;
     }
 
-    const leadingEquals = value.trimStart().startsWith('=');
+    const trimmedStart = value.trimStart();
+    const leadingEquals = trimmedStart.startsWith('=');
+    const justFirstEquals = trimmedStart === '='; // only the initial =
     
     // Check if we're replacing a ColX placeholder (Excel-like behavior)
     if (formulaInput.includes('Col') && value.length > formulaInput.length) {
@@ -1457,7 +1471,18 @@ const FormularBar: React.FC<FormularBarProps> = ({
       return;
     }
 
-    if (!leadingEquals || !isEditingFormula) {
+    // Extract current token before cursor
+    const beforeCursor = value.slice(0, cursorPosition);
+    const wordMatch = beforeCursor.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+    const hasPartialToken = Boolean(wordMatch && wordMatch[1]?.length > 0);
+
+    // Only show autocomplete when typing from keyboard, while editing, and
+    // either user is typing a partial token OR they just typed the very first '='
+    if (
+      !isEditingFormula ||
+      lastInputSourceRef.current !== 'keyboard' ||
+      (!hasPartialToken && !justFirstEquals)
+    ) {
       setShowAutoComplete(false);
       setAutoCompleteSuggestions([]);
       setSelectedSuggestionIndex(0);
@@ -1853,6 +1878,14 @@ const FormularBar: React.FC<FormularBarProps> = ({
                         : 'border-primary/50 bg-primary/5 focus:ring-primary/20 focus:border-primary'
                   } ${!isColumnSelected ? 'bg-slate-100 text-slate-400 cursor-not-allowed placeholder:text-slate-400' : ''} ${isColumnSelected && !isEditingFormula ? 'cursor-pointer' : ''}`}
                 onKeyDown={(e) => {
+                  // Mark this interaction as keyboard for autocomplete gating
+                  lastInputSourceRef.current = 'keyboard';
+                  // If comma is pressed, hide suggestions until the next token starts
+                  if (e.key === ',') {
+                    setShowAutoComplete(false);
+                    setAutoCompleteSuggestions([]);
+                    setSelectedSuggestionIndex(0);
+                  }
                   if (!isColumnSelected || !isEditingFormula) {
                     e.preventDefault();
                     return;
