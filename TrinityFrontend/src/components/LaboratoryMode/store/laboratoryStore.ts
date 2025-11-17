@@ -1587,8 +1587,8 @@ export const DEFAULT_BUILD_MODEL_FEATURE_BASED_SETTINGS: BuildModelFeatureBasedS
     xVariables: [],
     transformations: [],
     availableFiles: [],
-    availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8'],
-    scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
+    availableColumns: [],
+    scopes: [],
     outputFileName: '',
     kFolds: 5,
     testSize: 0.2

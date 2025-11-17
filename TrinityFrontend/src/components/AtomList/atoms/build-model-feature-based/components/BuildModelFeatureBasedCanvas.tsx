@@ -32,6 +32,8 @@ interface BuildModelFeatureBasedCanvasProps {
   atomId: string; // Required for Laboratory Mode
 }
 
+const NO_COLUMNS_MESSAGE = 'Load a valid file and scope to display model data.';
+
 const availableModels = [
   { id: 'linear-regression', name: 'Linear Regression', params: ['Learning Rate', 'Max Iterations', 'Tolerance'] },
   { id: 'random-forest', name: 'Random Forest', params: ['N Estimators', 'Max Depth', 'Min Samples Split'] },
@@ -583,6 +585,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
 
   // Fetch numerical columns when scope and combinations are selected
   const [numericalColumns, setNumericalColumns] = useState<string[]>([]);
+  const [columnsError, setColumnsError] = useState<string | null>(null);
   const [isLoadingColumns, setIsLoadingColumns] = useState(false);
   const [isRunningModel, setIsRunningModel] = useState(false);
   const [modelResult, setModelResult] = useState<any>(() => {
@@ -635,6 +638,7 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
     const fetchNumericalColumns = async () => {
       if (finalData?.selectedScope && finalData?.selectedCombinations && finalData.selectedCombinations.length > 0) {
         setIsLoadingColumns(true);
+        setColumnsError(null);
         try {
           // Use the first selected combination to get column info
           const firstCombination = finalData.selectedCombinations[0];
@@ -667,24 +671,29 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             
             
             if (numericalCols.length > 0) {
-            setNumericalColumns(numericalCols);
+              setNumericalColumns(numericalCols);
+              setColumnsError(null);
             } else {
-              // Fallback to default columns if no numerical columns found
-              console.log('⚠️ No numerical columns found, using fallback');
-              setNumericalColumns(['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8']);
+              setNumericalColumns([]);
+              setColumnsError(NO_COLUMNS_MESSAGE);
             }
           } else {
             const errorText = await response.text();
-            
-            // Fallback to default columns if API fails
-            setNumericalColumns(['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8']);
+
+            console.error('Failed to fetch numerical columns:', errorText);
+            setNumericalColumns([]);
+            setColumnsError(NO_COLUMNS_MESSAGE);
           }
         } catch (error) {
-          // Fallback to default columns if API fails
-          setNumericalColumns(['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8']);
+          console.error('Error fetching numerical columns:', error);
+          setNumericalColumns([]);
+          setColumnsError(NO_COLUMNS_MESSAGE);
         } finally {
           setIsLoadingColumns(false);
         }
+      } else {
+        setNumericalColumns([]);
+        setColumnsError(null);
       }
     };
 
@@ -1009,6 +1018,46 @@ const BuildModelFeatureBasedCanvas: React.FC<BuildModelFeatureBasedCanvasProps> 
             </h3>
             <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
               Select a scope and combinations from the properties panel to get started
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (
+    finalData?.selectedScope &&
+    finalData?.selectedCombinations &&
+    finalData.selectedCombinations.length > 0 &&
+    !isLoadingColumns &&
+    columnsError
+  ) {
+    return (
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-orange-50/30 to-orange-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-15">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="missingColumnsGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(248 113 113 / 0.12)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#missingColumnsGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-2xl">
+              <AlertTriangle className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-orange-500 to-orange-600 bg-clip-text text-transparent">
+              No model data available
+            </h3>
+            <p className="text-gray-600 mb-3 text-lg font-medium leading-relaxed">
+              {columnsError}
+            </p>
+            <p className="text-sm text-gray-500">
+              Upload a dataset and select a scope with combinations from the properties panel to continue.
             </p>
           </div>
         </div>
