@@ -345,6 +345,9 @@ services:
       OLLAMA_IP: 10.2.4.48
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
+      FASTAPI_BASE_URL: http://fastapi:8001
+      FASTAPI_HOST: fastapi
+      FASTAPI_PORT: "8001"
       REDIS_LOG_SERVICE: trinity-ai
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
@@ -368,8 +371,12 @@ services:
       dockerfile: Dockerfile
       args:
         - NODE_ENV=development  # 👈 keeps console.log for development
+        - VITE_AI_PORT=8005  # 👈 Port for trinity-ai service (host port mapping)
+        - VITE_HOST_IP=${HOST_IP:-10.2.4.48}  # 👈 Host IP for accessing services
     environment:
       - NODE_ENV=development
+      - VITE_AI_PORT=8005  # 👈 Port for trinity-ai service (host port mapping)
+      - VITE_HOST_IP=${HOST_IP:-10.2.4.48}  # 👈 Host IP for accessing services
     ports:
       - "8081:80"
     networks:
