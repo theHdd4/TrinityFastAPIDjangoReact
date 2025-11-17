@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Cpu, Database, ChevronDown, ChevronRight, Plus, Minus } from 'lucide-react';
 import { BuildModelFeatureBasedData, ModelConfig } from '../BuildModelFeatureBasedAtom';
 import { VALIDATE_API, BUILD_MODEL_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 
 interface BuildModelFeatureBasedSettingsTabProps {
   data: BuildModelFeatureBasedData;
@@ -73,7 +74,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
           });
           
           if (response.ok) {
-            const responseData = await response.json();
+            const payload = await response.json();
+            const responseData = await resolveTaskResponse(payload);
             console.log('Fetched columns response:', responseData);
             
             // Use the numerical_columns directly from the backend response
@@ -105,7 +107,8 @@ const BuildModelFeatureBasedSettingsTab: React.FC<BuildModelFeatureBasedSettings
           const response = await fetch(`${BUILD_MODEL_API}/pool-identifiers/${data.selectedScope}`);
           
           if (response.ok) {
-            const responseData = await response.json();
+            const payload = await response.json();
+            const responseData = await resolveTaskResponse(payload);
             const identifiers = responseData.identifiers || [];
             console.log('Fetched pool identifiers:', identifiers);
             setPoolIdentifiers(identifiers);

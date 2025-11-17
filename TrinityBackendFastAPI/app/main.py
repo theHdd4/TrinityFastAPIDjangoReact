@@ -80,7 +80,7 @@ def _default_cors_origins() -> List[str]:
         "http://127.0.0.1:8080",
         "http://10.2.1.207:8080",
         "http://172.22.64.1:8080",
-        "http://10.2.3.55:8080",
+        "http://192.168.31.63:8080",
         "https://trinity.quantmatrixai.com",
         "https://trinity-dev.quantmatrixai.com",
         "http://localhost:8080",

@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, ScatterChart, Scatter, Legend } from 'recharts';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { SELECT_API, EXPLORE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -52,6 +53,32 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   data
 }) => {
   const { toast } = useToast();
+  const fetchAndResolve = useCallback(
+    async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+      errorMessage = 'Request failed',
+    ) => {
+      const response = await fetch(input, init);
+      let payload: any;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        throw new Error(errorMessage);
+      }
+
+      if (!response.ok) {
+        const detail =
+          payload && typeof payload === 'object' && 'detail' in payload
+            ? (payload.detail as string)
+            : null;
+        throw new Error(detail || errorMessage);
+      }
+
+      return resolveTaskResponse(payload);
+    },
+    [],
+  );
   // State for variable selection popover
   const [variablePopoverOpen, setVariablePopoverOpen] = useState(false);
   // State for filter stats collapsible section
@@ -368,14 +395,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const url = `${baseUrl}?${params.toString()}`;
       
 
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch variables');
-      }
-      
-      const result = await response.json();
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch variables');
       
       if (result.variables && result.variables.length > 0) {
         handleDataChange({ 
@@ -456,14 +476,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch available filters');
-      }
-      
-      const result = await response.json();
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch available filters');
       
       if (result.available_filters) {
         // Update the model filters with the fetched ranges
@@ -508,43 +521,40 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const url = `${baseUrl}?${params.toString()}`;
       
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const result = await fetchAndResolve(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            file_key: fileKey,
+            variable: variable,
+            method: data.selectedMethod || 'elasticity',
+            combination_id: combinationId,
+            min_self_elasticity: null,
+            max_self_elasticity: null,
+            min_mape: null,
+            max_mape: null,
+            min_r2: null,
+            max_r2: null,
+            min_mape_train: null,
+            max_mape_train: null,
+            min_mape_test: null,
+            max_mape_test: null,
+            min_r2_train: null,
+            max_r2_train: null,
+            min_r2_test: null,
+            max_r2_test: null,
+            min_aic: null,
+            max_aic: null,
+            min_bic: null,
+            max_bic: null
+          })
         },
-        body: JSON.stringify({
-          file_key: fileKey,
-          variable: variable,
-          method: data.selectedMethod || 'elasticity',
-          combination_id: combinationId,
-          min_self_elasticity: null,
-          max_self_elasticity: null,
-          min_mape: null,
-          max_mape: null,
-          min_r2: null,
-          max_r2: null,
-          min_mape_train: null,
-          max_mape_train: null,
-          min_mape_test: null,
-          max_mape_test: null,
-          min_r2_train: null,
-          max_r2_train: null,
-          min_r2_test: null,
-          max_r2_test: null,
-          min_aic: null,
-          max_aic: null,
-          min_bic: null,
-          max_bic: null
-        })
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch elasticity data');
-      }
-      
-      const result = await response.json();
+        'Failed to fetch elasticity data',
+      );
       
       if (result && result.length > 0) {
         // Transform data for the vertical bar chart
@@ -677,14 +687,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch overall filters');
-      }
-      
-      const result = await response.json();
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch overall filters');
       
       if (result.available_filters) {
         // Update the model filters with the fetched ranges
@@ -721,11 +724,9 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             });
             const url = `${baseUrl}?${params.toString()}`;
             
-            const response = await fetch(url);
-            
-            if (response.ok) {
-              const result = await response.json();
-              
+            try {
+              const result = await fetchAndResolve(url, undefined, 'Failed to fetch variable ranges');
+
               if (result.variable_ranges) {
                 Object.keys(result.variable_ranges).forEach(variable => {
                   const rangeData = result.variable_ranges[variable];
@@ -738,6 +739,8 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                   };
                 });
               }
+            } catch (error) {
+              /* ignore range errors */
             }
           } catch (error) {
           }
@@ -772,43 +775,40 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const url = `${baseUrl}?${params.toString()}`;
       
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const result = await fetchAndResolve(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            file_key: fileKey,
+            variable: variable,
+            method: data.selectedMethod || 'elasticity',
+            combination_id: combinationId,
+            min_self_elasticity: null,
+            max_self_elasticity: null,
+            min_mape: null,
+            max_mape: null,
+            min_r2: null,
+            max_r2: null,
+            min_mape_train: null,
+            max_mape_train: null,
+            min_mape_test: null,
+            max_mape_test: null,
+            min_r2_train: null,
+            max_r2_train: null,
+            min_r2_test: null,
+            max_r2_test: null,
+            min_aic: null,
+            max_aic: null,
+            min_bic: null,
+            max_bic: null
+          })
         },
-        body: JSON.stringify({
-          file_key: fileKey,
-          variable: variable,
-          method: data.selectedMethod || 'elasticity',
-          combination_id: combinationId,
-          min_self_elasticity: null,
-          max_self_elasticity: null,
-          min_mape: null,
-          max_mape: null,
-          min_r2: null,
-          max_r2: null,
-          min_mape_train: null,
-          max_mape_train: null,
-          min_mape_test: null,
-          max_mape_test: null,
-          min_r2_train: null,
-          max_r2_train: null,
-          min_r2_test: null,
-          max_r2_test: null,
-          min_aic: null,
-          max_aic: null,
-          min_bic: null,
-          max_bic: null
-        })
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch elasticity data');
-      }
-      
-      const result = await response.json();
+        'Failed to fetch elasticity data',
+      );
       
               if (result && result.length > 0) {
           // Transform data for the vertical bar chart based on selected method
@@ -1117,20 +1117,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         max_bic: filters.bic?.current_max || null
       };
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const result = await fetchAndResolve(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(filterBody)
         },
-        body: JSON.stringify(filterBody)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch filtered elasticity data');
-      }
-      
-      const result = await response.json();
+        'Failed to fetch filtered elasticity data',
+      );
       
       if (result && result.length > 0) {
         // Transform data for the vertical bar chart based on selected method
@@ -1245,20 +1242,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
          variable_filters: Object.keys(variableFilters).length > 0 ? variableFilters : null
        };
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const result = await fetchAndResolve(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(filterBody)
         },
-        body: JSON.stringify(filterBody)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch variable filtered elasticity data');
-      }
-      
-      const result = await response.json();
+        'Failed to fetch variable filtered elasticity data',
+      );
       
       if (result && result.length > 0) {
         // Transform data for the vertical bar chart based on selected method
@@ -1333,13 +1327,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch combination status: ${response.statusText}`);
-      }
-
-      const result = await response.json();
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch combination status');
       setCombinationStatus(result);
       
       // Save to global store
@@ -1382,20 +1370,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         project_name: env.PROJECT_NAME || ''
       };
 
-      const response = await fetch(baseUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      await fetchAndResolve(
+        baseUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(saveRequest)
         },
-        body: JSON.stringify(saveRequest)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to save model');
-      }
-
-      const result = await response.json();
+        'Failed to save model',
+      );
       
       // Show success message
       toast({
@@ -1443,19 +1428,20 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
-      const response = await fetch(url);
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch model contribution data');
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch model contribution data');
-      }
-      
-      const result = await response.json();
-      
-      if (result && result.contribution_data) {
-    handleDataChange({
-          contributionData: result.contribution_data
-        });
+      if (result && Array.isArray(result.contribution_data)) {
+        const chartData = result.contribution_data.map((item: any) => ({
+          name: item.variable_name || item.name || item.variable || 'Variable',
+          value:
+            item.percentage_contribution ??
+            item.contribution_value ??
+            item.relative_contribution ??
+            0,
+        }));
+        handleDataChange({ contributionData: chartData });
+      } else {
+        handleDataChange({ contributionData: [] });
       }
       
     } catch (error) {
@@ -1486,26 +1472,14 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
-      const response = await fetch(url);
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch model performance data');
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch model performance data');
-      }
-      
-      const result = await response.json();
-      
-      if (result && result.performance_metrics) {
-        // Extract performance metrics from the dedicated endpoint
-        const performanceMetrics = [
-          { name: 'MAPE Train', value: result.performance_metrics.mape_train || 0 },
-          { name: 'MAPE Test', value: result.performance_metrics.mape_test || 0 },
-          { name: 'R² Train', value: result.performance_metrics.r2_train || 0 },
-          { name: 'R² Test', value: result.performance_metrics.r2_test || 0 },
-          { name: 'AIC', value: result.performance_metrics.aic || 0 },
-          { name: 'BIC', value: result.performance_metrics.bic || 0 }
-        ];
-        
+      if (result && Array.isArray(result.performance_metrics)) {
+        const performanceMetrics = result.performance_metrics.map((item: any) => ({
+          name: item.label || item.name || 'Metric',
+          value: item.value ?? 0,
+        }));
+
         handleDataChange({
           selectedModelPerformance: performanceMetrics,
           selectedModel: modelName
@@ -1518,34 +1492,35 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch actual vs predicted data
   const fetchActualVsPredicted = async (modelName: string, combinationId: string) => {
-    if (!modelName || combinationId === 'all') {
+    if (!modelName || combinationId === 'all' || !data.selectedDataset) {
       return;
     }
-    
+
     try {
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/actual-vs-predicted`;
-      const params = new URLSearchParams({
+      const requestBody = {
         client_name: env.CLIENT_NAME || '',
         app_name: env.APP_NAME || '',
         project_name: env.PROJECT_NAME || '',
+        file_key: data.selectedDataset,
         combination_name: combinationId,
         model_name: modelName
-      });
-      const url = `${baseUrl}?${params.toString()}`;
-      
-      const response = await fetch(url, {
-        method: 'POST'
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch actual vs predicted data');
-      }
-      
-      const result = await response.json();
+      };
+
+      const result = await fetchAndResolve(
+        baseUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        },
+        'Failed to fetch actual vs predicted data',
+      );
       
       if (result && result.success && result.actual_values && result.predicted_values) {
         
@@ -1624,41 +1599,41 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch YoY data
   const fetchYoYData = async (modelName: string, combinationId: string) => {
-    if (!modelName || combinationId === 'all') {
+    if (!modelName || combinationId === 'all' || !data.selectedDataset) {
       return;
     }
-    
+
     try {
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
       const baseUrl = `${SELECT_API}/yoy-calculation`;
-      const params = new URLSearchParams({
+      const requestBody = {
         client_name: env.CLIENT_NAME || '',
         app_name: env.APP_NAME || '',
         project_name: env.PROJECT_NAME || '',
+        file_key: data.selectedDataset,
         combination_name: combinationId,
         model_name: modelName
-      });
-      const url = `${baseUrl}?${params.toString()}`;
+      };
+
+      const result = await fetchAndResolve(
+        baseUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        },
+        'Failed to fetch YoY data',
+      );
       
-      const response = await fetch(url, {
-        method: 'POST'
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch YoY data');
-      }
-      
-      const result = await response.json();
-      
-      if (result && result.success && result.waterfall && result.waterfall.labels && result.waterfall.values) {
-        
-        // Transform waterfall data for the bar chart
-        const chartData = result.waterfall.labels.map((label: string, index: number) => ({
-          name: label,
-          value: result.waterfall.values[index] || 0
+      if (result && result.success && result.dates && Array.isArray(result.actual)) {
+        const chartData = result.dates.map((date: string, index: number) => ({
+          name: date,
+          value: result.actual[index] || 0,
+          predicted: result.predicted ? result.predicted[index] || 0 : 0,
         }));
         
         handleDataChange({ yoyData: chartData });
@@ -1696,14 +1671,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch actual vs predicted data');
-      }
-      
-      const result = await response.json();
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch actual vs predicted data');
       
       // Transform the data to match the expected format
       if (result.actual_values && result.predicted_values && Array.isArray(result.actual_values)) {
@@ -1778,21 +1746,14 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         project_name: env.PROJECT_NAME || ''
       });
       const url = `${baseUrl}?${params.toString()}`;
-      
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch ensemble contribution data');
-      }
-      
-      const result = await response.json();
+
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch ensemble contribution data');
       
       // Transform the data to match the expected format for pie chart
       if (result.contribution_data && Array.isArray(result.contribution_data)) {
         const transformedData = result.contribution_data.map((item: any) => ({
-          name: item.name,
-          value: item.value
+          name: item.variable_name || item.name || 'Variable',
+          value: item.percentage_contribution ?? item.value ?? 0,
         }));
         
         handleDataChange({ contributionData: transformedData });
@@ -1830,22 +1791,14 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch YoY data');
-      }
-      
-      const result = await response.json();
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch YoY data');
       
       // Transform the data to match the expected format
-      if (result && result.success && result.waterfall && result.waterfall.labels && result.waterfall.values) {
-        
-        // Transform waterfall data for the bar chart
-        const chartData = result.waterfall.labels.map((label: string, index: number) => ({
-          name: label,
-          value: result.waterfall.values[index] || 0
+      if (result && result.success && result.dates && Array.isArray(result.actual)) {
+        const chartData = result.dates.map((date: string, index: number) => ({
+          name: date,
+          value: result.actual[index] || 0,
+          predicted: result.predicted ? result.predicted[index] || 0 : 0,
         }));
         
         handleDataChange({ yoyData: chartData });
@@ -1883,20 +1836,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         filtered_models: data.elasticityData && data.elasticityData.length > 0 ? data.elasticityData.map((model: any) => model.name) : null
       };
       
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const result = await fetchAndResolve(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
         },
-        body: JSON.stringify(requestBody)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch weighted ensemble data');
-      }
-      
-      const result = await response.json();
+        'Failed to fetch weighted ensemble data',
+      );
       
       if (result && result.results && result.results.length > 0) {
         
@@ -1936,7 +1886,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch S-curve data
   const fetchSCurveData = async (combinationId: string, modelName: string) => {
-    if (!combinationId || combinationId === 'all' || !modelName || modelName === 'no-models') {
+    if (!combinationId || combinationId === 'all' || !modelName || modelName === 'no-models' || !data.selectedDataset) {
       return;
     }
     
@@ -1950,24 +1900,22 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         client_name: env.CLIENT_NAME || '',
         app_name: env.APP_NAME || '',
         project_name: env.PROJECT_NAME || '',
+        file_key: data.selectedDataset,
         combination_name: combinationId,
         model_name: modelName
       };
 
-      const response = await fetch(baseUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const result = await fetchAndResolve(
+        baseUrl,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
         },
-        body: JSON.stringify(requestBody)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch S-curve data');
-      }
-      
-      const result = await response.json();
+        'Failed to fetch S-curve data',
+      );
       
       if (result && result.success && result.s_curves) {
         handleDataChange({ sCurveData: result });
@@ -1997,19 +1945,16 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         project_name: env.PROJECT_NAME || ''
       });
 
-      const response = await fetch(`${baseUrl}?${params}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch application type');
-      }
-      
-      const result = await response.json();
+      const result = await fetchAndResolve(
+        `${baseUrl}?${params}`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        },
+        'Failed to fetch application type',
+      );
       
       if (result && result.application_type) {
         setApplicationType(result.application_type);
@@ -2260,20 +2205,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         filterBody.max_bic = filters.bic.current_max;
       }
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const result = await fetchAndResolve(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(filterBody)
         },
-        body: JSON.stringify(filterBody)
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch elasticity data');
-      }
-      
-      const result = await response.json();
+        'Failed to fetch elasticity data',
+      );
       
       if (result && result.length > 0) {
         // Transform data for the vertical bar chart

@@ -22,6 +22,7 @@ export interface DataFrameData {
   frozenColumns: number;
   cellColors: { [key: string]: string }; // key format: "row-col"
   hiddenColumns: string[]; // Array of hidden column names
+  deletedColumns?: string[]; // Track columns removed from the dataset
 }
 
 export interface DataFrameSettings {

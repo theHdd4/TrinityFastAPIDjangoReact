@@ -845,7 +845,28 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     });
 
     const sortRecursive = (items: ColumnNode[]) => {
-      items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      items.sort((a, b) => {
+        // Check if nodes are Grand Total nodes by checking their labels and column name
+        const aIsGrandTotal = 
+          (a.column && (a.column.toLowerCase().includes('grand total') || a.column.toLowerCase() === 'grandtotal')) ||
+          a.labels?.some(label => {
+            const value = String(label.value ?? '').toLowerCase();
+            return value.includes('grand total') || value === 'grandtotal';
+          }) || false;
+        const bIsGrandTotal = 
+          (b.column && (b.column.toLowerCase().includes('grand total') || b.column.toLowerCase() === 'grandtotal')) ||
+          b.labels?.some(label => {
+            const value = String(label.value ?? '').toLowerCase();
+            return value.includes('grand total') || value === 'grandtotal';
+          }) || false;
+        
+        // Grand Total nodes go to the end
+        if (aIsGrandTotal && !bIsGrandTotal) return 1;
+        if (!aIsGrandTotal && bIsGrandTotal) return -1;
+        
+        // Otherwise sort by order
+        return (a.order ?? 0) - (b.order ?? 0);
+      });
       items.forEach((child) => sortRecursive(child.children));
     };
     sortRecursive(roots);
@@ -879,6 +900,19 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       return total;
     };
     roots.forEach(computeLeafCounts);
+
+    // Sort leafColumns to put Grand Total columns at the end
+    const isGrandTotalColumn = (col: string) => {
+      const normalized = col.toLowerCase();
+      return normalized.includes('grand total') || normalized === 'grandtotal';
+    };
+    leafColumns.sort((a, b) => {
+      const aIsGrandTotal = isGrandTotalColumn(a);
+      const bIsGrandTotal = isGrandTotalColumn(b);
+      if (aIsGrandTotal && !bIsGrandTotal) return 1; // Grand Total goes to end
+      if (!aIsGrandTotal && bIsGrandTotal) return -1; // Non-Grand Total stays first
+      return 0; // Keep original order for same type
+    });
 
     const rows: ColumnHeaderCell[][] = Array.from(
       { length: depth },
@@ -3088,4 +3122,3 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 };
 
 export default PivotTableCanvas;
-

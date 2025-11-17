@@ -15,10 +15,10 @@ from app.features.scope_selector.endpoint import router as scope_selector_router
 from app.features.user_apps.endpoint import router as user_apps_router
 from app.features.clustering.endpoint import router as clustering_router
 from app.features.chart_maker.endpoint import router as chart_maker_router
+from app.features.build_feature_based.endpoint import router as build_feature_router
 from app.features.build_model_feature_based.endpoint import router as build_model_router
 from app.features.scenario_planner_category_forecasting.endpoint import router as scenario_planner_router
 # from app.features.build_autoregressive.endpoint import router as autoregressive_router
-from app.features.select_models_feature_based.endpoint import router as select_router
 from app.features.select_models_feature_based.endpoint import router as select_models_router
 from app.features.evaluate_models_feature_based.endpoint import router as evaluate_router
 from app.features.exhibition.endpoint import router as exhibition_router
@@ -62,6 +62,7 @@ api_router.include_router(laboratory_router)
 api_router.include_router(pivot_table_router)
 api_router.include_router(unpivot_router)
 
+api_router.include_router(build_feature_router)
 api_router.include_router(build_model_router)
 api_router.include_router(scenario_planner_router)
 # api_router.include_router(autoregressive_router)

@@ -1,3 +1,5 @@
+import { resolveTaskResponse } from './taskQueue';
+
 const hostIp = import.meta.env.VITE_HOST_IP;
 const isDevStack =
   (typeof window !== 'undefined' && window.location.port === '8081') ; //||
@@ -170,6 +172,10 @@ export const CLASSIFIER_API =
 export const DATAFRAME_OPERATIONS_API =
   import.meta.env.VITE_DATAFRAME_OPERATIONS_API || `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/dataframe-operations`;
 
+export const BUILD_FEATURE_BASED_API =
+  normalizeUrl(import.meta.env.VITE_BUILD_FEATURE_BASED_API) ||
+  `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-feature-based`;
+
 export const CLUSTERING_API =
   normalizeUrl(import.meta.env.VITE_CLUSTERING_API) ||
   `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/clustering`;
@@ -276,31 +282,20 @@ export const calculateFiscalGrowth = async (params: {
   fiscal_start_month?: number;
   frequency?: string;
   start_year?: number;
-  run_id?: string; 
+  run_id?: string;
 }) => {
-  const formData = new FormData();
-  formData.append('scope', params.scope);
-  formData.append('combination', params.combination);
-  formData.append('forecast_horizon', params.forecast_horizon.toString());
-  formData.append('fiscal_start_month', (params.fiscal_start_month || 1).toString());
-  formData.append('frequency', params.frequency || 'M');
-  formData.append('start_year', (params.start_year || 2017).toString());
-  
-  // Add run_id if provided
-  if (params.run_id) {
-    formData.append('run_id', params.run_id);
-  }
-
   const response = await fetch(`${AUTO_REGRESSIVE_API}/calculate-fiscal-growth`, {
     method: 'POST',
-    body: formData,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
   });
 
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 
-  return response.json();
+  const raw = await response.json();
+  return resolveTaskResponse(raw);
 };
 
 
@@ -310,30 +305,20 @@ export const calculateHalfYearlyGrowth = async (params: {
   forecast_horizon: number;
   fiscal_start_month?: number;
   frequency?: string;
-  run_id?: string;  // Add run_id parameter
+  run_id?: string;
 }) => {
-  const formData = new FormData();
-  formData.append('scope', params.scope);
-  formData.append('combination', params.combination);
-  formData.append('forecast_horizon', params.forecast_horizon.toString());
-  formData.append('fiscal_start_month', (params.fiscal_start_month || 1).toString());
-  formData.append('frequency', params.frequency || 'M');
-  
-  // Add run_id if provided
-  if (params.run_id) {
-    formData.append('run_id', params.run_id);
-  }
-
   const response = await fetch(`${AUTO_REGRESSIVE_API}/calculate-halfyearly-growth`, {
     method: 'POST',
-    body: formData,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
   });
 
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 
-  return response.json();
+  const raw = await response.json();
+  return resolveTaskResponse(raw);
 };
 
 export const calculateQuarterlyGrowth = async (params: {
@@ -342,28 +327,18 @@ export const calculateQuarterlyGrowth = async (params: {
   forecast_horizon: number;
   fiscal_start_month?: number;
   frequency?: string;
-  run_id?: string;  // Add run_id parameter
+  run_id?: string;
 }) => {
-  const formData = new FormData();
-  formData.append('scope', params.scope);
-  formData.append('combination', params.combination);
-  formData.append('forecast_horizon', params.forecast_horizon.toString());
-  formData.append('fiscal_start_month', (params.fiscal_start_month || 1).toString());
-  formData.append('frequency', params.frequency || 'M');
-  
-  // Add run_id if provided
-  if (params.run_id) {
-    formData.append('run_id', params.run_id);
-  }
-
   const response = await fetch(`${AUTO_REGRESSIVE_API}/calculate-quarterly-growth`, {
     method: 'POST',
-    body: formData,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
   });
 
   if (!response.ok) {
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 
-  return response.json();
+  const raw = await response.json();
+  return resolveTaskResponse(raw);
 };
