@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 // Removed Badge and icon imports to avoid type issues
 import { EvaluateModelsFeatureData, type EvaluateModelsFeatureSettings } from '../EvaluateModelsFeatureAtom';
 import { VALIDATE_API, EVALUATE_API, SELECT_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface EvaluateModelsFeatureSettingsProps {
@@ -103,18 +104,33 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
       }
     }
     
-    fetch(url)
-      .then(res => res.json())
-      .then(data => {
-        if (data.combinations && Array.isArray(data.combinations)) {
-          setCombinationOptions(data.combinations);
-        } else {
+    let isCancelled = false;
+
+    const fetchCombinations = async () => {
+      try {
+        const response = await fetch(url);
+        const payload = await resolveTaskResponse(await response.json());
+
+        if (!isCancelled) {
+          if (payload.combinations && Array.isArray(payload.combinations)) {
+            setCombinationOptions(payload.combinations);
+          } else {
+            setCombinationOptions([]);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch combinations', error);
+        if (!isCancelled) {
           setCombinationOptions([]);
         }
-      })
-      .catch(() => {
-        setCombinationOptions([]);
-      });
+      }
+    };
+
+    fetchCombinations();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [data.selectedDataframe, data.selectedIdentifierValues]);
 
   // Auto-select all combinations when dataset changes and combinations are available
