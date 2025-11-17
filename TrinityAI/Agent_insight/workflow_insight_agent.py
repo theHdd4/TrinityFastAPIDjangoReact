@@ -216,17 +216,15 @@ class WorkflowInsightAgent:
     def _build_step_section(self, records: List[Dict[str, Any]]) -> str:
         lines: List[str] = []
         for record in records:
-            header = f"{record['step_number']}. {record['agent']}"
-            if record["description"]:
-                header += f" – {record['description']}"
-            lines.append(header)
+            summary = record["description"] or record["insight"] or "completed the assigned objective"
+            lines.append(f"- {record['agent']} focused on {summary}")
             if record["insight"]:
-                lines.append(f"   Insight: {record['insight']}")
-            if record["result_preview"]:
-                lines.append(f"   Result: {record['result_preview']}")
+                lines.append(f"  Key takeaway: {record['insight']}")
+            elif record["result_preview"]:
+                lines.append(f"  Observable outcome: {record['result_preview']}")
             if record["outputs"]:
                 outputs = ", ".join(record["outputs"])
-                lines.append(f"   Outputs: {outputs}")
+                lines.append(f"  Outputs referenced: {outputs}")
         if len(lines) > 200:
             lines = lines[:200]
             lines.append("   … truncated additional steps …")
@@ -246,27 +244,22 @@ class WorkflowInsightAgent:
             in the sections above (Step Evidence, File Context, Additional Notes).
 
             Style rules:
-            - Do NOT mention workflows, pipelines, agents, prompts, insight generation,
-              or other meta-process language.
-            - Speak like an analyst briefing a stakeholder; keep the tone confident,
-              warm, and human.
-            - Lead with the subject (brand / metric / market) and cite concrete values
-              or files whenever they appear in the evidence (totals, averages, saved
-              file names, row counts, date ranges, etc.).
-            - If a requested number is missing, state that clearly instead of inventing it.
+            - Think like a senior analyst: synthesize meaning, do not just restate outputs.
+            - Tie every point back to the user’s intent and the specific datasets or files referenced.
+            - Keep the tone confident, human, and insight-oriented; avoid meta language about agents, prompts, or pipelines.
+            - When data is missing, call it out explicitly rather than guessing.
 
-            Structure:
-            - Write two short paragraphs, about three sentences each.
-              Paragraph 1: summarize what the data shows (key metrics, trends, notable
-              comparisons).
-              Paragraph 2: explain what those numbers mean for the business and suggest
-              the next logical question or action.
+            Output format (use these headings, each on its own line):
+            1. Summary — 2–3 sentences in plain language explaining what the workflow revealed and why it matters.
+            2. Key insights — a short bulleted list highlighting the non-obvious observations a human expert would surface.
+            3. Patterns / Red flags / Opportunities — note directional signals, anomalies, or leverage points; separate items with semicolons if needed.
+            4. Missing information or assumptions — clarify any data gaps or leaps of logic that limit confidence.
+            5. Recommendations or next steps — actionable guidance connected to the findings, framed as strategic advice.
 
             Hard constraints:
-            - Never fabricate data.
-            - Never reference the existence of “steps”, “pipelines”, or “insights”.
-            - Use the term “dataset” or the actual file name when you refer to
-              saved assets.
+            - Do not fabricate metrics or files; only cite evidence provided.
+            - Never describe the internal workflow mechanics (no mentions of steps, pipelines, or agents).
+            - Keep the entire response concise but substantive, focusing on reasoning and implications.
             """
         ).strip()
 

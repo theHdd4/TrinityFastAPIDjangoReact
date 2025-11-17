@@ -319,7 +319,15 @@ class SmartCreateTransformAgent:
 
         raw = call_llm_create_transform(self.api_url, self.model_name, self.bearer_token, prompt)
         
+        # 🔧 LOG LLM REQUEST AND RESPONSE
+        logger.info(f"🤖 CREATE/TRANSFORM LLM REQUEST:")
+        logger.info(f"📝 User Prompt: {user_prompt}")
+        logger.info(f"🔧 Session ID: {session_id}")
+        logger.info(f"📁 Available Files: {list(self.files_with_columns.keys())}")
+        logger.info(f"📋 Prompt Length: {len(prompt)} characters")
+        
         if not raw:
+            logger.error("❌ No response from LLM")
             return {
                 "success": False,
                 "message": "LLM returned no response.",
@@ -327,9 +335,46 @@ class SmartCreateTransformAgent:
                 "suggestions": ["Try again later."]
             }
         
+        # 🔧 LOG LLM RESPONSE
+        logger.info(f"🤖 CREATE/TRANSFORM LLM RESPONSE:")
+        logger.info(f"📄 Raw Response Length: {len(raw) if raw else 0} characters")
+        if raw:
+            logger.info(f"📄 FULL RAW LLM RESPONSE:")
+            logger.info("=" * 80)
+            logger.info(raw)
+            logger.info("=" * 80)
+        else:
+            logger.warning("❌ No response from LLM")
+        
         parsed = extract_json_from_response(raw) or {}
         
+        # 🔧 LOG PARSED JSON
+        logger.info(f"🔍 CREATE/TRANSFORM PARSED JSON:")
+        logger.info(f"✅ Success: {parsed.get('success', False)}")
+        logger.info(f"📊 Has json field: {bool(parsed.get('json'))}")
+        logger.info(f"💬 Has smart_response: {bool(parsed.get('smart_response'))}")
+        logger.info(f"📋 Has suggestions: {bool(parsed.get('suggestions'))}")
+        if parsed.get('smart_response'):
+            logger.info(f"💬 Smart Response: {parsed['smart_response'][:200]}...")
+        logger.info(f"🔍 FULL PARSED JSON:")
+        logger.info("=" * 80)
+        logger.info(json.dumps(parsed, indent=2))
+        logger.info("=" * 80)
+        
         result = self._enforce_allowed_keys(parsed, session_id)
+        
+        # 🔧 LOG FINAL RESULT
+        logger.info(f"✅ CREATE/TRANSFORM FINAL RESULT:")
+        logger.info(f"✅ Success: {result.get('success', False)}")
+        logger.info(f"📊 Has json field: {bool(result.get('json'))}")
+        if result.get('json'):
+            json_data = result.get('json')
+            if isinstance(json_data, list):
+                logger.info(f"📊 JSON is array with {len(json_data)} items")
+                if len(json_data) > 0:
+                    logger.info(f"📊 First item keys: {list(json_data[0].keys()) if isinstance(json_data[0], dict) else 'Not a dict'}")
+            elif isinstance(json_data, dict):
+                logger.info(f"📊 JSON is object with keys: {list(json_data.keys())}")
         
         memory.save_context({"input": user_prompt}, {"output": json.dumps(result)})
         return result

@@ -100,3 +100,4 @@ async def generate_workflow_insight(request: WorkflowInsightRequest):
         files_profiled=result.get("files_profiled"),
     )
 
+

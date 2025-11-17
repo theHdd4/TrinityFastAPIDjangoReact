@@ -46,22 +46,22 @@ agent = SmartCreateTransformAgent(
         "subtract": "Subtract columns (first column minus others, e.g., revenue - cost)",
         "multiply": "Multiply multiple numeric columns together (e.g., price * quantity)",
         "divide": "Divide columns (first column divided by others, e.g., revenue / volume)",
-        "power": "Raise a column to a specified power (e.g., volume^2)",
-        "sqrt": "Calculate square root of a numeric column",
-        "log": "Calculate natural logarithm of a numeric column",
-        "exp": "Calculate exponential of a numeric column",
-        "residual": "Calculate residuals from STL decomposition for time series",
-        "dummy": "Create dummy variables from categorical columns (e.g., market categories)",
-        "seasonality": "Extract seasonal component using STL for time series data",
-        "trend": "Extract trend component using STL for time series data",
-        "rpi": "Calculate relative price index (price / average_price)",
-        "percentile": "Calculate percentile rank of a numeric column",
-        "zscore": "Calculate z-score normalization of a numeric column",
-        "rolling_mean": "Calculate rolling average with specified window",
-        "rolling_sum": "Calculate rolling sum with specified window",
-        "lag": "Create lagged version of a column (previous period value)",
-        "diff": "Calculate difference between consecutive values",
-        "pct_change": "Calculate percentage change between consecutive values"
+        "abs": "Create absolute value for numeric columns (|value|).",
+        "power": "Raise a column to a specified power (requires `_param`, e.g., 2 for square).",
+        "sqrt": "Calculate square root of a numeric column.",
+        "log": "Calculate natural logarithm of a numeric column.",
+        "exp": "Calculate exponential of a numeric column.",
+        "residual": "Calculate regression residuals for a dependent column vs explanatory columns.",
+        "dummy": "Create categorical dummy/label-encoded columns.",
+        "datetime": "Extract year/month/week/day/day_name/month_name from a datetime column via `_param`.",
+        "rpi": "Calculate relative price index (price / average_price).",
+        "stl_outlier": "Detect STL outliers for date/volume columns.",
+        "logistic": "Apply logistic saturation with `_param` JSON: {\"gr\": growth, \"co\": carryover, \"mp\": midpoint}.",
+        "detrend": "Remove trend component using STL on a date-sorted series.",
+        "deseasonalize": "Remove seasonal component using STL.",
+        "detrend_deseasonalize": "Remove both trend and seasonality using STL.",
+        "standardize_zscore": "Standardize numeric columns using z-score.",
+        "standardize_minmax": "Scale numeric columns to 0-1 using min/max."
     },  # supported_operations
     """
 [
@@ -82,6 +82,11 @@ agent = SmartCreateTransformAgent(
 ## - "multiply_1": "price,quantity" → "multiply_1_rename": "total_revenue"
 ## - "subtract_1": "revenue,cost" → "subtract_1_rename": "profit_margin"
 ## - "divide_1": "revenue,volume" → "divide_1_rename": "price_per_unit"
+##
+## Special Parameters:
+## - Datetime ops must include `<op>_<idx>_param` with one of: to_year, to_month, to_week, to_day, to_day_name, to_month_name.
+## - Logistic ops require `<op>_<idx>_param` JSON: {"gr": growth_rate, "co": carryover, "mp": midpoint}.
+## - Power ops require `<op>_<idx>_param` numeric exponent (e.g., 2 for square).
 """
 )
 

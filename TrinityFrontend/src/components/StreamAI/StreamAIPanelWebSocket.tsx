@@ -84,6 +84,63 @@ interface Message {
   data?: any; // For storing workflow/step data
 }
 
+const HISTORY_SUMMARY_LIMIT = 8;
+const HISTORY_SUMMARY_CHAR_LIMIT = 1200;
+const FILE_MENTION_LIMIT = 20;
+
+const buildHistorySummary = (historyMessages: Message[], maxEntries = HISTORY_SUMMARY_LIMIT): string => {
+  if (!historyMessages || historyMessages.length === 0) {
+    return '';
+  }
+
+  const recent = historyMessages.slice(-maxEntries);
+  const summary = recent
+    .map((msg) => {
+      const senderLabel = msg.sender === 'user' ? 'User' : 'AI';
+      const text = (msg.content || '').trim();
+      if (!text) {
+        return '';
+      }
+      return `${senderLabel}: ${text}`;
+    })
+    .filter(Boolean)
+    .join('\n');
+
+  if (summary.length <= HISTORY_SUMMARY_CHAR_LIMIT) {
+    return summary;
+  }
+
+  return summary.slice(-HISTORY_SUMMARY_CHAR_LIMIT);
+};
+
+const extractFileMentions = (historyMessages: Message[]): string[] => {
+  if (!historyMessages || historyMessages.length === 0) {
+    return [];
+  }
+
+  const mentions: string[] = [];
+  const seen = new Set<string>();
+  const filePattern = /@?([\w\-./]+(?:\.(?:arrow|csv|xlsx|xls)))/gi;
+
+  historyMessages.forEach((msg) => {
+    const content = msg.content || '';
+    let match: RegExpExecArray | null;
+    while ((match = filePattern.exec(content)) !== null) {
+      const raw = match[1]?.replace(/^@/, '').trim();
+      if (!raw) continue;
+      const normalized = raw.toLowerCase();
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      mentions.push(raw);
+      if (mentions.length >= FILE_MENTION_LIMIT) {
+        return;
+      }
+    }
+  });
+
+  return mentions;
+};
+
 interface Chat {
   id: string;
   title: string;
@@ -943,6 +1000,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       sender: 'user',
       timestamp: new Date()
     };
+
+    const nextHistoryMessages = [...messages, userMessage];
+    const historySummary = buildHistorySummary(nextHistoryMessages);
+    const trackedFiles = extractFileMentions(nextHistoryMessages);
     
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
@@ -1012,7 +1073,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           project_context: projectContext,
           user_id: 'current_user',
           session_id: currentSessionId,  // Send session ID for chat context
-          chat_id: currentChatId
+          chat_id: currentChatId,
+          history_summary: historySummary,
+          mentioned_files: trackedFiles
         }));
       };
       
@@ -1127,6 +1190,45 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 : msg
             ));
             break;
+          
+          case 'atom_retry': {
+            console.warn('🔁 Atom retry triggered:', data);
+            setIsLoading(true);
+            setMessages(prev => {
+              const updated = prev.map(msg =>
+                msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id
+                  ? {
+                      ...msg,
+                      data: {
+                        ...msg.data,
+                        steps: msg.data.steps.map((s: any) =>
+                          s.step_number === data.step
+                            ? {
+                                ...s,
+                                status: 'retrying',
+                                retryAttempt: data.attempt,
+                                maxAttempts: data.max_attempts
+                              }
+                            : s
+                        )
+                      }
+                    }
+                  : msg
+              );
+              const attempt = Number(data.attempt) || 1;
+              const maxAttempts = Number(data.max_attempts) || attempt;
+              const reasonText = data.reason ? String(data.reason) : 'Atom returned success=false';
+              const retryMsg: Message = {
+                id: `atom-retry-${data.sequence_id}-${data.step}-${Date.now()}`,
+                content: `⚠️ ${data.atom_id || 'Atom'} attempt ${attempt}/${maxAttempts} failed. Retrying...\nReason: ${reasonText}`,
+                sender: 'ai',
+                timestamp: new Date(),
+                type: 'text'
+              };
+              return [...updated, retryMsg];
+            });
+            break;
+          }
             
           case 'card_created':
             console.log('🎴 Card created:', data.card_id);

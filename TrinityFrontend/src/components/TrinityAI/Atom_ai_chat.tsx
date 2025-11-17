@@ -8,6 +8,8 @@ import { Sparkles, Bot, User, X, MessageSquare, Send, Plus, RotateCcw } from 'lu
 import { TRINITY_AI_API, CONCAT_API, MERGE_API, CREATECOLUMN_API, GROUPBY_API, FEATURE_OVERVIEW_API, VALIDATE_API, CHART_MAKER_API, EXPLORE_API, DATAFRAME_OPERATIONS_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { createColumnHandler } from './handlers/createColumnHandler';
+import { AtomHandlerContext } from './handlers/types';
 
 interface Message {
   id: string;
@@ -585,334 +587,37 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             });
           }
         } else if (atomType === 'create-column' && data.json) {
-          const cfg = data.json[0]; // Get first configuration object
+          // 🔧 CRITICAL FIX: Use the handler instead of inline code (like groupby should)
+          console.log('🚀🚀🚀 NEW HANDLER: Using createColumnHandler for create-column - OLD CODE SHOULD NOT RUN');
           
-          console.log('🤖 AI CREATE COLUMN CONFIG EXTRACTED:', cfg);
-          
-          // 🔧 CRITICAL FIX: Convert AI config to proper CreateColumn format
-          const operations = [];
-          
-          // Parse operations from the new AI format (add_0, add_0_rename, etc.)
-          const operationKeys = Object.keys(cfg).filter(key => 
-            key.match(/^(add|subtract|multiply|divide|power|sqrt|log|abs|dummy|rpi|residual|stl_outlier|logistic|detrend|deseasonalize|detrend_deseasonalize|exp|standardize_zscore|standardize_minmax)_\d+$/)
-          );
-          
-          operationKeys.forEach((opKey) => {
-            const match = opKey.match(/^(\w+)_(\d+)$/);
-            if (match) {
-              const opType = match[1];
-              const opIndex = parseInt(match[2]);
-              const columns = cfg[opKey].split(',').map(col => col.trim());
-              const renameKey = `${opType}_${opIndex}_rename`;
-              const rename = cfg[renameKey] || '';
-              
-              operations.push({
-                id: `${opType}_${opIndex}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                type: opType,
-                name: opType.charAt(0).toUpperCase() + opType.slice(1),
-                columns: columns,
-                newColumnName: rename || `${opType}_${columns.join('_')}`,
-                rename: rename,
-                param: null // Will be added if param exists
-              });
-              
-              // Check if there are parameters
-              const paramKey = `${opType}_${opIndex}_param`;
-              if (cfg[paramKey]) {
-                operations[operations.length - 1].param = cfg[paramKey];
-              }
-              
-              // Check if there are period parameters
-              const periodKey = `${opType}_${opIndex}_period`;
-              if (cfg[periodKey]) {
-                operations[operations.length - 1].param = cfg[periodKey];
-              }
+          try {
+            const handlerContext: AtomHandlerContext = {
+              atomId,
+              atomType,
+              atomTitle,
+              updateAtomSettings,
+              setMessages,
+              sessionId,
+              isStreamMode: false
+            };
+            
+            if (data.success !== false) {
+              // Call handleSuccess
+              await createColumnHandler.handleSuccess(data, handlerContext);
+            } else {
+              // Call handleFailure
+              await createColumnHandler.handleFailure(data, handlerContext);
             }
-          });
-          
-          // 🔧 CRITICAL FIX: Set dataSource first to trigger column loading, then load columns
-          updateAtomSettings(atomId, { 
-            aiConfig: cfg,
-            aiMessage: data.message,
-            operationCompleted: false,
-            // Auto-populate the CreateColumn interface - EXACTLY like GroupBy
-            dataSource: cfg.object_name || '', // Note: AI uses object_name (singular)
-            bucketName: cfg.bucket_name || 'trinity',
-            selectedIdentifiers: cfg.identifiers || [],
-            // 🔧 CRITICAL FIX: Set the file key for column loading
-            file_key: cfg.object_name || '',
-            // 🔧 CRITICAL FIX: Set operations in the format expected by CreateColumnCanvas
-            // This ensures the UI automatically displays the AI-configured operations
-            operations: operations.map((op, index) => ({
-              id: op.id,
-              type: op.type,
-              name: op.name,
-              columns: op.columns,
-              newColumnName: op.newColumnName,
-              rename: op.rename,
-              param: op.param
-            }))
-          });
-          
-          // 🔧 CRITICAL FIX: Load columns directly after setting dataSource
-          if (cfg.object_name) {
-            try {
-              console.log('🔄 Loading columns for AI-selected data source:', cfg.object_name);
-              
-              // 🔧 CRITICAL FIX: Get the current prefix and construct full object name
-              let fullObjectName = cfg.object_name;
-              
-              // Get environment context for prefix construction
-              const envStr = localStorage.getItem('env');
-              if (envStr) {
-                try {
-                  const env = JSON.parse(envStr);
-                  const clientName = env.CLIENT_NAME || '';
-                  const appName = env.APP_NAME || '';
-                  const projectName = env.PROJECT_NAME || '';
-                  
-                  console.log('🔧 Environment context:', { clientName, appName, projectName });
-                  
-                  if (clientName && appName && projectName) {
-                    // Construct full path if object_name is just a filename
-                    if (!cfg.object_name.includes('/')) {
-                      fullObjectName = `${clientName}/${appName}/${projectName}/${cfg.object_name}`;
-                      console.log('🔧 Constructed full object name from filename:', fullObjectName);
-                    } else if (!cfg.object_name.startsWith(clientName)) {
-                      // Object name has some path but not the full prefix
-                      fullObjectName = `${clientName}/${appName}/${projectName}/${cfg.object_name}`;
-                      console.log('🔧 Added prefix to partial path:', fullObjectName);
-                    } else {
-                      fullObjectName = cfg.object_name;
-                      console.log('🔧 Using existing full path:', fullObjectName);
-                    }
-                  }
-                } catch (envError) {
-                  console.warn('⚠️ Failed to parse environment context:', envError);
-                }
-              } else {
-                console.warn('⚠️ No environment context found in localStorage');
-              }
-              
-              // Fetch column summary to populate allColumns with full object name
-              const columnRes = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fullObjectName)}`);
-              if (columnRes.ok) {
-                const rawColumn = await columnRes.json();
-                const columnData = await resolveTaskResponse<{ summary?: any[] }>(rawColumn);
-                const allColumns = Array.isArray(columnData.summary) ? columnData.summary.filter(Boolean) : [];
-                
-                console.log('✅ Columns loaded successfully:', allColumns.length);
-                
-                // Update atom settings with the loaded columns
-                updateAtomSettings(atomId, {
-                  allColumns: allColumns,
-                  // Also set the CSV display name
-                  csvDisplay: cfg.object_name.split('/').pop() || cfg.object_name
-                });
-                
-                // 🔧 CRITICAL FIX: Also trigger the handleFrameChange logic to set up identifiers
-                try {
-                  // Try to fetch identifiers from backend classification
-                  const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(cfg.object_name)}`);
-                  console.log('🔍 Classification response status:', resp.status);
-                  if (resp.ok) {
-                    const rawClassification = await resp.json();
-                    const data = await resolveTaskResponse<Record<string, any>>(rawClassification);
-                    console.log('🔍 Classification identifiers:', data.identifiers);
-                    updateAtomSettings(atomId, {
-                      selectedIdentifiers: (data.identifiers as string[]) || []
-                    });
-                  } else {
-                    // Fallback to categorical columns
-                    const cats = allColumns.filter(c =>
-                      c.data_type && (
-                        c.data_type.toLowerCase().includes('object') ||
-                        c.data_type.toLowerCase().includes('string') ||
-                        c.data_type.toLowerCase().includes('category')
-                      )
-                    ).map(c => c.column)
-                    .filter(id => !['date','time','month','months','week','weeks','year'].includes(id.toLowerCase()));
-                    
-                    console.log('🔧 Fallback categorical columns:', cats);
-                    updateAtomSettings(atomId, {
-                      selectedIdentifiers: cats
-                    });
-                  }
-                } catch (err) {
-                  console.warn('⚠️ Failed to fetch classification, using fallback:', err);
-                  // Fallback to categorical columns
-                  const cats = allColumns.filter(c =>
-                    c.data_type && (
-                      c.data_type.toLowerCase().includes('object') ||
-                      c.data_type.toLowerCase().includes('string') ||
-                      c.data_type.toLowerCase().includes('category')
-                    )
-                  ).map(c => c.column)
-                  .filter(id => !['date','time','month','months','week','weeks','year'].includes(id.toLowerCase()));
-                  
-                  console.log('🔧 Fallback categorical columns (catch):', cats);
-                  updateAtomSettings(atomId, {
-                    selectedIdentifiers: cats
-                  });
-                }
-                
-              } else {
-                console.warn('⚠️ Failed to load columns for data source:', cfg.object_name);
-              }
-            } catch (error) {
-              console.error('❌ Error loading columns for data source:', error);
-            }
+          } catch (handlerError) {
+            console.error('❌ Error in createColumnHandler:', handlerError);
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Error processing create column configuration: ${(handlerError as Error).message || 'Unknown error'}`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
           }
-          
-          // Add AI success message with operation completion
-          const aiSuccessMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            content: `✅ ${data.message || 'AI create column configuration completed'}\n\nFile: ${cfg.object_name || 'N/A'}\nOperations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}\n\n🔄 Configuration loaded! Now executing the Create Column operations...`,
-            sender: 'ai',
-            timestamp: new Date(),
-          };
-          setMessages(prev => [...prev, aiSuccessMsg]);
-
-          // 🔧 CRITICAL FIX: Automatically execute the operations (like GroupBy)
-          // Wait a bit for the UI to update, then automatically perform the operations
-          setTimeout(async () => {
-            try {
-              console.log('🚀 Auto-executing Create Column operations with AI config');
-              console.log('🔍 operations array:', operations);
-              console.log('🔍 operations is array:', Array.isArray(operations));
-              console.log('🔍 operations length:', operations?.length);
-              
-              // Extract just the filename if it's a full path
-              const getFilename = (filePath: string) => {
-                if (!filePath) return "";
-                return filePath.includes("/") ? filePath.split("/").pop() || filePath : filePath;
-              };
-              
-              // 🔧 CRITICAL FIX: Convert to FormData format that CreateColumn backend expects
-              const formData = new FormData();
-              formData.append('object_names', getFilename(cfg.object_name || ''));
-              formData.append('bucket_name', cfg.bucket_name || 'trinity');
-              
-              // 🔧 CRITICAL FIX: Include client/app/project context for correct path resolution
-              formData.append('client_name', envContext.client_name || '');
-              formData.append('app_name', envContext.app_name || '');
-              formData.append('project_name', envContext.project_name || '');
-              
-              // Add operations in the format backend expects
-              if (operations && Array.isArray(operations)) {
-                operations.forEach((op, index) => {
-                if (op.columns && op.columns.filter(Boolean).length > 0) {
-                  const colString = op.columns.filter(Boolean).join(',');
-                  const rename = op.rename && op.rename.trim() ? op.rename.trim() : '';
-                  const key = `${op.type}_${index}`;
-                  
-                  // Add the operation
-                  formData.append(key, colString);
-                  
-                  // Add rename if specified
-                  if (rename) {
-                    formData.append(`${key}_rename`, rename);
-                  }
-                  
-                  // Add parameters if specified
-                  if (op.param) {
-                    if (['detrend', 'deseasonalize', 'detrend_deseasonalize'].includes(op.type)) {
-                      formData.append(`${key}_period`, String(op.param));
-                    } else if (op.type === 'power') {
-                      formData.append(`${key}_param`, String(op.param));
-                    } else if (op.type === 'logistic') {
-                      formData.append(`${key}_param`, JSON.stringify(op.param));
-                    }
-                  }
-                }
-                });
-              }
-              
-              // Add identifiers
-              const identifiers = cfg.identifiers || [];
-              formData.append('identifiers', identifiers.join(','));
-              
-              console.log('📁 Auto-executing with form data:', {
-                object_names: getFilename(cfg.object_name || ''),
-                bucket_name: cfg.bucket_name || 'trinity',
-                operations: operations?.map((op, index) => ({
-                  index,
-                  type: op.type,
-                  columns: op.columns,
-                  rename: op.rename,
-                  param: op.param
-                })) || [],
-                identifiers: identifiers
-              });
-              
-              const res2 = await fetch(performEndpoint, {
-                method: 'POST',
-                body: formData,
-              });
-              
-              if (res2.ok) {
-                const result = await res2.json();
-                console.log('✅ Auto-execution successful:', result);
-                
-                // 🔧 CRITICAL FIX: Update atom settings with results
-                updateAtomSettings(atomId, {
-                  operationCompleted: true,
-                  createColumnResults: result
-                });
-                
-                // Add success message
-                const completionMsg: Message = {
-                  id: (Date.now() + 1).toString(),
-                  content: `🎉 Create Column operations completed successfully!\n\nFile: ${cfg.object_name || 'N/A'}\nOperations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}\n\n📊 Results are ready! New columns have been created.\n\n💡 You can now view the results in the Create Column interface.`,
-                  sender: 'ai',
-                  timestamp: new Date(),
-                };
-                setMessages(prev => [...prev, completionMsg]);
-                
-              } else {
-                console.error('❌ Auto-execution failed:', res2.status, res2.statusText);
-                
-                // Try to get detailed error message
-                let errorDetail = res2.statusText;
-                try {
-                  const errorData = await res2.json();
-                  errorDetail = errorData.detail || errorData.message || res2.statusText;
-                } catch (e) {
-                  // If we can't parse error response, use status text
-                }
-                
-                const errorMsg: Message = {
-                  id: (Date.now() + 1).toString(),
-                  content: `❌ Auto-execution failed: ${res2.status}\n\nError: ${errorDetail}\n\nFile: ${cfg.object_name || 'N/A'}\nOperations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}\n\n💡 Please try clicking the Perform button manually.`,
-                  sender: 'ai',
-                  timestamp: new Date(),
-                };
-                setMessages(prev => [...prev, errorMsg]);
-                
-                updateAtomSettings(atomId, {
-                  operationCompleted: false
-                });
-              }
-              
-            } catch (error) {
-              console.error('❌ Error during auto-execution:', error);
-              
-              const errorMsg: Message = {
-                id: (Date.now() + 1).toString(),
-                content: `❌ Auto-execution error: ${error.message || 'Unknown error occurred'}\n\nFile: ${cfg.object_name || 'N/A'}\nOperations: ${operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', ')}\n\n💡 Please try clicking the Perform button manually.`,
-                sender: 'ai',
-                timestamp: new Date(),
-              };
-              setMessages(prev => [...prev, errorMsg]);
-              
-              updateAtomSettings(atomId, {
-                operationCompleted: false
-              });
-            }
-          }, 1000); // Wait 1 second for UI to update
-          
-          // 🔧 CRITICAL FIX: Operations are now auto-executed above
-          // No need for manual execution - the AI automatically performs the operations
         } else if (atomType === 'groupby-wtg-avg' && data.groupby_json) {
           const cfg = data.groupby_json;
           

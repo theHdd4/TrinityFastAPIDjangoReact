@@ -1,5 +1,4 @@
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, VALIDATE_API } from '@/lib/api';
-import { resolveTaskResponse } from '@/lib/taskQueue';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
   getEnvironmentContext, 
@@ -20,7 +19,7 @@ export const createColumnHandler: AtomHandler = {
     console.log('🆔 AtomId:', context.atomId);
     console.log('🔢 SessionId:', context.sessionId);
     
-    const { atomId, updateAtomSettings, setMessages, sessionId, stepAlias: workflowStepAlias, isStreamMode = false } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
     // 🔧 CRITICAL FIX: Show smart_response FIRST (like concat/merge)
     // This displays the AI's clean, user-friendly message immediately
@@ -41,11 +40,27 @@ export const createColumnHandler: AtomHandler = {
       console.warn('⚠️ No smart response text found!');
     }
     
-    if (!data.json) {
+    if (!data.json || !Array.isArray(data.json) || data.json.length === 0) {
+      const errorMsg = createErrorMessage(
+        'Create Column configuration',
+        'No create column configuration found in AI response',
+        'Configuration validation'
+      );
+      setMessages(prev => [...prev, errorMsg]);
       return { success: false, error: 'No create column configuration found in AI response' };
     }
 
     const cfg = data.json[0]; // Get first configuration object
+    if (!cfg || typeof cfg !== 'object') {
+      const errorMsg = createErrorMessage(
+        'Create Column configuration',
+        'Invalid configuration format in AI response',
+        'Configuration validation'
+      );
+      setMessages(prev => [...prev, errorMsg]);
+      return { success: false, error: 'Invalid configuration format' };
+    }
+    
     console.log('🤖 AI CREATE COLUMN CONFIG EXTRACTED:', cfg, 'Session:', sessionId);
     
     // Validate data source
@@ -392,8 +407,7 @@ export const createColumnHandler: AtomHandler = {
         // Fetch column summary to populate allColumns with full object name
         const columnRes = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fullObjectName)}`);
         if (columnRes.ok) {
-          const rawColumn = await columnRes.json();
-          const columnData = await resolveTaskResponse<{ summary?: any[] }>(rawColumn);
+          const columnData = await columnRes.json();
           const allColumns = Array.isArray(columnData.summary) ? columnData.summary.filter(Boolean) : [];
           
           console.log('✅ Columns loaded successfully:', allColumns.length);
@@ -411,11 +425,10 @@ export const createColumnHandler: AtomHandler = {
             const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(resolvedDataSource)}`);
             console.log('🔍 Classification response status:', resp.status);
             if (resp.ok) {
-              const rawClassification = await resp.json();
-              const classificationData = await resolveTaskResponse<Record<string, any>>(rawClassification);
+              const classificationData = await resp.json();
               console.log('🔍 Classification identifiers:', classificationData.identifiers);
               updateAtomSettings(atomId, {
-                selectedIdentifiers: (classificationData.identifiers as string[]) || []
+                selectedIdentifiers: classificationData.identifiers || []
               });
             } else {
               // Fallback to categorical columns
@@ -475,7 +488,8 @@ export const createColumnHandler: AtomHandler = {
       const formData = new FormData();
       const { client_name = '', app_name = '', project_name = '' } = envWithFallback || {};
 
-      formData.append('object_names', cfg.object_name || resolvedDataSource || '');
+      // 🔧 CRITICAL FIX: Always use resolvedDataSource (full path) - never use cfg.object_name which might be just filename
+      formData.append('object_names', resolvedDataSource || '');
       formData.append('bucket_name', cfg.bucket_name || 'trinity');
       formData.append('client_name', client_name);
       formData.append('app_name', app_name);
@@ -504,17 +518,22 @@ export const createColumnHandler: AtomHandler = {
               formData.append(`${key}_param`, String(op.param));
             } else if (op.type === 'logistic') {
               formData.append(`${key}_param`, JSON.stringify(op.param));
+            } else if (op.type === 'datetime') {
+              formData.append(`${key}_param`, String(op.param));
             }
           }
         }
       });
+      
+      // 🔧 CRITICAL FIX: Add options field (operations order) - required by backend, same as manual perform
+      formData.append('options', operations.map(op => op.type).join(','));
       
       // Add identifiers
       const identifiers = cfg.identifiers || [];
       formData.append('identifiers', identifiers.join(','));
       
       console.log('📁 Auto-executing with form data:', {
-        object_names: cfg.object_name || resolvedDataSource || '',
+        object_names: resolvedDataSource || '',
         bucket_name: cfg.bucket_name || 'trinity',
         client_name,
         app_name,
@@ -686,15 +705,14 @@ export const createColumnHandler: AtomHandler = {
             resultFile: autoSavePayload.result_file
           });
 
-          const saveAlias = workflowStepAlias?.trim() || 'create_transform';
           await autoSaveStepResult({
             atomType: 'create-column',
             atomId,
-            stepAlias: saveAlias,
+            stepAlias: `create_transform`, // 🔧 FIX: Use simple alias without atomId/timestamp to avoid duplication (timestamp added in utils)
             result: autoSavePayload,
             updateAtomSettings,
             setMessages,
-            isStreamMode
+            isStreamMode: context.isStreamMode || false
           });
           
           console.log('✅ Auto-save completed successfully');
@@ -704,7 +722,7 @@ export const createColumnHandler: AtomHandler = {
         }
         
         // Add success message (only in Individual AI mode, not Stream mode)
-        if (!isStreamMode) {
+        if (!context.isStreamMode) {
           const completionDetails = {
             'Result File': resultFilePath || result.result_file || 'N/A',
             'Rows': (parsedRows?.length || result.row_count || 0).toLocaleString(),
@@ -799,3 +817,5 @@ export const createColumnHandler: AtomHandler = {
     return { success: true };
   }
 };
+
+

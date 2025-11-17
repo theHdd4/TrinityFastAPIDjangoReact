@@ -48,6 +48,27 @@ except Exception:  # pragma: no cover - memory service optional
 
 logger = logging.getLogger("trinity.trinityai.websocket")
 
+# Atom capability metadata for file/alias handling
+DATASET_OUTPUT_ATOMS = {
+    "data-upload-validate",
+    "dataframe-operations",
+    "groupby-wtg-avg",
+    "create-column",
+    "create-transform",
+    "merge",
+    "concat",
+    "pivot-table",
+}
+
+# Atoms that should default to using the latest produced dataset when inputs aren't explicit
+PREFERS_LATEST_DATASET_ATOMS = {
+    "dataframe-operations",
+    "groupby-wtg-avg",
+    "create-column",
+    "create-transform",
+    "chart-maker",
+}
+
 
 @dataclass
 class WebSocketEvent:
@@ -139,6 +160,7 @@ class StreamWebSocketOrchestrator:
         self._step_output_files: Dict[str, Dict[int, str]] = {}
         self._sequence_available_files: Dict[str, List[str]] = {}
         self._output_alias_registry: Dict[str, Dict[str, str]] = {}
+        self._chat_file_mentions: Dict[str, List[str]] = {}
 
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
@@ -160,6 +182,19 @@ class StreamWebSocketOrchestrator:
         
         # Load atom mapping for endpoints
         self._load_atom_mapping()
+
+        # Atom execution retry configuration
+        self.atom_retry_attempts = max(
+            1, int(os.getenv("STREAM_AI_ATOM_RETRY_ATTEMPTS", "3"))
+        )
+        self.atom_retry_delay = max(
+            0.0, float(os.getenv("STREAM_AI_ATOM_RETRY_DELAY_SECONDS", "2"))
+        )
+        logger.info(
+            "🔁 Atom retry configuration | attempts=%s delay=%ss",
+            self.atom_retry_attempts,
+            self.atom_retry_delay,
+        )
 
         self._memory_storage = memory_storage_module
         self._memory_summarizer = summarize_chat_messages
@@ -535,6 +570,19 @@ WORKFLOW PLANNING RULES:
 
         return matched
 
+    def _atom_produces_dataset(self, atom_id: Optional[str]) -> bool:
+        """Return True if the atom is expected to save a new dataset file."""
+        return bool(atom_id and atom_id in DATASET_OUTPUT_ATOMS)
+
+    def _atom_prefers_latest_dataset(self, atom_id: Optional[str]) -> bool:
+        """
+        Return True if the atom should default to using the most recent dataset
+        when explicit file references are not provided.
+        """
+        if not atom_id:
+            return False
+        return atom_id in PREFERS_LATEST_DATASET_ATOMS or self._atom_produces_dataset(atom_id)
+
     def _build_enriched_description(self, step: WorkflowStepPlan, available_files: List[str]) -> str:
         """
         Build enriched description with file details for UI display.
@@ -658,7 +706,10 @@ WORKFLOW PLANNING RULES:
             for key, value in dynamic_slots.items():
                 lines.append(f"- {key}: {value}")
 
-        lines.append(f"Return the result as `{output_alias}` for downstream steps.")
+        if output_alias:
+            lines.append(f"Return the result as `{output_alias}` for downstream steps.")
+        else:
+            lines.append("Focus on producing insights/visualizations using the referenced dataset(s) without creating a new output file.")
 
         return "\n".join(lines)
 
@@ -682,12 +733,18 @@ WORKFLOW PLANNING RULES:
         matched_queue = matched_prompt_files.copy()
 
         enriched_steps: List[WorkflowStepPlan] = []
-        previous_alias: Optional[str] = initial_previous_alias
+        last_materialized_alias: Optional[str] = initial_previous_alias
 
         for idx, raw_step in enumerate(workflow_steps_raw, start_index):
             atom_id = raw_step.get("atom_id", "unknown")
             description = raw_step.get("description", "").strip()
-            output_alias = raw_step.get("output_alias") or f"{atom_id.replace('-', '_')}_step_{idx}"
+            produces_dataset = self._atom_produces_dataset(atom_id)
+            prefers_latest_dataset = self._atom_prefers_latest_dataset(atom_id)
+            default_alias = f"{atom_id.replace('-', '_')}_step_{idx}"
+            if produces_dataset:
+                output_alias = raw_step.get("output_alias") or default_alias
+            else:
+                output_alias = raw_step.get("output_alias") or ""
 
             guidance = {}
             if self.rag_engine:
@@ -695,37 +752,44 @@ WORKFLOW PLANNING RULES:
 
             files_used_raw = raw_step.get("files_used") or []
             files_used = self._ensure_list_of_strings(files_used_raw)
-            if not files_used:
-                files_required = 0
-                if atom_id == "data-upload-validate":
-                    files_required = 1
-                elif atom_id in {"merge", "concat"}:
-                    files_required = 2
+            files_required = 0
+            if atom_id == "data-upload-validate":
+                files_required = 1
+            elif atom_id in {"merge", "concat"}:
+                files_required = 2
 
-                for _ in range(files_required):
+            if not files_used and prefers_latest_dataset and last_materialized_alias:
+                files_used = [last_materialized_alias]
+
+            if files_required and len(files_used) < files_required:
+                needed = files_required - len(files_used)
+                for _ in range(needed):
+                    next_file = None
                     if matched_queue:
-                        files_used.append(matched_queue.pop(0))
+                        next_file = matched_queue.pop(0)
                     elif remaining_available:
-                        files_used.append(remaining_available.pop(0))
+                        next_file = remaining_available.pop(0)
+                    if next_file and next_file not in files_used:
+                        files_used.append(next_file)
 
-                if not files_used and matched_queue:
-                    files_used.append(matched_queue.pop(0))
-                if not files_used and remaining_available:
-                    # For analysis atoms (groupby, chart-maker, etc.) default to first known dataset.
-                    files_used.append(remaining_available[0])
+            if not files_used and matched_queue:
+                files_used.append(matched_queue.pop(0))
+            if not files_used and remaining_available:
+                # For analysis atoms (groupby, chart-maker, etc.) default to first known dataset.
+                files_used.append(remaining_available[0])
 
             inputs_raw = raw_step.get("inputs") or []
             inputs = self._ensure_list_of_strings(inputs_raw)
             if not inputs:
                 if atom_id in {"merge", "concat"}:
                     inputs = files_used.copy()
-                    if previous_alias and previous_alias not in inputs:
-                        inputs.append(previous_alias)
+                    if last_materialized_alias and last_materialized_alias not in inputs:
+                        inputs.insert(0, last_materialized_alias)
                 elif atom_id == "data-upload-validate":
                     inputs = []
                 else:
-                    if previous_alias:
-                        inputs = [previous_alias]
+                    if prefers_latest_dataset and last_materialized_alias:
+                        inputs = [last_materialized_alias]
                     elif files_used:
                         inputs = files_used.copy()
                     elif matched_queue:
@@ -773,14 +837,16 @@ WORKFLOW PLANNING RULES:
                 )
             )
 
-            previous_alias = output_alias
+            if produces_dataset and output_alias:
+                last_materialized_alias = output_alias
 
         return enriched_steps
 
     async def _generate_workflow_with_llm(
         self,
         user_prompt: str,
-        available_files: List[str]
+        available_files: List[str],
+        priority_files: Optional[List[str]] = None,
     ) -> Tuple[List[Dict[str, Any]], List[str], bool]:
         """
         Use LLM to generate workflow plan based on user prompt and atom capabilities.
@@ -795,8 +861,9 @@ WORKFLOW PLANNING RULES:
         if aiohttp is None:
             raise RuntimeError("aiohttp is required for LLM workflow generation but is not installed")
         
-        # Extract files mentioned in prompt
+        # Extract files mentioned in prompt and merge with tracked context
         prompt_files = self._extract_file_names_from_prompt(user_prompt)
+        prompt_files = self._merge_file_references(prompt_files, priority_files)
         files_exist = self._match_files_with_available(prompt_files, available_files) if available_files else False
         
         graph_prompt: Optional[GraphRAGPhaseOnePrompt] = None
@@ -931,18 +998,19 @@ WORKFLOW PLANNING RULES:
             logger.error(f"❌ Workflow generation failed after all retries: {e}")
             # Fallback to keyword-based
             logger.info("🔄 Falling back to keyword-based workflow generation")
-            return self._fallback_to_keywords(user_prompt, available_files)
+            return self._fallback_to_keywords(user_prompt, available_files, priority_files)
         except Exception as e:
             logger.error(f"❌ LLM workflow generation failed with unexpected error: {e}")
             import traceback
             traceback.print_exc()
             # Fallback to keyword-based
-            return self._fallback_to_keywords(user_prompt, available_files)
+            return self._fallback_to_keywords(user_prompt, available_files, priority_files)
     
     def _fallback_to_keywords(
         self,
         user_prompt: str,
-        available_files: List[str]
+        available_files: List[str],
+        priority_files: Optional[List[str]] = None,
     ) -> Tuple[List[Dict[str, Any]], List[str], bool]:
         """Fallback to simple keyword-based workflow generation"""
         logger.info("⚠️ Falling back to keyword-based workflow generation")
@@ -951,6 +1019,7 @@ WORKFLOW PLANNING RULES:
         
         # Extract files from prompt and check if they exist
         prompt_files = self._extract_file_names_from_prompt(user_prompt)
+        prompt_files = self._merge_file_references(prompt_files, priority_files)
         files_exist = self._match_files_with_available(prompt_files, available_files) if available_files else False
         
         # Skip data-upload-validate if files already exist
@@ -995,7 +1064,9 @@ WORKFLOW PLANNING RULES:
         project_context: Dict[str, Any],
         user_id: str,
         frontend_session_id: Optional[str] = None,
-        frontend_chat_id: Optional[str] = None
+        frontend_chat_id: Optional[str] = None,
+        history_override: Optional[str] = None,
+        chat_file_names: Optional[List[str]] = None,
     ):
         """
         Execute complete workflow with WebSocket events.
@@ -1017,16 +1088,33 @@ WORKFLOW PLANNING RULES:
         available_files = list(available_files or [])
         self._sequence_available_files[sequence_id] = available_files
 
-        history_summary = self._load_persisted_chat_summary(frontend_chat_id, project_context)
-        if history_summary:
+        persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
+        if persisted_history:
             logger.info(
                 "🧠 Loaded persisted chat summary for %s (%d chars)",
                 frontend_chat_id,
-                len(history_summary),
+                len(persisted_history),
             )
         else:
             logger.info("ℹ️ No persisted chat summary found for %s", frontend_chat_id)
+
+        history_summary = self._combine_history_sources(history_override, persisted_history)
+        if history_override:
+            logger.info(
+                "🧠 Received %d chars of history context from frontend payload",
+                len(history_override),
+            )
+
         effective_user_prompt = self._apply_history_context(user_prompt, history_summary)
+
+        file_focus = self._merge_file_references(chat_file_names, None)
+        if history_summary:
+            history_files = self._extract_file_names_from_prompt(history_summary)
+            file_focus = self._merge_file_references(file_focus, history_files)
+        if file_focus:
+            self._chat_file_mentions[sequence_id] = file_focus
+            effective_user_prompt = self._append_file_focus_note(effective_user_prompt, file_focus)
+            logger.info("📁 Tracking %d file references from chat context", len(file_focus))
 
         try:
             # Send connected event
@@ -1050,7 +1138,8 @@ WORKFLOW PLANNING RULES:
             try:
                 workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
                     user_prompt=effective_user_prompt,
-                    available_files=available_files
+                    available_files=available_files,
+                    priority_files=file_focus
                 )
             except RetryableJSONGenerationError as e:
                 logger.error(f"❌ Workflow generation failed after all retries: {e}")
@@ -1145,12 +1234,21 @@ WORKFLOW PLANNING RULES:
                         combined_with_history = self._apply_history_context(combined_prompt, history_summary)
                         
                         logger.info(f"➕ Regenerating workflow with additional info: {additional_info}")
+
+                        updated_focus = self._merge_file_references(
+                            self._chat_file_mentions.get(sequence_id),
+                            self._extract_file_names_from_prompt(additional_info),
+                        )
+                        if updated_focus:
+                            self._chat_file_mentions[sequence_id] = updated_focus
+                            combined_with_history = self._append_file_focus_note(combined_with_history, updated_focus)
                         
                         # Regenerate workflow with combined prompt (with retry mechanism)
                         try:
                             workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
                                 user_prompt=combined_with_history,
-                                available_files=available_files
+                                available_files=available_files,
+                                priority_files=updated_focus
                             )
                         except RetryableJSONGenerationError as e:
                             logger.error(f"❌ Workflow regeneration failed after all retries: {e}")
@@ -1349,11 +1447,19 @@ WORKFLOW PLANNING RULES:
                                     # Combine original prompt with additional info for remaining steps
                                     combined_prompt = f"{original_prompt}. Additional requirements for remaining steps: {additional_info}"
                                     combined_with_history = self._apply_history_context(combined_prompt, history_summary)
+                                    updated_focus = self._merge_file_references(
+                                        self._chat_file_mentions.get(sequence_id),
+                                        self._extract_file_names_from_prompt(additional_info),
+                                    )
+                                    if updated_focus:
+                                        self._chat_file_mentions[sequence_id] = updated_focus
+                                        combined_with_history = self._append_file_focus_note(combined_with_history, updated_focus)
                                     
                                     # Regenerate workflow and filter to remaining steps
                                     new_workflow_steps, prompt_files, files_exist = await self._generate_workflow_with_llm(
                                         user_prompt=combined_with_history,
-                                        available_files=available_files
+                                        available_files=available_files,
+                                        priority_files=updated_focus
                                     )
                                     
                                     # Update plan with new remaining steps enriched with prompts
@@ -1604,10 +1710,13 @@ WORKFLOW PLANNING RULES:
             # ================================================================
             logger.info(f"⚙️ Executing atom {atom_id}...")
             
-            execution_result = await self._execute_atom_endpoint(
+            execution_result = await self._execute_atom_with_retry(
                 atom_id=atom_id,
                 parameters=parameters,
-                session_id=sequence_id
+                session_id=sequence_id,
+                step_number=step_number,
+                sequence_id=sequence_id,
+                websocket=websocket,
             )
 
             execution_success = bool(execution_result.get("success", True))
@@ -2507,6 +2616,7 @@ WORKFLOW PLANNING RULES:
         self._step_output_files.pop(sequence_id, None)
         self._sequence_available_files.pop(sequence_id, None)
         self._output_alias_registry.pop(sequence_id, None)
+        self._chat_file_mentions.pop(sequence_id, None)
 
     def _load_persisted_chat_summary(
         self,
@@ -2574,6 +2684,67 @@ WORKFLOW PLANNING RULES:
             f"{latest}"
         )
         return combined.strip()
+
+    def _combine_history_sources(
+        self,
+        frontend_summary: Optional[str],
+        persisted_summary: Optional[str],
+    ) -> Optional[str]:
+        parts: List[str] = []
+        for source in (frontend_summary, persisted_summary):
+            if source and source.strip():
+                parts.append(source.strip())
+        if not parts:
+            return None
+        if len(parts) == 1:
+            return parts[0]
+        return "\n\n".join(parts)
+
+    def _append_file_focus_note(self, prompt: str, files: Optional[List[str]]) -> str:
+        if not files:
+            return prompt
+        sanitized = [f for f in files if isinstance(f, str) and f.strip()]
+        if not sanitized:
+            return prompt
+        file_lines = "\n".join(f"- {entry.strip()}" for entry in sanitized[:10])
+        note = (
+            "\n\nFiles referenced in this chat (preserve these exact names and prioritize their usage):\n"
+            f"{file_lines}"
+        )
+        return f"{prompt}{note}"
+
+    def _normalize_file_reference(self, value: Optional[str]) -> Optional[str]:
+        if not value or not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    def _merge_file_references(
+        self,
+        existing: Optional[List[str]],
+        new_refs: Optional[List[str]],
+    ) -> List[str]:
+        merged: List[str] = []
+        seen: Set[str] = set()
+
+        def _add(values: Optional[List[str]]) -> None:
+            if not values:
+                return
+            for entry in values:
+                if not isinstance(entry, str):
+                    continue
+                cleaned = self._normalize_file_reference(entry)
+                if not cleaned:
+                    continue
+                key = cleaned.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(cleaned)
+
+        _add(existing)
+        _add(new_refs)
+        return merged
 
     def _determine_fastapi_base_url(self) -> str:
         """Resolve FastAPI base URL for downstream atom services."""
@@ -3169,6 +3340,130 @@ WORKFLOW PLANNING RULES:
             return ""
         return " ".join(text.split())
     
+    async def _execute_atom_with_retry(
+        self,
+        *,
+        atom_id: str,
+        parameters: Dict[str, Any],
+        session_id: str,
+        step_number: int,
+        sequence_id: str,
+        websocket
+    ) -> Dict[str, Any]:
+        """
+        Execute atom endpoint with retry support when success=False or request fails.
+        """
+        last_result: Dict[str, Any] = {}
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, self.atom_retry_attempts + 1):
+            try:
+                result = await self._execute_atom_endpoint(
+                    atom_id=atom_id,
+                    parameters=parameters,
+                    session_id=session_id,
+                )
+            except Exception as exec_error:
+                last_error = exec_error
+                logger.warning(
+                    "⚠️ Atom %s execution attempt %s/%s failed with exception: %s",
+                    atom_id,
+                    attempt,
+                    self.atom_retry_attempts,
+                    exec_error,
+                )
+                if attempt >= self.atom_retry_attempts:
+                    raise
+                await self._notify_atom_retry(
+                    websocket,
+                    atom_id=atom_id,
+                    step_number=step_number,
+                    sequence_id=sequence_id,
+                    attempt=attempt,
+                    reason=str(exec_error),
+                )
+                if self.atom_retry_delay:
+                    await asyncio.sleep(self.atom_retry_delay)
+                continue
+
+            success = bool(result.get("success", True))
+            if success:
+                if attempt > 1:
+                    logger.info(
+                        "✅ Atom %s succeeded after %s attempts",
+                        atom_id,
+                        attempt,
+                    )
+                return result
+
+            last_result = result
+            reason = (
+                result.get("error")
+                or result.get("message")
+                or "Atom returned success=false"
+            )
+            logger.warning(
+                "⚠️ Atom %s returned success=False on attempt %s/%s: %s",
+                atom_id,
+                attempt,
+                self.atom_retry_attempts,
+                reason,
+            )
+            if attempt >= self.atom_retry_attempts:
+                break
+
+            await self._notify_atom_retry(
+                websocket,
+                atom_id=atom_id,
+                step_number=step_number,
+                sequence_id=sequence_id,
+                attempt=attempt,
+                reason=reason,
+            )
+            if self.atom_retry_delay:
+                await asyncio.sleep(self.atom_retry_delay)
+
+        if last_result:
+            return last_result
+        if last_error:
+            raise last_error
+        return {}
+
+    async def _notify_atom_retry(
+        self,
+        websocket,
+        *,
+        atom_id: str,
+        step_number: int,
+        sequence_id: str,
+        attempt: int,
+        reason: str,
+    ) -> None:
+        """Notify frontend that an atom attempt failed and a retry is scheduled."""
+        reason_text = self._condense_text(str(reason))[:400]
+        payload = {
+            "sequence_id": sequence_id,
+            "step": step_number,
+            "atom_id": atom_id,
+            "attempt": attempt,
+            "max_attempts": self.atom_retry_attempts,
+            "reason": reason_text,
+        }
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent("atom_retry", payload),
+                f"atom_retry event (step {step_number})",
+            )
+        except WebSocketDisconnect:
+            raise
+        except Exception as notify_error:
+            logger.debug(
+                "Unable to notify client about atom retry (step %s): %s",
+                step_number,
+                notify_error,
+            )
+
     async def _execute_atom_endpoint(
         self,
         atom_id: str,

@@ -331,6 +331,13 @@ def perform_createcolumn_task(
         elif op == "rpi":
             df, rpi_cols = compute_rpi(df, columns)
             new_cols_total.extend(rpi_cols)
+        elif op == "abs":
+            for col in columns:
+                if col not in df.columns:
+                    raise ValueError(f"Column '{col}' not found for abs operation")
+                new_col = rename_val or f"{col}_abs"
+                df[new_col] = df[col].abs()
+                new_cols_total.append(new_col)
         elif op == "power":
             param = form_payload.get(f"{op}_{op_idx}_param")
             if param is None:
