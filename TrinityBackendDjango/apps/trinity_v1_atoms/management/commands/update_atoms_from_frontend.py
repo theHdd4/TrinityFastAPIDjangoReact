@@ -192,6 +192,11 @@ class Command(BaseCommand):
                 'tags': ['pivot', 'aggregation', 'business'],
                 'color': 'bg-teal-500'
             },
+            'unpivot': {
+                'description': 'Transform wide datasets into long format by unpivoting columns into rows',
+                'tags': ['unpivot', 'melt', 'reshape', 'data-transformation'],
+                'color': 'bg-cyan-500'
+            },
             'dataframe-operations': {
                 'description': 'Perform operations on dataframes',
                 'tags': ['dataframe', 'operations', 'data'],

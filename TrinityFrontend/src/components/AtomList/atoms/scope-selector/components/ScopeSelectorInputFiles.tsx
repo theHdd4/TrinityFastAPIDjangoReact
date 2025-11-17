@@ -74,7 +74,8 @@ const ScopeSelectorInputFiles: React.FC<Props> = ({ atomId }) => {
           )}&column_name=${encodeURIComponent(identifier)}`
         );
         if (res.ok) {
-          const json = await res.json();
+          const raw = await res.json();
+          const json = await resolveTaskResponse<{ unique_values?: string[] }>(raw);
           if (Array.isArray(json.unique_values) && json.unique_values.length > 1) {
             results.push(identifier);
           }

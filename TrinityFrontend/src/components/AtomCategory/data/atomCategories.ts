@@ -62,6 +62,7 @@ import promoEstimator from '@/components/AtomList/atoms/promo-estimator';
 import dataframeOperations from '@/components/AtomList/atoms/dataframe-operations';
 import clustering from '@/components/AtomList/atoms/clustering';
 import pivotTable from '@/components/AtomList/atoms/pivot-table';
+import unpivot from '@/components/AtomList/atoms/unpivot';
 
 export interface Atom {
   id: string;
@@ -170,7 +171,8 @@ export const atomCategories: AtomCategory[] = [
     atoms: [
       basePriceEstimator,
       promoEstimator,
-      pivotTable
+      pivotTable,
+      unpivot
     ]
   }
 ];

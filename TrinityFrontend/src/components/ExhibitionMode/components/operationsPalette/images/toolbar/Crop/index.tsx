@@ -111,6 +111,8 @@ interface DragState {
   startY: number;
   containerRect: DOMRect;
   initialCrop: ImageCropInsets;
+  pointerId?: number;
+  captureElement?: HTMLElement | null;
 }
 
 const computeNextCrop = (
@@ -189,6 +191,23 @@ export const useImageCropInteraction = ({
   const [previewCrop, setPreviewCrop] = useState<ImageCropInsets>(normalizedCropFromProps);
   const previewCropRef = useRef<ImageCropInsets>(normalizedCropFromProps);
 
+  // Use refs to store latest callbacks to avoid recreating event handlers
+  const onPreviewChangeRef = useRef(onPreviewChange);
+  const onCropChangeRef = useRef(onCropChange);
+  const onCropCommitRef = useRef(onCropCommit);
+
+  useEffect(() => {
+    onPreviewChangeRef.current = onPreviewChange;
+  }, [onPreviewChange]);
+
+  useEffect(() => {
+    onCropChangeRef.current = onCropChange;
+  }, [onCropChange]);
+
+  useEffect(() => {
+    onCropCommitRef.current = onCropCommit;
+  }, [onCropCommit]);
+
   useEffect(() => {
     previewCropRef.current = previewCrop;
   }, [previewCrop]);
@@ -197,9 +216,9 @@ export const useImageCropInteraction = ({
     (next: ImageCropInsets) => {
       previewCropRef.current = next;
       setPreviewCrop(next);
-      onPreviewChange?.(next);
+      onPreviewChangeRef.current?.(next);
     },
-    [onPreviewChange],
+    [],
   );
 
   const syncPreviewCrop = useCallback(
@@ -224,44 +243,57 @@ export const useImageCropInteraction = ({
     syncPreviewCrop(normalizedCropFromProps);
   }, [normalizedCropFromProps, syncPreviewCrop]);
 
-  const handleCropPointerMove = useCallback(
-    (event: PointerEvent) => {
-      const state = dragStateRef.current;
-      if (!state || !onCropChange) {
-        if (!state) {
-          cropLog('Pointer move ignored – no drag state');
-        }
-        if (!onCropChange) {
-          cropLog('Pointer move ignored – missing onCropChange handler');
-        }
-        return;
+  // Stable event handlers that use refs to access latest callbacks
+  const handleCropPointerMove = useCallback((event: PointerEvent) => {
+    const state = dragStateRef.current;
+    const onCropChange = onCropChangeRef.current;
+    
+    if (!state || !onCropChange) {
+      if (!state) {
+        cropLog('Pointer move ignored – no drag state');
       }
-
-      const { handle, startX, startY, containerRect, initialCrop } = state;
-      if (containerRect.width <= 0 || containerRect.height <= 0) {
-        cropLog('Pointer move ignored – invalid container rect', containerRect);
-        return;
+      if (!onCropChange) {
+        cropLog('Pointer move ignored – missing onCropChange handler');
       }
+      return;
+    }
 
-      // Calculate delta with full precision for smooth continuous movement
-      // No rounding or batching - update immediately for smoothness
-      const deltaXPercent = ((event.clientX - startX) / containerRect.width) * 100;
-      const deltaYPercent = ((event.clientY - startY) / containerRect.height) * 100;
-      
-      // Compute next crop with full precision (no rounding during live updates)
-      const next = computeNextCrop(handle, deltaXPercent, deltaYPercent, initialCrop, false);
-      
-      // Update immediately without batching for continuous movement
-      commitPreviewCrop(next);
-      onCropChange(next);
-    },
-    [commitPreviewCrop, onCropChange],
-  );
+    const { handle, startX, startY, containerRect, initialCrop } = state;
+    if (containerRect.width <= 0 || containerRect.height <= 0) {
+      cropLog('Pointer move ignored – invalid container rect', containerRect);
+      return;
+    }
 
-  const handleCropPointerUp = useCallback(() => {
-    if (!dragStateRef.current) {
+    // Calculate delta with full precision for smooth continuous movement
+    // No rounding or batching - update immediately for smoothness
+    const deltaXPercent = ((event.clientX - startX) / containerRect.width) * 100;
+    const deltaYPercent = ((event.clientY - startY) / containerRect.height) * 100;
+    
+    // Compute next crop with full precision (no rounding during live updates)
+    const next = computeNextCrop(handle, deltaXPercent, deltaYPercent, initialCrop, false);
+    
+    // Update immediately without batching for continuous movement
+    commitPreviewCrop(next);
+    onCropChange(next);
+  }, [commitPreviewCrop]);
+
+  const handleCropPointerUp = useCallback((event?: PointerEvent) => {
+    const state = dragStateRef.current;
+    if (!state) {
       cropLog('Pointer up ignored – no drag state');
       return;
+    }
+    
+    const onCropChange = onCropChangeRef.current;
+    const onCropCommit = onCropCommitRef.current;
+    
+    // Release pointer capture if available
+    if (state.captureElement && state.pointerId !== undefined) {
+      try {
+        state.captureElement.releasePointerCapture(state.pointerId);
+      } catch (e) {
+        // Ignore errors if pointer capture was not set
+      }
     }
     
     // Finalize the current preview crop with proper rounding for storage
@@ -277,7 +309,7 @@ export const useImageCropInteraction = ({
     
     // Commit with finalized (rounded) values
     onCropCommit?.(finalized);
-  }, [handleCropPointerMove, onCropCommit, commitPreviewCrop, onCropChange]);
+  }, [handleCropPointerMove, commitPreviewCrop]);
 
   useEffect(() => {
     return () => {
@@ -297,6 +329,8 @@ export const useImageCropInteraction = ({
 
   const beginCropDrag = useCallback(
     (handle: CropHandle, event: React.PointerEvent<HTMLElement>) => {
+      const onCropChange = onCropChangeRef.current;
+      
       if (!isCropping || !onCropChange) {
         cropLog('Begin drag ignored – crop disabled or missing handler', {
           isCropping,
@@ -320,18 +354,30 @@ export const useImageCropInteraction = ({
       event.preventDefault();
       event.stopPropagation();
 
+      // Set pointer capture to ensure continuous tracking even if pointer leaves element
+      try {
+        if (event.currentTarget instanceof HTMLElement) {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }
+      } catch (e) {
+        // Ignore if pointer capture is not supported
+        cropLog('Pointer capture not available', e);
+      }
+
       dragStateRef.current = {
         handle,
         startX: event.clientX,
         startY: event.clientY,
         containerRect: rect,
         initialCrop: previewCropRef.current,
+        pointerId: event.pointerId,
+        captureElement: event.currentTarget instanceof HTMLElement ? event.currentTarget : null,
       };
       setIsDragging(true);
       cropLog('Begin drag', {
         handle,
         containerRect: rect,
-        initialCrop: normalizedCropFromProps,
+        initialCrop: previewCropRef.current,
       });
       window.addEventListener('pointermove', handleCropPointerMove);
       window.addEventListener('pointerup', handleCropPointerUp);
@@ -342,8 +388,6 @@ export const useImageCropInteraction = ({
       handleCropPointerMove,
       handleCropPointerUp,
       isCropping,
-      normalizedCropFromProps,
-      onCropChange,
     ],
   );
 

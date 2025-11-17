@@ -2259,6 +2259,10 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             });
           }
         }
+        
+        // 🔧 CRITICAL FIX: Only handle dataframe-operations for dataframe-operations atom type
+        // This code was running for ALL atom types, causing errors for create-column, concat, etc.
+        if (atomType === 'dataframe-operations' && data.dataframe_config) {
           console.log('🔧 ===== DATAFRAME OPERATIONS AI RESPONSE =====');
           console.log('📝 User Prompt:', userMsg.content);
           console.log('🔧 DataFrame Config:', JSON.stringify(data.dataframe_config, null, 2));
@@ -2613,7 +2617,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             };
             setMessages(prev => [...prev, manualMsg]);
           }
-        } else {
+        } // End of dataframe-operations handler
+      } else {
           // Handle AI suggestions when complete info is not available
         if (data && data.suggestions && Array.isArray(data.suggestions)) {
           // Use smart_response if available, otherwise use the verbose suggestions format

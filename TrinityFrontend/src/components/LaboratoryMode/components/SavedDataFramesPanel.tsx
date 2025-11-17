@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VALIDATE_API, SESSION_API, CLASSIFIER_API } from '@/lib/api';
+import { VALIDATE_API, SESSION_API, CLASSIFIER_API, SHARE_LINKS_API } from '@/lib/api';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   DropdownMenu,
@@ -19,6 +19,12 @@ import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface Props {
   isOpen: boolean;
@@ -33,6 +39,21 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     arrow_name?: string;
     last_modified?: string;
     size?: number;
+  }
+  interface ProcessingColumnConfig {
+    name: string;
+    newName: string;
+    originalDtype: string;
+    selectedDtype: string;
+    sampleValues: string[];
+    missingCount: number;
+    missingPercentage: number;
+    missingStrategy: string;
+    missingCustomValue: string;
+    datetimeFormat?: string;
+    formatDetecting?: boolean;
+    formatFailed?: boolean;
+    dropColumn: boolean;
   }
   interface TreeNode {
     name: string;
@@ -59,7 +80,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     x: number;
     y: number;
     target: string;
-    frame: Frame;
+    frame?: Frame;
+    folderPath?: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
@@ -81,7 +103,81 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const [showDimensionTableByObject, setShowDimensionTableByObject] = useState<Record<string, boolean>>({});
   const [columnDimensionByObject, setColumnDimensionByObject] = useState<Record<string, Record<string, string>>>({});
   const [businessOpenByObject, setBusinessOpenByObject] = useState<Record<string, boolean>>({});
+  const [shareDialog, setShareDialog] = useState<{ open: boolean; objectName: string; filename: string } | null>(null);
+  const [shareLink, setShareLink] = useState<string>('');
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const shareLinkInputRef = React.useRef<HTMLInputElement | null>(null);
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [sheetOptions, setSheetOptions] = useState<string[]>([]);
+  const [selectedSheet, setSelectedSheet] = useState('');
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [hasMultipleSheets, setHasMultipleSheets] = useState(false);
+  const [tempUploadMeta, setTempUploadMeta] = useState<{ file_path: string; file_name: string; workbook_path?: string | null } | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [sheetChangeTarget, setSheetChangeTarget] = useState<Frame | null>(null);
+  const [sheetChangeOptions, setSheetChangeOptions] = useState<string[]>([]);
+  const [sheetChangeSelected, setSheetChangeSelected] = useState('');
+  const [sheetChangeLoading, setSheetChangeLoading] = useState(false);
+  const [sheetChangeError, setSheetChangeError] = useState('');
+  const [hasMultipleSheetsByFile, setHasMultipleSheetsByFile] = useState<Record<string, boolean>>({});
+  const [processingTarget, setProcessingTarget] = useState<Frame | null>(null);
+  const [processingColumns, setProcessingColumns] = useState<ProcessingColumnConfig[]>([]);
+  const [processingLoading, setProcessingLoading] = useState(false);
+  const [processingSaving, setProcessingSaving] = useState(false);
+  const [processingError, setProcessingError] = useState('');
+
+  const getProcessingDtypeOptions = (currentDtype: string) => {
+    const baseOptions = [
+      { value: 'object', label: 'Object' },
+      { value: 'int64', label: 'Integer' },
+      { value: 'float64', label: 'Float' },
+      { value: 'datetime64', label: 'DateTime' },
+      { value: 'bool', label: 'Boolean' },
+    ];
+    const exists = baseOptions.some(opt => opt.value === currentDtype);
+    if (!exists && currentDtype) {
+      return [{ value: currentDtype, label: currentDtype }, ...baseOptions];
+    }
+    return baseOptions;
+  };
+
+  const getProcessingMissingOptions = (dtype: string) => {
+    const base = [
+      { value: 'none', label: 'Keep as Missing' },
+      { value: 'drop', label: 'Drop Rows' },
+      { value: 'custom', label: 'Custom Value' },
+    ];
+    if (dtype.includes('int') || dtype.includes('float')) {
+      return [
+        ...base,
+        { value: 'mean', label: 'Fill with Mean' },
+        { value: 'median', label: 'Fill with Median' },
+        { value: 'zero', label: 'Fill with 0' },
+      ];
+    }
+    if (dtype.includes('str') || dtype === 'object' || dtype === 'string') {
+      return [
+        ...base,
+        { value: 'mode', label: 'Fill with Mode' },
+        { value: 'empty', label: 'Fill with Empty String' },
+      ];
+    }
+    return base;
+  };
+
+  const getProcessingDtypeBadgeColor = (dtype: string) => {
+    const lower = dtype.toLowerCase();
+    if (lower.includes('int') || lower.includes('float')) return 'bg-blue-100 text-blue-800';
+    if (lower.includes('str') || lower === 'object' || lower === 'string') return 'bg-green-100 text-green-800';
+    if (lower.includes('datetime')) return 'bg-purple-100 text-purple-800';
+    if (lower.includes('bool')) return 'bg-orange-100 text-orange-800';
+    return 'bg-gray-100 text-gray-800';
+  };
 
   const getDimensionTextClass = (dimensionName: string, orderedDims: string[]): string => {
     if (dimensionName === 'unattributed') return 'text-gray-600';
@@ -356,6 +452,475 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     return { env: parsedEnv, target };
   };
 
+  const appendEnvFields = (form: FormData) => {
+    const envStr = localStorage.getItem('env');
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        form.append('client_id', env.CLIENT_ID || '');
+        form.append('app_id', env.APP_ID || '');
+        form.append('project_id', env.PROJECT_ID || '');
+        form.append('client_name', env.CLIENT_NAME || '');
+        form.append('app_name', env.APP_NAME || '');
+        form.append('project_name', env.PROJECT_NAME || '');
+      } catch {
+        /* ignore */
+      }
+    }
+    if (user?.id) {
+      form.append('user_id', String(user.id));
+    }
+  };
+
+  const deriveFileKey = (name: string) => {
+    const base = name.replace(/\.[^.]+$/, '') || 'dataframe';
+    const sanitized = base.replace(/[^A-Za-z0-9_.-]+/g, '_');
+    return sanitized || 'dataframe';
+  };
+
+  const resetUploadState = () => {
+    setPendingFile(null);
+    setSheetOptions([]);
+    setSelectedSheet('');
+    setUploadingFile(false);
+    setUploadError('');
+    setHasMultipleSheets(false);
+    setTempUploadMeta(null);
+    setIsUploadModalOpen(false);
+  };
+
+  const finalizeSave = async (meta: { file_path: string; file_name: string }) => {
+    setUploadingFile(true);
+    try {
+      const form = new FormData();
+      form.append('validator_atom_id', 'panel-upload');
+      form.append('file_paths', JSON.stringify([meta.file_path]));
+      form.append('file_keys', JSON.stringify([deriveFileKey(meta.file_name)]));
+      form.append('overwrite', 'false');
+      const workbookPathsPayload =
+        tempUploadMeta?.workbook_path ? [tempUploadMeta.workbook_path] : [];
+      const sheetMetadataPayload =
+        tempUploadMeta?.workbook_path
+          ? [
+              {
+                sheet_names: sheetOptions.length ? sheetOptions : [selectedSheet || ''],
+                selected_sheet: selectedSheet || sheetOptions[0] || '',
+                original_filename: pendingFile?.name || tempUploadMeta.file_name || '',
+              },
+            ]
+          : [];
+      if (workbookPathsPayload.length) {
+        form.append('workbook_paths', JSON.stringify(workbookPathsPayload));
+      }
+      if (sheetMetadataPayload.length) {
+        form.append('sheet_metadata', JSON.stringify(sheetMetadataPayload));
+      }
+      appendEnvFields(form);
+      const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include'
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || 'Failed to save dataframe');
+      }
+      toast({ title: 'Dataframe saved', description: `${meta.file_name} uploaded successfully.` });
+      resetUploadState();
+      setReloadToken(prev => prev + 1);
+    } catch (err: any) {
+      setUploadError(err.message || 'Failed to save dataframe');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const uploadSelectedFile = async (file: File, sheet?: string) => {
+    setUploadingFile(true);
+    setUploadError('');
+    try {
+      // Replace spaces with underscores in filename
+      const sanitizedFileName = file.name.replace(/\s+/g, '_');
+      const sanitizedFile = sanitizedFileName !== file.name 
+        ? new File([file], sanitizedFileName, { type: file.type, lastModified: file.lastModified })
+        : file;
+      
+      const form = new FormData();
+      form.append('file', sanitizedFile);
+      if (sheet) {
+        form.append('sheet_name', sheet);
+      }
+      appendEnvFields(form);
+      const res = await fetch(`${VALIDATE_API}/upload-file`, {
+      method: 'POST',
+      body: form,
+        credentials: 'include'
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        const detail = data?.detail || (typeof data === 'string' ? data : '');
+        throw new Error(detail || 'Upload failed');
+      }
+      setTempUploadMeta({
+        file_path: data.file_path,
+        file_name: data.file_name || sanitizedFileName,
+        workbook_path: data.workbook_path || null,
+      });
+      const sheetNames = Array.isArray(data.sheet_names) ? data.sheet_names : [];
+      const multi = Boolean(data.has_multiple_sheets && sheetNames.length > 1);
+      setSheetOptions(sheetNames.length ? sheetNames : data.selected_sheet ? [data.selected_sheet] : []);
+      setSelectedSheet(data.selected_sheet || sheetNames[0] || '');
+      setHasMultipleSheets(multi);
+
+      if (multi && !sheet) {
+        setUploadingFile(false);
+        setIsUploadModalOpen(true);
+        return;
+      }
+      await finalizeSave({ file_path: data.file_path, file_name: data.file_name || sanitizedFileName });
+    } catch (err: any) {
+      setUploadError(err.message || 'Upload failed');
+      setUploadingFile(false);
+    }
+  };
+
+  const triggerFilePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleSheetConfirm = () => {
+    if (!pendingFile || !selectedSheet) return;
+    uploadSelectedFile(pendingFile, selectedSheet);
+  };
+
+  const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setPendingFile(file);
+    setUploadError('');
+    setSheetOptions([]);
+    setSelectedSheet('');
+    setHasMultipleSheets(false);
+    setTempUploadMeta(null);
+    setIsUploadModalOpen(true);
+    void uploadSelectedFile(file);
+    event.target.value = '';
+  };
+
+  const closeProcessingModal = () => {
+    setProcessingTarget(null);
+    setProcessingColumns([]);
+    setProcessingError('');
+    setProcessingLoading(false);
+    setProcessingSaving(false);
+  };
+
+  const normalizeFillValue = (value: string, dtype: string) => {
+    const trimmed = value.trim();
+    if (!trimmed.length) return undefined;
+    const dtypeLower = (dtype || '').toLowerCase();
+    if (['int', 'integer', 'int64', 'float', 'double', 'float64'].includes(dtypeLower)) {
+      const numeric = Number(trimmed);
+      return Number.isNaN(numeric) ? trimmed : numeric;
+    }
+    if (['bool', 'boolean'].includes(dtypeLower)) {
+      const normalized = trimmed.toLowerCase();
+      if (['true', '1', 'yes'].includes(normalized)) return true;
+      if (['false', '0', 'no'].includes(normalized)) return false;
+      return trimmed;
+    }
+    return trimmed;
+  };
+
+  const openProcessingModal = async (frame: Frame) => {
+    setProcessingTarget(frame);
+    setProcessingColumns([]);
+    setProcessingError('');
+    setProcessingLoading(true);
+    try {
+      const res = await fetch(`${VALIDATE_API}/file-metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+        body: JSON.stringify({ file_path: frame.object_name })
+    });
+      if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+        throw new Error(txt || 'Failed to load dataframe metadata');
+      }
+      const data = await res.json();
+      const cols: ProcessingColumnConfig[] = (data.columns || []).map((col: any) => {
+        const dtype = typeof col.dtype === 'string' && col.dtype ? col.dtype : 'object';
+        return {
+          name: col.name || '',
+          newName: col.name || '',
+          originalDtype: dtype,
+          selectedDtype: dtype,
+          sampleValues: Array.isArray(col.sample_values)
+            ? col.sample_values.map((val: unknown) => (val === null || val === undefined ? '' : String(val)))
+            : [],
+          missingCount: typeof col.missing_count === 'number' ? col.missing_count : 0,
+          missingPercentage: typeof col.missing_percentage === 'number' ? col.missing_percentage : 0,
+          missingStrategy: 'none',
+          missingCustomValue: '',
+          datetimeFormat: undefined,
+          formatDetecting: false,
+          formatFailed: false,
+          dropColumn: false,
+        };
+      });
+      setProcessingColumns(cols);
+    } catch (err: any) {
+      setProcessingError(err.message || 'Failed to load dataframe metadata');
+    } finally {
+      setProcessingLoading(false);
+    }
+  };
+
+  const updateProcessingColumn = (index: number, changes: Partial<ProcessingColumnConfig>) => {
+    setProcessingColumns(prev =>
+      prev.map((col, idx) => (idx === index ? { ...col, ...changes } : col))
+    );
+  };
+
+  const detectProcessingDatetimeFormat = async (index: number) => {
+    if (!processingTarget) return null;
+    updateProcessingColumn(index, { formatDetecting: true, formatFailed: false });
+    try {
+      const res = await fetch(`${VALIDATE_API}/detect-datetime-format`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          file_path: processingTarget.object_name,
+          column_name: processingColumns[index]?.name,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.can_detect && data.detected_format) {
+        updateProcessingColumn(index, {
+          datetimeFormat: data.detected_format,
+          formatDetecting: false,
+          formatFailed: false,
+        });
+        toast({
+          title: 'Format Detected',
+          description: `Auto-detected format: ${data.detected_format}`,
+        });
+        return data.detected_format;
+      }
+      updateProcessingColumn(index, { formatDetecting: false, formatFailed: true });
+      toast({
+        title: 'Format Detection Failed',
+        description: data?.detail || 'Unable to detect datetime format. Please select manually.',
+        variant: 'destructive',
+      });
+      return null;
+    } catch (err) {
+      updateProcessingColumn(index, { formatDetecting: false, formatFailed: true });
+      toast({
+        title: 'Detection Error',
+        description: 'Failed to contact detection service',
+        variant: 'destructive',
+      });
+      return null;
+    }
+  };
+
+  const handleProcessingDtypeChange = async (index: number, dtype: string) => {
+    updateProcessingColumn(index, {
+      selectedDtype: dtype,
+    });
+    if (dtype === 'datetime64') {
+      const detected = await detectProcessingDatetimeFormat(index);
+      if (!detected) {
+        updateProcessingColumn(index, { datetimeFormat: undefined });
+      }
+    } else {
+      updateProcessingColumn(index, {
+        datetimeFormat: undefined,
+        formatDetecting: false,
+        formatFailed: false,
+      });
+    }
+  };
+
+  const handleProcessingMissingStrategyChange = (index: number, strategy: string) => {
+    updateProcessingColumn(index, {
+      missingStrategy: strategy,
+      ...(strategy !== 'custom' ? { missingCustomValue: '' } : {}),
+    });
+  };
+
+  const handleProcessingMissingCustomChange = (index: number, value: string) => {
+    updateProcessingColumn(index, { missingCustomValue: value });
+  };
+
+  const handleProcessingDropToggle = (index: number, checked: boolean) => {
+    if (checked) {
+      updateProcessingColumn(index, {
+        dropColumn: true,
+        missingStrategy: 'none',
+        missingCustomValue: '',
+        datetimeFormat: undefined,
+        formatDetecting: false,
+        formatFailed: false,
+      });
+    } else {
+      updateProcessingColumn(index, { dropColumn: false });
+    }
+  };
+
+  const handleProcessingSave = async () => {
+    if (!processingTarget) return;
+    const instructions = processingColumns
+      .map(col => {
+        const instruction: Record<string, any> = { column: col.name };
+        if (col.dropColumn) {
+          instruction.drop_column = true;
+          return instruction;
+          }
+        const trimmedNewName = col.newName?.trim();
+        if (trimmedNewName && trimmedNewName !== col.name) {
+          instruction.new_name = trimmedNewName;
+        }
+        if (col.selectedDtype && col.selectedDtype !== col.originalDtype) {
+          instruction.dtype = col.selectedDtype;
+          if (col.selectedDtype === 'datetime64' && col.datetimeFormat) {
+            instruction.datetime_format = col.datetimeFormat;
+          }
+    }
+        if (col.missingStrategy && col.missingStrategy !== 'none') {
+          instruction.missing_strategy = col.missingStrategy;
+          if (col.missingStrategy === 'custom') {
+            const normalized = normalizeFillValue(col.missingCustomValue || '', col.selectedDtype);
+            if (!normalized && normalized !== 0 && normalized !== false) {
+    toast({
+                title: 'Missing custom value',
+                description: `Provide a custom value for ${col.name}.`,
+                variant: 'destructive',
+              });
+              throw new Error('custom-missing-value');
+            }
+            instruction.custom_value = normalized;
+          }
+        }
+        return instruction;
+      })
+      .filter(inst => Object.keys(inst).length > 1);
+
+    if (!instructions.length) {
+      toast({
+        title: 'No changes detected',
+        description: 'Adjust at least one column before saving.',
+      });
+      return;
+    }
+
+    setProcessingSaving(true);
+    setProcessingError('');
+    try {
+      const res = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          object_name: processingTarget.object_name,
+          instructions,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const detail = data?.detail || (typeof data === 'string' ? data : '');
+        throw new Error(detail || 'Failed to process dataframe');
+      }
+      toast({
+        title: 'Dataframe processed',
+        description: `${processingTarget.arrow_name || processingTarget.csv_name} updated successfully.`,
+    });
+      closeProcessingModal();
+      setReloadToken(prev => prev + 1);
+    } catch (err: any) {
+      if (err?.message === 'custom-missing-value') {
+        return;
+      }
+      setProcessingError(err.message || 'Failed to process dataframe');
+    } finally {
+      setProcessingSaving(false);
+    }
+  };
+
+  const closeSheetChangeModal = () => {
+    setSheetChangeTarget(null);
+    setSheetChangeOptions([]);
+    setSheetChangeSelected('');
+    setSheetChangeError('');
+    setSheetChangeLoading(false);
+  };
+
+  const openSheetChangeModal = async (frame: Frame) => {
+    setSheetChangeTarget(frame);
+    setSheetChangeOptions([]);
+    setSheetChangeSelected('');
+    setSheetChangeError('');
+    setSheetChangeLoading(true);
+    try {
+      const query = new URLSearchParams({ object_name: frame.object_name }).toString();
+      const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || 'Workbook metadata not found');
+      }
+      const data = await res.json();
+      const sheets = Array.isArray(data.sheet_names) ? data.sheet_names : [];
+      if (!sheets.length) {
+        throw new Error('No worksheets available');
+      }
+      setSheetChangeOptions(sheets);
+      setSheetChangeSelected(data.selected_sheet || sheets[0]);
+      setSheetChangeLoading(false);
+    } catch (err: any) {
+      closeSheetChangeModal();
+      toast({
+        title: 'Unable to load workbook',
+        description: err.message || 'Workbook metadata not available',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleSheetChangeConfirm = async () => {
+    if (!sheetChangeTarget || !sheetChangeSelected) return;
+    setSheetChangeLoading(true);
+    setSheetChangeError('');
+    try {
+      const form = new FormData();
+      form.append('object_name', sheetChangeTarget.object_name);
+      form.append('sheet_name', sheetChangeSelected);
+      const res = await fetch(`${VALIDATE_API}/change_sheet`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || 'Failed to update sheet');
+      }
+      toast({
+        title: 'Default sheet updated',
+        description: `${sheetChangeTarget.arrow_name || sheetChangeTarget.csv_name} now uses ${sheetChangeSelected}`,
+      });
+      closeSheetChangeModal();
+      setReloadToken(prev => prev + 1);
+    } catch (err: any) {
+      setSheetChangeError(err.message || 'Failed to update sheet');
+    } finally {
+      setSheetChangeLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
@@ -518,6 +1083,36 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             setOpenDirs({});
             setContextMenu(null);
             setRenameTarget(null);
+            
+            // Check workbook metadata for files to determine if they have multiple sheets
+            const checkWorkbookMetadata = async () => {
+              const metadataChecks: Record<string, boolean> = {};
+              for (const f of filtered) {
+                // Check if workbook metadata exists (which means it was uploaded from a multi-sheet Excel file)
+                try {
+                  const query = new URLSearchParams({ object_name: f.object_name }).toString();
+                  const res = await fetch(`${VALIDATE_API}/workbook_metadata?${query}`, {
+                    credentials: 'include',
+                  });
+                  if (res.ok) {
+                    const metaData = await res.json();
+                    const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
+                    // Check if has_multiple_sheets is true, or if sheet_names has more than 1 sheet
+                    metadataChecks[f.object_name] = Boolean(
+                      metaData.has_multiple_sheets === true || sheetNames.length > 1
+                    );
+                  } else {
+                    metadataChecks[f.object_name] = false;
+                  }
+                } catch {
+                  metadataChecks[f.object_name] = false;
+                }
+              }
+              if (!cancelled) {
+                setHasMultipleSheetsByFile(metadataChecks);
+              }
+            };
+            void checkWorkbookMetadata();
           }
 
           console.log(
@@ -543,7 +1138,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     return () => {
       cancelled = true;
     };
-  }, [isOpen, user]);
+  }, [isOpen, user, reloadToken]);
 
   const handleOpen = (obj: string) => {
     window.open(`/dataframe?name=${encodeURIComponent(obj)}`, '_blank');
@@ -606,6 +1201,101 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       toast({
         title: 'Download failed',
         description: error.message || 'Failed to download Excel',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleCopyFile = async (obj: string, filename: string) => {
+    try {
+      // Generate copy filename: add "_copy" before the extension
+      const baseFilename = filename || obj.split('/').pop() || 'dataframe';
+      const nameWithoutExt = baseFilename.replace(/\.arrow$/, '');
+      
+      // Remove the prefix (client/app/project) from the object path
+      // and preserve only the folder structure after the prefix
+      const relativePath = obj.startsWith(prefix) ? obj.substring(prefix.length) : obj;
+      const lastSlashIndex = relativePath.lastIndexOf('/');
+      const folderPath = lastSlashIndex !== -1 ? relativePath.substring(0, lastSlashIndex + 1) : '';
+      
+      // Find an available copy filename by checking existing files
+      const getAvailableCopyName = (baseName: string, folder: string): string => {
+        // Get all existing file names in the same folder (with prefix)
+        const existingFiles = files
+          .filter(f => {
+            const fRelative = f.object_name.startsWith(prefix) 
+              ? f.object_name.substring(prefix.length) 
+              : f.object_name;
+            return fRelative.startsWith(folder) && fRelative !== relativePath;
+          })
+          .map(f => {
+            const fRelative = f.object_name.startsWith(prefix) 
+              ? f.object_name.substring(prefix.length) 
+              : f.object_name;
+            return fRelative.substring(folder.length); // Get just the filename
+          });
+        
+        // Try base_copy.arrow first
+        let copyName = `${baseName}_copy.arrow`;
+        if (!existingFiles.includes(copyName)) {
+          return copyName;
+        }
+        
+        // If base_copy.arrow exists, try incrementing numbers
+        let counter = 1;
+        while (true) {
+          copyName = `${baseName}_copy_${counter}.arrow`;
+          if (!existingFiles.includes(copyName)) {
+            return copyName;
+          }
+          counter++;
+          // Safety limit to prevent infinite loop
+          if (counter > 1000) {
+            throw new Error('Too many copies exist. Please rename manually.');
+          }
+        }
+      };
+      
+      const copyFilename = getAvailableCopyName(nameWithoutExt, folderPath);
+      const newFilePath = folderPath + copyFilename;
+      
+      const form = new FormData();
+      form.append('object_name', obj);
+      form.append('new_filename', newFilePath);
+      
+      const response = await fetch(`${VALIDATE_API}/copy_dataframe`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include'
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null);
+        throw new Error(errorData?.detail || 'Failed to duplicate file');
+      }
+      
+      const data = await response.json();
+      const copyNameWithoutExt = copyFilename.replace(/\.arrow$/, '');
+      const newFile: Frame = {
+        object_name: data.new_name || (prefix + newFilePath),
+        csv_name: copyNameWithoutExt,
+        arrow_name: copyFilename,
+        last_modified: data.last_modified,
+        size: data.size
+      };
+      
+      // Add the new file to the list
+      setFiles(prev => [...prev, newFile]);
+      
+      toast({ 
+        title: 'File duplicated', 
+        description: `Duplicate created: ${copyFilename}` 
+      });
+    } catch (error: any) {
+      console.error('Duplicate file failed:', error);
+      toast({
+        title: 'Duplicate failed',
+        description: error.message || 'Failed to duplicate file',
         variant: 'destructive',
       });
     }
@@ -703,15 +1393,127 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     });
   };
 
-  const handleContextMenuAction = (action: 'edit' | 'delete' | 'classify') => {
+  const handleShareFile = async (obj: string, filename: string) => {
+    setShareDialog({ open: true, objectName: obj, filename });
+    setShareLink('');
+    setShareError(null);
+    setShareLoading(true);
+    
+    try {
+      // Get project context
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      
+      const payload = {
+        object_name: obj,
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || '',
+      };
+      
+      const response = await fetch(`${SHARE_LINKS_API}/dataframe/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      
+      if (!response.ok) {
+        let errorMessage = 'Failed to create share link';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData?.detail || errorData?.error || errorMessage;
+          if (typeof errorData === 'string') {
+            errorMessage = errorData;
+          }
+        } catch {
+          const text = await response.text().catch(() => '');
+          if (text) {
+            try {
+              const parsed = JSON.parse(text);
+              errorMessage = parsed?.detail || parsed?.error || text;
+            } catch {
+              errorMessage = text || `HTTP ${response.status}: ${response.statusText}`;
+            }
+          } else {
+            errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+          }
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const data = await response.json();
+      const resolvedLink = data.share_url.startsWith('http') 
+        ? data.share_url 
+        : `${window.location.origin}${data.share_url.startsWith('/') ? '' : '/'}${data.share_url}`;
+      setShareLink(resolvedLink);
+      toast({ title: 'Share link generated', description: 'Link copied to clipboard' });
+      
+      // Auto-copy to clipboard (with fallback)
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(resolvedLink);
+        }
+      } catch {
+        // Fallback if clipboard API fails - user can use the copy button
+      }
+    } catch (error: any) {
+      console.error('Failed to generate share link:', error);
+      const errorMessage = error.message || 'Failed to generate share link';
+      setShareError(errorMessage);
+      toast({
+        title: 'Share failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const handleContextMenuAction = (action: 'edit' | 'delete' | 'classify' | 'downloadCSV' | 'downloadExcel' | 'copy' | 'share' | 'process' | 'changeSheet') => {
     if (!contextMenu) return;
     
     if (action === 'edit') {
-      startRename(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+      if (contextMenu.frame) {
+        startRename(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+      }
     } else if (action === 'delete') {
-      promptDeleteOne(contextMenu.target);
+      if (contextMenu.folderPath) {
+        promptDeleteFolder(contextMenu.folderPath);
+      } else if (contextMenu.frame) {
+        promptDeleteOne(contextMenu.target);
+      }
     } else if (action === 'classify') {
-      void onToggleExpand(contextMenu.target);
+      if (contextMenu.frame) {
+        void onToggleExpand(contextMenu.target);
+      }
+    } else if (action === 'process') {
+      if (contextMenu.frame) {
+        openProcessingModal(contextMenu.frame);
+      }
+    // } else if (action === 'downloadCSV') {
+    //   if (contextMenu.frame) {
+    //     handleDownloadCSV(contextMenu.frame.object_name, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    //   }
+    // } else if (action === 'downloadExcel') {
+    //   if (contextMenu.frame) {
+    //     handleDownloadExcel(contextMenu.frame.object_name, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    //   }
+    } else if (action === 'changeSheet') {
+      if (contextMenu.frame) {
+        openSheetChangeModal(contextMenu.frame);
+      }
+    } else if (action === 'downloadCSV') {
+      handleDownloadCSV(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    } else if (action === 'downloadExcel') {
+      handleDownloadExcel(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    } else if (action === 'copy') {
+      handleCopyFile(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
+    } else if (action === 'share') {
+      handleShareFile(contextMenu.target, contextMenu.frame.arrow_name || contextMenu.frame.csv_name);
     }
     
     setContextMenu(null);
@@ -803,6 +1605,18 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               className="w-4 h-4 text-gray-400 cursor-pointer"
               onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)}
             />
+            <SlidersHorizontal
+              className="w-4 h-4 text-gray-400 cursor-pointer"
+              onClick={() => openProcessingModal(f)}
+              title="Process columns"
+            />
+            {hasMultipleSheetsByFile[f.object_name] && (
+              <Layers
+                className="w-4 h-4 text-gray-400 cursor-pointer"
+                onClick={() => openSheetChangeModal(f)}
+                title="Change default sheet"
+              />
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -1148,6 +1962,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         <div className="flex items-center justify-between">
           <button
             onClick={() => toggleDir(node.path)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                target: node.path,
+                folderPath: node.path
+              });
+            }}
             className="flex items-center text-sm text-gray-700"
           >
             {isOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
@@ -1170,26 +1993,45 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
 
   if (!isOpen) {
     return (
-      <div className={`w-12 bg-white flex flex-col h-full ${borderClass}`}>
+        <div className={`w-12 bg-white flex flex-col h-full ${borderClass}`}>
         <div className="p-3 border-b border-gray-200 flex items-center justify-between">
-          <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
-            <Database className="w-4 h-4" />
-          </Button>
+            <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
+              <Database className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
-      </div>
     );
   }
 
   const CollapseIcon = collapseDirection === 'left' ? ChevronLeft : ChevronRight;
+  const fileInput = (
+    <input
+      type="file"
+      ref={fileInputRef}
+      className="hidden"
+      accept=".csv,.xlsx,.xls"
+      onChange={handleFileInput}
+    />
+  );
 
   return (
     <div className={`w-80 bg-white flex flex-col h-full ${borderClass}`}>
+      {fileInput}
       <div className="p-3 border-b border-gray-200 flex items-center justify-between">
         <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
           <Database className="w-4 h-4" />
           <span>Saved DataFrames</span>
         </h3>
         <div className="flex items-center space-x-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={triggerFilePicker}
+            className="p-1 h-8 w-8"
+            title="Upload dataframe"
+          >
+            <Upload className="w-4 h-4" />
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -1259,30 +2101,575 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           }}
           onMouseLeave={() => setContextMenu(null)}
         >
-          <button
-            onClick={() => handleContextMenuAction('classify')}
+          {contextMenu.folderPath ? (
+            // Folder context menu - only show delete
+            <button
+              onClick={() => handleContextMenuAction('delete')}
+              className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Delete Folder</span>
+            </button>
+          ) : (
+            // File context menu - show all options
+            <>
+              <button
+                onClick={() => handleContextMenuAction('classify')}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+              >
+                <ChevronDown className="w-4 h-4" />
+                <span>Classification</span>
+              </button>
+              <button
+                onClick={() => handleContextMenuAction('edit')}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+              >
+                <Pencil className="w-4 h-4" />
+                <span>Rename</span>
+              </button>
+              <button
+                onClick={() => handleContextMenuAction('process')}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+              >
+                <SlidersHorizontal className="w-4 h-4" />
+                <span>Process columns</span>
+              </button>
+              {contextMenu.frame && hasMultipleSheetsByFile[contextMenu.frame.object_name] && (
+                <button
+                  onClick={() => handleContextMenuAction('changeSheet')}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                >
+                  <Layers className="w-4 h-4" />
+                  <span>Change default sheet</span>
+                </button>
+              )}
+              {/* <div className="border-t border-gray-200 my-1"></div>
+              <button
+                onClick={() => handleContextMenuAction('downloadCSV')}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download as CSV</span>
+              </button>
+              <button
+                onClick={() => handleContextMenuAction('downloadExcel')}
+                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download as Excel</span>
+              </button> */}
+              <div className="border-t border-gray-200 my-1"></div>
+              <button
+            onClick={() => handleContextMenuAction('copy')}
             className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
           >
-            <ChevronDown className="w-4 h-4" />
-            <span>Classification</span>
+            <Copy className="w-4 h-4" />
+            <span>Duplicate</span>
           </button>
           <button
-            onClick={() => handleContextMenuAction('edit')}
+            onClick={() => handleContextMenuAction('downloadCSV')}
             className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
           >
-            <Pencil className="w-4 h-4" />
-            <span>Rename</span>
+            <Download className="w-4 h-4" />
+            <span>Download as CSV</span>
           </button>
           <button
-            onClick={() => handleContextMenuAction('delete')}
-            className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+            onClick={() => handleContextMenuAction('downloadExcel')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
           >
-            <Trash2 className="w-4 h-4" />
-            <span>Delete</span>
+            <Download className="w-4 h-4" />
+            <span>Download as Excel</span>
           </button>
+          <button
+            onClick={() => handleContextMenuAction('share')}
+            className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+          >
+            <Share2 className="w-4 h-4" />
+            <span>Share</span>
+          </button>
+          <button
+                onClick={() => handleContextMenuAction('delete')}
+                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Delete</span>
+              </button>
+            </>
+          )}
         </div>,
         document.body
       )}
+      {isUploadModalOpen && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-96 max-w-[90vw] p-4">
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">Upload DataFrame</h4>
+            <p className="text-sm text-gray-600 truncate">{pendingFile?.name || 'No file selected'}</p>
+            {uploadError && <p className="text-xs text-red-500 mt-2">{uploadError}</p>}
+            {hasMultipleSheets ? (
+              <div className="mt-4">
+                <Label className="text-xs text-gray-600 mb-1 block">Select worksheet</Label>
+                <Select value={selectedSheet} onValueChange={setSelectedSheet}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select sheet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sheetOptions.map(sheet => (
+                      <SelectItem key={sheet} value={sheet}>
+                        {sheet}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+    </div>
+            ) : (
+              <div className="mt-4 text-sm text-gray-600">
+                {uploadingFile ? 'Processing file…' : 'Preparing upload…'}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={resetUploadState}
+                disabled={uploadingFile}
+              >
+                Cancel
+              </Button>
+              {hasMultipleSheets && (
+                <Button
+                  size="sm"
+                  onClick={handleSheetConfirm}
+                  disabled={uploadingFile || !selectedSheet}
+                >
+                  Upload Sheet
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+      {sheetChangeTarget && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-96 max-w-[90vw] p-4">
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">Change Default Sheet</h4>
+            <p className="text-sm text-gray-600 truncate">
+              {sheetChangeTarget.arrow_name || sheetChangeTarget.csv_name || sheetChangeTarget.object_name}
+            </p>
+            {sheetChangeError && <p className="text-xs text-red-500 mt-2">{sheetChangeError}</p>}
+            {sheetChangeOptions.length ? (
+              <div className="mt-4">
+                <Label className="text-xs text-gray-600 mb-1 block">Select worksheet</Label>
+                <Select value={sheetChangeSelected} onValueChange={setSheetChangeSelected}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select sheet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sheetChangeOptions.map(sheet => (
+                      <SelectItem key={`sheet-${sheet}`} value={sheet}>
+                        {sheet}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="mt-4 text-sm text-gray-600">
+                {sheetChangeLoading ? 'Loading worksheets…' : 'No worksheets available'}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={closeSheetChangeModal}
+                disabled={sheetChangeLoading}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSheetChangeConfirm}
+                disabled={sheetChangeLoading || !sheetChangeSelected || !sheetChangeOptions.length}
+              >
+                {sheetChangeLoading ? 'Updating…' : 'Update Sheet'}
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+      {processingTarget && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-[1000px] max-w-[98vw] p-4 max-h-[90vh] flex flex-col">
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">Process Dataframe</h4>
+            <p className="text-sm text-gray-600">
+              {processingTarget.arrow_name || processingTarget.csv_name || processingTarget.object_name}
+            </p>
+            {processingError && <p className="text-xs text-red-500 mt-2">{processingError}</p>}
+            <div className="mt-4 flex-1 min-h-0 flex flex-col">
+              {processingLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <Loader2 className="w-5 h-5 animate-spin text-gray-500" />
+                </div>
+              ) : processingColumns.length === 0 ? (
+                <p className="text-sm text-gray-600">No columns available.</p>
+              ) : (
+                <div className="border rounded-lg h-full flex flex-col overflow-hidden">
+                  <div className="flex-1 min-h-0 overflow-auto">
+                    <table className="w-full min-w-full">
+                      <thead className="bg-gradient-to-r from-blue-50 to-blue-100">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Column Name
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Rename
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Current Type
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Change Type
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Missing Values
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Strategy
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Drop Column
+                            </th>
+                          </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {processingColumns.map((col, idx) => {
+                            const dtypeOptions = getProcessingDtypeOptions(col.originalDtype);
+                            const missingOptions = getProcessingMissingOptions(col.selectedDtype);
+                            const hasMissingValues = col.missingCount > 0;
+                            const inputsDisabled = col.dropColumn;
+                            return (
+                              <tr key={`process-${col.name}-${idx}`}>
+                                <td className="px-3 py-2 align-top">
+                                  <p className="font-medium text-xs text-gray-900">{col.name}</p>
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <Input
+                                    value={col.newName}
+                                    onChange={e => updateProcessingColumn(idx, { newName: e.target.value })}
+                                    className="h-7 text-xs"
+                                    placeholder="Rename column"
+                                    disabled={inputsDisabled}
+                                  />
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getProcessingDtypeBadgeColor(col.originalDtype)}`}>
+                                    {col.originalDtype}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <div className={`space-y-2 ${inputsDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                                    <Select
+                                      value={col.selectedDtype}
+                                      onValueChange={value => handleProcessingDtypeChange(idx, value)}
+                                      disabled={inputsDisabled}
+                                    >
+                                      <SelectTrigger className="w-full h-7 text-xs">
+                                        <SelectValue placeholder="Select dtype" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {dtypeOptions.map(opt => (
+                                          <SelectItem key={`dtype-${col.name}-${opt.value}`} value={opt.value}>
+                                            {opt.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    {col.selectedDtype === 'datetime64' && (
+                                      <div className="space-y-1">
+                                        <Select
+                                          value={col.datetimeFormat || ''}
+                                          onValueChange={value => updateProcessingColumn(idx, { datetimeFormat: value })}
+                                          disabled={inputsDisabled || (!!col.datetimeFormat && !col.formatFailed)}
+                                        >
+                                          <SelectTrigger className="w-full h-7 text-xs">
+                                            <SelectValue placeholder="Select format" />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {[
+                                              { value: '%Y-%m-%d', label: '%Y-%m-%d (2024-12-31)' },
+                                              { value: '%d/%m/%Y', label: '%d/%m/%Y (31/12/2024)' },
+                                              { value: '%m/%d/%Y', label: '%m/%d/%Y (12/31/2024)' },
+                                              { value: '%d-%m-%Y', label: '%d-%m-%Y (31-12-2024)' },
+                                              { value: '%m-%d-%Y', label: '%m-%d-%Y (12-31-2024)' },
+                                              { value: '%Y/%m/%d', label: '%Y/%m/%d (2024/12/31)' },
+                                              { value: '%d/%m/%y', label: '%d/%m/%y (31/12/24)' },
+                                              { value: '%m/%d/%y', label: '%m/%d/%y (12/31/24)' },
+                                              { value: '%Y-%m-%d %H:%M:%S', label: '%Y-%m-%d %H:%M:%S (2024-12-31 23:59:59)' },
+                                              { value: '%d/%m/%Y %H:%M:%S', label: '%d/%m/%Y %H:%M:%S (31/12/2024 23:59:59)' },
+                                              { value: '%m/%d/%Y %H:%M:%S', label: '%m/%d/%Y %H:%M:%S (12/31/2024 23:59:59)' },
+                                              { value: '%Y-%m-%dT%H:%M:%S', label: '%Y-%m-%dT%H:%M:%S (ISO 8601)' },
+                                            ].map(opt => (
+                                              <SelectItem key={`dt-format-${opt.value}`} value={opt.value}>
+                                                {opt.label}
+                                              </SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                        {col.formatDetecting && (
+                                          <div className="text-xs text-blue-600 flex items-center gap-1">
+                                            <RefreshCw className="w-3 h-3 animate-spin" />
+                                            Detecting format…
+                                          </div>
+                                        )}
+                                        {col.formatFailed && (
+                                          <div className="text-xs text-orange-600">
+                                            Format detection failed. Please select manually.
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  {hasMissingValues ? (
+                                    <div className="flex items-center gap-1.5 text-xs">
+                                      <span className="inline-flex items-center rounded-full border border-red-300 text-red-600 px-2 py-0.5 text-[11px] font-semibold">
+                                        {col.missingCount}
+                                      </span>
+                                      <span className="text-gray-500">
+                                        ({col.missingPercentage.toFixed(1)}%)
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-gray-500">None</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  {hasMissingValues ? (
+                                    <div className={`space-y-1 ${inputsDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                                      <Select
+                                        value={col.missingStrategy}
+                                        onValueChange={value => handleProcessingMissingStrategyChange(idx, value)}
+                                        disabled={inputsDisabled}
+                                      >
+                                        <SelectTrigger className="w-full h-7 text-xs">
+                                          <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {missingOptions.map(opt => (
+                                            <SelectItem key={`missing-${col.name}-${opt.value}`} value={opt.value}>
+                                              {opt.label}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                      {col.missingStrategy === 'custom' && (
+                                        <Input
+                                          value={col.missingCustomValue}
+                                          onChange={e => handleProcessingMissingCustomChange(idx, e.target.value)}
+                                          placeholder="Custom value"
+                                          className="h-7 text-xs"
+                                          disabled={inputsDisabled}
+                                        />
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">N/A</span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <label className="flex items-center gap-2 text-xs text-gray-700">
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 accent-red-600"
+                                      checked={col.dropColumn}
+                                      onChange={e => handleProcessingDropToggle(idx, e.target.checked)}
+                                    />
+                                    Drop column
+                                  </label>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-gray-200 bg-white">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={closeProcessingModal}
+                disabled={processingSaving}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleProcessingSave}
+                disabled={processingSaving || processingLoading || !processingColumns.length}
+              >
+                {processingSaving ? 'Saving…' : 'Save Changes'}
+              </Button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+      
+      {/* Share Dialog */}
+      <Dialog
+        open={shareDialog?.open || false}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShareDialog(null);
+            setShareLink('');
+            setShareError(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Share2 className="h-5 w-5" />
+              Share DataFrame
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <p className="text-sm text-muted-foreground mb-2">
+                {shareDialog?.filename || 'DataFrame'}
+              </p>
+            </div>
+            
+            {shareLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                <span className="ml-2 text-sm text-gray-600">Generating share link...</span>
+              </div>
+            ) : shareError ? (
+              <div className="space-y-3">
+                <p className="text-sm text-destructive">
+                  {shareError}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Note: The database migration for DataFrameShareLink may need to be run. Please contact your administrator.
+                </p>
+              </div>
+            ) : shareLink ? (
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    ref={shareLinkInputRef}
+                    value={shareLink}
+                    readOnly
+                    className="flex-1 text-sm bg-muted"
+                    onClick={(e) => {
+                      // Select all text when clicking on the input
+                      (e.target as HTMLInputElement).select();
+                    }}
+                  />
+                  <Button
+                    onClick={async () => {
+                      const copyToClipboard = async (text: string, fallbackTarget?: HTMLInputElement | null) => {
+                        // Try native clipboard API first
+                        if (navigator.clipboard && window.isSecureContext) {
+                          try {
+                            await navigator.clipboard.writeText(text);
+                            return true;
+                          } catch (error) {
+                            console.warn('navigator.clipboard.writeText failed, trying fallback', error);
+                          }
+                        }
+                        
+                        // Fallback: Use the input element with execCommand
+                        if (fallbackTarget) {
+                          try {
+                            const wasReadOnly = fallbackTarget.readOnly;
+                            fallbackTarget.readOnly = false;
+                            fallbackTarget.focus();
+                            fallbackTarget.select();
+                            fallbackTarget.setSelectionRange(0, text.length);
+                            const successful = document.execCommand('copy');
+                            fallbackTarget.readOnly = wasReadOnly;
+                            fallbackTarget.blur();
+                            return successful;
+                          } catch (error) {
+                            console.warn('execCommand copy failed', error);
+                          }
+                        }
+                        
+                        // Last resort: Create temporary textarea
+                        try {
+                          const textarea = document.createElement('textarea');
+                          textarea.value = text;
+                          textarea.style.position = 'fixed';
+                          textarea.style.left = '-9999px';
+                          textarea.style.top = '0';
+                          textarea.setAttribute('readonly', '');
+                          document.body.appendChild(textarea);
+                          textarea.focus();
+                          textarea.select();
+                          textarea.setSelectionRange(0, text.length);
+                          const successful = document.execCommand('copy');
+                          document.body.removeChild(textarea);
+                          return successful;
+                        } catch (error) {
+                          console.warn('textarea fallback copy failed', error);
+                          return false;
+                        }
+                      };
+                      
+                      try {
+                        const success = await copyToClipboard(shareLink, shareLinkInputRef.current);
+                        if (success) {
+                          toast({ title: 'Link copied', description: 'Share link copied to clipboard' });
+                        } else {
+                          // If all methods fail, select the text in the input so user can manually copy
+                          if (shareLinkInputRef.current) {
+                            shareLinkInputRef.current.focus();
+                            shareLinkInputRef.current.select();
+                            toast({ 
+                              title: 'Select the link', 
+                              description: 'Link selected - press Ctrl+C to copy', 
+                              variant: 'default' 
+                            });
+                          } else {
+                            throw new Error('Copy not supported');
+                          }
+                        }
+                      } catch (error: any) {
+                        console.error('Copy failed:', error);
+                        toast({ 
+                          title: 'Copy failed', 
+                          description: 'Please select and copy the link manually', 
+                          variant: 'destructive' 
+                        });
+                      }
+                    }}
+                    variant="secondary"
+                    size="sm"
+                  >
+                    <Copy className="h-4 w-4 mr-2" />
+                    Copy
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Anyone with this link can view the dataframe with pagination.
+                </p>
+              </div>
+            ) : (
+              <p className="text-sm text-destructive">
+                Failed to generate share link. Please try again.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

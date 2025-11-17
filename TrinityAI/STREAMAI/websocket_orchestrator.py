@@ -161,6 +161,7 @@ class StreamWebSocketOrchestrator:
         self._sequence_available_files: Dict[str, List[str]] = {}
         self._output_alias_registry: Dict[str, Dict[str, str]] = {}
         self._chat_file_mentions: Dict[str, List[str]] = {}
+        self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
 
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
@@ -1087,6 +1088,8 @@ WORKFLOW PLANNING RULES:
         logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
         available_files = list(available_files or [])
         self._sequence_available_files[sequence_id] = available_files
+        # Store project_context for this sequence (needed for dataframe-operations and other agents)
+        self._sequence_project_context[sequence_id] = project_context or {}
 
         persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
         if persisted_history:
@@ -3483,6 +3486,20 @@ WORKFLOW PLANNING RULES:
             "prompt": parameters.get("prompt", ""),
             "session_id": session_id
         }
+        
+        # 🔧 CRITICAL FIX: Include client_name, app_name, project_name for dataframe-operations
+        # These are required for the agent to find files in MinIO using the correct prefix
+        if atom_id == "dataframe-operations":
+            project_context = self._sequence_project_context.get(session_id, {})
+            client_name = project_context.get("client_name", "")
+            app_name = project_context.get("app_name", "")
+            project_name = project_context.get("project_name", "")
+            
+            payload["client_name"] = client_name
+            payload["app_name"] = app_name
+            payload["project_name"] = project_name
+            
+            logger.info(f"🔧 Added project context for dataframe-operations: client={client_name}, app={app_name}, project={project_name}")
         
         logger.info(f"📡 Calling {full_url}")
         logger.info(f"📦 Payload: {payload}")

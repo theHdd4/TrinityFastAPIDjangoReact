@@ -1,4 +1,4 @@
-import React, { useId } from 'react';
+import React, { useId, useState } from 'react';
 import { FileText, Upload, Trash2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,10 @@ interface UploadSectionProps {
   initialMissingValueStrategies?: Record<string, Record<string, { strategy: string; value?: string }>>;
   initialFilesMetadata?: Record<string, any>;
   onMetadataChange?: (metadata: Record<string, any>) => void;
+  savedDataframes?: Array<{ object_name: string; csv_name: string; arrow_name?: string }>;
+  isLoadingSavedDataframes?: boolean;
+  onSelectSavedDataframe?: (objectName: string) => void;
+  filePathMap?: Record<string, string>;
 }
 
 const UploadSection: React.FC<UploadSectionProps> = ({
@@ -76,9 +80,22 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   initialDtypeChanges = {},
   initialMissingValueStrategies = {},
   initialFilesMetadata = {},
-  onMetadataChange
+  onMetadataChange,
+  savedDataframes = [],
+  isLoadingSavedDataframes = false,
+  onSelectSavedDataframe,
+  filePathMap = {}
 }) => {
   const inputId = useId();
+  const [selectedSavedDataframe, setSelectedSavedDataframe] = useState<string>('');
+
+  const handleSavedDataframeChange = (value: string) => {
+    if (value && onSelectSavedDataframe) {
+      onSelectSavedDataframe(value);
+      setSelectedSavedDataframe(''); // Reset after selection
+    }
+  };
+
   return (
     <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
     <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
@@ -106,6 +123,47 @@ const UploadSection: React.FC<UploadSectionProps> = ({
            </>
          )}
       </div>
+
+      {/* Saved Dataframes Selector - Only show when validation steps are enabled */}
+      {useMasterFile && onSelectSavedDataframe && (() => {
+        const availableDataframes = savedDataframes.filter((frame) => {
+          // Filter out files that are already in the canvas
+          const fileName = frame.csv_name.split('/').pop() || frame.object_name.split('/').pop() || '';
+          return !uploadedFiles.some((f) => f.name === fileName);
+        });
+        
+        return (
+          <div className="border rounded-lg p-4 bg-gray-50">
+            <label className="text-sm font-medium text-gray-700 block mb-2">
+              Select from Saved Dataframes
+            </label>
+            {availableDataframes.length === 0 && !isLoadingSavedDataframes ? (
+              <div className="text-sm text-gray-500 py-2">
+                {savedDataframes.length === 0 
+                  ? 'No saved dataframes available' 
+                  : 'All saved dataframes are already in the canvas'}
+              </div>
+            ) : (
+            <Select
+              value={selectedSavedDataframe}
+              disabled={disabled || isLoadingSavedDataframes}
+              onValueChange={handleSavedDataframeChange}
+            >
+              <SelectTrigger className="bg-white">
+                <SelectValue placeholder={isLoadingSavedDataframes ? 'Loading saved dataframes...' : 'Choose a saved dataframe...'} />
+              </SelectTrigger>
+              <SelectContent className="max-h-64">
+                {availableDataframes.map((frame) => (
+                  <SelectItem key={frame.object_name} value={frame.object_name}>
+                    {frame.csv_name.split('/').pop() || frame.object_name.split('/').pop()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            )}
+          </div>
+        );
+      })()}
       
       {/* Data Preview & Configuration Section */}
       <FileDataPreview 
@@ -113,6 +171,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
         onDataChanges={onDataChanges}
         onDeleteFile={onDeleteFile}
         useMasterFile={useMasterFile}
+        validationResults={validationResults}
         fileAssignments={fileAssignments}
         onAssignmentChange={onAssignmentChange}
         requiredOptions={requiredOptions}
@@ -121,6 +180,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
         initialMissingValueStrategies={initialMissingValueStrategies}
         initialFilesMetadata={initialFilesMetadata}
         onMetadataChange={onMetadataChange}
+        filePathMap={filePathMap}
       />
       
       {uploadedFiles.length > 0 && !disableValidation && (

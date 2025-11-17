@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { CheckboxTemplate } from '@/templates/checkbox';
 import { Card } from '@/components/ui/card';
 import { VALIDATE_API, SELECT_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useDataSourceChangeWarning } from '@/hooks/useDataSourceChangeWarning';
 
 interface SelectModelsFeatureSettingsProps {
@@ -20,6 +21,32 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
   const [frames, setFrames] = useState<Frame[]>([]);
   const [combinationError, setCombinationError] = useState<string>('');
   const [isLoadingCombinations, setIsLoadingCombinations] = useState(false);
+  const fetchAndResolve = useCallback(
+    async (
+      input: RequestInfo | URL,
+      init?: RequestInit,
+      errorMessage = 'Request failed',
+    ) => {
+      const response = await fetch(input, init);
+      let payload: any;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        throw new Error(errorMessage);
+      }
+
+      if (!response.ok) {
+        const detail =
+          payload && typeof payload === 'object' && 'detail' in payload
+            ? (payload.detail as string)
+            : null;
+        throw new Error(detail || errorMessage);
+      }
+
+      return resolveTaskResponse(payload);
+    },
+    [],
+  );
 
   useEffect(() => {
     let query = '';
@@ -43,11 +70,14 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
     }
     
     // Fetch only model results files
-    fetch(`${SELECT_API}/list-model-results-files${query}`)
-      .then(r => r.json())
+    fetchAndResolve(
+      `${SELECT_API}/list-model-results-files${query}`,
+      undefined,
+      'Failed to fetch model results files',
+    )
       .then(d => setFrames(Array.isArray(d.files) ? d.files : []))
       .catch(() => setFrames([]));
-  }, []);
+  }, [fetchAndResolve]);
 
   // Function to fetch combination_id values when dataset is selected
   const fetchCombinationIds = async (fileKey: string) => {
@@ -72,22 +102,17 @@ const SelectModelsFeatureSettings: React.FC<SelectModelsFeatureSettingsProps> = 
       const url = `${baseUrl}?${params.toString()}`;
       
 
-      const response = await fetch(url);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to fetch combination IDs');
-      }
-      
-      const result = await response.json();
-      
+      const result = await fetchAndResolve(url, undefined, 'Failed to fetch combination IDs');
+
       if (result.unique_combination_ids && result.unique_combination_ids.length > 0) {
-        onDataChange({ 
+        setCombinationError(result.note || '');
+        onDataChange({
           availableCombinationIds: result.unique_combination_ids,
           selectedCombinationId: ''
         });
       } else {
-        throw new Error('No combination_id values found in the file');
+        const message = result.note || 'No combination_id values found in the file';
+        throw new Error(message);
       }
       
     } catch (error) {

@@ -12,6 +12,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import {
@@ -26,9 +34,14 @@ import {
   MinusSquare,
   Save,
   RefreshCcw,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { PivotTableSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { SCOPE_SELECTOR_API } from '@/lib/api';
+import PivotTableFilterModal from './PivotTableFilterModal';
+import { MultiSelectDropdown } from '@/templates/dropdown';
 
 type PivotStyleOptions = {
   rowHeaders: boolean;
@@ -315,9 +328,11 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   collapsedKeys,
   onToggleCollapse,
 }) => {
-  const [filterSearch, setFilterSearch] = useState<Record<string, string>>({});
   const [loadingFilter, setLoadingFilter] = useState<string | null>(null);
   const [filterErrors, setFilterErrors] = useState<Record<string, string | null>>({});
+  const [filterModalField, setFilterModalField] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const ROWS_PER_PAGE = 20;
 
   const styleOptions = useMemo<PivotStyleOptions>(() => {
     return {
@@ -503,6 +518,226 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     [data.dataSource, filterOptions, filterSelections, onDataChange],
   );
 
+  const handleSortChange = useCallback(
+    (field: string, sortType: 'asc' | 'desc' | 'value_asc' | 'value_desc' | null) => {
+      const currentSorting = data.pivotSorting ?? {};
+      const newSorting: Record<string, { type: string; level?: number; preserve_hierarchy?: boolean }> = {};
+      
+      // Copy existing sorting, but normalize keys to match exact field names from rowFields/columnFields
+      // Preserve level and preserve_hierarchy if they exist
+      Object.entries(currentSorting).forEach(([key, value]) => {
+        // Find the exact field name that matches (case-insensitive)
+        const exactField = rowFields.find(f => f.toLowerCase() === key.toLowerCase()) ||
+                          data.columnFields.find(f => f.toLowerCase() === key.toLowerCase()) ||
+                          key;
+        
+        // Preserve full config if it exists
+        if (value && typeof value === 'object' && 'type' in value) {
+          const sortValue = value as { type: string; level?: number; preserve_hierarchy?: boolean };
+          newSorting[exactField] = {
+            type: sortValue.type as 'asc' | 'desc' | 'value_asc' | 'value_desc',
+            level: sortValue.level,
+            preserve_hierarchy: sortValue.preserve_hierarchy ?? true,
+          };
+        } else {
+          newSorting[exactField] = { type: typeof value === 'string' ? (value as 'asc' | 'desc' | 'value_asc' | 'value_desc') : 'asc' };
+        }
+      });
+      
+      // Remove any existing sorting for this field (case-insensitive)
+      const fieldLower = field.toLowerCase();
+      Object.keys(newSorting).forEach(key => {
+        if (key.toLowerCase() === fieldLower) {
+          delete newSorting[key];
+        }
+      });
+      
+      if (sortType !== null) {
+        // Use the exact field name from rowFields/columnFields
+        const exactField = rowFields.find(f => f.toLowerCase() === fieldLower) ||
+                          data.columnFields.find(f => f.toLowerCase() === fieldLower) ||
+                          field;
+        
+        // Determine hierarchy level for this field (if it's a row field)
+        const fieldIndex = rowFields.findIndex(f => f.toLowerCase() === fieldLower);
+        const level = fieldIndex >= 0 ? fieldIndex : undefined;
+        
+        newSorting[exactField] = {
+          type: sortType,
+          level: level,
+          preserve_hierarchy: true, // Default to preserving hierarchy
+        };
+      }
+      
+      console.log('Sort change - field:', field, 'exactField:', rowFields.find(f => f.toLowerCase() === fieldLower) || field, 'type:', sortType, 'level:', rowFields.findIndex(f => f.toLowerCase() === fieldLower), 'newSorting:', newSorting);
+      onDataChange({ pivotSorting: newSorting });
+    },
+    [data.pivotSorting, data.columnFields, rowFields, onDataChange],
+  );
+
+  const handleFilterModalOpen = useCallback(
+    (field: string) => {
+      // Load options if not already loaded (this will auto-select all if selections are empty)
+      ensureFilterOptions(field);
+      setFilterModalField(field);
+    },
+    [ensureFilterOptions],
+  );
+
+  const handleFilterSelectionsChange = useCallback(
+    (field: string, selections: string[]) => {
+      const normalized = getNormalizedKey(field);
+      
+      // Update filter selections without moving fields to filter bucket
+      // Row and column fields can be filtered without being in filterFields
+      onDataChange({
+        pivotFilterSelections: {
+          ...filterSelections,
+          [field]: selections,
+          [normalized]: selections,
+        },
+      });
+    },
+    [filterSelections, onDataChange],
+  );
+
+  const getSortIcon = (field: string) => {
+    const sorting = data.pivotSorting?.[field];
+    if (!sorting) return <ArrowUpDown className="h-3 w-3" />;
+    switch (sorting.type) {
+      case 'asc':
+        return <ArrowUp className="h-3 w-3" />;
+      case 'desc':
+        return <ArrowDown className="h-3 w-3" />;
+      case 'value_asc':
+        return <ArrowUp className="h-3 w-3" />;
+      case 'value_desc':
+        return <ArrowDown className="h-3 w-3" />;
+      default:
+        return <ArrowUpDown className="h-3 w-3" />;
+    }
+  };
+
+  const renderFieldHeaderWithSortFilter = (field: string, isRowField: boolean = true) => {
+    // Check sorting with case-insensitive lookup
+    const sorting = data.pivotSorting?.[field] || 
+                   (data.pivotSorting ? Object.entries(data.pivotSorting).find(([k]) => k.toLowerCase() === field.toLowerCase())?.[1] : undefined);
+    const hasFilter = filterSelections[field] || filterSelections[getNormalizedKey(field)];
+    const filterOptionsForField = getFilterOptions(field);
+    const filterSelectionsForField = getFilterSelections(field);
+
+    return (
+      <div className="flex items-center gap-0.5 group/header">
+        <span>{field}</span>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="opacity-60 group-hover/header:opacity-100 transition-opacity p-0.5 hover:bg-muted rounded flex items-center justify-center ml-0.5"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">
+              Sort Options
+            </DropdownMenuLabel>
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault();
+                handleSortChange(field, 'asc');
+              }}
+              className={cn(
+                'text-xs',
+                sorting?.type === 'asc' ? 'font-semibold text-primary' : '',
+              )}
+            >
+              <ArrowUp className="h-3 w-3 mr-2" />
+              Sort A → Z
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault();
+                handleSortChange(field, 'desc');
+              }}
+              className={cn(
+                'text-xs',
+                sorting?.type === 'desc' ? 'font-semibold text-primary' : '',
+              )}
+            >
+              <ArrowDown className="h-3 w-3 mr-2" />
+              Sort Z → A
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault();
+                handleSortChange(field, 'value_asc');
+              }}
+              className={cn(
+                'text-xs',
+                sorting?.type === 'value_asc' ? 'font-semibold text-primary' : '',
+              )}
+            >
+              <ArrowUp className="h-3 w-3 mr-2" />
+              Sort by Value (Ascending)
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault();
+                handleSortChange(field, 'value_desc');
+              }}
+              className={cn(
+                'text-xs',
+                sorting?.type === 'value_desc' ? 'font-semibold text-primary' : '',
+              )}
+            >
+              <ArrowDown className="h-3 w-3 mr-2" />
+              Sort by Value (Descending)
+            </DropdownMenuItem>
+            {sorting && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={(e) => {
+                    e.preventDefault();
+                    handleSortChange(field, null);
+                  }}
+                  className="text-xs"
+                >
+                  Clear Sort
+                </DropdownMenuItem>
+              </>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={(e) => {
+                e.preventDefault();
+                handleFilterModalOpen(field);
+              }}
+              className={cn(
+                'text-xs',
+                hasFilter ? 'font-semibold text-primary' : '',
+              )}
+            >
+              <Filter className="h-3 w-3 mr-2" />
+              Filter...
+              {hasFilter && filterSelectionsForField.length < filterOptionsForField.length && (
+                <span className="ml-auto text-[10px]">
+                  ({filterSelectionsForField.length} selected)
+                </span>
+              )}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  };
+
   const columns = useMemo(() => {
     if (!hasResults) {
       return data.rowFields.length > 0
@@ -557,6 +792,11 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   };
 
   const columnHeaderInfo = useMemo(() => {
+    // Don't show column headers if columnFields is empty
+    if (!data.columnFields || data.columnFields.length === 0) {
+      return { rows: [] as ColumnHeaderCell[][], leafColumns: [] as string[] };
+    }
+    
     const rawNodes = Array.isArray(data.pivotColumnHierarchy)
       ? data.pivotColumnHierarchy
       : [];
@@ -605,7 +845,28 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     });
 
     const sortRecursive = (items: ColumnNode[]) => {
-      items.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      items.sort((a, b) => {
+        // Check if nodes are Grand Total nodes by checking their labels and column name
+        const aIsGrandTotal = 
+          (a.column && (a.column.toLowerCase().includes('grand total') || a.column.toLowerCase() === 'grandtotal')) ||
+          a.labels?.some(label => {
+            const value = String(label.value ?? '').toLowerCase();
+            return value.includes('grand total') || value === 'grandtotal';
+          }) || false;
+        const bIsGrandTotal = 
+          (b.column && (b.column.toLowerCase().includes('grand total') || b.column.toLowerCase() === 'grandtotal')) ||
+          b.labels?.some(label => {
+            const value = String(label.value ?? '').toLowerCase();
+            return value.includes('grand total') || value === 'grandtotal';
+          }) || false;
+        
+        // Grand Total nodes go to the end
+        if (aIsGrandTotal && !bIsGrandTotal) return 1;
+        if (!aIsGrandTotal && bIsGrandTotal) return -1;
+        
+        // Otherwise sort by order
+        return (a.order ?? 0) - (b.order ?? 0);
+      });
       items.forEach((child) => sortRecursive(child.children));
     };
     sortRecursive(roots);
@@ -640,6 +901,19 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     };
     roots.forEach(computeLeafCounts);
 
+    // Sort leafColumns to put Grand Total columns at the end
+    const isGrandTotalColumn = (col: string) => {
+      const normalized = col.toLowerCase();
+      return normalized.includes('grand total') || normalized === 'grandtotal';
+    };
+    leafColumns.sort((a, b) => {
+      const aIsGrandTotal = isGrandTotalColumn(a);
+      const bIsGrandTotal = isGrandTotalColumn(b);
+      if (aIsGrandTotal && !bIsGrandTotal) return 1; // Grand Total goes to end
+      if (!aIsGrandTotal && bIsGrandTotal) return -1; // Non-Grand Total stays first
+      return 0; // Keep original order for same type
+    });
+
     const rows: ColumnHeaderCell[][] = Array.from(
       { length: depth },
       () => [],
@@ -654,13 +928,19 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       let labelValue = labelEntry?.value ?? '';
       const fieldName = labelEntry?.field ?? '';
       const isValueField = fieldName === '__value__';
+      
+      // Show the actual value for column field nodes (not the field name)
+      // This displays the actual data values like "January", "February" instead of "MONTH"
       if (isValueField) {
+        // For value fields, use the mapped label (e.g., "Sum of Sales")
         const normalizedLabel = String(labelValue ?? '').toLowerCase();
         labelValue =
           valueFieldLabelMap.get(normalizedLabel) ??
           valueFieldLabelMap.get(String(labelValue ?? '')) ??
           labelValue;
       }
+      // For column field nodes (both parent and leaf), show the actual value
+      
       const displayLabel =
         labelValue === null || labelValue === undefined || labelValue === ''
           ? '\u00A0'
@@ -679,7 +959,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     roots.forEach(pushNode);
 
     return { rows, leafColumns };
-  }, [data.pivotColumnHierarchy, valueFieldLabelMap]);
+  }, [data.pivotColumnHierarchy, data.columnFields, valueFieldLabelMap]);
 
   const rawColumnHeaderRows = columnHeaderInfo.rows;
   const columnLeafColumns = columnHeaderInfo.leafColumns;
@@ -692,14 +972,40 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     );
 
   const baseValueColumns = useMemo(
-    () => columns.filter((column) => !rowFieldSet.has(column.toLowerCase())),
-    [columns, rowFieldSet],
+    () => {
+      // If columnFields is empty, don't show any value columns as headers
+      if (!data.columnFields || data.columnFields.length === 0) {
+        return [];
+      }
+      return columns.filter((column) => !rowFieldSet.has(column.toLowerCase()));
+    },
+    [columns, rowFieldSet, data.columnFields],
   );
 
   const valueColumns = useMemo(
-    () =>
-      columnLeafColumns.length > 0 ? columnLeafColumns : baseValueColumns,
-    [columnLeafColumns, baseValueColumns],
+    () => {
+      // If columnFields is empty, don't show any column headers - only show value fields
+      if (!data.columnFields || data.columnFields.length === 0) {
+        // When no columnFields, only show actual value field columns (not cached column names)
+        // Get value field names from valueFields settings
+        if (data.valueFields && data.valueFields.length > 0) {
+          return data.valueFields
+            .filter((vf: any) => vf?.field)
+            .map((vf: any) => {
+              // Try to find matching column in results, or use the field name
+              // This is the actual column name in the data, not the label
+              const fieldName = vf.field;
+              const matchingColumn = columns.find(
+                (col) => col.toLowerCase() === fieldName.toLowerCase()
+              );
+              return matchingColumn || fieldName;
+            });
+        }
+        return [];
+      }
+      return columnLeafColumns.length > 0 ? columnLeafColumns : baseValueColumns;
+    },
+    [columnLeafColumns, baseValueColumns, data.columnFields, data.valueFields, columns, rowFieldSet],
   );
 
   const canonicalizeKey = useCallback((key: unknown) => {
@@ -821,7 +1127,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   );
 
   const buildRecordForNode = useCallback(
-    (node: HierNode) => {
+    (node: HierNode, includeValues: boolean = true) => {
       const record: Record<string, any> = {};
       const labelMap = new Map<string, any>();
 
@@ -839,57 +1145,69 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         }
       });
 
-      const sourceValues = new Map<string, any>();
-      Object.entries(node.values ?? {}).forEach(([key, value]) => {
-        sourceValues.set(canonicalizeKey(key), value);
-      });
+      // Only populate value columns if includeValues is true
+      if (includeValues) {
+        const sourceValues = new Map<string, any>();
+        Object.entries(node.values ?? {}).forEach(([key, value]) => {
+          sourceValues.set(canonicalizeKey(key), value);
+        });
 
-      normalizedValueColumns.forEach(({ name, canonical }) => {
-        if (!sourceValues.has(canonical)) {
-          return;
+        normalizedValueColumns.forEach(({ name, canonical }) => {
+          if (!sourceValues.has(canonical)) {
+            return;
+          }
+
+          const value = sourceValues.get(canonical);
+
+          if (record[name] === undefined || record[name] === null) {
+            record[name] = value;
+          }
+
+          if (
+            canonical &&
+            canonical !== name &&
+            (record[canonical] === undefined || record[canonical] === null)
+          ) {
+            record[canonical] = value;
+          }
+        });
+
+        if (valueColumns.some((column) => record[column] === undefined || record[column] === null)) {
+          const match = findMatchingPivotRow(node.labels ?? []);
+          if (match) {
+            valueColumns.forEach((column) => {
+              const canonicalColumn = canonicalizeKey(column);
+              const matchValue =
+                match[column] ??
+                (canonicalColumn && canonicalColumn !== column ? match[canonicalColumn] : undefined);
+
+              if (matchValue === undefined || matchValue === null) {
+                return;
+              }
+
+              if (record[column] === undefined || record[column] === null) {
+                record[column] = matchValue;
+              }
+
+              if (
+                canonicalColumn &&
+                canonicalColumn !== column &&
+                (record[canonicalColumn] === undefined || record[canonicalColumn] === null)
+              ) {
+                record[canonicalColumn] = matchValue;
+              }
+            });
+          }
         }
-
-        const value = sourceValues.get(canonical);
-
-        if (record[name] === undefined || record[name] === null) {
-          record[name] = value;
-        }
-
-        if (
-          canonical &&
-          canonical !== name &&
-          (record[canonical] === undefined || record[canonical] === null)
-        ) {
-          record[canonical] = value;
-        }
-      });
-
-      if (valueColumns.some((column) => record[column] === undefined || record[column] === null)) {
-        const match = findMatchingPivotRow(node.labels ?? []);
-        if (match) {
-          valueColumns.forEach((column) => {
-            const canonicalColumn = canonicalizeKey(column);
-            const matchValue =
-              match[column] ??
-              (canonicalColumn && canonicalColumn !== column ? match[canonicalColumn] : undefined);
-
-            if (matchValue === undefined || matchValue === null) {
-              return;
-            }
-
-            if (record[column] === undefined || record[column] === null) {
-              record[column] = matchValue;
-            }
-
-            if (
-              canonicalColumn &&
-              canonicalColumn !== column &&
-              (record[canonicalColumn] === undefined || record[canonicalColumn] === null)
-            ) {
-              record[canonicalColumn] = matchValue;
-            }
-          });
-        }
+      } else {
+        // Set value columns to empty/null when includeValues is false
+        valueColumns.forEach((column) => {
+          record[column] = null;
+          const canonicalColumn = canonicalizeKey(column);
+          if (canonicalColumn && canonicalColumn !== column) {
+            record[canonicalColumn] = null;
+          }
+        });
       }
 
       return record;
@@ -1203,7 +1521,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     </TableRow>
   );
 
-  const renderTabularTable = () => {
+  const renderTabularTable = (rowsToRender: TabularRow[] = tabularRows) => {
     const colSpan = Math.max(rowFields.length + valueColumns.length, 1);
     const headerRowCount = columnHeaderRows.length > 0 ? columnHeaderRows.length : 1;
 
@@ -1220,7 +1538,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     className="text-left text-[12px] uppercase tracking-wide font-semibold"
                     style={{ ...headerStyle, textAlign: 'left' }}
                   >
-                    {field}
+                    {renderFieldHeaderWithSortFilter(field, true)}
                   </TableHead>
                 ))}
               {columnHeaderRows.length > 0
@@ -1239,28 +1557,34 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     </TableHead>
                   ))
                 : headerIndex === 0
-                ? valueColumns.map((column) => (
+                ? valueColumns.map((column) => {
+                    // Use valueFieldLabelMap to show aggregation labels (e.g., "Sum of D1")
+                    const label = valueFieldLabelMap.get(column) || 
+                                  valueFieldLabelMap.get(column.toLowerCase()) || 
+                                  column;
+                    return (
                     <TableHead
                       key={column}
                       className="text-right text-[12px] uppercase tracking-wide font-semibold"
                       style={headerStyle}
                     >
-                      {column}
+                        {label}
                     </TableHead>
-                  ))
+                    );
+                  })
                 : null}
             </TableRow>
           ))}
         </TableHeader>
         <TableBody>
-          {isLoading
-            ? renderLoadingRow(colSpan)
-            : tabularRows.length === 0
-            ? renderEmptyRow(
-                colSpan,
-                'No pivot results yet. Configure the layout and refresh to generate the table.'
-              )
-            : tabularRows.map((row, rowIndex) => (
+            {isLoading
+              ? renderLoadingRow(colSpan)
+              : rowsToRender.length === 0
+              ? renderEmptyRow(
+                  colSpan,
+                  'No pivot results yet. Configure the layout and refresh to generate the table.'
+                )
+              : rowsToRender.map((row, rowIndex) => (
                 <TableRow key={`tabular-${rowIndex}`} style={{ borderColor }}>
                   {rowFields.map((field, fieldIndex) => {
                     const canonicalField = canonicalizeKey(field);
@@ -1291,28 +1615,33 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                   })}
                   {valueColumns.map((column) => {
                     const canonicalColumn = canonicalizeKey(column);
+                    const record = row.record || {};
                     const rawValue =
-                      row.record[column] ??
+                      record[column] ??
                       (canonicalColumn && canonicalColumn !== column
-                        ? row.record[canonicalColumn]
+                        ? record[canonicalColumn]
                         : undefined);
                     
-                    const rowKey = rowFields
-                      .map((field) => canonicalizeKey(getRowFieldValue(row.record, field)))
-                      .join('|');
+                    // Use nodeKey for subtotals (if available) to get correct percentage calculations
+                    // Otherwise generate rowKey from record fields
+                    const rowKey = row.nodeKey || (rowFields.length > 0
+                      ? rowFields
+                          .map((field) => canonicalizeKey(getRowFieldValue(record, field)))
+                          .join('|')
+                      : '');
 
                     return (
                       <TableCell
                         key={`${rowIndex}-${column}`}
                         className="text-right tabular-nums font-medium"
                         style={getDataCellStyle({
-                          row: row.record,
+                          row: record,
                           column,
                           rowIndex,
                           isRowHeader: false,
                         })}
                       >
-                        {formatValue(rawValue, rowKey, column, row.record)}
+                        {formatValue(rawValue, rowKey, column, record)}
                       </TableCell>
                     );
                   })}
@@ -1323,9 +1652,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     );
   };
 
-  const renderCompactTable = () => {
-    if (!rowFields.length || compactRows.length === 0) {
-      return renderTabularTable();
+  const renderCompactTable = (rowsToRender: CompactRow[] = compactRows) => {
+    if (!rowFields.length || rowsToRender.length === 0) {
+      return renderTabularTable([]);
     }
 
     const headerRowCount = columnHeaderRows.length > 0 ? columnHeaderRows.length : 1;
@@ -1345,7 +1674,131 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     className="flex items-center justify-between"
                     style={{ color: headerStyle.color as string }}
                   >
-                    Row Labels
+                    <div className="flex items-center gap-0.5 group/header">
+                      <span>Row Labels</span>
+                      {rowFields.length > 0 && (() => {
+                        const parentField = rowFields[0];
+                        const sorting = data.pivotSorting?.[parentField] || 
+                                       (data.pivotSorting ? Object.entries(data.pivotSorting).find(([k]) => k.toLowerCase() === parentField.toLowerCase())?.[1] : undefined);
+                        const hasFilter = filterSelections[parentField] || filterSelections[getNormalizedKey(parentField)];
+                        const filterOptionsForField = getFilterOptions(parentField);
+                        const filterSelectionsForField = getFilterSelections(parentField);
+                        
+                        return (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className="opacity-60 group-hover/header:opacity-100 transition-opacity p-0.5 hover:bg-muted rounded flex items-center justify-center ml-0.5"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                              >
+                                {sorting?.type === 'asc' || sorting?.type === 'value_asc' ? (
+                                  <ArrowUp className="h-3.5 w-3.5 text-muted-foreground" />
+                                ) : sorting?.type === 'desc' || sorting?.type === 'value_desc' ? (
+                                  <ArrowDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                ) : (
+                                  <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                )}
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56">
+                              <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">
+                                Sort Options
+                              </DropdownMenuLabel>
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleSortChange(parentField, 'asc');
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  sorting?.type === 'asc' ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <ArrowUp className="h-3 w-3 mr-2" />
+                                Sort A → Z
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleSortChange(parentField, 'desc');
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  sorting?.type === 'desc' ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <ArrowDown className="h-3 w-3 mr-2" />
+                                Sort Z → A
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleSortChange(parentField, 'value_asc');
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  sorting?.type === 'value_asc' ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <ArrowUp className="h-3 w-3 mr-2" />
+                                Sort by Value (Ascending)
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleSortChange(parentField, 'value_desc');
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  sorting?.type === 'value_desc' ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <ArrowDown className="h-3 w-3 mr-2" />
+                                Sort by Value (Descending)
+                              </DropdownMenuItem>
+                              {sorting && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onSelect={(e) => {
+                                      e.preventDefault();
+                                      handleSortChange(parentField, null);
+                                    }}
+                                    className="text-xs"
+                                  >
+                                    Clear Sort
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleFilterModalOpen(parentField);
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  hasFilter ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <Filter className="h-3 w-3 mr-2" />
+                                Filter...
+                                {hasFilter && filterSelectionsForField.length < filterOptionsForField.length && (
+                                  <span className="ml-auto text-[10px]">
+                                    ({filterSelectionsForField.length} selected)
+                                  </span>
+                                )}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        );
+                      })()}
+                    </div>
                   </div>
                 </TableHead>
               )}
@@ -1365,23 +1818,29 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     </TableHead>
                   ))
                 : headerIndex === 0
-                ? valueColumns.map((column) => (
+                ? valueColumns.map((column) => {
+                    // Use valueFieldLabelMap to show aggregation labels (e.g., "Sum of D1")
+                    const label = valueFieldLabelMap.get(column) || 
+                                  valueFieldLabelMap.get(column.toLowerCase()) || 
+                                  column;
+                    return (
                     <TableHead
                       key={column}
                       className="text-right text-[12px] uppercase tracking-wide font-semibold"
                       style={headerStyle}
                     >
-                      {column}
+                        {label}
                     </TableHead>
-                  ))
+                    );
+                  })
                 : null}
             </TableRow>
           ))}
         </TableHeader>
         <TableBody>
-          {isLoading
-            ? renderLoadingRow(Math.max(1 + valueColumns.length, 1))
-            : compactRows.map((row, rowIndex) => {
+            {isLoading
+              ? renderLoadingRow(Math.max(1 + valueColumns.length, 1))
+              : rowsToRender.map((row, rowIndex) => {
                 const cellStyle = getDataCellStyle({
                   row: row.record,
                   column: 'Row Labels',
@@ -1424,19 +1883,20 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       </div>
                     </TableCell>
                     {valueColumns.map((column) => {
-                      const rowKey = row.node.key;
+                      const rowKey = row.node?.key || '';
+                      const columnValue = row.record?.[column];
                       return (
                       <TableCell
-                        key={`${row.node.key}-${column}`}
+                        key={`${row.node?.key || rowIndex}-${column}`}
                         className="text-right tabular-nums"
                         style={getDataCellStyle({
-                          row: row.record,
+                          row: row.record || {},
                           column,
                           rowIndex,
                           isRowHeader: false,
                         })}
                       >
-                          {formatValue(row.record[column], rowKey, column, row.record)}
+                          {formatValue(columnValue, rowKey, column, row.record || {})}
                       </TableCell>
                       );
                     })}
@@ -1448,9 +1908,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     );
   };
 
-  const renderOutlineTable = () => {
-    if (!rowFields.length || outlineRows.length === 0) {
-      return renderTabularTable();
+  const renderOutlineTable = (rowsToRender: OutlineRow[] = outlineRows) => {
+    if (!rowFields.length || rowsToRender.length === 0) {
+      return renderTabularTable([]);
     }
 
     const colSpan = Math.max(rowFields.length + valueColumns.length, 1);
@@ -1469,7 +1929,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     className="text-left text-[12px] uppercase tracking-wide font-semibold"
                     style={{ ...headerStyle, textAlign: 'left' }}
                   >
-                    {field}
+                    {renderFieldHeaderWithSortFilter(field, true)}
                   </TableHead>
                 ))}
               {columnHeaderRows.length > 0
@@ -1502,9 +1962,9 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           ))}
         </TableHeader>
         <TableBody>
-          {isLoading
-            ? renderLoadingRow(colSpan)
-            : outlineRows.map((row, rowIndex) => (
+            {isLoading
+              ? renderLoadingRow(colSpan)
+              : rowsToRender.map((row, rowIndex) => (
                 <TableRow key={`${row.node.key}-outline${row.isTotal ? '-total' : ''}`} style={{ borderColor }}>
                   {rowFields.map((field, fieldIndex) => {
                     const isLevelCell = fieldIndex === row.level;
@@ -1554,19 +2014,21 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     );
                   })}
                   {valueColumns.map((column) => {
-                    const rowKey = row.node.key;
+                    const rowKey = row.node?.key || '';
+                    const record = row.record || {};
+                    const columnValue = record[column];
                     return (
                     <TableCell
-                      key={`${row.node.key}-${column}-${row.isTotal ? 'total' : 'value'}`}
+                      key={`${row.node?.key || rowIndex}-${column}-${row.isTotal ? 'total' : 'value'}`}
                       className="text-right tabular-nums font-medium"
                       style={getDataCellStyle({
-                        row: row.record,
+                        row: record,
                         column,
                         rowIndex,
                         isRowHeader: false,
                       })}
                     >
-                        {formatValue(row.record[column], rowKey, column, row.record)}
+                        {formatValue(columnValue, rowKey, column, record)}
                     </TableCell>
                     );
                   })}
@@ -1576,25 +2038,6 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       </Table>
     );
   };
-
-  const renderCurrentLayout = () => {
-    if (!canUseHierarchicalLayouts) {
-      return renderTabularTable();
-    }
-    switch (reportLayout) {
-      case 'compact':
-        return renderCompactTable();
-      case 'outline':
-        return renderOutlineTable();
-      case 'tabular':
-      default:
-        return renderTabularTable();
-    }
-  };
-
-  const datasetLabel = data.dataSource
-    ? data.dataSource.split('/').filter(Boolean).slice(-1)[0]
-    : 'Not selected';
 
   type HierNode = {
     key: string;
@@ -1655,6 +2098,20 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     isTotal: boolean;
   };
 
+  // Helper to check if a node is a Grand Total node
+  const isGrandTotalNode = useCallback((node: HierNode): boolean => {
+    if (node.key === '__grand_total__') {
+      return true;
+    }
+    const labelEntry = node.labels?.[node.labels.length - 1];
+    const labelValue = labelEntry?.value ?? '';
+    if (typeof labelValue === 'string') {
+      const normalized = labelValue.trim().toLowerCase();
+      return normalized.includes('grand total') || normalized === 'grandtotal';
+    }
+    return false;
+  }, []);
+
   const compactRows = useMemo<CompactRow[]>(() => {
     if (!rowFields.length || hierarchyTree.roots.length === 0) {
       return [];
@@ -1664,16 +2121,25 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     const showSubtotals = subtotalsMode !== 'off';
 
     const pushNode = (node: HierNode, ancestorCollapsed: boolean) => {
-      const record = buildRecordForNode(node);
       const labelEntry = node.labels?.[node.labels.length - 1];
       const labelValue = labelEntry?.value ?? '';
       const nodeHasChildren = node.children.length > 0;
       const isCollapsed = collapsedSet.has(node.key) && nodeHasChildren;
       const shouldShowSubtotals = showSubtotals && nodeHasChildren;
 
+      // Determine if parent node should have values
+      // - subtotals off: parent nodes have empty values
+      // - subtotals top: parent nodes have values (subtotals)
+      // - subtotals bottom: parent nodes have empty values (totals shown separately at bottom)
+      const parentHasValues = nodeHasChildren && subtotalsMode === 'top';
+      const includeValues = !nodeHasChildren || parentHasValues;
+      
+      const record = buildRecordForNode(node, includeValues);
+
       const createTotalRow = () => {
         const fieldName = rowFields[node.level] ?? rowFields[0];
-        const totalRecord = { ...record };
+        // Total row always has values (subtotals)
+        const totalRecord = buildRecordForNode(node, true);
         let totalLabel = String(labelValue ?? '').trim();
 
         if (!totalLabel && fieldName) {
@@ -1711,6 +2177,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       };
 
       if (!ancestorCollapsed) {
+        // Always show parent nodes
+        // - subtotals off: parent nodes have empty values
+        // - subtotals top: parent nodes have values (subtotals) - no separate total row needed
+        // - subtotals bottom: parent nodes have empty values (totals shown separately at bottom)
         rows.push({
           node,
           depth: node.level,
@@ -1719,15 +2189,12 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           hasChildren: nodeHasChildren,
           isTotal: false,
         });
-
-        if (shouldShowSubtotals && subtotalsMode === 'top' && !isCollapsed) {
-          rows.push(createTotalRow());
-        }
       }
 
       const nextAncestorCollapsed = ancestorCollapsed || isCollapsed;
       node.children.forEach((child) => pushNode(child, nextAncestorCollapsed));
 
+      // When subtotals are bottom, add a total row after children
       if (
         !ancestorCollapsed &&
         shouldShowSubtotals &&
@@ -1740,13 +2207,26 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
 
     hierarchyTree.roots.forEach((root) => pushNode(root, false));
 
-    return rows;
+    // Separate Grand Total rows and place them at the end
+    const regularRows: CompactRow[] = [];
+    const grandTotalRows: CompactRow[] = [];
+    
+    rows.forEach((row) => {
+      if (isGrandTotalNode(row.node)) {
+        grandTotalRows.push(row);
+      } else {
+        regularRows.push(row);
+      }
+    });
+
+    return [...regularRows, ...grandTotalRows];
   }, [
     buildRecordForNode,
     collapsedSet,
     hierarchyTree,
     rowFields,
     subtotalsMode,
+    isGrandTotalNode,
   ]);
 
   type OutlineRow = {
@@ -1768,18 +2248,30 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     const visit = (node: HierNode, ancestorCollapsed: boolean) => {
       const nodeHasChildren = node.children.length > 0;
       const isCollapsed = collapsedSet.has(node.key) && nodeHasChildren;
-      const record = buildRecordForNode(node);
+      const shouldShowSubtotals = showSubtotals && nodeHasChildren;
+
+      // Determine if parent node should have values
+      // - subtotals off: parent nodes have empty values
+      // - subtotals top: parent nodes have values (subtotals)
+      // - subtotals bottom: parent nodes have empty values (totals shown separately at bottom)
+      const parentHasValues = nodeHasChildren && subtotalsMode === 'top';
+      const includeValues = !nodeHasChildren || parentHasValues;
+      
+      const record = buildRecordForNode(node, includeValues);
       const display: Record<string, any> = {};
       rowFields.forEach((field, index) => {
         display[field] = index === node.level ? record[field] : '';
       });
 
-      const shouldShowSubtotals = showSubtotals && nodeHasChildren;
-
       const createTotalRow = () => {
         const fieldName = rowFields[node.level] ?? rowFields[0];
-        const totalRecord = { ...record };
-        const totalDisplay = { ...display };
+        // Total row always has values (subtotals)
+        const totalRecord = buildRecordForNode(node, true);
+        const totalDisplay: Record<string, any> = {};
+        rowFields.forEach((field, index) => {
+          totalDisplay[field] = index === node.level ? totalRecord[field] : '';
+        });
+        
         if (fieldName) {
           const base = String(totalRecord[fieldName] ?? '').trim();
           const totalLabel = base.length > 0 && !base.toLowerCase().endsWith('total')
@@ -1799,6 +2291,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       };
 
       if (!ancestorCollapsed) {
+        // Always show parent nodes
+        // - subtotals off: parent nodes have empty values
+        // - subtotals top: parent nodes have values (subtotals) - no separate total row needed
+        // - subtotals bottom: parent nodes have empty values (totals shown separately at bottom)
         rows.push({
           node,
           record,
@@ -1807,15 +2303,12 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           hasChildren: nodeHasChildren,
           isTotal: false,
         });
-
-        if (shouldShowSubtotals && subtotalsMode === 'top' && !isCollapsed) {
-          createTotalRow();
-        }
       }
 
       const nextAncestorCollapsed = ancestorCollapsed || isCollapsed;
       node.children.forEach((child) => visit(child, nextAncestorCollapsed));
 
+      // When subtotals are bottom, add a total row after children
       if (
         !ancestorCollapsed &&
         shouldShowSubtotals &&
@@ -1827,22 +2320,41 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     };
 
     hierarchyTree.roots.forEach((root) => visit(root, false));
-    return rows;
+    
+    // Separate Grand Total rows and place them at the end
+    const regularRows: OutlineRow[] = [];
+    const grandTotalRows: OutlineRow[] = [];
+    
+    rows.forEach((row) => {
+      if (isGrandTotalNode(row.node)) {
+        grandTotalRows.push(row);
+      } else {
+        regularRows.push(row);
+      }
+    });
+
+    return [...regularRows, ...grandTotalRows];
   }, [
     buildRecordForNode,
     collapsedSet,
     hierarchyTree,
     rowFields,
     subtotalsMode,
+    isGrandTotalNode,
   ]);
 
   type TabularRow = {
     record: Record<string, any>;
+    nodeKey?: string; // Store node key for subtotals to calculate percentages correctly
   };
 
   const tabularRows = useMemo<TabularRow[]>(() => {
     if (!rowFields.length || hierarchyTree.roots.length === 0) {
-      return pivotRows.map((row) => {
+      // No hierarchy - process flat rows and ensure grand total is last
+      const regularRows: TabularRow[] = [];
+      const grandTotalRows: TabularRow[] = [];
+      
+      pivotRows.forEach((row) => {
         const record: Record<string, any> = { ...row };
 
         valueColumns.forEach((column) => {
@@ -1872,8 +2384,24 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           }
         });
 
-        return { record };
+        // Check if this is a Grand Total row
+        const isGrandTotal = rowFields.some((field) => {
+          const value = record[field];
+          if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            return normalized.includes('grand total') || normalized === 'grandtotal';
+          }
+          return false;
+        });
+
+        if (isGrandTotal) {
+          grandTotalRows.push(row);
+        } else {
+          regularRows.push(row);
+        }
       });
+
+      return [...regularRows, ...grandTotalRows];
     }
 
     const rows: TabularRow[] = [];
@@ -1885,7 +2413,16 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         nextPath[canonicalizeKey(field)] = value;
       });
 
-      const record = buildRecordForNode(node);
+      const nodeHasChildren = node.children.length > 0;
+      
+      // Determine if parent node should have values
+      // - subtotals off: parent nodes have empty values
+      // - subtotals top: parent nodes have values (subtotals)
+      // - subtotals bottom: parent nodes have empty values (totals shown separately at bottom)
+      const parentHasValues = nodeHasChildren && subtotalsMode === 'top';
+      const includeValues = !nodeHasChildren || parentHasValues;
+      
+      const record = buildRecordForNode(node, includeValues);
       rowFields.forEach((field, index) => {
         const canonicalField = canonicalizeKey(field);
         let displayValue = nextPath[field];
@@ -1895,8 +2432,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         if (displayValue === undefined) {
           displayValue = '';
         }
-        // Only add "Total" suffix if subtotals are enabled
-        if (subtotalsMode !== 'off' && node.children.length > 0 && index === node.level && typeof displayValue === 'string') {
+        // Only add "Total" suffix if subtotals are enabled and showing at bottom
+        if (subtotalsMode === 'bottom' && nodeHasChildren && index === node.level && typeof displayValue === 'string') {
           const trimmed = displayValue.trim();
           displayValue = trimmed.length > 0 && !trimmed.toLowerCase().endsWith('total')
             ? `${trimmed} Total`
@@ -1913,35 +2450,130 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       });
 
       if (node.children.length === 0) {
-        rows.push({ record });
+        // Leaf node - always include
+        rows.push({ record, nodeKey: node.key });
         return;
       }
 
+      // Always add parent node as a row (before children for tabular layout)
+      // - subtotals off: parent nodes have empty values
+      // - subtotals top: parent nodes have values (subtotals)
+      // - subtotals bottom: parent nodes have empty values (totals shown separately at bottom)
+      rows.push({ record, nodeKey: node.key });
+      
+      // Node has children - process children
       node.children.forEach((child) => traverse(child, nextPath));
-      rows.push({ record });
+      
+      // When subtotals are bottom, add a total row after all children
+      if (subtotalsMode === 'bottom') {
+        const totalRecord = buildRecordForNode(node, true);
+        rowFields.forEach((field, index) => {
+          const canonicalField = canonicalizeKey(field);
+          let displayValue = nextPath[field];
+          if (displayValue === undefined) {
+            displayValue = nextPath[canonicalizeKey(field)];
+          }
+          if (displayValue === undefined) {
+            displayValue = '';
+          }
+          if (index === node.level && typeof displayValue === 'string') {
+            const trimmed = displayValue.trim();
+            displayValue = trimmed.length > 0 && !trimmed.toLowerCase().endsWith('total')
+              ? `${trimmed} Total`
+              : trimmed;
+          }
+          totalRecord[field] = displayValue;
+          if (
+            canonicalField &&
+            canonicalField !== field &&
+            (totalRecord[canonicalField] === undefined || totalRecord[canonicalField] === null)
+          ) {
+            totalRecord[canonicalField] = displayValue;
+          }
+        });
+        rows.push({ record: totalRecord, nodeKey: node.key });
+      }
     };
 
     hierarchyTree.roots.forEach((root) => traverse(root, {}));
     
-    // Filter out subtotal rows when subtotals are off
-    if (subtotalsMode === 'off') {
-      return rows.filter((row) => {
-        // Check if any field value ends with "Total" (subtotal indicator)
-        // But keep Grand Total rows (rows where all fields might be "Grand Total")
-        const hasSubtotal = rowFields.some((field) => {
-          const value = row.record[field];
-          if (typeof value === 'string') {
-            const lower = value.toLowerCase().trim();
-            return lower.endsWith('total') && !lower.includes('grand total') && lower !== 'grand total';
-          }
-          return false;
-        });
-        return !hasSubtotal;
+    // Separate Grand Total rows and place them at the end
+    const regularRows: TabularRow[] = [];
+    const grandTotalRows: TabularRow[] = [];
+    
+    rows.forEach((row) => {
+      // Check if this is a Grand Total row by checking if any field value contains "Grand Total"
+      const isGrandTotal = rowFields.some((field) => {
+        const value = row.record[field];
+        if (typeof value === 'string') {
+          const normalized = value.trim().toLowerCase();
+          return normalized.includes('grand total') || normalized === 'grandtotal';
+        }
+        return false;
       });
+      
+      if (isGrandTotal) {
+        grandTotalRows.push(row);
+      } else {
+        regularRows.push(row);
+      }
+    });
+
+    return [...regularRows, ...grandTotalRows];
+  }, [buildRecordForNode, canonicalizeKey, hierarchyTree, pivotRows, rowFields, valueColumns, subtotalsMode]);
+
+  const canUseHierarchicalLayouts = rowFields.length > 0 && hierarchyTree.roots.length > 0;
+
+  // Get current rows count based on layout
+  const getCurrentRowsCount = useCallback(() => {
+    if (!canUseHierarchicalLayouts) {
+      return tabularRows.length;
+    }
+    switch (reportLayout) {
+      case 'compact':
+        return compactRows.length;
+      case 'outline':
+        return outlineRows.length;
+      case 'tabular':
+      default:
+        return tabularRows.length;
+    }
+  }, [canUseHierarchicalLayouts, reportLayout, tabularRows.length, compactRows.length, outlineRows.length]);
+
+  // Pagination calculations
+  const totalRows = getCurrentRowsCount();
+  const totalPages = Math.max(1, Math.ceil(totalRows / ROWS_PER_PAGE));
+  const startIndex = (currentPage - 1) * ROWS_PER_PAGE;
+  const endIndex = startIndex + ROWS_PER_PAGE;
+
+  // Reset to page 1 when data changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [totalRows, reportLayout]);
+
+  const renderCurrentLayout = () => {
+    // Don't render table if rowFields is empty - show readiness message instead
+    if (!rowFields.length) {
+      return renderTabularTable([]);
     }
     
-    return rows;
-  }, [buildRecordForNode, canonicalizeKey, hierarchyTree, pivotRows, rowFields, valueColumns, subtotalsMode]);
+    if (!canUseHierarchicalLayouts) {
+      const paginatedTabularRows = tabularRows.slice(startIndex, endIndex);
+      return renderTabularTable(paginatedTabularRows);
+    }
+    switch (reportLayout) {
+      case 'compact':
+        const paginatedCompactRows = compactRows.slice(startIndex, endIndex);
+        return renderCompactTable(paginatedCompactRows);
+      case 'outline':
+        const paginatedOutlineRows = outlineRows.slice(startIndex, endIndex);
+        return renderOutlineTable(paginatedOutlineRows);
+      case 'tabular':
+      default:
+        const paginatedTabularRows = tabularRows.slice(startIndex, endIndex);
+        return renderTabularTable(paginatedTabularRows);
+    }
+  };
 
   type LayoutOption = { id: 'compact' | 'outline' | 'tabular'; label: string };
 
@@ -1953,8 +2585,6 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     ],
     [],
   );
-
-  const canUseHierarchicalLayouts = rowFields.length > 0 && hierarchyTree.roots.length > 0;
 
   // Calculate max height for scrollable area (approximately 20 rows)
   const tableMaxHeight = useMemo(() => {
@@ -1974,12 +2604,12 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   return (
     <div className="w-full h-full bg-[#F3F3F3] flex flex-col overflow-hidden">
       <div className="p-3 space-y-3 flex-shrink-0">
-        <Card className="bg-white border border-[#D9D9D9] rounded-md shadow-sm">
-          <div className="px-4 py-3">
-            <div className="flex w-full flex-nowrap items-center gap-3 sm:gap-4 overflow-x-auto">
-              <div className="flex flex-nowrap items-center gap-3 min-w-0">
-                <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase">Layout</span>
-                <div className="flex flex-nowrap items-center gap-1">
+        <Card className="bg-white border border-[#D9D9D9] rounded-md shadow-sm overflow-hidden">
+          <div className="px-4 py-3 overflow-hidden">
+            <div className="flex w-full flex-nowrap items-center gap-3 sm:gap-4 overflow-x-auto min-w-0 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+              <div className="flex flex-nowrap items-center gap-3 min-w-0 flex-shrink-0">
+                <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase whitespace-nowrap">Layout</span>
+                <div className="flex flex-nowrap items-center gap-1 flex-shrink-0">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -2048,8 +2678,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       {[
                         { id: 'off', label: 'Off for Rows and Columns' },
                         { id: 'both', label: 'On for Rows and Columns' },
-                        { id: 'rows', label: 'On for Rows Only' },
-                        { id: 'columns', label: 'On for Columns Only' },
+                        { id: 'columns', label: 'On for Rows Only' },
+                        { id: 'rows', label: 'On for Columns Only' },
                       ].map((option) => {
                         const isActive = grandTotalsMode === option.id;
                         return (
@@ -2175,13 +2805,13 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="px-2.5 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
+                      className="px-2.5 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] flex-shrink-0"
                     >
                       <span className="flex flex-col leading-tight text-left whitespace-normal">
                         <span>Pivot</span>
@@ -2241,7 +2871,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
+                      className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] flex-shrink-0"
                     >
                       <span className="flex flex-col leading-tight text-left whitespace-normal">
                         <span>PivotTable</span>
@@ -2308,53 +2938,22 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
                               </div>
-                            </div>
-                              </div>
 
-          <div className="flex flex-col gap-2 border-t border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-1 text-[11px] text-[#595959]">
-              <p className="font-medium">
-                Data source: <span className="text-[#262626]">{datasetLabel}</span>
-              </p>
-              {data.pivotUpdatedAt && (
-                <p>Last updated: <span className="font-medium text-[#262626]">{new Date(data.pivotUpdatedAt).toLocaleString()}</span></p>
-              )}
-              {typeof data.pivotRowCount === 'number' && data.pivotRowCount > 0 && (
-                <p>Rows returned: <span className="font-medium text-[#262626]">{data.pivotRowCount.toLocaleString()}</span></p>
-              )}
-                      </div>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={onSave}
-                disabled={isSaving || !hasResults}
-                className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
-              >
-                {isSaving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    <span>Save</span>
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
               <Button
                 onClick={onSaveAs}
                 disabled={isSaving || !hasResults}
-                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4"
+                  className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4 flex-shrink-0"
               >
                 {isSaving ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    <span>Saving...</span>
+                      <span className="whitespace-nowrap">Saving...</span>
                   </>
                 ) : (
                   <>
                     <Save className="w-4 h-4" />
-                    <span>Save As</span>
+                      <span className="whitespace-nowrap">Save As</span>
                   </>
                 )}
               </Button>
@@ -2363,15 +2962,15 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 size="sm"
                 onClick={onRefresh}
                 disabled={isLoading || !data.dataSource}
-                className="h-8 px-3 text-[12px] font-semibold border-[#D0D0D0] text-[#1A73E8] hover:bg-[#E8F0FE]"
+                  className="h-8 px-3 border-[#D0D0D0] text-[#1A73E8] hover:bg-[#E8F0FE] flex-shrink-0"
               >
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                Refresh
+                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               </Button>
+              </div>
                               </div>
                             </div>
 
-          {(error || infoMessage || saveError || saveMessage) && (
+          {(error || infoMessage || saveError) && (
             <div className="border-t border-border/60">
               {error && (
                 <div className="flex items-start gap-2 bg-destructive/10 px-4 py-3 text-destructive">
@@ -2389,12 +2988,6 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 <div className="flex items-start gap-2 bg-destructive/10 px-4 py-3 text-destructive">
                   <AlertTriangle className="h-4 w-4 mt-0.5" />
                   <p className="text-sm">{saveError}</p>
-                    </div>
-              )}
-              {!saveError && saveMessage && (
-                <div className="flex items-start gap-2 bg-emerald-50 px-4 py-3 text-emerald-700">
-                  <Info className="h-4 w-4 mt-0.5" />
-                  <p className="text-sm">{saveMessage}</p>
               </div>
                             )}
             </div>
@@ -2415,23 +3008,6 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 {filters.map((field) => {
                   const options = getFilterOptions(field);
                   const selections = getFilterSelections(field);
-                  const displayLabel = (() => {
-                    if (!options.length) {
-                      return field;
-                    }
-                    if (!selections.length || selections.length === options.length) {
-                      return `${field} (All)`;
-                    }
-                    if (selections.length === 1) {
-                      return `${field} (${selections[0]})`;
-                    }
-                    return `${field} (${selections.length} selected)`;
-                  })();
-
-                  const searchValue = filterSearch[field] ?? '';
-                  const visibleOptions = options.filter((value) =>
-                    value.toLowerCase().includes(searchValue.toLowerCase())
-                  );
 
                   const handleSelectionChange = (nextSelections: string[]) => {
                     const normalized = getNormalizedKey(field);
@@ -2445,123 +3021,20 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                   };
 
                   return (
-                    <DropdownMenu
-                      key={field}
-                      onOpenChange={(open) => {
-                        if (open) {
-                          ensureFilterOptions(field);
-                        } else {
-                          setFilterSearch((prev) => ({ ...prev, [field]: '' }));
-                        }
-                      }}
-                    >
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="ghost"
-                          className="h-7 px-3 text-xs font-medium rounded-full bg-[#E6F4EA] text-[#0B8043] border border-[#C6E6C9] hover:bg-[#D7EADB]"
-                        >
-                          <span className="flex items-center gap-1.5">
-                            {displayLabel}
-                            <ChevronDown className="w-3 h-3" />
-                          </span>
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start" className="w-64 max-h-72 overflow-y-auto p-0">
-                        <div className="px-3 py-2 space-y-2">
-                          <Input
-                            value={searchValue}
-                            onChange={(event) =>
-                              setFilterSearch((prev) => ({
-                                ...prev,
-                                [field]: event.target.value,
-                              }))
-                            }
-                            placeholder="Search"
-                            className="h-8 text-xs"
-                          />
-                          <div className="flex items-center gap-2 text-xs text-[#595959]">
-                            <Checkbox
-                              checked={selections.length === options.length && options.length > 0}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  handleSelectionChange(options);
-                                } else {
-                                  handleSelectionChange([]);
-                                }
-                              }}
-                              className="h-3 w-3"
-                              disabled={loadingFilter === field}
-                            />
-                            <span>Select Multiple Items</span>
-              </div>
-            </div>
-                        <div className="border-t border-[#E6E6E6]" />
-                        <div className="py-1">
-                          {loadingFilter === field ? (
-                            <DropdownMenuItem disabled className="text-xs text-[#595959]">
-                              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> Loading values…
-                            </DropdownMenuItem>
-                          ) : filterErrors[field] ? (
-                            <DropdownMenuItem disabled className="text-xs text-destructive">
-                              {filterErrors[field]}
-                            </DropdownMenuItem>
-                          ) : !options.length ? (
-                            <DropdownMenuItem disabled className="text-xs text-[#9E9E9E]">
-                              No values available
-                            </DropdownMenuItem>
-                          ) : visibleOptions.length ? (
-                            visibleOptions.map((value) => {
-                              const isChecked = selections.includes(value);
-                              return (
-                                <DropdownMenuItem
-                                  key={value}
-                                  className="flex items-center gap-2 text-xs"
-                                  onSelect={(event) => {
-                                    event.preventDefault();
-                                    const nextSelections = isChecked
-                                      ? selections.filter((item) => item !== value)
-                                      : [...selections, value];
-                                    handleSelectionChange(nextSelections);
-                                  }}
-                                >
-                                  <Checkbox checked={isChecked} className="h-3 w-3" />
-                                  <span className="truncate" title={value}>
-                                    {value}
-                                  </span>
-                                </DropdownMenuItem>
-                              );
-                            })
-                          ) : (
-                            <DropdownMenuItem disabled className="text-xs text-[#9E9E9E]">
-                              No matches
-                            </DropdownMenuItem>
-                          )}
-                  </div>
-                        <div className="border-t border-[#E6E6E6]" />
-                        <div className="flex items-center justify-between px-3 py-2">
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            className="text-[11px]"
-                            onClick={() => handleSelectionChange(options)}
-                            disabled={!options.length}
-                          >
-                            Select All
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            className="text-[11px]"
-                            onClick={() => handleSelectionChange([])}
-                            disabled={!options.length}
-                          >
-                            Clear
-                          </Button>
+                    <div key={field} onMouseEnter={() => ensureFilterOptions(field)}>
+                      <MultiSelectDropdown
+                        identifierName={field}
+                        placeholder={`Filter by ${field}`}
+                        selectedValues={selections}
+                        onSelectionChange={handleSelectionChange}
+                        options={options.map((value) => ({ value, label: value }))}
+                        showSelectAll={true}
+                        showTrigger={true}
+                        triggerClassName="h-7 px-3 text-xs font-medium rounded-full bg-[#E6F4EA] text-[#0B8043] border border-[#C6E6C9] hover:bg-[#D7EADB]"
+                        disabled={loadingFilter === field}
+                        maxHeight="200px"
+                      />
                     </div>
-                  </DropdownMenuContent>
-                </DropdownMenu>
                   );
                 })}
             </div>
@@ -2576,11 +3049,76 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           >
             {renderCurrentLayout()}
           </div>
+          
+          {/* Pagination - only show if more than 20 rows */}
+          {totalRows > ROWS_PER_PAGE && (
+            <div className="border-t border-border bg-white px-4 py-3 flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                Showing {startIndex + 1} to {Math.min(endIndex, totalRows)} of {totalRows} rows
+              </div>
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                      className={currentPage === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    />
+                  </PaginationItem>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    let pageNum: number;
+                    if (totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (currentPage >= totalPages - 2) {
+                      pageNum = totalPages - 4 + i;
+                    } else {
+                      pageNum = currentPage - 2 + i;
+                    }
+                    return (
+                      <PaginationItem key={pageNum}>
+                        <PaginationLink
+                          onClick={() => setCurrentPage(pageNum)}
+                          isActive={currentPage === pageNum}
+                          className="cursor-pointer"
+                        >
+                          {pageNum}
+                        </PaginationLink>
+                      </PaginationItem>
+                    );
+                  })}
+                  <PaginationItem>
+                    <PaginationNext
+                      onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                      className={currentPage === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Filter Modal */}
+      {filterModalField && (
+        <PivotTableFilterModal
+          open={!!filterModalField}
+          onOpenChange={(open) => {
+            if (!open) setFilterModalField(null);
+          }}
+          field={filterModalField}
+          options={getFilterOptions(filterModalField)}
+          selections={getFilterSelections(filterModalField)}
+          onSelectionsChange={(selections) =>
+            handleFilterSelectionsChange(filterModalField, selections)
+          }
+          isLoading={loadingFilter === filterModalField}
+          error={filterErrors[filterModalField] ?? null}
+        />
+      )}
     </div>
   );
 };
 
 export default PivotTableCanvas;
-

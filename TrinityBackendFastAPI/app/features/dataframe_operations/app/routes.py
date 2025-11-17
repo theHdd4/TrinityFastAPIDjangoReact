@@ -17,6 +17,7 @@ from numbers import Real
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
+from .formula_parser import FormulaEvaluationError, evaluate_formula
 from app.core.task_queue import celery_task_client, format_task_response
 from app.features.dataframe_operations.service import (
     SESSIONS,
@@ -1022,177 +1023,37 @@ async def apply_formula(
     target_column: str = Body(...),
     formula: str = Body(...),
 ):
-    """Apply a simple column-based formula to the dataframe."""
-    import logging
-    logger = logging.getLogger("dataframe_operations.apply_formula")
-    
-    logger.info(f"🔵 [APPLY_FORMULA] Starting - df_id: {df_id}, target_column: '{target_column}', formula: '{formula}'")
-    
+    """Apply an Excel-like formula to one column using the vectorised engine."""
     df = _get_df(df_id)
     logger.info(f"📊 [APPLY_FORMULA] DataFrame shape: {df.shape}, columns: {df.columns}")
     
     expr = formula.strip()
-    logger.info(f"📝 [APPLY_FORMULA] Original formula: '{formula}'")
-    logger.info(f"📝 [APPLY_FORMULA] Processed expression: '{expr}'")
-    
-    # 🔧 FIX: Auto-add "=" prefix if formula contains function calls but doesn't start with "="
-    if not expr.startswith("=") and any(func in expr.upper() for func in ["DIV", "SUM", "AVG", "MAX", "MIN", "IF", "CORR", "ZSCORE", "NORM"]):
-        logger.info(f"🔧 [APPLY_FORMULA] Auto-adding '=' prefix to formula")
-        expr = "=" + expr
-    
-    rows = df.to_dicts()
+    if not expr:
+        raise HTTPException(status_code=400, detail="Formula cannot be empty.")
+
     if expr.startswith("="):
         expr_body = expr[1:].strip()
-        corr_match = re.match(r"^CORR\(([^,]+),([^)]+)\)$", expr_body, re.IGNORECASE)
-        if corr_match:
-            cols = [c.strip() for c in corr_match.groups()]
-            if len(cols) != 2:
-                raise HTTPException(status_code=400, detail="CORR requires two columns")
-            c1, c2 = cols
+        if not expr_body:
+            raise HTTPException(status_code=400, detail="Formula cannot be empty.")
+        try:
             try:
-                corr_val = df.select(pl.corr(pl.col(c1), pl.col(c2))).to_series()[0]
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            df = df.with_columns(pl.lit(corr_val).alias(target_column))
-        else:
-            zscore_pattern = re.compile(r"(?i)\b(ZSCORE|NORM)\s*\(([^)]+)\)")
-            zscore_placeholders: List[Tuple[str, str]] = []
+                pandas_frame = df.to_pandas(use_pyarrow_extension_array=True)  # Polars >=0.17
+            except TypeError:
+                pandas_frame = df.to_pandas()
+            result_series = evaluate_formula(expr_body, pandas_frame)
+        except FormulaEvaluationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-            def _capture_zscore(match: re.Match) -> str:
-                column_name = match.group(2).strip()
-                if (column_name.startswith("\"") and column_name.endswith("\"")) or (
-                    column_name.startswith("'") and column_name.endswith("'")
-                ):
-                    column_name = column_name[1:-1]
-                placeholder = f"__ZFUNC_{len(zscore_placeholders)}__"
-                zscore_placeholders.append((placeholder, column_name))
-                return placeholder
+        if len(result_series) != df.height:
+            raise HTTPException(
+                status_code=400,
+                detail="Formula result does not match the number of dataframe rows.",
+            )
 
-            expr_body_processed = zscore_pattern.sub(_capture_zscore, expr_body)
-            expr_body_processed = _normalize_formula_functions(expr_body_processed)
-
-            zscore_values: Dict[str, List[Any]] = {}
-            if zscore_placeholders:
-                for column_name in {col for _, col in zscore_placeholders}:
-                    if column_name not in df.columns:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Column '{column_name}' not found for ZSCORE/NORM",
-                        )
-                    try:
-                        series = df.get_column(column_name)
-                    except Exception as e:
-                        raise HTTPException(status_code=400, detail=str(e))
-                    try:
-                        numeric_series = series.cast(pl.Float64, strict=False)
-                        numeric_series = numeric_series.fill_nan(None)
-                    except Exception as e:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Column '{column_name}' could not be converted to numeric values for ZSCORE/NORM: {e}",
-                        )
-
-                    values = numeric_series.to_list()
-                    valid_values = [
-                        float(v)
-                        for v in values
-                        if v is not None and isinstance(v, Real) and math.isfinite(float(v))
-                    ]
-
-                    if not valid_values:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Column '{column_name}' has no numeric values for ZSCORE/NORM",
-                        )
-
-                    mean_val = numeric_series.mean()
-                    std_val = numeric_series.std()
-
-                    mean_val_f: float | None = None
-                    if isinstance(mean_val, Real) and math.isfinite(float(mean_val)):
-                        mean_val_f = float(mean_val)
-
-                    std_val_f: float | None = None
-                    if isinstance(std_val, Real) and math.isfinite(float(std_val)):
-                        std_val_f = float(std_val)
-
-                    if mean_val_f is None:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unable to compute mean for column '{column_name}'",
-                        )
-
-                    if std_val_f is None or math.isclose(std_val_f, 0.0, rel_tol=1e-12, abs_tol=1e-12):
-                        zscore_values[column_name] = [
-                            None if v is None else 0.0
-                            for v in values
-                        ]
-                    else:
-                        zscore_values[column_name] = [
-                            None
-                            if v is None
-                            else (float(v) - mean_val_f) / std_val_f
-                            for v in values
-                        ]
-
-            # 🔧 FIX: Create case-insensitive column mapping for formula replacement
-            column_map = {col.lower(): col for col in df.columns if col}
-            logger.info(f"🔍 [APPLY_FORMULA] Available columns: {list(df.columns)}")
-            logger.info(f"🔍 [APPLY_FORMULA] Column map (lowercase -> original): {column_map}")
-            
-            headers_pattern = "|".join(re.escape(h) for h in df.columns if h)
-            regex = re.compile(f"\\b({headers_pattern})\\b", re.IGNORECASE) if headers_pattern else None
-            logger.info(f"🔍 [APPLY_FORMULA] Column pattern: {headers_pattern[:100]}...")
-            logger.info(f"🔍 [APPLY_FORMULA] Processed expression body: '{expr_body_processed}'")
-            
-            def replace_column(match):
-                """Replace column name in formula with actual value, handling case-insensitive matching."""
-                matched_col = match.group(0)
-                # Try exact match first
-                if matched_col in r:
-                    return _format_value(r.get(matched_col))
-                # Try case-insensitive match
-                matched_lower = matched_col.lower()
-                if matched_lower in column_map:
-                    actual_col = column_map[matched_lower]
-                    logger.debug(f"🔧 [APPLY_FORMULA] Case-insensitive match: '{matched_col}' -> '{actual_col}'")
-                    return _format_value(r.get(actual_col))
-                # If no match, return original (might be a function name)
-                logger.warning(f"⚠️ [APPLY_FORMULA] Column '{matched_col}' not found in row, keeping as-is")
-                return matched_col
-            
-            new_vals: List[Any] = []
-            for row_idx, r in enumerate(rows):
-                replaced = expr_body_processed
-                if regex:
-                    replaced = regex.sub(replace_column, replaced)
-                    if row_idx == 0:  # Log first row replacement for debugging
-                        logger.info(f"🔍 [APPLY_FORMULA] First row replacement: '{expr_body_processed}' -> '{replaced}'")
-                if zscore_placeholders:
-                    for placeholder, column_name in zscore_placeholders:
-                        column_series = zscore_values.get(column_name)
-                        z_val = (
-                            column_series[row_idx]
-                            if column_series is not None and row_idx < len(column_series)
-                            else None
-                        )
-                        replaced = replaced.replace(placeholder, _format_value(z_val))
-                try:
-                    val = eval(replaced, SAFE_EVAL_GLOBALS, {})
-                    if row_idx == 0:  # Log first row evaluation
-                        logger.info(f"✅ [APPLY_FORMULA] First row eval: '{replaced}' -> {val}")
-                except Exception as e:
-                    import traceback
-                    error_trace = traceback.format_exc()
-                    logger.error(f"❌ [APPLY_FORMULA] Row {row_idx} evaluation failed:")
-                    logger.error(f"   Expression: '{replaced}'")
-                    logger.error(f"   Error: {e}")
-                    logger.error(f"   Traceback: {error_trace}")
-                    val = None
-                new_vals.append(val)
-            
-            logger.info(f"📊 [APPLY_FORMULA] Generated {len(new_vals)} values, non-null: {sum(1 for v in new_vals if v is not None)}")
-            df = df.with_columns(pl.Series(target_column, new_vals))
+        result_series = result_series.reset_index(drop=True)
+        df = df.with_columns(
+            pl.Series(name=target_column, values=result_series.to_list())
+        )
     else:
         logger.info(f"📝 [APPLY_FORMULA] No '=' prefix, treating as literal value")
         df = df.with_columns(pl.lit(expr).alias(target_column))

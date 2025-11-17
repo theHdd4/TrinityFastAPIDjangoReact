@@ -211,9 +211,18 @@ def perform_createcolumn_task(
         rename_val = form_payload.get(f"{op_type}_{op_idx}_rename")
         operations.append((op_type, columns, rename_val, op_idx))
 
-    legacy_skipped = {"options", "object_names", "bucket_name", "identifiers"}
+    # 🔧 CRITICAL FIX: Skip environment context fields and other non-operation fields
+    legacy_skipped = {
+        "options", "object_names", "bucket_name", "identifiers",
+        "client_name", "app_name", "project_name"  # Environment context fields
+    }
     for key, value in form_payload.multi_items():
-        if key in legacy_skipped or op_pattern.match(key):
+        # Skip if it's in the skipped list, matches the operation pattern, or is a parameter field
+        if (key in legacy_skipped or 
+            op_pattern.match(key) or 
+            key.endswith("_rename") or 
+            key.endswith("_param") or 
+            key.endswith("_period")):
             continue
         columns = [part.strip() for part in value.split(",") if part.strip()]
         rename_val = form_payload.get(f"{key}_rename")
