@@ -72,6 +72,36 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     }
   }, [atom?.settings, atomId, updateSettings]);
 
+  // Clear column and value fields when rowFields becomes empty
+  React.useEffect(() => {
+    if (!settings.rowFields || settings.rowFields.length === 0) {
+      const hasColumns = settings.columnFields && settings.columnFields.length > 0;
+      const hasValues = settings.valueFields && settings.valueFields.length > 0;
+      
+      if (hasColumns || hasValues) {
+        updateSettings(atomId, {
+          columnFields: [],
+          valueFields: [],
+          pivotResults: [],
+          pivotColumnHierarchy: [],
+          pivotStatus: 'pending',
+          pivotError: null,
+        });
+      }
+    }
+  }, [atomId, settings.rowFields, settings.columnFields, settings.valueFields, updateSettings]);
+
+  // Clear column hierarchy when columnFields becomes empty
+  React.useEffect(() => {
+    if (!settings.columnFields || settings.columnFields.length === 0) {
+      if (settings.pivotColumnHierarchy && settings.pivotColumnHierarchy.length > 0) {
+        updateSettings(atomId, {
+          pivotColumnHierarchy: [],
+        });
+      }
+    }
+  }, [atomId, settings.columnFields, settings.pivotColumnHierarchy, updateSettings]);
+
   const handleDataChange = React.useCallback(
     (newData: Partial<PivotTableSettings>) => {
       const latestAtom = useLaboratoryStore.getState().getAtom(atomId);
@@ -89,7 +119,28 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
   );
 
   const computeSignature = React.useMemo(() => {
-    const selectionsSnapshot = settings.filterFields.reduce<Record<string, string[]>>((acc, field) => {
+    // Collect filter selections from:
+    // 1. Fields in filterFields (dedicated filter bucket)
+    // 2. Row fields with filter selections
+    // 3. Column fields with filter selections
+    const fieldsToCheck = new Set<string>();
+    settings.filterFields.filter(Boolean).forEach(field => fieldsToCheck.add(field));
+    settings.rowFields.filter(Boolean).forEach(field => {
+      const key = field.toLowerCase();
+      const selections = settings.pivotFilterSelections?.[field] ?? settings.pivotFilterSelections?.[key] ?? [];
+      if (selections.length > 0) {
+        fieldsToCheck.add(field);
+      }
+    });
+    settings.columnFields.filter(Boolean).forEach(field => {
+      const key = field.toLowerCase();
+      const selections = settings.pivotFilterSelections?.[field] ?? settings.pivotFilterSelections?.[key] ?? [];
+      if (selections.length > 0) {
+        fieldsToCheck.add(field);
+      }
+    });
+    
+    const selectionsSnapshot = Array.from(fieldsToCheck).reduce<Record<string, string[]>>((acc, field) => {
       const key = field.toLowerCase();
       const selection =
         settings.pivotFilterSelections?.[field] ??
@@ -151,12 +202,19 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
 
     const readyForCompute =
       !!settings.dataSource &&
+      Array.isArray(settings.rowFields) &&
+      settings.rowFields.length > 0 &&
       Array.isArray(settings.valueFields) &&
       settings.valueFields.length > 0;
 
     if (!readyForCompute) {
       setIsComputing(false);
       setComputeError(null);
+      updateSettings(atomId, {
+        pivotResults: [],
+        pivotStatus: 'pending',
+        pivotError: null,
+      });
       return;
     }
 
@@ -208,24 +266,53 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
               aggregation: item.aggregation || 'sum',
               weight_column: item.weightColumn || undefined,
             })),
-          filters: settings.filterFields.filter(Boolean).map((field) => {
-            const key = field.toLowerCase();
-            const selections =
-              settings.pivotFilterSelections?.[field] ??
-              settings.pivotFilterSelections?.[key] ?? [];
-            const options =
-              settings.pivotFilterOptions?.[field] ??
-              settings.pivotFilterOptions?.[key] ?? [];
+          filters: (() => {
+            // Collect all fields that need filtering:
+            // 1. Fields in filterFields (dedicated filter bucket)
+            // 2. Row fields with filter selections
+            // 3. Column fields with filter selections
+            const fieldsToFilter = new Set<string>();
+            
+            // Add filterFields
+            settings.filterFields.filter(Boolean).forEach(field => fieldsToFilter.add(field));
+            
+            // Add row fields that have filter selections
+            settings.rowFields.filter(Boolean).forEach(field => {
+              const key = field.toLowerCase();
+              const selections = settings.pivotFilterSelections?.[field] ?? settings.pivotFilterSelections?.[key] ?? [];
+              if (selections.length > 0) {
+                fieldsToFilter.add(field);
+              }
+            });
+            
+            // Add column fields that have filter selections
+            settings.columnFields.filter(Boolean).forEach(field => {
+              const key = field.toLowerCase();
+              const selections = settings.pivotFilterSelections?.[field] ?? settings.pivotFilterSelections?.[key] ?? [];
+              if (selections.length > 0) {
+                fieldsToFilter.add(field);
+              }
+            });
+            
+            return Array.from(fieldsToFilter).map((field) => {
+              const key = field.toLowerCase();
+              const selections =
+                settings.pivotFilterSelections?.[field] ??
+                settings.pivotFilterSelections?.[key] ?? [];
+              const options =
+                settings.pivotFilterOptions?.[field] ??
+                settings.pivotFilterOptions?.[key] ?? [];
 
-            const includeValues =
-              selections.length > 0 && selections.length !== options.length
-                ? selections
-                : undefined;
+              const includeValues =
+                selections.length > 0 && selections.length !== options.length
+                  ? selections
+                  : undefined;
 
-            return includeValues
-              ? { field, include: includeValues }
-              : { field };
-          }),
+              return includeValues
+                ? { field, include: includeValues }
+                : { field };
+            });
+          })(),
           sorting: sortingPayload,
           grand_totals: settings.grandTotalsMode || 'off',
         };
@@ -308,8 +395,33 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
         }
       );
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Pivot save failed (${response.status})`);
+        let errorMessage = `Pivot save failed (${response.status})`;
+        try {
+          const contentType = response.headers.get('content-type');
+          const text = await response.text();
+          
+          if (contentType && contentType.includes('application/json')) {
+            try {
+              const errorData = JSON.parse(text);
+              // Try to extract detailed error message from various possible formats
+              errorMessage = errorData?.detail || 
+                            errorData?.message || 
+                            errorData?.error || 
+                            (typeof errorData === 'string' ? errorData : JSON.stringify(errorData, null, 2)) ||
+                            text ||
+                            errorMessage;
+            } catch {
+              // If JSON parsing fails, use the text as-is
+              errorMessage = text || errorMessage;
+            }
+          } else {
+            errorMessage = text || errorMessage;
+          }
+        } catch (parseError) {
+          // Keep default error message if we can't read the response
+          errorMessage = `Pivot save failed (${response.status}). Unable to read error details.`;
+        }
+        throw new Error(errorMessage);
       }
       const result = await response.json();
       const message = result?.object_name
@@ -357,8 +469,33 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
         }
       );
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Pivot save failed (${response.status})`);
+        let errorMessage = `Pivot save failed (${response.status})`;
+        try {
+          const contentType = response.headers.get('content-type');
+          const text = await response.text();
+          
+          if (contentType && contentType.includes('application/json')) {
+            try {
+              const errorData = JSON.parse(text);
+              // Try to extract detailed error message from various possible formats
+              errorMessage = errorData?.detail || 
+                            errorData?.message || 
+                            errorData?.error || 
+                            (typeof errorData === 'string' ? errorData : JSON.stringify(errorData, null, 2)) ||
+                            text ||
+                            errorMessage;
+            } catch {
+              // If JSON parsing fails, use the text as-is
+              errorMessage = text || errorMessage;
+            }
+          } else {
+            errorMessage = text || errorMessage;
+          }
+        } catch (parseError) {
+          // Keep default error message if we can't read the response
+          errorMessage = `Pivot save failed (${response.status}). Unable to read error details.`;
+        }
+        throw new Error(errorMessage);
       }
       const result = await response.json();
       const message = result?.object_name
@@ -387,8 +524,11 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     if (!settings.valueFields || settings.valueFields.length === 0) {
       return 'Add at least one field to the Values area to compute the pivot table.';
     }
+    if (!settings.rowFields || settings.rowFields.length === 0) {
+      return 'Add at least one field to the Rows area to generate the pivot table.';
+    }
     return null;
-  }, [settings.dataSource, settings.valueFields]);
+  }, [settings.dataSource, settings.valueFields, settings.rowFields]);
 
   const handleReportLayoutChange = React.useCallback(
     (layout: 'compact' | 'outline' | 'tabular') => {

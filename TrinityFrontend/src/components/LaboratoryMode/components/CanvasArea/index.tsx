@@ -46,6 +46,7 @@ import EvaluateModelsAutoRegressiveAtom from '@/components/AtomList/atoms/evalua
 import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAtom';
 import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import PivotTableAtom from '@/components/AtomList/atoms/pivot-table/PivotTableAtom';
+import UnpivotAtom from '@/components/AtomList/atoms/unpivot/UnpivotAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -70,6 +71,7 @@ import {
   DEFAULT_EXPLORE_SETTINGS,
   DEFAULT_EXPLORE_DATA,
   DEFAULT_PIVOT_TABLE_SETTINGS,
+  DEFAULT_UNPIVOT_SETTINGS,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, UnifiedRenderItem } from './helpers';
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
@@ -2524,6 +2526,8 @@ const getDefaultSettingsForAtom = (atomId: string) => {
       return { ...DEFAULT_CHART_MAKER_SETTINGS };
     case 'pivot-table':
       return { ...DEFAULT_PIVOT_TABLE_SETTINGS };
+    case 'unpivot':
+      return { ...DEFAULT_UNPIVOT_SETTINGS };
     case 'dataframe-operations':
       return { ...DEFAULT_DATAFRAME_OPERATIONS_SETTINGS };
     case 'select-models-feature':
@@ -4208,6 +4212,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                       <ChartMakerAtom atomId={atom.id} />
                               ) : atom.atomId === 'pivot-table' ? (
                                 <PivotTableAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'unpivot' ? (
+                                      <UnpivotAtom atomId={atom.id} />
                                     ) : atom.atomId === 'concat' ? (
                                       <ConcatAtom atomId={atom.id} />
                                     ) : atom.atomId === 'merge' ? (
@@ -4486,6 +4492,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   <ChartMakerAtom atomId={atom.id} />
               ) : atom.atomId === 'pivot-table' ? (
                 <PivotTableAtom atomId={atom.id} />
+                                ) : atom.atomId === 'unpivot' ? (
+                                  <UnpivotAtom atomId={atom.id} />
                                 ) : atom.atomId === 'concat' ? (
                                   <ConcatAtom atomId={atom.id} />
                                 ) : atom.atomId === 'merge' ? (
@@ -4683,6 +4691,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               <ChartMakerAtom atomId={atom.id} />
               ) : atom.atomId === 'pivot-table' ? (
                 <PivotTableAtom atomId={atom.id} />
+                            ) : atom.atomId === 'unpivot' ? (
+                              <UnpivotAtom atomId={atom.id} />
                             ) : atom.atomId === 'concat' ? (
                               <ConcatAtom atomId={atom.id} />
                             ) : atom.atomId === 'merge' ? (
@@ -4953,6 +4963,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <ChartMakerAtom atomId={atom.id} />
             ) : atom.atomId === 'pivot-table' ? (
               <PivotTableAtom atomId={atom.id} />
+                      ) : atom.atomId === 'unpivot' ? (
+                        <UnpivotAtom atomId={atom.id} />
                       ) : atom.atomId === 'concat' ? (
                         <ConcatAtom atomId={atom.id} />
                       ) : atom.atomId === 'merge' ? (
@@ -5140,6 +5152,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             <ChartMakerAtom atomId={atom.id} />
               ) : atom.atomId === 'pivot-table' ? (
                 <PivotTableAtom atomId={atom.id} />
+                          ) : atom.atomId === 'unpivot' ? (
+                            <UnpivotAtom atomId={atom.id} />
                           ) : atom.atomId === 'concat' ? (
                             <ConcatAtom atomId={atom.id} />
                           ) : atom.atomId === 'merge' ? (

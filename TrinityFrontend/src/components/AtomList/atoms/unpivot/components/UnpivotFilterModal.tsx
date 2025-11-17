@@ -12,7 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-interface PivotTableFilterModalProps {
+interface UnpivotFilterModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   field: string;
@@ -23,7 +23,7 @@ interface PivotTableFilterModalProps {
   error?: string | null;
 }
 
-const PivotTableFilterModal: React.FC<PivotTableFilterModalProps> = ({
+const UnpivotFilterModal: React.FC<UnpivotFilterModalProps> = ({
   open,
   onOpenChange,
   field,
@@ -100,16 +100,16 @@ const PivotTableFilterModal: React.FC<PivotTableFilterModalProps> = ({
 
   return (
     <Dialog open={open} onOpenChange={handleCancel}>
-      <DialogContent className="sm:max-w-[320px] max-h-[450px] flex flex-col p-0">
-        <DialogHeader className="px-3 pt-3 pb-2">
-          <DialogTitle className="text-sm font-semibold">Filter: {field}</DialogTitle>
+      <DialogContent className="sm:max-w-[400px] max-h-[600px] flex flex-col p-0">
+        <DialogHeader className="px-4 pt-4 pb-2">
+          <DialogTitle className="text-base">Filter: {field}</DialogTitle>
         </DialogHeader>
-        <div className="flex-1 overflow-hidden flex flex-col px-3 pb-2">
+        <div className="flex-1 overflow-hidden flex flex-col px-4 pb-2">
           <Input
             placeholder="Search"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-7 mb-2 text-xs"
+            className="h-8 mb-2"
           />
           
           {isLoading ? (
@@ -120,29 +120,29 @@ const PivotTableFilterModal: React.FC<PivotTableFilterModalProps> = ({
           ) : error ? (
             <div className="text-sm text-destructive py-4">{error}</div>
           ) : (
-            <div className="flex-1 overflow-y-auto border rounded-md min-h-[150px] max-h-[280px]">
+            <div className="flex-1 overflow-y-auto border rounded-md min-h-[200px] max-h-[400px]">
               {filteredOptions.length === 0 ? (
                 <div className="text-sm text-muted-foreground py-4 text-center px-2">
                   {searchTerm ? 'No matches found' : 'No values available'}
                 </div>
               ) : (
-                <div className="py-0.5">
+                <div className="py-1">
                   {/* Select All option at the top */}
                   <label
                     className={cn(
-                      'flex items-center gap-2 px-2 py-1.5 hover:bg-muted/50 cursor-pointer',
+                      'flex items-center gap-2 px-3 py-2 hover:bg-muted/50 cursor-pointer',
                     )}
                   >
                     <Checkbox
                       checked={allSelected}
                       onCheckedChange={handleSelectAll}
-                      className="h-3.5 w-3.5"
+                      className="h-4 w-4"
                     />
-                    <span className="text-xs font-medium">(Select All)</span>
+                    <span className="text-sm font-medium">(Select All)</span>
                   </label>
                   
                   {/* Divider */}
-                  <div className="border-t my-0.5" />
+                  <div className="border-t my-1" />
                   
                   {/* Options list */}
                   {filteredOptions.map((option) => {
@@ -151,16 +151,16 @@ const PivotTableFilterModal: React.FC<PivotTableFilterModalProps> = ({
                       <label
                         key={option}
                         className={cn(
-                          'flex items-center gap-2 px-2 py-1 hover:bg-muted/50 cursor-pointer',
+                          'flex items-center gap-2 px-3 py-1.5 hover:bg-muted/50 cursor-pointer',
                           isChecked && 'bg-muted/30'
                         )}
                       >
                         <Checkbox
                           checked={isChecked}
                           onCheckedChange={() => handleToggle(option)}
-                          className="h-3.5 w-3.5"
+                          className="h-4 w-4"
                         />
-                        <span className="text-xs flex-1 truncate" title={option}>
+                        <span className="text-sm flex-1 truncate" title={option}>
                           {option}
                         </span>
                       </label>
@@ -171,11 +171,11 @@ const PivotTableFilterModal: React.FC<PivotTableFilterModalProps> = ({
             </div>
           )}
         </div>
-        <DialogFooter className="px-3 pb-3 pt-2 border-t">
-          <Button onClick={handleCancel} variant="outline" className="min-w-[70px] h-8 text-xs">
+        <DialogFooter className="px-4 pb-4 pt-2 border-t">
+          <Button onClick={handleCancel} variant="outline" className="min-w-[80px]">
             Cancel
           </Button>
-          <Button onClick={handleOK} className="min-w-[70px] h-8 text-xs">
+          <Button onClick={handleOK} className="min-w-[80px]">
             OK
           </Button>
         </DialogFooter>
@@ -184,4 +184,5 @@ const PivotTableFilterModal: React.FC<PivotTableFilterModalProps> = ({
   );
 };
 
-export default PivotTableFilterModal;
+export default UnpivotFilterModal;
+

@@ -30,7 +30,8 @@ class Command(BaseCommand):
             'auto-regressive-models',  # Correct ID from populate command
             'scenario-planner',
             'clustering',  # Added missing clustering atom
-            'pivot-table'
+            'pivot-table',
+            'unpivot'
         ]
         
         updated_count = 0

@@ -332,7 +332,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   const [filterErrors, setFilterErrors] = useState<Record<string, string | null>>({});
   const [filterModalField, setFilterModalField] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const ROWS_PER_PAGE = 15;
+  const ROWS_PER_PAGE = 20;
 
   const styleOptions = useMemo<PivotStyleOptions>(() => {
     return {
@@ -587,20 +587,10 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   const handleFilterSelectionsChange = useCallback(
     (field: string, selections: string[]) => {
       const normalized = getNormalizedKey(field);
-      const currentFilterFields = data.filterFields || [];
       
-      // If this is a row/column field being filtered, ensure it's in filterFields
-      const isRowField = data.rowFields.includes(field);
-      const isColumnField = data.columnFields.includes(field);
-      const isInFilterFields = currentFilterFields.includes(field);
-      
-      let updatedFilterFields = currentFilterFields;
-      if ((isRowField || isColumnField) && !isInFilterFields) {
-        updatedFilterFields = [...currentFilterFields, field];
-      }
-      
+      // Update filter selections without moving fields to filter bucket
+      // Row and column fields can be filtered without being in filterFields
       onDataChange({
-        filterFields: updatedFilterFields,
         pivotFilterSelections: {
           ...filterSelections,
           [field]: selections,
@@ -608,7 +598,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
         },
       });
     },
-    [data.filterFields, data.rowFields, data.columnFields, filterSelections, onDataChange],
+    [filterSelections, onDataChange],
   );
 
   const getSortIcon = (field: string) => {
@@ -637,13 +627,13 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     const filterSelectionsForField = getFilterSelections(field);
 
     return (
-      <div className="flex items-center gap-1 group/header">
-        <span className="flex-1">{field}</span>
+      <div className="flex items-center gap-0.5 group/header">
+        <span>{field}</span>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="opacity-60 group-hover/header:opacity-100 transition-opacity p-0.5 hover:bg-muted rounded flex items-center justify-center"
+              className="opacity-60 group-hover/header:opacity-100 transition-opacity p-0.5 hover:bg-muted rounded flex items-center justify-center ml-0.5"
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
@@ -802,6 +792,11 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   };
 
   const columnHeaderInfo = useMemo(() => {
+    // Don't show column headers if columnFields is empty
+    if (!data.columnFields || data.columnFields.length === 0) {
+      return { rows: [] as ColumnHeaderCell[][], leafColumns: [] as string[] };
+    }
+    
     const rawNodes = Array.isArray(data.pivotColumnHierarchy)
       ? data.pivotColumnHierarchy
       : [];
@@ -930,7 +925,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     roots.forEach(pushNode);
 
     return { rows, leafColumns };
-  }, [data.pivotColumnHierarchy, valueFieldLabelMap]);
+  }, [data.pivotColumnHierarchy, data.columnFields, valueFieldLabelMap]);
 
   const rawColumnHeaderRows = columnHeaderInfo.rows;
   const columnLeafColumns = columnHeaderInfo.leafColumns;
@@ -943,14 +938,40 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
     );
 
   const baseValueColumns = useMemo(
-    () => columns.filter((column) => !rowFieldSet.has(column.toLowerCase())),
-    [columns, rowFieldSet],
+    () => {
+      // If columnFields is empty, don't show any value columns as headers
+      if (!data.columnFields || data.columnFields.length === 0) {
+        return [];
+      }
+      return columns.filter((column) => !rowFieldSet.has(column.toLowerCase()));
+    },
+    [columns, rowFieldSet, data.columnFields],
   );
 
   const valueColumns = useMemo(
-    () =>
-      columnLeafColumns.length > 0 ? columnLeafColumns : baseValueColumns,
-    [columnLeafColumns, baseValueColumns],
+    () => {
+      // If columnFields is empty, don't show any column headers - only show value fields
+      if (!data.columnFields || data.columnFields.length === 0) {
+        // When no columnFields, only show actual value field columns (not cached column names)
+        // Get value field names from valueFields settings
+        if (data.valueFields && data.valueFields.length > 0) {
+          return data.valueFields
+            .filter((vf: any) => vf?.field)
+            .map((vf: any) => {
+              // Try to find matching column in results, or use the field name
+              // This is the actual column name in the data, not the label
+              const fieldName = vf.field;
+              const matchingColumn = columns.find(
+                (col) => col.toLowerCase() === fieldName.toLowerCase()
+              );
+              return matchingColumn || fieldName;
+            });
+        }
+        return [];
+      }
+      return columnLeafColumns.length > 0 ? columnLeafColumns : baseValueColumns;
+    },
+    [columnLeafColumns, baseValueColumns, data.columnFields, data.valueFields, columns, rowFieldSet],
   );
 
   const canonicalizeKey = useCallback((key: unknown) => {
@@ -1502,15 +1523,21 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     </TableHead>
                   ))
                 : headerIndex === 0
-                ? valueColumns.map((column) => (
+                ? valueColumns.map((column) => {
+                    // Use valueFieldLabelMap to show aggregation labels (e.g., "Sum of D1")
+                    const label = valueFieldLabelMap.get(column) || 
+                                  valueFieldLabelMap.get(column.toLowerCase()) || 
+                                  column;
+                    return (
                     <TableHead
                       key={column}
                       className="text-right text-[12px] uppercase tracking-wide font-semibold"
                       style={headerStyle}
                     >
-                      {column}
+                        {label}
                     </TableHead>
-                  ))
+                    );
+                  })
                 : null}
             </TableRow>
           ))}
@@ -1554,30 +1581,33 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                   })}
                   {valueColumns.map((column) => {
                     const canonicalColumn = canonicalizeKey(column);
+                    const record = row.record || {};
                     const rawValue =
-                      row.record[column] ??
+                      record[column] ??
                       (canonicalColumn && canonicalColumn !== column
-                        ? row.record[canonicalColumn]
+                        ? record[canonicalColumn]
                         : undefined);
                     
                     // Use nodeKey for subtotals (if available) to get correct percentage calculations
                     // Otherwise generate rowKey from record fields
-                    const rowKey = row.nodeKey || rowFields
-                      .map((field) => canonicalizeKey(getRowFieldValue(row.record, field)))
-                      .join('|');
+                    const rowKey = row.nodeKey || (rowFields.length > 0
+                      ? rowFields
+                          .map((field) => canonicalizeKey(getRowFieldValue(record, field)))
+                          .join('|')
+                      : '');
 
                     return (
                       <TableCell
                         key={`${rowIndex}-${column}`}
                         className="text-right tabular-nums font-medium"
                         style={getDataCellStyle({
-                          row: row.record,
+                          row: record,
                           column,
                           rowIndex,
                           isRowHeader: false,
                         })}
                       >
-                        {formatValue(rawValue, rowKey, column, row.record)}
+                        {formatValue(rawValue, rowKey, column, record)}
                       </TableCell>
                     );
                   })}
@@ -1610,7 +1640,131 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     className="flex items-center justify-between"
                     style={{ color: headerStyle.color as string }}
                   >
-                    Row Labels
+                    <div className="flex items-center gap-0.5 group/header">
+                      <span>Row Labels</span>
+                      {rowFields.length > 0 && (() => {
+                        const parentField = rowFields[0];
+                        const sorting = data.pivotSorting?.[parentField] || 
+                                       (data.pivotSorting ? Object.entries(data.pivotSorting).find(([k]) => k.toLowerCase() === parentField.toLowerCase())?.[1] : undefined);
+                        const hasFilter = filterSelections[parentField] || filterSelections[getNormalizedKey(parentField)];
+                        const filterOptionsForField = getFilterOptions(parentField);
+                        const filterSelectionsForField = getFilterSelections(parentField);
+                        
+                        return (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button
+                                type="button"
+                                className="opacity-60 group-hover/header:opacity-100 transition-opacity p-0.5 hover:bg-muted rounded flex items-center justify-center ml-0.5"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                              >
+                                {sorting?.type === 'asc' || sorting?.type === 'value_asc' ? (
+                                  <ArrowUp className="h-3.5 w-3.5 text-muted-foreground" />
+                                ) : sorting?.type === 'desc' || sorting?.type === 'value_desc' ? (
+                                  <ArrowDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                ) : (
+                                  <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                                )}
+                              </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56">
+                              <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">
+                                Sort Options
+                              </DropdownMenuLabel>
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleSortChange(parentField, 'asc');
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  sorting?.type === 'asc' ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <ArrowUp className="h-3 w-3 mr-2" />
+                                Sort A → Z
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleSortChange(parentField, 'desc');
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  sorting?.type === 'desc' ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <ArrowDown className="h-3 w-3 mr-2" />
+                                Sort Z → A
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleSortChange(parentField, 'value_asc');
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  sorting?.type === 'value_asc' ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <ArrowUp className="h-3 w-3 mr-2" />
+                                Sort by Value (Ascending)
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleSortChange(parentField, 'value_desc');
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  sorting?.type === 'value_desc' ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <ArrowDown className="h-3 w-3 mr-2" />
+                                Sort by Value (Descending)
+                              </DropdownMenuItem>
+                              {sorting && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onSelect={(e) => {
+                                      e.preventDefault();
+                                      handleSortChange(parentField, null);
+                                    }}
+                                    className="text-xs"
+                                  >
+                                    Clear Sort
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleFilterModalOpen(parentField);
+                                }}
+                                className={cn(
+                                  'text-xs',
+                                  hasFilter ? 'font-semibold text-primary' : '',
+                                )}
+                              >
+                                <Filter className="h-3 w-3 mr-2" />
+                                Filter...
+                                {hasFilter && filterSelectionsForField.length < filterOptionsForField.length && (
+                                  <span className="ml-auto text-[10px]">
+                                    ({filterSelectionsForField.length} selected)
+                                  </span>
+                                )}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        );
+                      })()}
+                    </div>
                   </div>
                 </TableHead>
               )}
@@ -1630,15 +1784,21 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     </TableHead>
                   ))
                 : headerIndex === 0
-                ? valueColumns.map((column) => (
+                ? valueColumns.map((column) => {
+                    // Use valueFieldLabelMap to show aggregation labels (e.g., "Sum of D1")
+                    const label = valueFieldLabelMap.get(column) || 
+                                  valueFieldLabelMap.get(column.toLowerCase()) || 
+                                  column;
+                    return (
                     <TableHead
                       key={column}
                       className="text-right text-[12px] uppercase tracking-wide font-semibold"
                       style={headerStyle}
                     >
-                      {column}
+                        {label}
                     </TableHead>
-                  ))
+                    );
+                  })
                 : null}
             </TableRow>
           ))}
@@ -1689,19 +1849,20 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       </div>
                     </TableCell>
                     {valueColumns.map((column) => {
-                      const rowKey = row.node.key;
+                      const rowKey = row.node?.key || '';
+                      const columnValue = row.record?.[column];
                       return (
                       <TableCell
-                        key={`${row.node.key}-${column}`}
+                        key={`${row.node?.key || rowIndex}-${column}`}
                         className="text-right tabular-nums"
                         style={getDataCellStyle({
-                          row: row.record,
+                          row: row.record || {},
                           column,
                           rowIndex,
                           isRowHeader: false,
                         })}
                       >
-                          {formatValue(row.record[column], rowKey, column, row.record)}
+                          {formatValue(columnValue, rowKey, column, row.record || {})}
                       </TableCell>
                       );
                     })}
@@ -1819,19 +1980,21 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     );
                   })}
                   {valueColumns.map((column) => {
-                    const rowKey = row.node.key;
+                    const rowKey = row.node?.key || '';
+                    const record = row.record || {};
+                    const columnValue = record[column];
                     return (
                     <TableCell
-                      key={`${row.node.key}-${column}-${row.isTotal ? 'total' : 'value'}`}
+                      key={`${row.node?.key || rowIndex}-${column}-${row.isTotal ? 'total' : 'value'}`}
                       className="text-right tabular-nums font-medium"
                       style={getDataCellStyle({
-                        row: row.record,
+                        row: record,
                         column,
                         rowIndex,
                         isRowHeader: false,
                       })}
                     >
-                        {formatValue(row.record[column], rowKey, column, row.record)}
+                        {formatValue(columnValue, rowKey, column, record)}
                     </TableCell>
                     );
                   })}
@@ -1841,10 +2004,6 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
       </Table>
     );
   };
-
-  const datasetLabel = data.dataSource
-    ? data.dataSource.split('/').filter(Boolean).slice(-1)[0]
-    : 'Not selected';
 
   type HierNode = {
     key: string;
@@ -2359,6 +2518,11 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   }, [totalRows, reportLayout]);
 
   const renderCurrentLayout = () => {
+    // Don't render table if rowFields is empty - show readiness message instead
+    if (!rowFields.length) {
+      return renderTabularTable([]);
+    }
+    
     if (!canUseHierarchicalLayouts) {
       const paginatedTabularRows = tabularRows.slice(startIndex, endIndex);
       return renderTabularTable(paginatedTabularRows);
@@ -2406,12 +2570,12 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
   return (
     <div className="w-full h-full bg-[#F3F3F3] flex flex-col overflow-hidden">
       <div className="p-3 space-y-3 flex-shrink-0">
-        <Card className="bg-white border border-[#D9D9D9] rounded-md shadow-sm">
-          <div className="px-4 py-3">
-            <div className="flex w-full flex-nowrap items-center gap-3 sm:gap-4 overflow-x-auto">
-              <div className="flex flex-nowrap items-center gap-3 min-w-0">
-                <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase">Layout</span>
-                <div className="flex flex-nowrap items-center gap-1">
+        <Card className="bg-white border border-[#D9D9D9] rounded-md shadow-sm overflow-hidden">
+          <div className="px-4 py-3 overflow-hidden">
+            <div className="flex w-full flex-nowrap items-center gap-3 sm:gap-4 overflow-x-auto min-w-0 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
+              <div className="flex flex-nowrap items-center gap-3 min-w-0 flex-shrink-0">
+                <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase whitespace-nowrap">Layout</span>
+                <div className="flex flex-nowrap items-center gap-1 flex-shrink-0">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -2480,8 +2644,8 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                       {[
                         { id: 'off', label: 'Off for Rows and Columns' },
                         { id: 'both', label: 'On for Rows and Columns' },
-                        { id: 'rows', label: 'On for Rows Only' },
-                        { id: 'columns', label: 'On for Columns Only' },
+                        { id: 'columns', label: 'On for Rows Only' },
+                        { id: 'rows', label: 'On for Columns Only' },
                       ].map((option) => {
                         const isActive = grandTotalsMode === option.id;
                         return (
@@ -2607,13 +2771,13 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
+              <div className="flex items-center gap-2 flex-shrink-0">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="px-2.5 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
+                      className="px-2.5 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] flex-shrink-0"
                     >
                       <span className="flex flex-col leading-tight text-left whitespace-normal">
                         <span>Pivot</span>
@@ -2673,7 +2837,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB]"
+                      className="px-3 text-[11px] font-medium text-[#3F3F3F] hover:bg-[#EBEBEB] flex-shrink-0"
                     >
                       <span className="flex flex-col leading-tight text-left whitespace-normal">
                         <span>PivotTable</span>
@@ -2740,53 +2904,22 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
                               </div>
-                            </div>
-                              </div>
 
-          <div className="flex flex-col gap-2 border-t border-border px-4 py-3 md:flex-row md:items-center md:justify-between">
-            <div className="space-y-1 text-[11px] text-[#595959]">
-              <p className="font-medium">
-                Data source: <span className="text-[#262626]">{datasetLabel}</span>
-              </p>
-              {data.pivotUpdatedAt && (
-                <p>Last updated: <span className="font-medium text-[#262626]">{new Date(data.pivotUpdatedAt).toLocaleString()}</span></p>
-              )}
-              {typeof data.pivotRowCount === 'number' && data.pivotRowCount > 0 && (
-                <p>Rows returned: <span className="font-medium text-[#262626]">{data.pivotRowCount.toLocaleString()}</span></p>
-              )}
-                      </div>
-            <div className="flex items-center gap-2">
-              <Button
-                onClick={onSave}
-                disabled={isSaving || !hasResults}
-                className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2 px-4"
-              >
-                {isSaving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    <span>Save</span>
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
               <Button
                 onClick={onSaveAs}
                 disabled={isSaving || !hasResults}
-                className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4"
+                  className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2 px-4 flex-shrink-0"
               >
                 {isSaving ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    <span>Saving...</span>
+                      <span className="whitespace-nowrap">Saving...</span>
                   </>
                 ) : (
                   <>
                     <Save className="w-4 h-4" />
-                    <span>Save As</span>
+                      <span className="whitespace-nowrap">Save As</span>
                   </>
                 )}
               </Button>
@@ -2795,15 +2928,15 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 size="sm"
                 onClick={onRefresh}
                 disabled={isLoading || !data.dataSource}
-                className="h-8 px-3 text-[12px] font-semibold border-[#D0D0D0] text-[#1A73E8] hover:bg-[#E8F0FE]"
+                  className="h-8 px-3 border-[#D0D0D0] text-[#1A73E8] hover:bg-[#E8F0FE] flex-shrink-0"
               >
-                {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                Refresh
+                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               </Button>
+              </div>
                               </div>
                             </div>
 
-          {(error || infoMessage || saveError || saveMessage) && (
+          {(error || infoMessage || saveError) && (
             <div className="border-t border-border/60">
               {error && (
                 <div className="flex items-start gap-2 bg-destructive/10 px-4 py-3 text-destructive">
@@ -2821,12 +2954,6 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
                 <div className="flex items-start gap-2 bg-destructive/10 px-4 py-3 text-destructive">
                   <AlertTriangle className="h-4 w-4 mt-0.5" />
                   <p className="text-sm">{saveError}</p>
-                    </div>
-              )}
-              {!saveError && saveMessage && (
-                <div className="flex items-start gap-2 bg-emerald-50 px-4 py-3 text-emerald-700">
-                  <Info className="h-4 w-4 mt-0.5" />
-                  <p className="text-sm">{saveMessage}</p>
               </div>
                             )}
             </div>
@@ -2889,7 +3016,7 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
             {renderCurrentLayout()}
           </div>
           
-          {/* Pagination - only show if more than 15 rows */}
+          {/* Pagination - only show if more than 20 rows */}
           {totalRows > ROWS_PER_PAGE && (
             <div className="border-t border-border bg-white px-4 py-3 flex items-center justify-between">
               <div className="text-sm text-muted-foreground">

@@ -1775,6 +1775,57 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   collapsedKeys: [],
 };
 
+export interface UnpivotSettings {
+  atomId?: string;
+  projectId?: string;
+  workflowId?: string;
+  atomName?: string;
+  datasetPath?: string;
+  dataSourceColumns?: string[];
+  idVars: string[];
+  valueVars: string[];
+  variableColumnName: string;
+  valueColumnName: string;
+  preFilters: Array<{ field: string; include?: string[]; exclude?: string[] }>;
+  postFilters: Array<{ field: string; include?: string[]; exclude?: string[] }>;
+  autoRefresh: boolean;
+  unpivotResults: any[];
+  unpivotStatus?: 'idle' | 'pending' | 'success' | 'failed';
+  unpivotError?: string | null;
+  unpivotUpdatedAt?: string;
+  unpivotRowCount?: number;
+  unpivotSummary?: {
+    original_rows?: number;
+    original_columns?: number;
+    unpivoted_rows?: number;
+    unpivoted_columns?: number;
+    id_vars_count?: number;
+    value_vars_count?: number;
+  };
+  unpivotLastSavedPath?: string | null;
+  unpivotLastSavedAt?: string | null;
+  computationTime?: number;
+}
+
+export const DEFAULT_UNPIVOT_SETTINGS: UnpivotSettings = {
+  idVars: [],
+  valueVars: [],
+  variableColumnName: 'variable',
+  valueColumnName: 'value',
+  preFilters: [],
+  postFilters: [],
+  autoRefresh: true,
+  unpivotResults: [],
+  unpivotStatus: 'idle',
+  unpivotError: null,
+  unpivotUpdatedAt: undefined,
+  unpivotRowCount: 0,
+  unpivotSummary: {},
+  unpivotLastSavedPath: null,
+  unpivotLastSavedAt: null,
+  computationTime: 0,
+};
+
 interface LaboratoryStore {
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;

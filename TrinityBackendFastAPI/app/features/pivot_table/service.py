@@ -1259,8 +1259,6 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
                 else:
                     logger.warning("No value columns available for sorting")
         
-        # For column fields, we need to sort columns (this is trickier after flattening)
-        # Column sorting is mainly handled in the column hierarchy building
 
     records = [_convert_numpy(record) for record in pivot_df.to_dict(orient="records")]
 
