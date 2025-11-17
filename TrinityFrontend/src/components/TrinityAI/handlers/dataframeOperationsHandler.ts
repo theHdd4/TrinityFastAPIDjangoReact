@@ -9,7 +9,8 @@ import {
   processSmartResponse,
   validateFileInput,
   createProgressTracker,
-  autoSaveStepResult
+  autoSaveStepResult,
+  constructFullPath
 } from './utils';
 
 // Import the dataframe operations API functions
@@ -165,6 +166,201 @@ export const dataframeOperationsHandler: AtomHandler = {
       currentDfId: sessionExistingDfId,
       existingDataAvailable: sessionHasExistingData
     });
+    
+    // 🔧 CRITICAL FIX FOR STREAM AI: Resolve file paths using same logic as create-column
+    // Skip file validation in Stream AI mode (Stream AI already validates files)
+    // Resolve full object names to ensure proper MinIO access
+    const resolveFilePathForStreamAI = async (objectName: string): Promise<string> => {
+      if (!objectName) {
+        return objectName;
+      }
+      
+      // In Stream AI mode, trust the path provided (Stream AI already validated)
+      // But still ensure it's a full path if needed
+      if (isStreamMode) {
+        console.log(`🔍 Stream AI mode: Resolving path for ${objectName}`);
+        // If already a full path (contains /), use as-is
+        if (objectName.includes('/')) {
+          console.log(`✅ Stream AI mode: Using provided full path: ${objectName}`);
+          return objectName;
+        }
+        // Otherwise, construct full path using environment context
+        const fullPath = constructFullPath(objectName, envContext);
+        if (fullPath && fullPath !== objectName) {
+          console.log(`✅ Stream AI mode: Constructed full path: ${objectName} -> ${fullPath}`);
+          return fullPath;
+        }
+        console.log(`✅ Stream AI mode: Using path as-is: ${objectName}`);
+        return objectName;
+      }
+      
+      // For Individual AI mode, do full path resolution (same as create-column)
+      try {
+        // Map AI file paths to correct file paths for UI compatibility
+        let mappedPath = objectName;
+        let matchedFrame: any = null;
+
+        console.log('🔄 Fetching frames to map AI file paths for dataframe-operations...');
+        const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+        if (framesResponse.ok) {
+          const framesData = await framesResponse.json();
+          const frames = Array.isArray(framesData.files) ? framesData.files : [];
+          
+          // Map AI file path to correct file path (same logic as create-column)
+          const mapFilePathToObjectName = (aiFilePath: string) => {
+            if (!aiFilePath) return aiFilePath;
+            
+            // Try exact match first
+            let exactMatch = frames.find((f: any) => f.object_name === aiFilePath);
+            if (exactMatch) {
+              console.log(`✅ Exact match found for dataframe-operations ${aiFilePath}: ${exactMatch.object_name}`);
+              matchedFrame = exactMatch;
+              return exactMatch.object_name;
+            }
+            
+            // Try matching by filename
+            const aiFileName = aiFilePath.includes('/') ? aiFilePath.split('/').pop() : aiFilePath;
+            let filenameMatch = frames.find((f: any) => {
+              const frameFileName = (f.arrow_name || f.object_name || '').split('/').pop();
+              return frameFileName === aiFileName;
+            });
+            
+            if (filenameMatch) {
+              console.log(`✅ Filename match found for dataframe-operations ${aiFilePath} -> ${filenameMatch.object_name}`);
+              matchedFrame = filenameMatch;
+              return filenameMatch.object_name;
+            }
+            
+            // Try partial match
+            let partialMatch = frames.find((f: any) => 
+              f.object_name?.includes(aiFileName) || 
+              f.arrow_name?.includes(aiFileName) ||
+              aiFilePath.includes(f.object_name || '')
+            );
+            
+            if (partialMatch) {
+              console.log(`✅ Partial match found for dataframe-operations ${aiFilePath} -> ${partialMatch.object_name}`);
+              matchedFrame = partialMatch;
+              return partialMatch.object_name;
+            }
+            
+            console.log(`⚠️ No match found for dataframe-operations ${aiFilePath}, using original value`);
+            return aiFilePath;
+          };
+          
+          mappedPath = mapFilePathToObjectName(objectName);
+        } else {
+          console.warn('⚠️ Failed to fetch frames for dataframe-operations mapping, using original file path');
+        }
+        
+        // Build environment context with fallbacks
+        let envWithFallback = { ...envContext };
+        const candidatePath = matchedFrame?.object_name || mappedPath || objectName;
+
+        if (candidatePath.includes('/')) {
+          const parts = candidatePath.split('/');
+          if (parts.length >= 4) {
+            if (!envWithFallback.client_name) envWithFallback.client_name = parts[0];
+            if (!envWithFallback.app_name) envWithFallback.app_name = parts[1];
+            if (!envWithFallback.project_name) envWithFallback.project_name = parts[2];
+          }
+        }
+
+        // Ensure full object name with prefix
+        let cachedPrefix: string | null = null;
+        const ensureFullObjectName = async (objName: string): Promise<string> => {
+          if (!objName) return objName;
+
+          // Keep fully qualified paths that match the active context
+          if (
+            objName.includes('/') &&
+            envWithFallback.client_name &&
+            envWithFallback.app_name &&
+            envWithFallback.project_name &&
+            objName.startsWith(`${envWithFallback.client_name}/${envWithFallback.app_name}/${envWithFallback.project_name}/`)
+          ) {
+            return objName;
+          }
+
+          if (cachedPrefix === null) {
+            try {
+              const params = new URLSearchParams();
+              if (envWithFallback.client_name) params.append('client_name', envWithFallback.client_name);
+              if (envWithFallback.app_name) params.append('app_name', envWithFallback.app_name);
+              if (envWithFallback.project_name) params.append('project_name', envWithFallback.project_name);
+
+              const prefixUrl = params.toString()
+                ? `${VALIDATE_API}/get_object_prefix?${params.toString()}`
+                : `${VALIDATE_API}/get_object_prefix`;
+
+              const prefixRes = await fetch(prefixUrl);
+              if (prefixRes.ok) {
+                const prefixData = await prefixRes.json();
+                cachedPrefix = prefixData.prefix || '';
+              } else {
+                cachedPrefix = '';
+              }
+            } catch (err) {
+              console.warn('⚠️ Failed to fetch object prefix for dataframe-operations:', err);
+              cachedPrefix = '';
+            }
+          }
+
+          if (cachedPrefix) {
+            return `${cachedPrefix}${objName}`;
+          }
+
+          const constructed = constructFullPath(objName, envWithFallback);
+          if (constructed && constructed !== objName) {
+            return constructed;
+          }
+
+          return objName;
+        };
+
+        const resolvedPath = await ensureFullObjectName(mappedPath || objectName);
+        console.log('🧭 Resolved dataframe-operations file path:', {
+          original: objectName,
+          mapped: mappedPath,
+          resolved: resolvedPath
+        });
+        
+        return resolvedPath;
+      } catch (error) {
+        console.error('❌ Error resolving file path for dataframe-operations:', error);
+        return objectName; // Return original on error
+      }
+    };
+    
+    // 🔧 CRITICAL FIX: Resolve all file paths in operations before execution
+    // This ensures proper MinIO access in Stream AI mode
+    if (config.operations && config.operations.length > 0) {
+      console.log('🔄 Resolving file paths for all operations...');
+      for (const operation of config.operations) {
+        if (operation.parameters && operation.parameters.object_name) {
+          const originalPath = operation.parameters.object_name;
+          const resolvedPath = await resolveFilePathForStreamAI(originalPath);
+          if (resolvedPath !== originalPath) {
+            console.log(`✅ Resolved path: ${originalPath} -> ${resolvedPath}`);
+            operation.parameters.object_name = resolvedPath;
+          }
+        }
+        // Also check for file_path and filename
+        if (operation.parameters) {
+          if (operation.parameters.file_path && !operation.parameters.object_name) {
+            const resolvedPath = await resolveFilePathForStreamAI(operation.parameters.file_path);
+            operation.parameters.object_name = resolvedPath;
+            delete operation.parameters.file_path;
+          }
+          if (operation.parameters.filename && !operation.parameters.object_name) {
+            const resolvedPath = await resolveFilePathForStreamAI(operation.parameters.filename);
+            operation.parameters.object_name = resolvedPath;
+            delete operation.parameters.filename;
+          }
+        }
+      }
+      console.log('✅ All file paths resolved');
+    }
     
     // 🔧 DEFINE operationsCount for use throughout the handler
     const operationsCount = config.operations ? config.operations.length : 0;

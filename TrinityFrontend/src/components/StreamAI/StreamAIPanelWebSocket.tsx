@@ -1329,12 +1329,44 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             
           case 'workflow_completed':
             updateProgress('\n\n🎉 Workflow complete!');
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't close connection yet - wait for workflow insight
+            // Set loading state to show "Generating insights..."
+            setIsLoading(true);
+            updateProgress('\n\n💭 Generating insights...');
             stopAutoRun();
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
             }
-            ws.close();
+            // Don't close websocket - wait for workflow_insight or workflow_insight_failed
+            break;
+            
+          case 'workflow_insight':
+            console.log('✅ Workflow insight received:', data);
+            // Display the insight in a new message
+            const insightMessage: Message = {
+              id: `insight-${Date.now()}`,
+              content: `📊 **Workflow Insights**\n\n${data.insight || 'No insight generated'}`,
+              sender: 'ai',
+              timestamp: new Date(),
+              type: 'text'
+            };
+            setMessages(prev => [...prev, insightMessage]);
+            updateProgress('\n\n✅ Insights generated!');
+            setIsLoading(false);
+            // Now close the connection after insight is received
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+            break;
+            
+          case 'workflow_insight_failed':
+            console.warn('⚠️ Workflow insight failed:', data.error);
+            updateProgress(`\n\n⚠️ Insight generation failed: ${data.error || 'Unknown error'}`);
+            setIsLoading(false);
+            // Close connection even if insight failed
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
             break;
 
           case 'workflow_rejected':
@@ -1369,6 +1401,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         console.log('🔌 WebSocket closed');
         stopAutoRun();
         setWsConnection(null);
+        // 🔧 CRITICAL FIX: Always set loading to false when connection closes
+        setIsLoading(false);
       };
       
     } catch (error) {

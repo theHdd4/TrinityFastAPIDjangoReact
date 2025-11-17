@@ -1538,14 +1538,28 @@ WORKFLOW PLANNING RULES:
             
             logger.info(f"✅ Workflow completed: {sequence_id}")
 
-            await self._emit_workflow_insight(
-                websocket=websocket,
-                sequence_id=sequence_id,
-                plan=plan,
-                user_prompt=user_prompt,
-                project_context=project_context,
-                additional_context=history_summary or "",
-            )
+            # 🔧 CRITICAL FIX: Check if websocket is still connected before emitting workflow insight
+            # The connection might be closed after workflow_completed event
+            try:
+                # Check connection state before emitting workflow insight
+                if hasattr(websocket, 'client_state') and websocket.client_state.name == 'DISCONNECTED':
+                    logger.warning(f"⚠️ WebSocket already disconnected, skipping workflow insight for {sequence_id}")
+                elif hasattr(websocket, 'application_state') and websocket.application_state.name == 'DISCONNECTED':
+                    logger.warning(f"⚠️ WebSocket application state disconnected, skipping workflow insight for {sequence_id}")
+                else:
+                    await self._emit_workflow_insight(
+                        websocket=websocket,
+                        sequence_id=sequence_id,
+                        plan=plan,
+                        user_prompt=user_prompt,
+                        project_context=project_context,
+                        additional_context=history_summary or "",
+                    )
+            except WebSocketDisconnect:
+                logger.info(f"🔌 WebSocket disconnected before workflow insight could be emitted for {sequence_id}")
+            except Exception as insight_error:
+                logger.warning(f"⚠️ Failed to emit workflow insight (connection may be closed): {insight_error}")
+                # Don't fail the entire workflow if insight emission fails
             
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during workflow {sequence_id}")
@@ -2525,6 +2539,21 @@ WORKFLOW PLANNING RULES:
     ) -> None:
         """Generate and stream the final workflow-level insight paragraph."""
         try:
+            # 🔧 CRITICAL FIX: Check if websocket connection is still alive before proceeding
+            try:
+                # Try to check connection state
+                if hasattr(websocket, 'client_state'):
+                    if websocket.client_state.name == 'DISCONNECTED':
+                        logger.warning(f"⚠️ WebSocket client disconnected, skipping workflow insight for {sequence_id}")
+                        return
+                if hasattr(websocket, 'application_state'):
+                    if websocket.application_state.name == 'DISCONNECTED':
+                        logger.warning(f"⚠️ WebSocket application disconnected, skipping workflow insight for {sequence_id}")
+                        return
+            except Exception as state_check_error:
+                logger.debug(f"Could not check websocket state: {state_check_error}")
+                # Continue anyway - the send will fail gracefully if disconnected
+            
             step_records = self._collect_workflow_step_records(sequence_id, plan)
             if not step_records:
                 logger.info("Skipped workflow insight emission (no step records)")
@@ -2550,18 +2579,29 @@ WORKFLOW PLANNING RULES:
 
             if not result.get("success"):
                 logger.warning("Workflow insight agent returned error: %s", result.get("error"))
-                await self._send_event(
-                    websocket,
-                    WebSocketEvent(
-                        "workflow_insight_failed",
-                        {
-                            "sequence_id": sequence_id,
-                            "error": result.get("error") or "Insight agent returned unsuccessful response",
-                        },
-                    ),
-                    "workflow_insight_failed event",
-                )
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "workflow_insight_failed",
+                            {
+                                "sequence_id": sequence_id,
+                                "error": result.get("error") or "Insight agent returned unsuccessful response",
+                            },
+                        ),
+                        "workflow_insight_failed event",
+                    )
+                except (WebSocketDisconnect, RuntimeError) as send_error:
+                    logger.info(f"🔌 Connection closed while sending workflow_insight_failed: {send_error}")
                 return
+
+            # 🔧 CRITICAL FIX: Check connection again before sending insight (connection might have closed during LLM call)
+            try:
+                if hasattr(websocket, 'client_state') and websocket.client_state.name == 'DISCONNECTED':
+                    logger.warning(f"⚠️ WebSocket disconnected during insight generation, skipping send for {sequence_id}")
+                    return
+            except Exception:
+                pass  # Continue - send will fail gracefully if disconnected
 
             await self._send_event(
                 websocket,
@@ -2577,8 +2617,11 @@ WORKFLOW PLANNING RULES:
                 "workflow_insight event",
             )
             logger.info("✅ Workflow insight emitted for %s", sequence_id)
+        except WebSocketDisconnect as ws_exc:
+            logger.info(f"🔌 WebSocket disconnected during workflow insight generation for {sequence_id}: {ws_exc}")
+            # Connection was destroyed - this is expected if client closed connection
         except Exception as exc:  # pragma: no cover - defensive logging
-            logger.warning("⚠️ Failed to emit workflow insight: %s", exc)
+            logger.warning("⚠️ Failed to emit workflow insight: %s", exc, exc_info=True)
             try:
                 await self._send_event(
                     websocket,
@@ -2591,8 +2634,10 @@ WORKFLOW PLANNING RULES:
                     ),
                     "workflow_insight_failed event",
                 )
-            except Exception:
-                logger.debug("Unable to notify client about workflow insight failure")
+            except (WebSocketDisconnect, RuntimeError) as send_error:
+                logger.debug(f"Unable to notify client about workflow insight failure (connection closed): {send_error}")
+            except Exception as send_exc:
+                logger.debug(f"Unable to notify client about workflow insight failure: {send_exc}")
 
     async def _send_event(
         self,

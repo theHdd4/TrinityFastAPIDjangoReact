@@ -69,17 +69,64 @@ class DataFrameOperationsAgent:
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
         """
         Set environment context for dynamic path resolution.
+        If default values are provided, try to fetch actual context from API.
         """
-        if client_name or app_name or project_name:
-            if client_name:
-                os.environ["CLIENT_NAME"] = client_name
-            if app_name:
-                os.environ["APP_NAME"] = app_name
-            if project_name:
-                os.environ["PROJECT_NAME"] = project_name
-            logger.info(f"🔧 Environment context set for dynamic path resolution: {client_name}/{app_name}/{project_name}")
-        else:
-            logger.info("🔧 Using existing environment context for dynamic path resolution")
+        # 🔧 CRITICAL FIX: If default values are provided, try to fetch actual context
+        is_default = (client_name in ["default", "default_client", ""] and 
+                     app_name in ["default", "default_app", ""] and 
+                     project_name in ["default", "default_project", ""])
+        
+        if is_default:
+            # Try to fetch actual context from the validate API
+            try:
+                validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8001")
+                if not validate_api_url.startswith("http"):
+                    validate_api_url = f"http://{validate_api_url}"
+                
+                url = f"{validate_api_url}/api/data-upload-validate/get_object_prefix"
+                logger.info(f"🔍 Fetching actual project context from: {url}")
+                
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    # Extract context from prefix if available
+                    prefix = data.get("prefix", "")
+                    environment = data.get("environment", {})
+                    
+                    if environment:
+                        actual_client = environment.get("CLIENT_NAME", "")
+                        actual_app = environment.get("APP_NAME", "")
+                        actual_project = environment.get("PROJECT_NAME", "")
+                        
+                        if actual_client and actual_app and actual_project:
+                            client_name = actual_client
+                            app_name = actual_app
+                            project_name = actual_project
+                            logger.info(f"✅ Fetched actual context from API: {client_name}/{app_name}/{project_name}")
+                        elif prefix:
+                            # Parse from prefix: client/app/project/
+                            parts = prefix.rstrip('/').split('/')
+                            if len(parts) >= 3:
+                                client_name = parts[0] if parts[0] else client_name
+                                app_name = parts[1] if parts[1] else app_name
+                                project_name = parts[2] if parts[2] else project_name
+                                logger.info(f"✅ Parsed context from prefix: {client_name}/{app_name}/{project_name}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to fetch actual context from API: {e}, using provided values")
+        
+        # Set environment variables if we have valid values
+        if client_name and client_name not in ["default", "default_client"]:
+            os.environ["CLIENT_NAME"] = client_name
+        if app_name and app_name not in ["default", "default_app"]:
+            os.environ["APP_NAME"] = app_name
+        if project_name and project_name not in ["default", "default_project"]:
+            os.environ["PROJECT_NAME"] = project_name
+            
+        # Log the final context being used
+        final_client = os.getenv("CLIENT_NAME", client_name or "default")
+        final_app = os.getenv("APP_NAME", app_name or "default")
+        final_project = os.getenv("PROJECT_NAME", project_name or "default")
+        logger.info(f"🔧 Environment context set for dynamic path resolution: {final_client}/{final_app}/{final_project}")
     
     def process(self, user_prompt: str, session_id: Optional[str] = None, 
                 client_name: str = "", app_name: str = "", project_name: str = "",
