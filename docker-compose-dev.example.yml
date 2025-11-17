@@ -230,8 +230,8 @@ services:
       <<: [*redis-env, *celery-env]
       HOST_IP: ${HOST_IP:-10.2.4.48}
       FRONTEND_PORT: "8081"
-      CORS_ALLOWED_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.4.48}:8081,http://172.17.48.1:8081,http://10.2.4.48:8081,https://trinity-dev.quantmatrixai.com"
-      CSRF_TRUSTED_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.4.48}:8081,http://172.17.48.1:8081,http://10.2.4.48:8081,https://trinity-dev.quantmatrixai.com"
+      CORS_ALLOWED_ORIGINS: "http://${HOST_IP:-10.2.4.48}:8081,https://trinity-dev.quantmatrixai.com"
+      CSRF_TRUSTED_ORIGINS: "http://${HOST_IP:-10.2.4.48}:8081,https://trinity-dev.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: minio
@@ -295,7 +295,7 @@ services:
       FLIGHT_PORT: 8816
       FLIGHT_REGISTRY_FILE: /tmp/flight_registry.json
       HOST_IP: ${HOST_IP:-10.2.4.48}
-      FASTAPI_CORS_ORIGINS: "http://127.0.0.1:8081,http://${HOST_IP:-10.2.4.48}:8081,http://172.17.48.1:8081,http://10.2.4.48:8081,https://trinity-dev.quantmatrixai.com,https://trinity.quantmatrixai.com"
+      FASTAPI_CORS_ORIGINS: "http://${HOST_IP:-10.2.4.48}:8081,https://trinity-dev.quantmatrixai.com"
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
       REDIS_LOG_SERVICE: fastapi-api
