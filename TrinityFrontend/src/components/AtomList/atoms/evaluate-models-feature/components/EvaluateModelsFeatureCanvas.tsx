@@ -3061,29 +3061,19 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     setCardinalityError(null);
     
     try {
-      // Extract the object name by removing the prefix (default_client/default_app/default_project/)
-      // The groupby endpoint will add the prefix back, so we need to pass the path without the prefix
-      let objectName = data.selectedDataframe;
-      if (data.selectedDataframe.includes('/')) {
-        const parts = data.selectedDataframe.split('/');
-        // Remove the first 3 parts (default_client/default_app/default_project)
-        if (parts.length > 3) {
-          objectName = parts.slice(3).join('/');
-        } else {
-          // If less than 3 parts, just use the last part
-          objectName = parts[parts.length - 1];
-        }
-      }
-      
-      // Use GROUPBY_API cardinality endpoint instead of FEATURE_OVERVIEW_API
-      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(objectName)}`;
+      // Use the full object name as returned from the selector; the backend no longer prefixes paths
+      const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(data.selectedDataframe)}`;
       const res = await fetch(url);
-      const data_result = await res.json();
-      
+      const data_result = await resolveTaskResponse(await res.json());
+
       if (data_result.status === 'SUCCESS' && data_result.cardinality) {
         setCardinalityData(data_result.cardinality);
       } else {
-        setCardinalityError(data_result.error || 'Failed to fetch cardinality data');
+        setCardinalityError(
+          data_result.error ||
+            data_result.detail ||
+            'Failed to fetch cardinality data'
+        );
       }
     } catch (e: any) {
       setCardinalityError(e.message || 'Error fetching cardinality data');
