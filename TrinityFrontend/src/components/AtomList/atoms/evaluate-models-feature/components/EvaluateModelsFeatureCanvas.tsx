@@ -65,6 +65,7 @@ import { Maximize2, X, MessageSquare, Send, Edit3, Trash2, Filter, ChevronDown, 
 import { EvaluateModelsFeatureData } from '../EvaluateModelsFeatureAtom';
 import { EvaluateModelsFeatureSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { EVALUATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -799,7 +800,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
         try {
           const response = await fetch(`${EVALUATE_API}/get-scope?object_name=${encodeURIComponent(data.selectedDataframe)}`);
           if (response.ok) {
-            const data = await response.json();
+            const data = await resolveTaskResponse(await response.json());
             setCurrentScope(data.scope);
           } else {
             console.warn('Failed to fetch scope from dataset');
@@ -889,7 +890,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           );
           
           if (response.ok) {
-            const result = await response.json();
+            const result = await resolveTaskResponse(await response.json());
             console.log('🔍 DEBUG: YoY Backend response:', result);
             // Handle array of results for multiple combinations
             if (result && result.results && Array.isArray(result.results)) {
@@ -943,7 +944,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
               );
               
               if (response.ok) {
-                const result = await response.json();
+                const result = await resolveTaskResponse(await response.json());
                 newContributionData[combination] = result.contribution_data || [];
               } else {
                 console.warn(`Failed to fetch contribution data for combination: ${combination}`);
@@ -996,7 +997,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             );
             
             if (response.ok) {
-              const result = await response.json();
+              const result = await resolveTaskResponse(await response.json());
               betaDataMap[combination] = result;
             } else {
               console.warn(`Failed to fetch beta data for combination: ${combination}`);
@@ -1045,7 +1046,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             );
             
             if (response.ok) {
-              const result = await response.json();
+              const result = await resolveTaskResponse(await response.json());
               elasticityDataMap[combination] = result;
             } else {
               console.warn(`Failed to fetch elasticity data for combination: ${combination}`);
@@ -1094,7 +1095,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             );
             
             if (response.ok) {
-              const result = await response.json();
+              const result = await resolveTaskResponse(await response.json());
               roiDataMap[combination] = result;
             } else {
               console.warn(`Failed to fetch ROI data for combination: ${combination}`);
@@ -1139,7 +1140,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           );
           
           if (response.ok) {
-            const result = await response.json();
+            const result = await resolveTaskResponse(await response.json());
             console.log('🔍 S-curve data received:', result);
             console.log('🔍 S-curve keys:', result.s_curves ? Object.keys(result.s_curves) : 'No s_curves');
             setSCurveData(result);
@@ -1188,7 +1189,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
         throw new Error(errorData.detail || 'Failed to fetch application type');
       }
       
-      const result = await response.json();
+      const result = await resolveTaskResponse(await response.json());
       
       if (result && result.application_type) {
         setApplicationType(result.application_type);
@@ -1238,7 +1239,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
             );
             
             if (response.ok) {
-              const result = await response.json();
+              const result = await resolveTaskResponse(await response.json());
               averagesDataMap[combination] = result;
             } else {
               console.warn(`Failed to fetch averages data for combination: ${combination}`);
@@ -1283,7 +1284,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           );
           
           if (response.ok) {
-            const result = await response.json();
+            const result = await resolveTaskResponse(await response.json());
             console.log('🔍 DEBUG: Actual vs Predicted Backend response:', result);
             
             // Transform the data to be organized by combination
@@ -1337,7 +1338,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const response = await fetch(url);
           
           if (response.ok) {
-            const result = await response.json();
+            const result = await resolveTaskResponse(await response.json());
             console.log('🔍 DEBUG: Identifiers Backend response:', result);
             if (result && result.identifiers) {
               setIdentifiersData(result.identifiers);
@@ -1377,7 +1378,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       
       try {
         const response = await fetch(url);
-        const result = await response.json();
+        const result = await resolveTaskResponse(await response.json());
         
         if (result.combinations && Array.isArray(result.combinations)) {
           console.log('🔍 Re-fetched combinations based on identifier filters:', result.combinations);
