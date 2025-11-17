@@ -35,6 +35,8 @@ minio_client = Minio(
     secure=False,  # Set to True if using HTTPS
 )
 
+from app.core.task_queue import celery_task_client, format_task_response
+
 from .config import settings
 from .database import get_authenticated_client, MONGO_DB
 from .schemas import (
@@ -43,6 +45,12 @@ from .schemas import (
     PerformanceMetrics, ActualPredictedItem, ActualPredictedResponse,
     ContributionsItem, ContributionsResponse,
     IdentifiersResponse,
+)
+from .service import (
+    compute_actual_vs_predicted,
+    compute_contributions_yoy,
+    compute_yoy_growth,
+    list_selected_models,
 )
 
 logger = logging.getLogger("evaluate-atom")
@@ -480,77 +488,27 @@ def list_selected_models(
     indicates selection (case-insensitive match of: selected/true/yes/1).
     Aggregates across files, supports offset/limit pagination on the combined result.
     """
-    try:
-        if not minio_client.bucket_exists(bucket):
-            raise HTTPException(status_code=404, detail=f"Bucket '{bucket}' not found")
-
-        allowed_ext = {"." + e.strip().lower().lstrip(".") for e in extensions.split(",") if e.strip()}
-        if not allowed_ext:
-            allowed_ext = _ALLOWED_EXT
-
-        objs = minio_client.list_objects(bucket, prefix=prefix or "", recursive=recursive)
-
-        files_scanned = 0
-        total_rows_scanned = 0
-        all_rows: List[Dict[str, Any]] = []
-
-        for obj in objs:
-            key = getattr(obj, "object_name", "")
-            ext = os.path.splitext(key)[1].lower()
-            if ext not in allowed_ext:
-                continue
-
-            # Fetch object bytes
-            try:
-                resp = minio_client.get_object(bucket, key)
-                data = resp.read()
-                resp.close()
-                resp.release_conn()
-            except S3Error as e:
-                logger.warning("Skipping %s due to MinIO error: %s", key, e)
-                continue
-
-            files_scanned += 1
-
-            # Parse as Arrow/Feather/Parquet
-            try:
-                table = _read_table_from_bytes(key, BytesIO(data))
-            except Exception as e:
-                logger.warning("Skipping %s due to read error: %s", key, e)
-                continue
-
-            total_rows_scanned += table.num_rows or 0
-
-            # Filter selected
-            table = _filter_selected(table)
-            if table.num_rows == 0:
-                continue
-
-            # Convert to records
-            rows = _table_to_records(table)
-            all_rows.extend(rows)
-
-            # Early stop cushion
-            if len(all_rows) >= offset + limit + 1000:
-                break
-
-        # Apply pagination on the aggregated rows
-        sliced = all_rows[offset: offset + limit]
-
-        return SelectedModelsResponse(
-            bucket=bucket,
-            prefix=prefix,
-            files_scanned=files_scanned,
-            total_rows_scanned=total_rows_scanned,
-            count=len(sliced),
-            items=[SelectedModelRow(**r) for r in sliced],
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Unexpected error in /files/selected")
-        raise HTTPException(status_code=500, detail=str(e))
+    submission = celery_task_client.submit_callable(
+        name="evaluate.list_selected_models",
+        dotted_path="app.features.evaluate_models_feature_based.service.list_selected_models",
+        kwargs={
+            "bucket": bucket,
+            "prefix": prefix,
+            "recursive": recursive,
+            "limit": limit,
+            "offset": offset,
+            "extensions": extensions,
+        },
+        metadata={
+            "feature": "evaluate_models_feature_based",
+            "operation": "list_selected_models",
+            "bucket": bucket,
+            "prefix": prefix,
+        },
+    )
+    if submission.status == "failure":
+        raise HTTPException(status_code=500, detail=submission.detail or "Failed to list selected models")
+    return format_task_response(submission, embed_result=True)
 
 
 # ---------- Selected models charts ----------
@@ -569,167 +527,27 @@ async def selected_actual_vs_predicted(
     coefficients + source data (intercept + sum(beta*x)) WITH TRANSFORMATION SUPPORT.
     Returns an array of items, one per (combination_id, model_name).
     """
-    # Import apply_transformation_steps from select models feature
-    from ..select_models_feature_based.s_curve import apply_transformation_steps
-    
-    # 1) read results and collect (combination_id, model_name) pairs
-    results_df = _read_minio_dataframe(minio_client, bucket, results_file_key)
-    results_df.columns = results_df.columns.str.lower()
-    selected_pairs = _collect_selected_rows(results_df)[:limit_models]
-
-    build_cfg = await _get_build_config(client_name, app_name, project_name)
-
-    items: List[Dict[str, Any]] = []
-    for combination_id, model_name in selected_pairs:
-        file_key = _file_key_for_combo(build_cfg, combination_id)
-        src_df = _read_minio_dataframe(minio_client, bucket, file_key)
-        src_df.columns = src_df.columns.str.lower()
-        
-        # Get betas and intercept from the results file
-        betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
-        
-        # Get transformation_metadata from MongoDB (same as select models feature)
-        transformation_metadata = {}
-        try:
-            model_coeffs_in_mongo = build_cfg.get("model_coefficients", {})
-            combo_coeffs = model_coeffs_in_mongo.get(combination_id, {})
-            model_coeffs = combo_coeffs.get(model_name, {})
-            transformation_metadata = model_coeffs.get("transformation_metadata", {})
-            logger.info(f"✅ Transformation metadata from MongoDB for {combination_id}/{model_name}: {transformation_metadata}")
-        except Exception as e:
-            logger.warning(f"Failed to get transformation metadata from MongoDB: {str(e)}")
-        
-        # Get x_variables from the source data columns that have betas
-        x_vars = list(betas.keys())
-        y_var = build_cfg.get("y_variable") or "Volume"
-        
-        # Convert y_var to lowercase to match the DataFrame columns
-        y_var = y_var.lower()
-
-        # coerce y to numeric
-        if y_var not in src_df.columns:
-            raise HTTPException(status_code=404, detail=f"y_variable '{y_var}' not in source for {combination_id}")
-        actual = pd.to_numeric(src_df[y_var], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-        
-        # Try to capture dates if a date-like column exists
-        date_column = None
-        for col in ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"]:
-            if col in src_df.columns:
-                date_column = col
-                break
-        dates_list = None
-        if date_column is not None:
-            try:
-                parsed = pd.to_datetime(src_df[date_column], errors='coerce')
-                dates_list = [d.isoformat() if pd.notna(d) else None for d in parsed]
-            except Exception:
-                dates_list = None
-        
-        # Check if transformations are available
-        has_transformations = transformation_metadata and len(transformation_metadata) > 0
-        if has_transformations:
-            logger.info(f"✅ Transformations available for combination {combination_id}: {list(transformation_metadata.keys())}")
-        
-        # Calculate predictions with transformation support
-        predicted_values = []
-        
-        for index, row in src_df.iterrows():
-            # Calculate predicted value: intercept + sum(beta_i * x_i)
-            predicted_value = intercept
-            
-            for x_var in x_vars:
-                if x_var in src_df.columns:
-                    # Get the raw x value
-                    x_value = row[x_var]
-                    
-                    # Apply transformations if available (check both original and lowercased variable names)
-                    if has_transformations:
-                        # Try to find the transformation metadata with case-insensitive matching
-                        transformation_steps = None
-                        if x_var in transformation_metadata:
-                            transformation_steps = transformation_metadata[x_var].get('transformation_steps', [])
-                        elif x_var.lower() in transformation_metadata:
-                            transformation_steps = transformation_metadata[x_var.lower()].get('transformation_steps', [])
-                        elif x_var.upper() in transformation_metadata:
-                            transformation_steps = transformation_metadata[x_var.upper()].get('transformation_steps', [])
-                        
-                        if transformation_steps:
-                            try:
-                                # Apply transformations to the single value
-                                original_value = x_value
-                                transformed_value = apply_transformation_steps([x_value], transformation_steps)[0]
-                                x_value = transformed_value
-                                if index == 0:  # Log only for first row to avoid spam
-                                    logger.info(f"🔄 Applied transformation to {x_var}: {original_value} → {transformed_value}")
-                            except Exception as e:
-                                logger.warning(f"Failed to apply transformations for {x_var}: {str(e)}")
-                    
-                    beta_value = betas.get(x_var, 0.0)
-                    contribution = beta_value * x_value
-                    predicted_value += contribution
-                else:
-                    logger.warning(f"Variable {x_var} not found in source data columns")
-            
-            predicted_values.append(predicted_value)
-        
-        pred = np.array(predicted_values)
-
-        # Filter out extreme outliers that might be causing axis scaling issues (from original select models)
-        if len(predicted_values) > 0:
-            predicted_array = np.array(predicted_values)
-            actual_array = np.array(actual)
-            
-            # Calculate percentiles to identify extreme outliers
-            pred_99th = np.percentile(predicted_array, 99)
-            pred_1st = np.percentile(predicted_array, 1)
-            actual_99th = np.percentile(actual_array, 99)
-            actual_1st = np.percentile(actual_array, 1)
-            
-            # Filter out extreme outliers (beyond 99th percentile)
-            filtered_data = []
-            for i, (actual_val, predicted_val) in enumerate(zip(actual, predicted_values)):
-                if (predicted_val <= pred_99th and predicted_val >= pred_1st and 
-                    actual_val <= actual_99th and actual_val >= actual_1st):
-                    filtered_data.append((actual_val, predicted_val, (dates_list[i] if dates_list else None)))
-            
-            if len(filtered_data) < len(actual):
-                actual = np.array([item[0] for item in filtered_data])
-                pred = np.array([item[1] for item in filtered_data])
-                if dates_list is not None:
-                    dates_list = [item[2] for item in filtered_data]
-
-        # optional outlier guard
-        if len(pred) and len(actual):
-            p99, p01 = np.percentile(pred, 99), np.percentile(pred, 1)
-            a99, a01 = np.percentile(actual, 99), np.percentile(actual, 1)
-            mask = (pred <= p99) & (pred >= p01) & (actual <= a99) & (actual >= a01)
-            actual = actual[mask]
-            pred = pred[mask]
-            if dates_list is not None:
-                dates_array = np.array(dates_list, dtype=object)
-                dates_list = dates_array[mask].tolist()
-
-        items.append(
-            ActualPredictedItem(
-                combination_id=combination_id,
-                model_name=model_name,
-                file_key=file_key,
-                actual_values=actual.tolist(),
-                predicted_values=pred.tolist(),
-                dates=dates_list,
-                performance_metrics=PerformanceMetrics(**_metrics(actual, pred)),
-                data_points=int(len(actual)),
-            ).dict()
-        )
-
-    response = ActualPredictedResponse(
-        results_file_key=results_file_key,
-        bucket=bucket,
-        models_count=len(items),
-        items=[ActualPredictedItem(**i) for i in items],
+    submission = celery_task_client.submit_callable(
+        name="evaluate.selected_actual_vs_predicted",
+        dotted_path="app.features.evaluate_models_feature_based.service.compute_actual_vs_predicted",
+        kwargs={
+            "results_file_key": results_file_key,
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "bucket": bucket,
+            "limit_models": limit_models,
+        },
+        metadata={
+            "feature": "evaluate_models_feature_based",
+            "operation": "selected_actual_vs_predicted",
+            "results_file_key": results_file_key,
+            "bucket": bucket,
+        },
     )
-    
-    return response
+    if submission.status == "failure":
+        raise HTTPException(status_code=500, detail=submission.detail or "Failed to compute actual vs predicted")
+    return format_task_response(submission, embed_result=True)
 
 
 @router.get("/selected/contributions-yoy", response_model=ContributionsResponse, tags=["Selected Models", "Charts"])
@@ -747,74 +565,26 @@ async def selected_contributions_yoy(
       - compute YoY % change per variable
     Returns one block per model with {yearly_contributions, yoy_contributions}.
     """
-    results_df = _read_minio_dataframe(minio_client, bucket, results_file_key)
-    results_df.columns = results_df.columns.str.lower()
-    selected_pairs = _collect_selected_rows(results_df)
-
-    build_cfg = await _get_build_config(client_name, app_name, project_name)
-
-    out_items: List[Dict[str, Any]] = []
-    for combination_id, model_name in selected_pairs:
-        file_key = _file_key_for_combo(build_cfg, combination_id)
-        df = _read_minio_dataframe(minio_client, bucket, file_key)
-        
-        # Get betas and intercept from the results file instead of MongoDB
-        betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
-        
-        # Get x_variables from the source data columns that have betas
-        x_vars = list(betas.keys())
-        _y_var = build_cfg.get("y_variable") or "Volume"
-
-        year_col = _year_col(df)
-        if not year_col:
-            raise HTTPException(status_code=400, detail=f"Source for {combination_id} has no Year column")
-
-        # Build per-variable contribution columns (beta * x)
-        contrib_cols: Dict[str, pd.Series] = {}
-        for x in x_vars:
-            if x in df.columns:
-                vec = pd.to_numeric(df[x], errors="coerce").fillna(0.0)
-                contrib_cols[x] = (betas.get(x, 0.0) * vec).astype(float)
-
-        if not contrib_cols:
-            # nothing to contribute
-            continue
-
-        contrib_df = pd.DataFrame(contrib_cols)
-        contrib_df[year_col] = df[year_col]
-
-        # Yearly totals per variable
-        yearly = contrib_df.groupby(year_col).sum(numeric_only=True).sort_index()
-
-        # YoY % change per variable
-        yoy = yearly.pct_change().replace([np.inf, -np.inf], np.nan) * 100.0
-
-        years_list: List[Any]
-        if np.issubdtype(yearly.index.dtype, np.number):
-            years_list = yearly.index.astype(int).tolist()
-        else:
-            years_list = yearly.index.astype(str).tolist()
-
-        out_items.append(
-            ContributionsItem(
-                combination_id=combination_id,
-                model_name=model_name,
-                file_key=file_key,
-                years=years_list,
-                yearly_contributions={col: yearly[col].round(6).tolist() for col in yearly.columns},
-                yoy_contributions_pct={col: yoy[col].round(4).fillna(0.0).tolist() for col in yearly.columns},
-            ).dict()
-        )
-
-    if not out_items:
-        raise HTTPException(status_code=404, detail="No selected models (or no contribution variables) found")
-
-    return ContributionsResponse(
-        results_file_key=results_file_key,
-        bucket=bucket,
-        models_count=len(out_items),
-        items=[ContributionsItem(**i) for i in out_items],
+    submission = celery_task_client.submit_callable(
+        name="evaluate.selected_contributions_yoy",
+        dotted_path="app.features.evaluate_models_feature_based.service.compute_contributions_yoy",
+        kwargs={
+            "results_file_key": results_file_key,
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "bucket": bucket,
+        },
+        metadata={
+            "feature": "evaluate_models_feature_based",
+            "operation": "selected_contributions_yoy",
+            "results_file_key": results_file_key,
+            "bucket": bucket,
+        },
     )
+    if submission.status == "failure":
+        raise HTTPException(status_code=500, detail=submission.detail or "Failed to compute contributions")
+    return format_task_response(submission, embed_result=True)
 
 
 @router.get("/get-scope", tags=["Data"])
@@ -1143,311 +913,26 @@ async def calculate_yoy_growth(
     Calculate Year-over-Year (YoY) growth for each selected combination using stored coefficients and actual X values WITH TRANSFORMATION SUPPORT.
     Returns YoY growth data for all combinations where selected_models = 'yes'.
     """
-    # Import apply_transformation_steps from select models feature
-    from ..select_models_feature_based.s_curve import apply_transformation_steps
-    
-    try:
-        # logger.info(f"Calculating YoY growth for results file: {results_file_key}")
-        # logger.info(f"Client: {client_name}, App: {app_name}, Project: {project_name}")
-        
-        # Get build configuration from MongoDB
-        try:
-            build_cfg = await _get_build_config(client_name, app_name, project_name)
-            # logger.info(f"Successfully retrieved build configuration")
-        except Exception as e:
-            logger.error(f"Failed to get build configuration: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to get build configuration: {str(e)}")
-        
-        # Read results file to get selected combinations
-        try:
-            results_df = _read_minio_dataframe(minio_client, bucket, results_file_key)
-            # logger.info(f"Successfully read results file with {len(results_df)} rows")
-        except Exception as e:
-            logger.error(f"Failed to read results file: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to read results file: {str(e)}")
-        
-        try:
-            selected_pairs = _collect_selected_rows(results_df)
-            # logger.info(f"Found {len(selected_pairs)} selected model pairs")
-        except Exception as e:
-            # logger.error(f"Failed to collect selected rows: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Failed to collect selected rows: {str(e)}")
-        
-        if not selected_pairs:
-            raise HTTPException(status_code=404, detail="No selected models found in the results file")
-        
-        yoy_results = []
-        
-        for combination_id, model_name in selected_pairs:
-            try:
-                # logger.info(f"Processing YoY growth for combination: {combination_id}, model: {model_name}")
-                
-                # Get betas and intercept from the results file instead of MongoDB
-                betas, intercept, transformation_metadata = _extract_betas_from_results_file(results_df, combination_id)
-                
-                # Get x_variables from the source data columns that have betas
-                x_vars = list(betas.keys())
-                y_var = build_cfg.get("y_variable") or "Volume"
-                
-                # Get transformation_metadata from MongoDB (same as select models feature)
-                try:
-                    model_coeffs_in_mongo = build_cfg.get("model_coefficients", {})
-                    combo_coeffs = model_coeffs_in_mongo.get(combination_id, {})
-                    model_coeffs = combo_coeffs.get(model_name, {})
-                    transformation_metadata = model_coeffs.get("transformation_metadata", {})
-                    
-                    # Parse transformation_metadata if it's a string (JSON)
-                    if isinstance(transformation_metadata, str):
-                        import json
-                        try:
-                            transformation_metadata = json.loads(transformation_metadata)
-                            logger.info(f"✅ YoY Growth - Parsed transformation metadata from JSON string")
-                        except json.JSONDecodeError as e:
-                            logger.warning(f"Failed to parse transformation metadata JSON: {str(e)}")
-                            transformation_metadata = {}
-                    
-                    logger.info(f"✅ YoY Growth - Transformation metadata from MongoDB for {combination_id}/{model_name}: {transformation_metadata}")
-                except Exception as e:
-                    logger.warning(f"Failed to get transformation metadata from MongoDB for YoY growth: {str(e)}")
-                    transformation_metadata = {}
-                
-                # Check if transformations are available
-                has_transformations = transformation_metadata and len(transformation_metadata) > 0
-                # logger.info(f"✅ YoY Growth - Has transformations: {has_transformations}")
-                # logger.info(f"✅ YoY Growth - Transformation metadata structure: {type(transformation_metadata)}")
-                # logger.info(f"✅ YoY Growth - Transformation metadata keys: {list(transformation_metadata.keys()) if isinstance(transformation_metadata, dict) else 'Not a dict'}")
-                # logger.info(f"✅ YoY Growth - Available x_vars: {x_vars}")
-                
-                # Get source file for this combination
-                file_key = _file_key_for_combo(build_cfg, combination_id)
-                df = _read_minio_dataframe(minio_client, bucket, file_key)
-                df.columns = df.columns.str.lower()
-                
-                # Convert y_var to lowercase to match the DataFrame columns
-                y_var = y_var.lower()
-                
-                # Detect date column (since columns are lowercase, look for lowercase versions)
-                date_column = None
-                date_columns = ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"]
-                for col in date_columns:
-                    if col in df.columns:
-                        date_column = col
-                        break
-                
-                if not date_column:
-                    logger.warning(f"No date column found for combination {combination_id}, skipping")
-                    continue
-                
-                # Convert date column to datetime
-                df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
-                df = df.dropna(subset=[date_column])
-                
-                if df.empty:
-                    logger.warning(f"No valid date data for combination {combination_id}, skipping")
-                    continue
-                
-                # Get unique years and ensure we have at least 2 years
-                years = sorted(df[date_column].dt.year.unique())
-                if len(years) < 2:
-                    logger.warning(f"Need at least 2 years for YoY calculation in combination {combination_id}, skipping")
-                    continue
-                
-                year_first, year_last = int(years[0]), int(years[-1])
-                
-                # Split data by years
-                df_first_year = df[df[date_column].dt.year == year_first]
-                df_last_year = df[df[date_column].dt.year == year_last]
-                
-                if df_first_year.empty or df_last_year.empty:
-                    logger.warning(f"No data for year {year_first} or {year_last} in combination {combination_id}, skipping")
-                    continue
-                
-                # Calculate actual YoY change
-                y_first_mean = df_first_year[y_var].mean() if y_var in df_first_year.columns else 0
-                y_last_mean = df_last_year[y_var].mean() if y_var in df_last_year.columns else 0
-                observed_delta = float(y_last_mean - y_first_mean)
-                
-                # Calculate explained YoY change using model coefficients
-                explained_delta = 0.0
-                contributions = []
-                
-                # # Get all variables that have betas in the coefficients (same as select atom)
-                # logger.info(f"🔍 DEBUG: Available betas: {list(betas.keys())}")
-                # logger.info(f"🔍 DEBUG: Available df columns: {list(df.columns)}")
-                # logger.info(f"🔍 DEBUG: Available x_vars: {x_vars}")
-                
-                for x_var in x_vars:
-                    # logger.info(f"🔍 DEBUG: Looking for beta for variable: {x_var}")
-                    if x_var in betas and x_var in df.columns:
-                        beta_value = betas[x_var]
-                        logger.info(f"🔍 DEBUG: Processing variable {x_var} with beta {beta_value}")
-                        
-                        # Apply transformations if available (same logic as actual-vs-predicted)
-                        if has_transformations and x_var in transformation_metadata:
-                            try:
-                                # Get raw values first for comparison
-                                x_first_raw = df_first_year[x_var].mean()
-                                x_last_raw = df_last_year[x_var].mean()
-                                
-                                # logger.info(f"✅ YoY Growth - Looking for {x_var} in transformation_metadata")
-                                # logger.info(f"✅ YoY Growth - transformation_metadata type: {type(transformation_metadata)}")
-                                # logger.info(f"✅ YoY Growth - transformation_metadata keys: {list(transformation_metadata.keys()) if isinstance(transformation_metadata, dict) else 'Not a dict'}")
-                                
-                                # Parse individual variable transformation metadata if it's a string
-                                var_transformation_metadata = transformation_metadata[x_var]
-                                # logger.info(f"✅ YoY Growth - Retrieved {x_var} metadata: {type(var_transformation_metadata)}")
-                                
-                                # Extract transformation_steps from the variable metadata
-                                if isinstance(var_transformation_metadata, dict) and "transformation_steps" in var_transformation_metadata:
-                                    var_transformation_metadata = var_transformation_metadata["transformation_steps"]
-                                    # logger.info(f"✅ YoY Growth - Extracted transformation_steps for {x_var}: {type(var_transformation_metadata)}")
-                                elif isinstance(var_transformation_metadata, str):
-                                    import json
-                                    try:
-                                        var_transformation_metadata = json.loads(var_transformation_metadata)
-                                        # Check if it's a dict with transformation_steps
-                                        if isinstance(var_transformation_metadata, dict) and "transformation_steps" in var_transformation_metadata:
-                                            var_transformation_metadata = var_transformation_metadata["transformation_steps"]
-                                        # logger.info(f"✅ YoY Growth - Parsed transformation metadata for {x_var} from JSON string")
-                                    except json.JSONDecodeError as e:
-                                        logger.warning(f"Failed to parse transformation metadata for {x_var}: {str(e)}")
-                                        var_transformation_metadata = []
-                                else:
-                                    # logger.warning(f"Transformation metadata for {x_var} is not in expected format, skipping transformations")
-                                    var_transformation_metadata = []
-                                
-                                # Ensure transformation_metadata is a list (as expected by apply_transformation_steps)
-                                if not isinstance(var_transformation_metadata, list):
-                                    logger.warning(f"Transformation metadata for {x_var} is not a list, skipping transformations")
-                                    var_transformation_metadata = []
-                                
-                                # logger.info(f"✅ YoY Growth - {x_var} transformation metadata type: {type(var_transformation_metadata)}, length: {len(var_transformation_metadata) if isinstance(var_transformation_metadata, list) else 'N/A'}")
-                                
-                                # Apply transformations to first year data
-                                x_first_transformed = apply_transformation_steps(
-                                    [x_first_raw], 
-                                    var_transformation_metadata
-                                )
-                                # Apply transformations to last year data
-                                x_last_transformed = apply_transformation_steps(
-                                    [x_last_raw], 
-                                    var_transformation_metadata
-                                )
-                                
-                                # Calculate mean values for each year (using transformed data)
-                                # apply_transformation_steps returns a list, so we need to get the first element
-                                x_first_mean = x_first_transformed[0] if len(x_first_transformed) > 0 else x_first_raw
-                                x_last_mean = x_last_transformed[0] if len(x_last_transformed) > 0 else x_last_raw
-                                
-                                # logger.info(f"✅ YoY Growth - {x_var}: Raw means ({x_first_raw:.2f}, {x_last_raw:.2f}) -> Transformed means ({x_first_mean:.2f}, {x_last_mean:.2f})")
-                            except Exception as e:
-                                # logger.warning(f"Failed to apply transformations to {x_var}: {str(e)}")
-                                # Fallback to raw values
-                                x_first_mean = df_first_year[x_var].mean()
-                                x_last_mean = df_last_year[x_var].mean()
-                        else:
-                            # No transformations available, use raw values
-                            x_first_mean = df_first_year[x_var].mean()
-                            x_last_mean = df_last_year[x_var].mean()
-                            if has_transformations:
-                                logger.info(f"✅ YoY Growth - {x_var}: Variable not found in transformation metadata, using raw means ({x_first_mean:.2f}, {x_last_mean:.2f})")
-                            else:
-                                logger.info(f"✅ YoY Growth - {x_var}: No transformations available, using raw means ({x_first_mean:.2f}, {x_last_mean:.2f})")
-                        
-                        # Check for unusually large beta coefficients
-                        if abs(beta_value) > 10000:
-                            logger.warning(f"⚠️ YoY Growth - {x_var}: Beta coefficient is very large ({beta_value:.2f}), this may cause billion-scale contributions")
-                        
-                        # Calculate contribution: beta * (mean_last_year - mean_first_year)
-                        delta_contribution = beta_value * (x_last_mean - x_first_mean)
-                        explained_delta += delta_contribution
-                        
-                        # logger.info(f"✅ YoY Growth - {x_var}: Beta={beta_value:.6f}, Delta={x_last_mean-x_first_mean:.2f}, Contribution={delta_contribution:.2f}")
-                        
-                        contributions.append({
-                            "variable": x_var,
-                            "beta_coefficient": beta_value,
-                            "mean_year1": float(x_first_mean),
-                            "mean_year2": float(x_last_mean),
-                            "delta_contribution": float(delta_contribution)
-                        })
-                    else:
-                        logger.info(f"🔍 DEBUG: Skipping {x_var} - {x_var} not in betas or {x_var} not in df.columns")
-                
-                # Sort contributions by absolute value
-                contributions.sort(key=lambda x: abs(x["delta_contribution"]), reverse=True)
-                # logger.info(f"🔍 DEBUG: Final contributions: {contributions}")
-                
-                # Calculate residual
-                residual = float(observed_delta - explained_delta)
-                
-                # Calculate YoY percentage change
-                yoy_percentage = 0.0
-                if y_first_mean != 0:
-                    yoy_percentage = (observed_delta / y_first_mean) * 100
-                
-                # Create waterfall data for visualization
-                waterfall_labels = [f"Base {year_first}"] + [c["variable"] for c in contributions] + ["Residual", f"Final {year_last}"]
-                waterfall_values = [y_first_mean] + [c["delta_contribution"] for c in contributions] + [residual, y_last_mean]
-                
-                yoy_result = {
-                    "combination_id": combination_id,
-                    "model_name": model_name,
-                    "file_key": file_key,
-                    "date_column_used": date_column,
-                    "years_used": {"year1": year_first, "year2": year_last},
-                    "y_variable_used": y_var,
-                    "observed": {
-                        "year1_mean": float(y_first_mean),
-                        "year2_mean": float(y_last_mean),
-                        "delta_y": observed_delta,
-                        "yoy_percentage": yoy_percentage
-                    },
-                    "explanation": {
-                        "explained_delta_yhat": float(explained_delta),
-                        "residual": residual,
-                        "contributions": contributions
-                    },
-                    "waterfall": {
-                        "labels": waterfall_labels,
-                        "values": waterfall_values
-                    },
-                    "model_info": {
-                        "intercept": intercept,
-                        "coefficients": betas,
-                        "x_variables": x_vars,
-                        "y_variable": y_var
-                    }
-                }
-                
-                yoy_results.append(yoy_result)
-                # logger.info(f"Successfully calculated YoY growth for {combination_id}/{model_name}")
-                
-            except Exception as e:
-                logger.error(f"Error calculating YoY growth for {combination_id}/{model_name}: {str(e)}")
-                # Continue with other combinations instead of failing completely
-                continue
-        
-        if not yoy_results:
-            raise HTTPException(status_code=404, detail="No valid YoY growth calculations could be performed")
-        
-        # Return all results for all combinations
-        if yoy_results:
-            return {
-                "results_file_key": results_file_key,
-                "bucket": bucket,
-                "combinations_count": len(yoy_results),
-                "results": yoy_results
-            }
-        else:
-            raise HTTPException(status_code=404, detail="No valid YoY growth calculations could be performed")
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error calculating YoY growth: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error calculating YoY growth: {str(e)}")
-
+    submission = celery_task_client.submit_callable(
+        name="evaluate.yoy_growth",
+        dotted_path="app.features.evaluate_models_feature_based.service.compute_yoy_growth",
+        kwargs={
+            "results_file_key": results_file_key,
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "bucket": bucket,
+        },
+        metadata={
+            "feature": "evaluate_models_feature_based",
+            "operation": "yoy_growth",
+            "results_file_key": results_file_key,
+            "bucket": bucket,
+        },
+    )
+    if submission.status == "failure":
+        raise HTTPException(status_code=500, detail=submission.detail or "Failed to calculate YoY growth")
+    return format_task_response(submission, embed_result=True)
 
 @router.get("/contribution", tags=["Evaluate"])
 async def get_contribution_data(
