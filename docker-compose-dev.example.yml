@@ -345,9 +345,9 @@ services:
       OLLAMA_IP: 10.2.4.48
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
-      FASTAPI_BASE_URL: http://fastapi:8001
+      FASTAPI_BASE_URL: http://fastapi:8004
       FASTAPI_HOST: fastapi
-      FASTAPI_PORT: "8001"
+      FASTAPI_PORT: "8004"
       REDIS_LOG_SERVICE: trinity-ai
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
