@@ -839,20 +839,27 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
 
     // Determine container width for responsive layout with extra space on the left
     const containerWidth = (canvasWidth || 900);
-    const margin = { top: 80, right: 60, bottom: 180, left: 150 };
+    const margin = { top: 130, right: 60, bottom: 200, left: 200 };
     const width = containerWidth - margin.left - margin.right;
 
     const g = svg
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    // Resolve variables using existing helper to honour showAllColumns logic
-    const allVariables =
-      data.isUsingFileData && data.fileData?.numericColumns
-        ? data.fileData.numericColumns
-        : data.variables || [];
+    // Resolve variables - use data.variables as the source of truth for matrix indices
+    // The correlation matrix indices correspond to data.variables
+    const allVariables = data.variables || [];
+    
+    // Filter by selected numeric columns for matrix if specified
+    // Only show variables that are both in data.variables AND in selectedNumericColumnsForMatrix
+    let filteredBySelection = allVariables;
+    if (data.selectedNumericColumnsForMatrix && data.selectedNumericColumnsForMatrix.length > 0) {
+      // Filter to only include variables that are selected AND exist in the correlation matrix
+      filteredBySelection = allVariables.filter(v => data.selectedNumericColumnsForMatrix!.includes(v));
+    }
+    
     const variables = getFilteredVariables(
-      allVariables,
+      filteredBySelection,
       data.correlationMatrix,
     );
 
@@ -1093,6 +1100,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       }
     }
 
+    // Helper function to truncate text
+    const truncateText = (text: string, maxLength: number = 15): string => {
+      if (text.length <= maxLength) return text;
+      return text.substring(0, maxLength) + "...";
+    };
+
     // Axis labels
     if (matrixSettings.showAxisLabels) {
       const xLabels = g
@@ -1101,8 +1114,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         .enter()
         .append("text")
         .attr("class", "x-label")
-        .attr("x", (_, i) => i * cellWidth + cellWidth / 2)
-        .attr("y", actualHeight + 30)
+        .attr("x", (_, i) => {
+          // Match cell positioning: cells are at i * cellWidth + 1, with width cellWidth - 2
+          // Center of cell = i * cellWidth + 1 + (cellWidth - 2) / 2 = i * cellWidth + cellWidth / 2
+          return i * cellWidth + cellWidth / 2;
+        })
+        .attr("y", actualHeight + 50)
         .attr("text-anchor", "middle")
         .attr("dominant-baseline", "hanging")
         .attr("font-size", "14px")
@@ -1110,14 +1127,56 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         .attr("fill", "hsl(var(--foreground))")
         .attr(
           "transform",
-          (_, i) =>
-            `rotate(-45, ${i * cellWidth + cellWidth / 2}, ${actualHeight + 30})`,
+          (_, i) => {
+            const centerX = i * cellWidth + cellWidth / 2;
+            return `rotate(-45, ${centerX}, ${actualHeight + 50})`;
+          }
         )
         .style("font-style", "italic")
         .style("opacity", shouldAnimate ? 0 : 1)
-        .text((d) => d);
+        .style("cursor", "pointer")
+        .text((d) => truncateText(d))
+        .each(function(d) {
+          d3.select(this).append("title").text(d);
+        });
       if (shouldAnimate) {
         xLabels.transition().duration(600).delay(1200).style("opacity", 1);
+      }
+
+      // Top labels (same as bottom labels but at the top)
+      const topLabels = g
+        .selectAll(".top-label")
+        .data(variables)
+        .enter()
+        .append("text")
+        .attr("class", "top-label")
+        .attr("x", (_, i) => {
+          // Match cell positioning: cells are at i * cellWidth + 1, with width cellWidth - 2
+          // Center of cell = i * cellWidth + 1 + (cellWidth - 2) / 2 = i * cellWidth + cellWidth / 2
+          return i * cellWidth + cellWidth / 2;
+        })
+        .attr("y", -50)
+        .attr("text-anchor", "middle")
+        .attr("dominant-baseline", "baseline")
+        .attr("font-size", "14px")
+        .attr("font-weight", "600")
+        .attr("fill", "hsl(var(--foreground))")
+        .attr(
+          "transform",
+          (_, i) => {
+            const centerX = i * cellWidth + cellWidth / 2;
+            return `rotate(-45, ${centerX}, -50)`;
+          }
+        )
+        .style("font-style", "italic")
+        .style("opacity", shouldAnimate ? 0 : 1)
+        .style("cursor", "pointer")
+        .text((d) => truncateText(d))
+        .each(function(d) {
+          d3.select(this).append("title").text(d);
+        });
+      if (shouldAnimate) {
+        topLabels.transition().duration(600).delay(1200).style("opacity", 1);
       }
 
       const yLabels = g
@@ -1126,16 +1185,19 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         .enter()
         .append("text")
         .attr("class", "y-label")
-        .attr("x", -10)
+        .attr("x", -20)
         .attr("text-anchor", "end")
         .attr("dominant-baseline", "middle")
         .attr("font-size", "14px")
         .attr("font-weight", "600")
         .attr("fill", "hsl(var(--foreground))")
         .style("font-style", "italic")
-        .style("opacity", shouldAnimate ? 0 : 1);
+        .style("opacity", shouldAnimate ? 0 : 1)
+        .style("cursor", "pointer");
       yLabels.each(function (d, i) {
-        const words = String(d).replace(/_/g, " ").split(/\s+/);
+        const fullText = String(d);
+        const truncatedText = truncateText(fullText);
+        const words = truncatedText.replace(/_/g, " ").split(/\s+/);
         const lineHeight = 14;
         const text = d3.select(this);
         const yPos = i * cellHeight + cellHeight / 2 - ((words.length - 1) * lineHeight) / 2;
@@ -1144,10 +1206,12 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         words.forEach((word, idx) => {
           text
             .append("tspan")
-            .attr("x", -10)
+            .attr("x", -20)
             .attr("dy", idx === 0 ? 0 : lineHeight)
             .text(word);
         });
+        // Add title for full text on hover
+        text.append("title").text(fullText);
       });
       if (shouldAnimate) {
         yLabels.transition().duration(600).delay(1400).style("opacity", 1);
@@ -1163,7 +1227,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         .attr("class", "color-legend")
         .attr(
           "transform",
-          `translate(${margin.left + (actualWidth - legendWidth) / 2}, ${margin.top + actualHeight + 80})`,
+          `translate(${margin.left + (actualWidth - legendWidth) / 2}, ${margin.top + actualHeight + 120})`,
         );
 
       const gradient = svg
@@ -1230,6 +1294,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
     data.isUsingFileData,
     data.fileData,
     data.showAllColumns,
+    data.selectedNumericColumnsForMatrix,
     isCompactMode,
     canvasWidth,
     matrixSettings,
@@ -1242,10 +1307,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
       return null;
     }
 
-    const variables =
-      data.isUsingFileData && data.fileData?.numericColumns
-        ? data.fileData.numericColumns
-        : data.variables || [];
+    // Use data.variables as the source of truth for matrix indices
+    const variables = data.variables || [];
 
     if (!variables || !data.correlationMatrix) {
       return null;
@@ -1267,13 +1330,17 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
   };
 
   // Get current variables for display (filtered or all)
-  const allCurrentVariables =
-    data.isUsingFileData && data.fileData?.numericColumns
-      ? data.fileData.numericColumns
-      : data.variables || [];
+  // Use data.variables as the source of truth for matrix indices
+  const allCurrentVariables = data.variables || [];
+
+  // Filter by selected numeric columns for matrix if specified
+  let filteredBySelection = allCurrentVariables;
+  if (data.selectedNumericColumnsForMatrix && data.selectedNumericColumnsForMatrix.length > 0) {
+    filteredBySelection = allCurrentVariables.filter(v => data.selectedNumericColumnsForMatrix!.includes(v));
+  }
 
   const currentVariables = getFilteredVariables(
-    allCurrentVariables,
+    filteredBySelection,
     data.correlationMatrix,
   );
 
@@ -1718,13 +1785,13 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         >
           <div
             className={
-              isCompactMode ? "p-4 flex justify-center" : "p-6 flex justify-center"
+              isCompactMode ? "p-4 overflow-x-auto" : "p-6 overflow-x-auto"
             }
           >
             <svg
               ref={heatmapRef}
               height={isCompactMode ? "260" : "650"}
-              className="block mx-auto"
+              className="block"
             ></svg>
           </div>
         </Card>

@@ -372,6 +372,7 @@ export interface CorrelationSettings {
   selectedFile?: string;  // Selected dataframe object_name
   validatorAtomId?: string;  // Validator atom ID for column extraction
   selectedColumns?: string[];  // Selected columns for correlation analysis
+  selectedNumericColumnsForMatrix?: string[];  // Selected numerical columns to display in correlation matrix (default: all)
   // File processing related data
   fileData?: {
     fileName: string;

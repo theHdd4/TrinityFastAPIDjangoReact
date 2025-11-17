@@ -3,6 +3,7 @@ import { X, AlertCircle, Loader2, Calendar, ChevronLeft, ChevronRight } from 'lu
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -489,6 +490,76 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
   return (
     <div className="h-full overflow-y-auto">
       <div className="p-4 space-y-6 bg-background text-foreground">
+        {/* Numerical Columns Selection for Correlation Matrix */}
+        {data.fileData?.isProcessed && data.fileData?.numericColumns && data.fileData.numericColumns.length > 0 && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-muted-foreground">Select Numerical Columns</Label>
+            <div className="max-h-60 overflow-y-auto space-y-2">
+              {/* Select All checkbox at the top */}
+              <div className="flex items-center space-x-2 pb-2 border-b">
+                <Checkbox
+                  id="select-all-numeric"
+                  checked={
+                    data.fileData.numericColumns.length > 0 &&
+                    (data.selectedNumericColumnsForMatrix?.length || 0) === data.fileData.numericColumns.length
+                  }
+                  onCheckedChange={(checked) => {
+                    const allColumns = data.fileData?.numericColumns || [];
+                    onDataChange({
+                      selectedNumericColumnsForMatrix: checked ? allColumns : []
+                    });
+                  }}
+                />
+                <label
+                  htmlFor="select-all-numeric"
+                  className="text-sm font-medium cursor-pointer flex-1"
+                >
+                  Select All
+                </label>
+              </div>
+              {data.fileData.numericColumns.map((column) => {
+                const isSelected = data.selectedNumericColumnsForMatrix?.includes(column) ?? true;
+                return (
+                  <div key={column} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`numeric-col-${column}`}
+                      checked={isSelected}
+                      onCheckedChange={(checked) => {
+                        const currentSelected = data.selectedNumericColumnsForMatrix || data.fileData?.numericColumns || [];
+                        if (checked) {
+                          // Add column if not already selected
+                          if (!currentSelected.includes(column)) {
+                            onDataChange({
+                              selectedNumericColumnsForMatrix: [...currentSelected, column]
+                            });
+                          }
+                        } else {
+                          // Remove column
+                          onDataChange({
+                            selectedNumericColumnsForMatrix: currentSelected.filter((col) => col !== column)
+                          });
+                        }
+                      }}
+                    />
+                    <label
+                      htmlFor={`numeric-col-${column}`}
+                      className="text-sm cursor-pointer flex-1"
+                    >
+                      {column}
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {data.selectedNumericColumnsForMatrix?.length || data.fileData.numericColumns.length} of {data.fileData.numericColumns.length} columns selected
+            </p>
+          </div>
+        )}
+
+        {/* Divider */}
+        <div className="border-t border-border my-4"></div>
+
         {/* Smart Date Filter Section - Only render if date data exists */}
         {renderDateFilterSection()}
 
@@ -608,7 +679,7 @@ const CorrelationVisualisation: React.FC<CorrelationVisualisationProps> = ({ dat
         </div>
 
         {/* Action Buttons */}
-        <div className="flex gap-2 pt-4">
+        <div className="flex gap-2 -mt-4">
           <Button 
             variant="default" 
             size="sm" 
