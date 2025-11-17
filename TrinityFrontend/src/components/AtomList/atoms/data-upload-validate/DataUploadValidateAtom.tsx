@@ -61,6 +61,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const [saveStatus, setSaveStatus] = useState<Record<string, string>>({});
   const [allFilesSaved, setAllFilesSaved] = useState(false);
   const [isConfigStatusOpen, setIsConfigStatusOpen] = useState(false);
+  const [savedDataframes, setSavedDataframes] = useState<Array<{ object_name: string; csv_name: string; arrow_name?: string }>>([]);
+  const [isLoadingSavedDataframes, setIsLoadingSavedDataframes] = useState(false);
   
   // Use ref to store current data changes without triggering re-renders
   const dataChangesRef = React.useRef<{
@@ -110,6 +112,53 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       setUploadedFiles(files);
     }
   }, [settings.uploadedFiles, settings.filePathMap, settings.fileSizeMap, uploadedFiles.length]);
+
+  // Update uploadedFiles paths when filePathMap changes (after save)
+  useEffect(() => {
+    if (settings.filePathMap && Object.keys(settings.filePathMap).length > 0) {
+      setUploadedFiles(prev => prev.map(file => {
+        const savedPath = settings.filePathMap?.[file.name];
+        // Update path if we have a saved path and current path is temporary or empty
+        if (savedPath && (file.path.includes('/tmp/') || file.path.includes('tmp/') || !file.path)) {
+          console.log(`🔄 Updating path for ${file.name} from ${file.path} to ${savedPath}`);
+          return { ...file, path: savedPath };
+        }
+        return file;
+      }));
+    }
+  }, [settings.filePathMap]);
+
+  // Fetch saved dataframes when validation steps are enabled
+  useEffect(() => {
+    if (settings.bypassMasterUpload) {
+      setIsLoadingSavedDataframes(true);
+      const envStr = localStorage.getItem('env');
+      let query = '';
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          query = '?' + new URLSearchParams({
+            client_id: env.CLIENT_ID || '',
+            app_id: env.APP_ID || '',
+            project_id: env.PROJECT_ID || '',
+            client_name: env.CLIENT_NAME || '',
+            app_name: env.APP_NAME || '',
+            project_name: env.PROJECT_NAME || ''
+          }).toString();
+        } catch {
+          /* ignore */
+        }
+      }
+      fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
+        .then(r => r.json())
+        .then(d => {
+          const files = Array.isArray(d.files) ? d.files : [];
+          setSavedDataframes(files);
+        })
+        .catch(() => setSavedDataframes([]))
+        .finally(() => setIsLoadingSavedDataframes(false));
+    }
+  }, [settings.bypassMasterUpload]);
 
   useEffect(() => {
     return () => {
@@ -185,11 +234,17 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }
 
     for (const file of files) {
-      const stem = file.name.replace(/\.[^/.]+$/, '').toLowerCase();
+      // Replace spaces with underscores in filename
+      const sanitizedFileName = file.name.replace(/\s+/g, '_');
+      const sanitizedFile = sanitizedFileName !== file.name 
+        ? new File([file], sanitizedFileName, { type: file.type, lastModified: file.lastModified })
+        : file;
+      
+      const stem = sanitizedFileName.replace(/\.[^/.]+$/, '').toLowerCase();
       if (
         savedNames.has(stem) ||
-        uploadedFiles.some((f) => f.name === file.name) ||
-        (settings.uploadedFiles || []).includes(file.name)
+        uploadedFiles.some((f) => f.name === sanitizedFileName) ||
+        (settings.uploadedFiles || []).includes(sanitizedFileName)
       ) {
         toast({
           title: 'Same file already present in the project',
@@ -199,7 +254,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       }
 
       const form = new FormData();
-      form.append('file', file);
+      form.append('file', sanitizedFile);
       if (env) {
         form.append('client_id', env.CLIENT_ID || '');
         form.append('app_id', env.APP_ID || '');
@@ -216,7 +271,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         });
         if (!res.ok) {
           const errorData = await res.json().catch(() => ({}));
-          const errorMessage = errorData.detail || `Failed to upload ${file.name}`;
+          const errorMessage = errorData.detail || `Failed to upload ${sanitizedFileName}`;
           toast({ title: errorMessage, variant: 'destructive' });
           continue;
         }
@@ -225,11 +280,11 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         const data = await waitForTaskResult(payload);
         const filePath = (data as any).file_path as string | undefined;
         if (!filePath) {
-          toast({ title: `Upload response missing file path for ${file.name}`, variant: 'destructive' });
+          toast({ title: `Upload response missing file path for ${sanitizedFileName}`, variant: 'destructive' });
           continue;
         }
 
-        uploaded.push({ name: file.name, path: filePath, size: file.size });
+        uploaded.push({ name: sanitizedFileName, path: filePath, size: file.size });
 
         if ((data as any).has_data_quality_issues && Array.isArray((data as any).warnings) && (data as any).warnings.length > 0) {
           const warnings = (data as any).warnings as string[];
@@ -238,25 +293,25 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
             const colList = mixedCols.slice(0, 5).join(', ');
             const moreText = mixedCols.length > 5 ? ` and ${mixedCols.length - 5} more` : '';
             toast({
-              title: `⚠️ Data Quality Warning - ${file.name}`,
+              title: `⚠️ Data Quality Warning - ${sanitizedFileName}`,
               description: `File has mixed data types in columns: ${colList}${moreText}. This may lead to unstable results. Please use Dataframe Operations atom to fix column data types.`,
               variant: 'default',
               duration: 10000,
             });
           } else {
             toast({
-              title: `⚠️ ${file.name} uploaded with warnings`,
+              title: `⚠️ ${sanitizedFileName} uploaded with warnings`,
               description: warnings[0] || 'Some atoms may need data type conversion.',
               variant: 'default',
               duration: 8000,
             });
           }
         } else {
-          toast({ title: `${file.name} uploaded successfully` });
+          toast({ title: `${sanitizedFileName} uploaded successfully` });
         }
       } catch (error: any) {
         toast({
-          title: `Failed to upload ${file.name}`,
+          title: `Failed to upload ${sanitizedFileName}`,
           description: error?.message,
           variant: 'destructive',
         });
@@ -373,6 +428,54 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     setRenameTarget(null);
   };
 
+  const handleSelectSavedDataframe = async (objectName: string) => {
+    const savedFile = savedDataframes.find(f => f.object_name === objectName);
+    if (!savedFile) return;
+
+    let fileName = savedFile.csv_name.split('/').pop() || savedFile.object_name.split('/').pop() || objectName;
+    // Replace spaces with underscores in filename
+    fileName = fileName.replace(/\s+/g, '_');
+    
+    // Check if file already exists
+    if (uploadedFiles.some((f) => f.name === fileName) || (settings.uploadedFiles || []).includes(fileName)) {
+      toast({
+        title: 'Same file already present in the project',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Add saved dataframe as an uploaded file
+    const newFile: UploadedFileRef = {
+      name: fileName,
+      path: savedFile.object_name,
+      size: 0, // Size not available for saved dataframes
+    };
+
+    setUploadedFiles((prev) => [...prev, newFile]);
+    updateSettings(atomId, {
+      uploadedFiles: [...(settings.uploadedFiles || []), fileName],
+      fileMappings: {
+        ...fileAssignments,
+        [fileName]: !settings.bypassMasterUpload ? fileName : settings.requiredFiles?.[0] || '',
+      },
+      filePathMap: {
+        ...(settings.filePathMap || {}),
+        [fileName]: savedFile.object_name,
+      },
+      fileSizeMap: {
+        ...(settings.fileSizeMap || {}),
+        [fileName]: 0,
+      },
+    });
+    setFileAssignments((prev) => ({
+      ...prev,
+      [fileName]: !settings.bypassMasterUpload ? fileName : settings.requiredFiles?.[0] || '',
+    }));
+
+    toast({ title: `${fileName} selected from saved dataframes` });
+  };
+
   const handleDeleteFile = (name: string) => {
     setUploadedFiles(prev => prev.filter(f => f.name !== name));
     const newUploads = (settings.uploadedFiles || []).filter(n => n !== name);
@@ -453,10 +556,45 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     form.append('validator_atom_id', settings.validatorId);
     const paths = uploadedFiles.map(f => f.path);
     form.append('file_paths', JSON.stringify(paths));
-    const keys = uploadedFiles.map(f => {
+    
+    // Generate keys ensuring uniqueness
+    // First pass: get the assigned keys
+    const initialKeys = uploadedFiles.map(f => {
       const assigned = fileAssignments[f.name] || '';
-      return settings.fileKeyMap?.[assigned] || assigned;
+      return settings.fileKeyMap?.[assigned] || assigned || f.name;
     });
+    
+    // Sanitize file name to match FILE_KEY_RE pattern: [A-Za-z0-9_.-]+
+    const sanitizeKey = (name: string): string => {
+      return name.replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^\.+|\.+$/g, '');
+    };
+    
+    // Ensure uniqueness: if there are duplicates, append index or use sanitized file name
+    const keyCount = new Map<string, number>();
+    initialKeys.forEach(key => {
+      keyCount.set(key, (keyCount.get(key) || 0) + 1);
+    });
+    
+    const keys = uploadedFiles.map((f, idx) => {
+      const initialKey = initialKeys[idx];
+      // If this key is used by multiple files, make it unique
+      if ((keyCount.get(initialKey) || 0) > 1) {
+        // Try to preserve the assigned key by appending index
+        if (initialKey && initialKey.trim()) {
+          return `${initialKey}_${idx}`;
+        }
+        // Fallback to sanitized file name
+        const sanitized = sanitizeKey(f.name);
+        return sanitized || `file_${idx}`;
+      }
+      // Ensure key is valid and non-empty
+      if (!initialKey || !initialKey.trim()) {
+        const sanitized = sanitizeKey(f.name);
+        return sanitized || `file_${idx}`;
+      }
+      return initialKey;
+    });
+    
     form.append('file_keys', JSON.stringify(keys));
     console.log('Validating files', {
       validator_atom_id: settings.validatorId,
@@ -480,6 +618,112 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       const data = await waitForTaskResult(payload);
       const cfgRes = await fetch(`${VALIDATE_API}/get_validator_config/${settings.validatorId}`);
       const cfg = cfgRes.ok ? await cfgRes.json() : { validations: {} };
+
+      // Map backend types to frontend dtype format (matching apply-data-transformations expectations)
+      const mapBackendTypeToDtype = (backendType: string): string => {
+        const t = backendType.toLowerCase();
+        if (t === "integer") return "int64";
+        if (t === "numeric" || t === "number") return "float64";
+        if (t.includes("date") || t === "datetime") return "datetime64";
+        if (t === "string" || t === "object") return "object";
+        if (t === "boolean" || t === "bool") return "bool";
+        return "object"; // default
+      };
+
+      // Update dtypeChanges based on master file column types after validation
+      // Start with existing dtypeChanges to preserve any manual changes
+      const updatedDtypeChanges: Record<string, Record<string, string>> = { ...(settings.dtypeChanges || {}) };
+      
+      // Helper function to normalize column names (same as backend)
+      const normalizeColumnName = (colName: string): string => {
+        return colName.trim().toLowerCase().replace(/(?<!_)\s+(?!_)/g, '');
+      };
+      
+      // Process each uploaded file - ensure ALL files are processed
+      uploadedFiles.forEach((file, idx) => {
+        const fileName = file.name;
+        const key = keys[idx];
+        
+        // Get the master file assignment for this uploaded file
+        // Use settings.fileMappings directly to ensure we have the latest assignments
+        const masterFileAssignment = settings.fileMappings?.[fileName] || fileAssignments[fileName] || '';
+        
+        // Try multiple strategies to find the master file schema for THIS specific uploaded file
+        // Strategy 1: Use fileKeyMap to get the backend key for the assigned master file
+        // Strategy 2: Try the master file assignment directly (in case it's the actual master file name)
+        // Strategy 3: Try the validation key (fallback)
+        let masterSchema: any = null;
+        let masterColumnTypes: Record<string, string> = {};
+        
+        // Try strategy 1: fileKeyMap lookup (most reliable - uses the saved mapping)
+        if (masterFileAssignment) {
+          const masterFileKey = settings.fileKeyMap?.[masterFileAssignment] || masterFileAssignment;
+          if (masterFileKey && cfg.schemas?.[masterFileKey]) {
+            masterSchema = cfg.schemas[masterFileKey];
+            masterColumnTypes = cfg.column_types?.[masterFileKey] || {};
+          }
+          // Try strategy 2: direct assignment name (in case fileKeyMap doesn't have it)
+          else if (cfg.schemas?.[masterFileAssignment]) {
+            masterSchema = cfg.schemas[masterFileAssignment];
+            masterColumnTypes = cfg.column_types?.[masterFileAssignment] || {};
+          }
+        }
+        
+        // Try strategy 3: validation key (fallback if assignment lookup failed)
+        if (!masterSchema && cfg.schemas?.[key]) {
+          masterSchema = cfg.schemas[key];
+          masterColumnTypes = cfg.column_types?.[key] || {};
+        }
+        
+        // Get uploaded file's actual column names from metadata
+        const uploadedFileMetadata = settings.filesMetadata?.[fileName];
+        const uploadedColumns = uploadedFileMetadata?.columns || [];
+        
+        // Initialize dtypeChanges for this file if not exists (even if no schema found)
+        if (!updatedDtypeChanges[fileName]) {
+          updatedDtypeChanges[fileName] = {};
+        }
+        
+        // Process dtype mapping if we found a schema and have columns
+        if (masterSchema && masterSchema.columns && uploadedColumns.length > 0) {
+          // Create a map of normalized column names to actual column names from uploaded file
+          const normalizedToActual: Record<string, string> = {};
+          uploadedColumns.forEach((col: any) => {
+            const normalized = normalizeColumnName(col.name);
+            normalizedToActual[normalized] = col.name;
+          });
+          
+          // For each column in master file schema, find matching uploaded file column and set dtype
+          masterSchema.columns.forEach((col: any) => {
+            const masterColName = col.column; // This is already normalized from backend
+            const masterType = masterColumnTypes[masterColName] || col.type || "string";
+            const dtype = mapBackendTypeToDtype(masterType);
+            
+            // Find the actual column name in uploaded file that matches this normalized master column name
+            const actualColName = normalizedToActual[masterColName];
+            
+            if (actualColName) {
+              // Update dtypeChanges using the actual column name from uploaded file
+              updatedDtypeChanges[fileName][actualColName] = dtype;
+            } else {
+              // Fallback: use normalized name if actual name not found
+              updatedDtypeChanges[fileName][masterColName] = dtype;
+            }
+          });
+        }
+      });
+      
+      // Update settings with the dtypeChanges from master file
+      if (Object.keys(updatedDtypeChanges).length > 0) {
+        updateSettings(atomId, {
+          dtypeChanges: updatedDtypeChanges,
+        });
+        // Also update the ref so it's immediately available
+        dataChangesRef.current = {
+          ...dataChangesRef.current,
+          dtypeChanges: updatedDtypeChanges,
+        };
+      }
 
       const results: Record<string, string> = {};
       const details: Record<string, any[]> = {};
@@ -921,6 +1165,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }
   }, [settings.enableColumnClassifier, settings.filePathMap, settings.classifierData]);
 
+
   const handleSaveDataFrames = async () => {
     if (!settings.validatorId && settings.bypassMasterUpload) return;
     console.log('🔧 Running save dataframes util');
@@ -939,13 +1184,67 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       const filesWithChangesApplied: string[] = [];
       
       for (const file of uploadedFiles) {
+        // Use saved MinIO path if available, otherwise use temporary path
+        // Check filePathMap first, then check if temp path exists, if not check saved dataframes
+        let filePath = settings.filePathMap?.[file.name];
+        
+        // If we have a saved path and it's not temporary, use it
+        if (filePath && !filePath.includes('/tmp/')) {
+          // Use saved path
+        } else if (file.path && !file.path.includes('/tmp/')) {
+          // Use the file.path if it's not temporary
+          filePath = file.path;
+        } else {
+          // If temp path doesn't exist, try to find in saved dataframes
+          try {
+            const envStr = localStorage.getItem('env');
+            if (envStr) {
+              try {
+                const env = JSON.parse(envStr);
+                if (env.CLIENT_NAME && env.APP_NAME && env.PROJECT_NAME) {
+                  const query = '?' + new URLSearchParams({
+                    client_name: env.CLIENT_NAME,
+                    app_name: env.APP_NAME,
+                    project_name: env.PROJECT_NAME
+                  }).toString();
+                  const check = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
+                  if (check.ok) {
+                    const data = await check.json();
+                    const fileNameStem = file.name.replace(/\.[^/.]+$/, '').toLowerCase();
+                    const savedFile = Array.isArray(data.files)
+                      ? data.files.find((f: any) => {
+                          const savedStem = (f.csv_name || '').toLowerCase().replace(/\.[^/.]+$/, '');
+                          return savedStem === fileNameStem;
+                        })
+                      : null;
+                    if (savedFile?.object_name) {
+                      filePath = savedFile.object_name;
+                      console.log(`📦 Found saved path for ${file.name}: ${filePath}`);
+                    }
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+          
+          // Fallback to file.path if we couldn't find a saved path
+          if (!filePath) {
+            filePath = file.path;
+          }
+        }
+        
         const fileChanges = {
-          file_path: file.path,
+          file_path: filePath,
           dtype_changes: currentChanges.dtypeChanges[file.name] || {},
           missing_value_strategies: currentChanges.missingValueStrategies[file.name] || {},
         };
         
         console.log(`📤 Sending transformations for ${file.name}:`, {
+          file_path: filePath,
           dtype_changes: fileChanges.dtype_changes,
           missing_value_strategies: fileChanges.missing_value_strategies,
         });
@@ -999,49 +1298,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       }
     }
     
-    try {
-      let query = '';
-      const envStr = localStorage.getItem('env');
-      if (envStr) {
-        try {
-          const env = JSON.parse(envStr);
-          if (env.CLIENT_NAME && env.APP_NAME && env.PROJECT_NAME) {
-            query =
-              '?' +
-              new URLSearchParams({
-                client_name: env.CLIENT_NAME,
-                app_name: env.APP_NAME,
-                project_name: env.PROJECT_NAME
-              }).toString();
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-      if (query) {
-        const check = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
-        if (check.ok) {
-          const data = await check.json();
-          const existing = new Set(
-            Array.isArray(data.files)
-              ? data.files.map((f: any) => (f.csv_name || '').toLowerCase())
-              : []
-          );
-          const duplicates = uploadedFiles.filter(f =>
-            existing.has(f.name.replace(/\.[^/.]+$/, '').toLowerCase())
-          );
-          if (duplicates.length > 0) {
-            toast({
-              title: 'Same file already present in the project',
-              variant: 'destructive',
-            });
-            return;
-          }
-        }
-      }
-    } catch {
-      /* ignore */
-    }
+    // Removed pre-check for existing files - will allow overwrite automatically
     const form = new FormData();
     const vidSave = settings.validatorId || 'bypass_upload';
     form.append('validator_atom_id', vidSave);
@@ -1061,20 +1318,63 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }
     if (user?.id) form.append('user_id', String(user.id));
     if (user?.username) form.append('user_name', user.username);
-    const paths = uploadedFiles.map(f => f.path);
-    form.append('file_paths', JSON.stringify(paths));
-    const keys = uploadedFiles.map(f => {
-      const assigned = fileAssignments[f.name] || '';
-      return settings.fileKeyMap?.[assigned] || assigned;
+    
+    // Use saved MinIO paths if available, otherwise use temporary paths
+    // This prevents 500 errors when trying to read temporary paths that no longer exist
+    const paths = uploadedFiles.map(f => {
+      const savedPath = settings.filePathMap?.[f.name];
+      // Use saved path if it exists and doesn't look like a temporary path
+      if (savedPath && !savedPath.includes('/tmp/')) {
+        return savedPath;
+      }
+      return f.path;
     });
+    form.append('file_paths', JSON.stringify(paths));
+    
+    // Generate keys ensuring uniqueness (same logic as handleValidateFiles)
+    const initialKeys = uploadedFiles.map(f => {
+      const assigned = fileAssignments[f.name] || '';
+      return settings.fileKeyMap?.[assigned] || assigned || f.name;
+    });
+    
+    // Sanitize file name to match FILE_KEY_RE pattern: [A-Za-z0-9_.-]+
+    const sanitizeKey = (name: string): string => {
+      return name.replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^\.+|\.+$/g, '');
+    };
+    
+    const keyCount = new Map<string, number>();
+    initialKeys.forEach(key => {
+      keyCount.set(key, (keyCount.get(key) || 0) + 1);
+    });
+    
+    const keys = uploadedFiles.map((f, idx) => {
+      const initialKey = initialKeys[idx];
+      if ((keyCount.get(initialKey) || 0) > 1) {
+        // Try to preserve the assigned key by appending index
+        if (initialKey && initialKey.trim()) {
+          return `${initialKey}_${idx}`;
+        }
+        // Fallback to sanitized file name
+        const sanitized = sanitizeKey(f.name);
+        return sanitized || `file_${idx}`;
+      }
+      // Ensure key is valid and non-empty
+      if (!initialKey || !initialKey.trim()) {
+        const sanitized = sanitizeKey(f.name);
+        return sanitized || `file_${idx}`;
+      }
+      return initialKey;
+    });
+    
     form.append('file_keys', JSON.stringify(keys));
-    form.append('overwrite', 'false');
+    form.append('overwrite', 'true'); // Always allow overwrite
     console.log('Saving dataframes', {
       validator_atom_id: vidSave,
       file_paths: paths,
       file_keys: keys,
-      overwrite: false,
+      overwrite: true,
     });
+    
     const savePromise = fetch(`${VALIDATE_API}/save_dataframes`, {
       method: 'POST',
       body: form,
@@ -1099,76 +1399,118 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       const fileResults = Array.isArray(data.minio_uploads)
         ? data.minio_uploads
         : [];
-      if (fileResults.length === 0) {
-        toast({ title: 'Dataframes Saved Successfully' });
-      }
+      
+      // Separate files that were saved successfully from those that already exist
+      const alreadySavedFiles: string[] = [];
+      const successfullySavedFiles: Array<{ name: string; result: any }> = [];
+      
       fileResults.forEach((r: any, idx: number) => {
         const name = uploadedFiles[idx]?.name || r.file_key;
         if (!name) {
           return;
         }
-        const obj = r.minio_upload?.object_name;
-        if (obj) {
-          const env = data.environment || {};
-          const loc = `/${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}`;
-          console.log(`File ${name} saved as ${obj} in ${loc}`);
-        }
-
-        let statusMessage = 'Saved successfully';
-        let variant: 'destructive' | undefined;
-        if (r.error) {
-          statusMessage = `Not saved: ${r.error}`;
-          variant = 'destructive';
-        } else if (r.already_saved) {
-          statusMessage = 'File already saved';
-          variant = 'destructive';
-        }
-
-        newStatus[name] = statusMessage;
-
-        toast({
-          title: name,
-          description: statusMessage,
-          variant,
-        });
-      });
-      setSaveStatus(prev => ({ ...prev, ...newStatus }));
-      // Save MinIO object names for later use (e.g., column classifier)
-      const savedPaths: Record<string, string> = {};
-      fileResults.forEach((result: any, idx: number) => {
-        const fileName = uploadedFiles[idx]?.name || result.file_key;
-        if (result.minio_upload?.object_name && fileName) {
-          // Use the user's original filename as key, not the arrow filename
-          savedPaths[fileName] = result.minio_upload.object_name;
-          console.log(`📦 Mapped ${fileName} → ${result.minio_upload.object_name}`);
+        
+        if (r.already_saved) {
+          alreadySavedFiles.push(name);
+        } else if (r.minio_upload?.object_name || !r.error) {
+          // File was saved successfully (has object_name or no error)
+          successfullySavedFiles.push({ name, result: r });
         }
       });
-      updateSettings(atomId, {
-        uploadedFiles: uploadedFiles.map(f => f.name),
-        filePathMap: { ...(settings.filePathMap || {}), ...savedPaths },
-        fileSizeMap: {
-          ...(settings.fileSizeMap || {}),
-          ...Object.fromEntries(uploadedFiles.map(f => [f.name, f.size])),
-        },
-        fileMappings: fileAssignments,
-      });
-      addNavigationItem(user?.id, {
-        atom: 'data-upload-validate',
-        files: uploadedFiles.map(f => f.name),
-        settings
-      });
-      logSessionState(user?.id);
-      setAllFilesSaved(true); // Disable save button after successful save
       
-      // Auto-trigger column classification if toggle is enabled - classify ALL files
-      if (settings.enableColumnClassifier && fileResults.length > 0) {
-        console.log(`🔍 Auto-classifying all saved files after save`);
-        handleAutoClassifyAllFiles();
+      // Process successfully saved files first
+      if (successfullySavedFiles.length > 0) {
+        const savedPaths: Record<string, string> = {};
+        // Show toast for each file with a small delay to ensure all messages appear
+        successfullySavedFiles.forEach(({ name, result }, index) => {
+          const obj = result.minio_upload?.object_name;
+          if (obj) {
+            const env = data.environment || {};
+            const loc = `/${env.CLIENT_NAME}/${env.APP_NAME}/${env.PROJECT_NAME}`;
+            console.log(`File ${name} saved as ${obj} in ${loc}`);
+            savedPaths[name] = obj;
+          }
+
+          let statusMessage = 'Saved successfully';
+          let variant: 'destructive' | undefined;
+          if (result.error) {
+            statusMessage = `Not saved: ${result.error}`;
+            variant = 'destructive';
+          }
+
+          newStatus[name] = statusMessage;
+
+          // Add a delay between toasts to ensure all messages are displayed
+          setTimeout(() => {
+            toast({
+              title: name,
+              description: statusMessage,
+              variant,
+            });
+          }, index * 800); // 800ms delay between each toast
+        });
+        
+        // Update settings with successfully saved files
+        if (Object.keys(savedPaths).length > 0) {
+          updateSettings(atomId, {
+            uploadedFiles: uploadedFiles.map(f => f.name),
+            filePathMap: { ...(settings.filePathMap || {}), ...savedPaths },
+            fileSizeMap: {
+              ...(settings.fileSizeMap || {}),
+              ...Object.fromEntries(uploadedFiles.map(f => [f.name, f.size])),
+            },
+            fileMappings: fileAssignments,
+          });
+        }
+        
+        setSaveStatus(prev => ({ ...prev, ...newStatus }));
+      }
+      
+      // If there are files that already exist, they were overwritten (overwrite=true was sent)
+      if (alreadySavedFiles.length > 0) {
+        // Calculate delay offset to continue after successfully saved files toasts
+        const delayOffset = successfullySavedFiles.length * 800;
+        alreadySavedFiles.forEach((name, index) => {
+          // Add a delay between toasts to ensure all messages are displayed
+          setTimeout(() => {
+            toast({
+              title: name,
+              description: 'File was overwritten successfully',
+            });
+          }, delayOffset + (index * 800)); // Continue delay sequence after successfully saved files
+        });
+      }
+      
+      // Complete the save
+      if (successfullySavedFiles.length > 0) {
+        addNavigationItem(user?.id, {
+          atom: 'data-upload-validate',
+          files: uploadedFiles.map(f => f.name),
+          settings
+        });
+        logSessionState(user?.id);
+        
+        // Auto-trigger column classification if toggle is enabled - classify ALL files
+        if (settings.enableColumnClassifier && successfullySavedFiles.length > 0) {
+          console.log(`🔍 Auto-classifying all saved files after save`);
+          handleAutoClassifyAllFiles();
+        }
       }
     } else {
       const err = await res.text();
       console.error('Save dataframes failed', res.status, err);
-      toast({ title: 'Unable to Save Dataframes', variant: 'destructive' });
+      let errorMessage = 'Unable to Save Dataframes';
+      try {
+        const errorJson = JSON.parse(err);
+        errorMessage = errorJson.detail || errorMessage;
+      } catch {
+        errorMessage = err || errorMessage;
+      }
+      toast({ 
+        title: 'Unable to Save Dataframes', 
+        description: errorMessage,
+        variant: 'destructive' 
+      });
       logSessionState(user?.id);
     }
   };
@@ -1261,8 +1603,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 onFileSelect={handleFileSelect}
                 onValidateFiles={handleValidateFiles}
                 onSaveDataFrames={handleSaveDataFrames}
-                saveEnabled={allValid && !allFilesSaved}
-                disableValidation={!settings.bypassMasterUpload}
+                saveEnabled={true}
+                disableValidation={!settings.bypassMasterUpload || allFilesSaved}
                 isDragOver={isDragOver}
                 requiredOptions={settings.requiredFiles || []}
                 onDeleteFile={handleDeleteFile}
@@ -1271,10 +1613,14 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 useMasterFile={settings.bypassMasterUpload}
                 onDataChanges={handleDataChanges}
                 filesWithAppliedChanges={filesWithAppliedChanges}
+                filePathMap={settings.filePathMap || {}}
                 initialDtypeChanges={settings.dtypeChanges || {}}
                 initialMissingValueStrategies={settings.missingValueStrategies || {}}
                 initialFilesMetadata={settings.filesMetadata || {}}
                 onMetadataChange={handleMetadataChange}
+                savedDataframes={savedDataframes}
+                isLoadingSavedDataframes={isLoadingSavedDataframes}
+                onSelectSavedDataframe={handleSelectSavedDataframe}
               />
               </div>
 
@@ -1416,6 +1762,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           </div>
         </div>
       </div>
+      
     </div>
   );
 };

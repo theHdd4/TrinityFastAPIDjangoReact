@@ -62,6 +62,7 @@ export interface DataUploadSettings {
   /** Array of file names that have saved classifier configurations */
   classifierSavedFiles?: string[];
   validatorId?: string;
+  selectedMasterFile?: string;
   requiredFiles?: string[];
   validations?: Record<string, any>;
   fileMappings?: Record<string, string>;

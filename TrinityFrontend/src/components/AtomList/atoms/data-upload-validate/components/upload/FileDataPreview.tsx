@@ -39,6 +39,8 @@ interface FileDataPreviewProps {
   initialMissingValueStrategies?: Record<string, Record<string, { strategy: string; value?: string }>>;
   initialFilesMetadata?: Record<string, FileMetadata>;
   onMetadataChange?: (metadata: Record<string, FileMetadata>) => void;
+  validationResults?: Record<string, string>;
+  filePathMap?: Record<string, string>;
 }
 
 const FileDataPreview: React.FC<FileDataPreviewProps> = ({ 
@@ -53,7 +55,9 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
   initialDtypeChanges = {},
   initialMissingValueStrategies = {},
   initialFilesMetadata = {},
-  onMetadataChange
+  onMetadataChange,
+  validationResults = {},
+  filePathMap = {}
 }) => {
   const [filesMetadata, setFilesMetadata] = useState<Record<string, FileMetadata>>(initialFilesMetadata);
   const [openFiles, setOpenFiles] = useState<Set<string>>(new Set());
@@ -66,10 +70,6 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
 
   // Notify parent component about changes
   useEffect(() => {
-    console.log('📢 FileDataPreview - Notifying parent of changes:', {
-      dtypeChanges,
-      missingValueStrategies,
-    });
     onDataChanges?.({ dtypeChanges, missingValueStrategies });
   }, [dtypeChanges, missingValueStrategies, onDataChanges]);
 
@@ -77,6 +77,23 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
   useEffect(() => {
     onMetadataChange?.(filesMetadata);
   }, [filesMetadata, onMetadataChange]);
+
+  // Sync dtypeChanges and missingValueStrategies when initialDtypeChanges prop changes (e.g., after validation)
+  useEffect(() => {
+    if (initialDtypeChanges && Object.keys(initialDtypeChanges).length > 0) {
+      setDtypeChanges(prev => {
+        // Merge with existing changes, but allow new values from initialDtypeChanges to override
+        const merged = { ...prev };
+        Object.keys(initialDtypeChanges).forEach(fileName => {
+          merged[fileName] = {
+            ...(merged[fileName] || {}),
+            ...initialDtypeChanges[fileName],
+          };
+        });
+        return merged;
+      });
+    }
+  }, [initialDtypeChanges]);
 
   // Don't clear local changes for saved files - allow showing both badges
 
@@ -140,9 +157,8 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
   const detectDatetimeFormat = async (fileName: string, columnName: string) => {
     const file = uploadedFiles.find(f => f.name === fileName);
     
-    // Skip detection if path is empty (file was already saved and temp path is gone)
-    if (!file || !file.path || file.path === '') {
-      console.log('Skipping datetime format detection for', fileName, '- path is empty');
+    if (!file) {
+      console.log('Skipping datetime format detection for', fileName, '- file not found');
       setFormatDetectionStatus(prev => ({
         ...prev,
         [`${fileName}-${columnName}`]: { detecting: false, failed: true }
@@ -150,7 +166,97 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
       return null;
     }
     
-    console.log('Detecting datetime format for', fileName, columnName, 'with path:', file.path);
+    // Determine the file path to use
+    // Strategy:
+    // 1. If filePathMap has a saved (non-temp) path, use it (file was already saved)
+    // 2. If filePathMap has a temp path, check if file was saved via API
+    // 3. If no saved path found and file.path is temp, use temp path (file not saved yet - this is OK)
+    // 4. If file.path is temp but file was saved, find saved path or skip
+    
+    let filePath = filePathMap?.[fileName];
+    const filePathIsTemporary = file.path && (file.path.includes('/tmp/') || file.path.includes('tmp/'));
+    const savedPathIsTemporary = filePath && (filePath.includes('/tmp/') || filePath.includes('tmp/'));
+    
+    // If we have a saved path in filePathMap that's not temporary, use it
+    if (filePath && !savedPathIsTemporary) {
+      // File was saved, use saved path
+      console.log(`✅ Using saved path from filePathMap for ${fileName}: ${filePath}`);
+    } 
+    // If filePathMap has temp path or no path, but file.path is temp, check if file was actually saved
+    else if (filePathIsTemporary) {
+      // File path is temporary - check if file was saved
+      console.log(`🔍 File ${fileName} has temporary path: ${file.path}, checking if it was saved...`);
+      
+      // Try to find in saved dataframes via API
+      try {
+        const envStr = localStorage.getItem('env');
+        if (envStr) {
+          try {
+            const env = JSON.parse(envStr);
+            if (env.CLIENT_NAME && env.APP_NAME && env.PROJECT_NAME) {
+              const query = '?' + new URLSearchParams({
+                client_name: env.CLIENT_NAME,
+                app_name: env.APP_NAME,
+                project_name: env.PROJECT_NAME
+              }).toString();
+              const check = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
+              if (check.ok) {
+                const data = await check.json();
+                const fileNameStem = fileName.replace(/\.[^/.]+$/, '').toLowerCase();
+                const savedFile = Array.isArray(data.files)
+                  ? data.files.find((f: any) => {
+                      const savedStem = (f.csv_name || '').toLowerCase().replace(/\.[^/.]+$/, '');
+                      return savedStem === fileNameStem;
+                    })
+                  : null;
+                if (savedFile?.object_name) {
+                  // File was saved, use saved path
+                  filePath = savedFile.object_name;
+                  console.log(`📦 Found saved path for datetime detection ${fileName}: ${filePath}`);
+                } else {
+                  // File not saved yet, use temp path (this is OK before save)
+                  filePath = file.path;
+                  console.log(`📝 File ${fileName} not saved yet, using temporary path: ${filePath}`);
+                }
+              } else {
+                // API call failed, use temp path as fallback
+                filePath = file.path;
+                console.log(`⚠️ Failed to check saved dataframes, using temp path: ${filePath}`);
+              }
+            } else {
+              // No env vars, use temp path
+              filePath = file.path;
+            }
+          } catch (err) {
+            console.error('❌ Error looking up saved path:', err);
+            // On error, use temp path
+            filePath = file.path;
+          }
+        } else {
+          // No env vars, use temp path
+          filePath = file.path;
+        }
+      } catch (err) {
+        console.error('❌ Error in saved path lookup:', err);
+        // On error, use temp path
+        filePath = file.path;
+      }
+    } else {
+      // No temp path, use file.path (might be saved path or other valid path)
+      filePath = file.path;
+    }
+    
+    // Final validation: only skip if path is empty
+    if (!filePath || filePath === '') {
+      console.log('❌ Skipping datetime format detection for', fileName, '- path is empty');
+      setFormatDetectionStatus(prev => ({
+        ...prev,
+        [`${fileName}-${columnName}`]: { detecting: false, failed: true }
+      }));
+      return null;
+    }
+    
+    console.log('Detecting datetime format for', fileName, columnName, 'with path:', filePath);
     
     setFormatDetectionStatus(prev => ({
       ...prev,
@@ -162,7 +268,7 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          file_path: file.path,
+          file_path: filePath,
           column_name: columnName
         }),
         credentials: 'include',
@@ -472,6 +578,17 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                     </SelectContent>
                   </Select>
                 </div>
+                {validationResults[file.name] && (
+                  <p
+                    className={`mt-1 text-xs font-semibold ${
+                      validationResults[file.name].toLowerCase().includes('success')
+                        ? 'text-green-600'
+                        : 'text-red-600'
+                    }`}
+                  >
+                    {validationResults[file.name]}
+                  </p>
+                )}
               </div>
             )}
 

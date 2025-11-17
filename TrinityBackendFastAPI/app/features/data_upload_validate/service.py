@@ -135,6 +135,26 @@ def read_minio_object(object_name: str) -> bytes:
             pass
 
 
+def _normalize_column_names(df: pl.DataFrame) -> pl.DataFrame:
+    """Normalize column names: replace blank/empty names with 'Unnamed: 0', 'Unnamed: 1', etc. (like Excel)."""
+    columns = df.columns
+    new_columns = []
+    unnamed_counter = 0
+    
+    for col in columns:
+        if not col or col.strip() == "":
+            new_col = f"Unnamed: {unnamed_counter}"
+            unnamed_counter += 1
+            new_columns.append(new_col)
+        else:
+            new_columns.append(col)
+    
+    if new_columns != columns:
+        df = df.rename(dict(zip(columns, new_columns)))
+    
+    return df
+
+
 def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.DataFrame, List[str], Dict[str, Any]]:
     warnings: List[str] = []
     metadata: Dict[str, Any] = {
@@ -145,6 +165,7 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
 
     try:
         df = pl.read_csv(io.BytesIO(content), **csv_kwargs)
+        df = _normalize_column_names(df)
         return df, warnings, metadata
     except Exception as first_error:  # pragma: no cover - defensive parsing
         error_msg = str(first_error).lower()
@@ -153,6 +174,7 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
             kwargs_ignore["ignore_errors"] = True
             try:
                 df = pl.read_csv(io.BytesIO(content), **kwargs_ignore)
+                df = _normalize_column_names(df)
                 metadata["parsing_method"] = "ignore_errors"
                 try:
                     import re
@@ -173,6 +195,7 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
         kwargs_strings = {k: v for k, v in csv_kwargs.items() if k not in ["infer_schema_length"]}
         try:
             df = pl.read_csv(io.BytesIO(content), dtypes=pl.Utf8, **kwargs_strings)
+            df = _normalize_column_names(df)
             metadata["parsing_method"] = "all_strings"
             warnings.append("All columns read as strings to handle data type conflicts")
             warnings.append("Please use Dataframe Operations atom to fix column data types if needed")
@@ -181,19 +204,47 @@ def _smart_csv_parse(content: bytes, csv_kwargs: Dict[str, Any]) -> Tuple[pl.Dat
             raise first_error
 
 
-def process_temp_upload(*, file_b64: str, filename: str, tmp_prefix: str) -> Dict[str, Any]:
+def process_temp_upload(
+    *,
+    file_b64: str,
+    filename: str,
+    tmp_prefix: str,
+    sheet_name: str | None = None,
+) -> Dict[str, Any]:
     content = base64.b64decode(file_b64)
     ensure_minio_bucket()
     logger.info("data_upload.temp_upload.worker_start file=%s size=%s", filename, len(content))
 
     parsing_warnings: List[str] = []
     parsing_metadata: Dict[str, Any] = {}
+    sheet_details: Dict[str, Any] | None = None
+    workbook_upload: Dict[str, Any] | None = None
+
     if filename.lower().endswith(".csv"):
         df_pl, parsing_warnings, parsing_metadata = _smart_csv_parse(content, CSV_READ_KWARGS)
     elif filename.lower().endswith((".xls", ".xlsx")):
         try:
-            df_pandas = pd.read_excel(io.BytesIO(content))
+            excel_bytes = io.BytesIO(content)
+            excel_file = pd.ExcelFile(excel_bytes)
+            sheet_names = excel_file.sheet_names or ["Sheet1"]
+            selected_sheet = sheet_name or sheet_names[0]
+            if selected_sheet not in sheet_names:
+                logger.warning(
+                    "Requested sheet '%s' not found in workbook %s. Falling back to '%s'",
+                    selected_sheet,
+                    filename,
+                    sheet_names[0],
+                )
+                selected_sheet = sheet_names[0]
+            df_pandas = excel_file.parse(selected_sheet)
             df_pl = pl.from_pandas(df_pandas)
+            df_pl = _normalize_column_names(df_pl)
+            sheet_details = {
+                "sheet_names": sheet_names,
+                "selected_sheet": selected_sheet,
+                "has_multiple_sheets": len(sheet_names) > 1,
+            }
+            workbook_upload = upload_to_minio(content, filename, tmp_prefix + "workbooks/")
         except Exception as exc:  # pragma: no cover - relies on pandas engine
             logger.exception("Excel parsing failed for file %s", filename)
             raise ValueError(f"Error parsing file {filename}: {exc}") from exc
@@ -222,6 +273,7 @@ def process_temp_upload(*, file_b64: str, filename: str, tmp_prefix: str) -> Dic
         "file_name": filename,
         "has_data_quality_issues": False,
         "message": "File uploaded successfully",
+        "workbook_path": workbook_upload.get("object_name") if workbook_upload else None,
     }
 
     if parsing_warnings:
@@ -242,6 +294,9 @@ def process_temp_upload(*, file_b64: str, filename: str, tmp_prefix: str) -> Dic
             response["message"] = (
                 "File uploaded successfully with data quality warnings. Some atoms may need data type conversion."
             )
+
+    if sheet_details:
+        response.update(sheet_details)
 
     return response
 
@@ -285,6 +340,7 @@ def run_validation(
                 df_pl = pl.read_ipc(io.BytesIO(content))
             else:
                 raise ValueError("Only CSV, XLSX and Arrow files supported")
+            df_pl = _normalize_column_names(df_pl)
             df = df_pl.to_pandas()
             df.columns = [preprocess_column_name(col) for col in df.columns]
             files_data.append((key, df))
@@ -302,6 +358,7 @@ def run_validation(
                 df_pl = pl.read_ipc(io.BytesIO(data))
             else:
                 raise ValueError("Only CSV, XLSX and Arrow files supported")
+            df_pl = _normalize_column_names(df_pl)
             df = df_pl.to_pandas()
             df.columns = [preprocess_column_name(col) for col in df.columns]
             files_data.append((key, df))
@@ -321,7 +378,18 @@ def run_validation(
             flight_path = f"{validator_atom_id}/{key}"
             upload_dataframe(df, flight_path)
             flight_uploads.append({"file_key": key, "flight_path": flight_path})
-            minio_uploads.append({"file_key": key, "arrow_path": str(arrow_file)})
+            minio_uploads.append(
+                {
+                    "file_key": key,
+                    "filename": filename,
+                    "minio_upload": {
+                        "status": "success",
+                        "message": "Arrow file saved and Flight upload completed",
+                        "arrow_path": str(arrow_file),
+                        "flight_path": flight_path,
+                    },
+                }
+            )
 
     validation_log_data = {
         "validator_atom_id": validator_atom_id,

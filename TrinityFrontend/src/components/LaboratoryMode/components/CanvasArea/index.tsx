@@ -81,6 +81,7 @@ interface CanvasAreaProps {
   onCardSelect?: (cardId: string, exhibited: boolean) => void;
   selectedCardId?: string;
   onToggleSettingsPanel?: () => void;
+  onOpenSettingsPanel?: () => void;
   onToggleHelpPanel?: () => void;
   canEdit: boolean;
   cardEditors?: Map<string, {
@@ -308,6 +309,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onCardSelect,
   selectedCardId,
   onToggleSettingsPanel,
+  onOpenSettingsPanel,
   onToggleHelpPanel,
   canEdit,
   cardEditors,
@@ -340,6 +342,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   });
   const [atomToDelete, setAtomToDelete] = useState<{cardId: string, atomId: string, atomTitle: string} | null>(null);
   const [deleteAtomDialogOpen, setDeleteAtomDialogOpen] = useState(false);
+  const [cardToDelete, setCardToDelete] = useState<{cardId: string, cardTitle: string} | null>(null);
+  const [deleteCardDialogOpen, setDeleteCardDialogOpen] = useState(false);
   const loadingMessages = useMemo(
     () => [
       'Loading project canvas',
@@ -1963,6 +1967,14 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       } else if (atom.id === 'scope-selector') {
         prefillScopeSelector(newAtom.id);
       }
+
+      // Automatically open properties panel and select the atom
+      if (onAtomSelect) {
+        onAtomSelect(newAtom.id);
+      }
+      if (onOpenSettingsPanel) {
+        onOpenSettingsPanel();
+      }
     }
   };
 
@@ -2422,6 +2434,14 @@ const addNewCardWithAtomWorkflow = async (
       }));
       console.log(`📝 Tracked atom addition: ${newCard.atoms[0].atomId} to molecule ${moleculeId} (will sync on save)`);
     }
+    
+    // Automatically open properties panel and select the atom
+    if (newCard.atoms.length > 0 && onAtomSelect) {
+      onAtomSelect(newCard.atoms[0].id);
+    }
+    if (newCard.atoms.length > 0 && onOpenSettingsPanel) {
+      onOpenSettingsPanel();
+    }
   } catch (err) {
     console.error('⚠️ Failed to create laboratory card via API, using fallback', err);
     toast({
@@ -2488,6 +2508,14 @@ const addNewCardWithAtomWorkflow = async (
 
     setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
     fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
+    
+    // Automatically open properties panel and select the atom
+    if (fallbackCard.atoms.length > 0 && onAtomSelect) {
+      onAtomSelect(fallbackCard.atoms[0].id);
+    }
+    if (fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
+      onOpenSettingsPanel();
+    }
   }
 };
 
@@ -2644,6 +2672,14 @@ const addNewCardWithAtom = async (
     ]);
     setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
     newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+    
+    // Automatically open properties panel and select the atom
+    if (newCard.atoms.length > 0 && onAtomSelect) {
+      onAtomSelect(newCard.atoms[0].id);
+    }
+    if (newCard.atoms.length > 0 && onOpenSettingsPanel) {
+      onOpenSettingsPanel();
+    }
   } catch (err) {
     console.error('⚠️ Failed to create laboratory card via API, using fallback', err);
     toast({
@@ -2659,6 +2695,14 @@ const addNewCardWithAtom = async (
     ]);
     setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
     fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
+    
+    // Automatically open properties panel and select the atom
+    if (fallbackCard.atoms.length > 0 && onAtomSelect) {
+      onAtomSelect(fallbackCard.atoms[0].id);
+    }
+    if (fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
+      onOpenSettingsPanel();
+    }
   }
 };
 
@@ -2927,6 +2971,17 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     }
 
     prefillAtomIfRequired(cardId, newAtom);
+
+    // Automatically open properties panel and select the atom when added from suggestion
+    // Use setTimeout to ensure state update has propagated
+    setTimeout(() => {
+      if (onAtomSelect) {
+        onAtomSelect(newAtom.id);
+      }
+      if (onOpenSettingsPanel) {
+        onOpenSettingsPanel();
+      }
+    }, 0);
   };
 
   const handleAddAtomFromSuggestion = (atomId: string, atomData: any, targetCardId?: string) => {
@@ -3016,6 +3071,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     if (onAtomSelect) {
       onAtomSelect(atomId);
     }
+    // Automatically open properties panel when atom is clicked
+    if (onOpenSettingsPanel) {
+      onOpenSettingsPanel();
+    }
   };
 
   const handleAtomSettingsClick = (e: React.MouseEvent, atomId: string) => {
@@ -3023,7 +3082,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     if (onAtomSelect) {
       onAtomSelect(atomId);
     }
-    onToggleSettingsPanel?.();
+    // Always open properties panel when clicking gear icon
+    if (onOpenSettingsPanel) {
+      onOpenSettingsPanel();
+    }
   };
 
   const handleCardSettingsClick = (
@@ -3035,7 +3097,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     if (onCardSelect) {
       onCardSelect(cardId, exhibited);
     }
-    onToggleSettingsPanel?.();
+    // Always open properties panel when clicking gear icon
+    if (onOpenSettingsPanel) {
+      onOpenSettingsPanel();
+    }
   };
 
   const handleCardClick = (
@@ -3108,6 +3173,31 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       setDeleteAtomDialogOpen(true);
     } else {
       cancelDeleteAtom();
+    }
+  };
+
+  const handleDeleteCardClick = (cardId: string, cardTitle: string) => {
+    setCardToDelete({ cardId, cardTitle });
+    setDeleteCardDialogOpen(true);
+  };
+
+  const confirmDeleteCard = async () => {
+    if (!cardToDelete) return;
+    await deleteCard(cardToDelete.cardId);
+    setDeleteCardDialogOpen(false);
+    setCardToDelete(null);
+  };
+
+  const cancelDeleteCard = () => {
+    setDeleteCardDialogOpen(false);
+    setCardToDelete(null);
+  };
+
+  const handleDeleteCardDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setDeleteCardDialogOpen(true);
+    } else {
+      cancelDeleteCard();
     }
   };
 
@@ -3931,21 +4021,42 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           confirmButtonClass="bg-red-500 hover:bg-red-600"
         />
         <ConfirmationDialog
-          open={deleteAtomDialogOpen}
-          onOpenChange={handleDeleteAtomDialogOpenChange}
-          onConfirm={confirmDeleteAtom}
-          onCancel={cancelDeleteAtom}
-          title="Delete atom?"
-          description={`Are you sure you want to delete "${atomToDelete?.atomTitle || ''}"? This action cannot be undone.`}
+          open={deleteCardDialogOpen}
+          onOpenChange={handleDeleteCardDialogOpenChange}
+          onConfirm={confirmDeleteCard}
+          onCancel={cancelDeleteCard}
+          title="Delete card?"
+          description={`Are you sure you want to delete "${cardToDelete?.cardTitle || ''}"? This will remove the card and all its associated atoms. This action cannot be undone.`}
           icon={<Trash2 className="w-6 h-6 text-white" />}
           iconBgClass="bg-red-500"
           confirmLabel="Yes, delete"
           cancelLabel="Cancel"
           confirmButtonClass="bg-red-500 hover:bg-red-600"
         />
-      <div className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
+      <div 
+        className="h-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto"
+        onClick={(e) => {
+          // Only handle canvas background clicks (not clicks on cards/atoms)
+          // Check if the click target is the container itself or the inner padding div
+          const target = e.target as HTMLElement;
+          if (target === e.currentTarget || 
+              (target.classList.contains('p-6') && target.classList.contains('space-y-6')) ||
+              target.closest('.p-6.space-y-6') === e.currentTarget.querySelector('.p-6.space-y-6')) {
+            if (onOpenSettingsPanel) {
+              onOpenSettingsPanel();
+            }
+          }
+        }}
+      >
         <div className={canEdit ? '' : 'pointer-events-none'}>
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-6" onClick={(e) => {
+            // Handle clicks on the empty space in the canvas
+            if (e.target === e.currentTarget) {
+              if (onOpenSettingsPanel) {
+                onOpenSettingsPanel();
+              }
+            }
+          }}>
             {unifiedRenderItems.map((item) => {
               if (item.type === 'molecule-container') {
                 const molecule = workflowMolecules.find(m => m.moleculeId === item.moleculeId);
@@ -4090,15 +4201,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 onAddAtom={(id, atom) => addAtomByName(id, atom)}
                                 disabled={card.atoms.length > 0}
                               />
-                              {card.atoms.length > 0 && (
-                                <button
-                                  onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                                  className="p-1 hover:bg-gray-100 rounded"
-                                  title="Card Settings"
-                                >
-                                  <Settings className="w-4 h-4 text-gray-400" />
-                                </button>
-                              )}
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
@@ -4112,7 +4214,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             </div>
                             <div className="flex items-center space-x-2">
                               <button
-                                onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  handleDeleteCardClick(card.id, cardTitle);
+                                }}
                                 className="p-1 hover:bg-gray-100 rounded"
                               >
                                 <Trash2 className="w-4 h-4 text-gray-400" />
@@ -4352,15 +4457,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             onAddAtom={(id, atom) => addAtomByName(id, atom)}
                             disabled={card.atoms.length > 0}
                           />
-                          {card.atoms.length > 0 && (
-                            <button
-                              onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                              className="p-1 hover:bg-gray-100 rounded"
-                              title="Card Settings"
-                            >
-                              <Settings className="w-4 h-4 text-gray-400" />
-                            </button>
-                          )}
                           <button
                             onClick={e => {
                               e.stopPropagation();
@@ -4374,7 +4470,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         </div>
                         <div className="flex items-center space-x-2">
                           <button
-                            onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
+                            onClick={e => {
+                              e.stopPropagation();
+                              handleDeleteCardClick(card.id, cardTitle);
+                            }}
                             className="p-1 hover:bg-gray-100 rounded"
                           >
                             <Trash2 className="w-4 h-4 text-gray-400" />
@@ -4752,6 +4851,19 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         cancelLabel="Cancel"
         confirmButtonClass="bg-red-500 hover:bg-red-600"
       />
+      <ConfirmationDialog
+        open={deleteCardDialogOpen}
+        onOpenChange={handleDeleteCardDialogOpenChange}
+        onConfirm={confirmDeleteCard}
+        onCancel={cancelDeleteCard}
+        title="Delete card?"
+        description={`Are you sure you want to delete "${cardToDelete?.cardTitle || ''}"? This will remove the card and all its associated atoms. This action cannot be undone.`}
+        icon={<Trash2 className="w-6 h-6 text-white" />}
+        iconBgClass="bg-red-500"
+        confirmLabel="Yes, delete"
+        cancelLabel="Cancel"
+        confirmButtonClass="bg-red-500 hover:bg-red-600"
+      />
       <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
         {/* Layout Cards Container */}
@@ -4816,15 +4928,6 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   onAddAtom={(id, atom) => addAtomByName(id, atom)}
                   disabled={card.atoms.length > 0}
                 />
-                {card.atoms.length > 0 && (
-                  <button
-                    onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                    className="p-1 hover:bg-gray-100 rounded"
-                    title="Card Settings"
-                  >
-                    <Settings className="w-4 h-4 text-gray-400" />
-                  </button>
-                )}
                 <button
                   onClick={e => {
                     e.stopPropagation();
@@ -4838,7 +4941,11 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               </div>
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={e => { e.stopPropagation(); deleteCard(card.id); }}
+                  onClick={e => {
+                    e.stopPropagation();
+                    const cardTitle = card.moleculeTitle || card.atoms[0]?.title || 'Card';
+                    handleDeleteCardClick(card.id, cardTitle);
+                  }}
                   className="p-1 hover:bg-gray-100 rounded"
                 >
                   <Trash2 className="w-4 h-4 text-gray-400" />
@@ -4921,7 +5028,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               }
                               onToggleHelpPanel?.();
                             }}
-                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110 hidden"
                             title="Help"
                           >
                             <span className="w-4 h-4 text-gray-400 text-base font-bold flex items-center justify-center">?</span>
