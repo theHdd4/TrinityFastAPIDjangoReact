@@ -7,7 +7,6 @@ from app.core.task_queue import celery_task_client, format_task_response
 from .schemas import (
     ActualPredictedResponse,
     ContributionsResponse,
-    IdentifiersResponse,
     ListObjectsResponse,
     SelectedModelsResponse,
 )
@@ -181,7 +180,7 @@ async def get_combinations_from_dataset(
     )
 
 
-@router.get("/get-identifiers", response_model=IdentifiersResponse, tags=["Data"])
+@router.get("/get-identifiers", tags=["Data"])
 async def get_identifiers_from_dataset(
     object_name: str = Query(..., description="MinIO key of the dataset file"),
     bucket: str = Query(default=MINIO_BUCKET),
