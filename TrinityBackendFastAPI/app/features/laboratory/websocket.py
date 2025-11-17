@@ -22,6 +22,7 @@ from starlette.websockets import WebSocketState
 from app.features.project_state.routes import save_atom_list_configuration, get_atom_list_configuration
 
 logger = logging.getLogger(__name__)
+logger.disabled = True  # Disable all logs from laboratory websocket
 
 
 class ConnectionManager:

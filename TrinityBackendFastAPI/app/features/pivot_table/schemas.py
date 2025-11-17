@@ -42,6 +42,20 @@ class PivotFilterConfig(BaseModel):
     )
 
 
+class PivotSortConfig(BaseModel):
+    type: Literal["asc", "desc", "value_asc", "value_desc"] = Field(
+        ..., description="Sort type: asc/desc for alphabetical, value_asc/value_desc for by aggregated value"
+    )
+    level: Optional[int] = Field(
+        default=None,
+        description="Hierarchy level to apply sorting (0-based). If None, applies to the field's natural level."
+    )
+    preserve_hierarchy: bool = Field(
+        default=True,
+        description="Whether to preserve parent-child relationships when sorting. If True, children are sorted within their parent groups."
+    )
+
+
 class PivotComputeRequest(BaseModel):
     data_source: str = Field(..., description="Arrow Flight path or MinIO object name")
     rows: List[str] = Field(default_factory=list, description="Row grouping fields")
@@ -53,6 +67,10 @@ class PivotComputeRequest(BaseModel):
     )
     filters: List[PivotFilterConfig] = Field(
         default_factory=list, description="Optional filters applied before aggregation"
+    )
+    sorting: Dict[str, PivotSortConfig] = Field(
+        default_factory=dict,
+        description="Sorting configuration per field: {fieldName: {type: 'asc'|'desc'|'value_asc'|'value_desc'}}"
     )
     dropna: bool = Field(
         default=True,

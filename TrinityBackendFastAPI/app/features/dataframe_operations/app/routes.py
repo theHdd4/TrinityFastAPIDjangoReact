@@ -17,6 +17,7 @@ from numbers import Real
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
 from app.features.data_upload_validate.app.routes import get_object_prefix
+from .formula_parser import FormulaEvaluationError, evaluate_formula
 from app.core.task_queue import celery_task_client, format_task_response
 from app.features.dataframe_operations.service import (
     SESSIONS,
@@ -872,126 +873,35 @@ async def apply_formula(
     target_column: str = Body(...),
     formula: str = Body(...),
 ):
-    """Apply a simple column-based formula to the dataframe."""
+    """Apply an Excel-like formula to one column using the vectorised engine."""
     df = _get_df(df_id)
     expr = formula.strip()
-    rows = df.to_dicts()
+    if not expr:
+        raise HTTPException(status_code=400, detail="Formula cannot be empty.")
+
     if expr.startswith("="):
         expr_body = expr[1:].strip()
-        corr_match = re.match(r"^CORR\(([^,]+),([^)]+)\)$", expr_body, re.IGNORECASE)
-        if corr_match:
-            cols = [c.strip() for c in corr_match.groups()]
-            if len(cols) != 2:
-                raise HTTPException(status_code=400, detail="CORR requires two columns")
-            c1, c2 = cols
+        if not expr_body:
+            raise HTTPException(status_code=400, detail="Formula cannot be empty.")
+        try:
             try:
-                corr_val = df.select(pl.corr(pl.col(c1), pl.col(c2))).to_series()[0]
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            df = df.with_columns(pl.lit(corr_val).alias(target_column))
-        else:
-            zscore_pattern = re.compile(r"(?i)\b(ZSCORE|NORM)\s*\(([^)]+)\)")
-            zscore_placeholders: List[Tuple[str, str]] = []
+                pandas_frame = df.to_pandas(use_pyarrow_extension_array=True)  # Polars >=0.17
+            except TypeError:
+                pandas_frame = df.to_pandas()
+            result_series = evaluate_formula(expr_body, pandas_frame)
+        except FormulaEvaluationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-            def _capture_zscore(match: re.Match) -> str:
-                column_name = match.group(2).strip()
-                if (column_name.startswith("\"") and column_name.endswith("\"")) or (
-                    column_name.startswith("'") and column_name.endswith("'")
-                ):
-                    column_name = column_name[1:-1]
-                placeholder = f"__ZFUNC_{len(zscore_placeholders)}__"
-                zscore_placeholders.append((placeholder, column_name))
-                return placeholder
+        if len(result_series) != df.height:
+            raise HTTPException(
+                status_code=400,
+                detail="Formula result does not match the number of dataframe rows.",
+            )
 
-            expr_body_processed = zscore_pattern.sub(_capture_zscore, expr_body)
-            expr_body_processed = _normalize_formula_functions(expr_body_processed)
-
-            zscore_values: Dict[str, List[Any]] = {}
-            if zscore_placeholders:
-                for column_name in {col for _, col in zscore_placeholders}:
-                    if column_name not in df.columns:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Column '{column_name}' not found for ZSCORE/NORM",
-                        )
-                    try:
-                        series = df.get_column(column_name)
-                    except Exception as e:
-                        raise HTTPException(status_code=400, detail=str(e))
-                    try:
-                        numeric_series = series.cast(pl.Float64, strict=False)
-                        numeric_series = numeric_series.fill_nan(None)
-                    except Exception as e:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Column '{column_name}' could not be converted to numeric values for ZSCORE/NORM: {e}",
-                        )
-
-                    values = numeric_series.to_list()
-                    valid_values = [
-                        float(v)
-                        for v in values
-                        if v is not None and isinstance(v, Real) and math.isfinite(float(v))
-                    ]
-
-                    if not valid_values:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Column '{column_name}' has no numeric values for ZSCORE/NORM",
-                        )
-
-                    mean_val = numeric_series.mean()
-                    std_val = numeric_series.std()
-
-                    mean_val_f: float | None = None
-                    if isinstance(mean_val, Real) and math.isfinite(float(mean_val)):
-                        mean_val_f = float(mean_val)
-
-                    std_val_f: float | None = None
-                    if isinstance(std_val, Real) and math.isfinite(float(std_val)):
-                        std_val_f = float(std_val)
-
-                    if mean_val_f is None:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unable to compute mean for column '{column_name}'",
-                        )
-
-                    if std_val_f is None or math.isclose(std_val_f, 0.0, rel_tol=1e-12, abs_tol=1e-12):
-                        zscore_values[column_name] = [
-                            None if v is None else 0.0
-                            for v in values
-                        ]
-                    else:
-                        zscore_values[column_name] = [
-                            None
-                            if v is None
-                            else (float(v) - mean_val_f) / std_val_f
-                            for v in values
-                        ]
-
-            headers_pattern = "|".join(re.escape(h) for h in df.columns if h)
-            regex = re.compile(f"\\b({headers_pattern})\\b") if headers_pattern else None
-            new_vals: List[Any] = []
-            for row_idx, r in enumerate(rows):
-                replaced = expr_body_processed
-                if regex:
-                    replaced = regex.sub(lambda m: _format_value(r.get(m.group(0))), replaced)
-                if zscore_placeholders:
-                    for placeholder, column_name in zscore_placeholders:
-                        column_series = zscore_values.get(column_name)
-                        z_val = (
-                            column_series[row_idx]
-                            if column_series is not None and row_idx < len(column_series)
-                            else None
-                        )
-                        replaced = replaced.replace(placeholder, _format_value(z_val))
-                try:
-                    val = eval(replaced, SAFE_EVAL_GLOBALS, {})
-                except Exception:
-                    val = None
-                new_vals.append(val)
-            df = df.with_columns(pl.Series(target_column, new_vals))
+        result_series = result_series.reset_index(drop=True)
+        df = df.with_columns(
+            pl.Series(name=target_column, values=result_series.to_list())
+        )
     else:
         df = df.with_columns(pl.lit(expr).alias(target_column))
     SESSIONS[df_id] = df

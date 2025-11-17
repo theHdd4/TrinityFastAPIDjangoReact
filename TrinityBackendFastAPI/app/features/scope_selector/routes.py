@@ -15,6 +15,8 @@ from minio.error import S3Error
 from motor.motor_asyncio import AsyncIOMotorCollection
 from pymongo import MongoClient
 
+from app.core.task_queue import celery_task_client, format_task_response
+
 from .config import get_settings, Settings
 from .schemas import (
     ScopeRequest, 
@@ -137,56 +139,18 @@ async def get_unique_values(
     object_name: str = Query(..., description="Name of the object to get unique values from"),
     column_name: str = Query(..., description="Name of the column to get unique values for")
 ):
-    """
-    Get unique values for a specific column in a data source.
-    The object_name should be the full path within the MinIO bucket.
-    """
-    try:
-        # Get MinIO client from deps
-        minio_client = get_minio_client()
-        
-        # Get the object from MinIO
-        try:
-            # Get the file from MinIO
-            response = minio_client.get_object(settings.minio_bucket, object_name)
-            file_bytes = response.read()
-            
-            # Convert to pandas DataFrame based on file extension
-            if object_name.lower().endswith('.parquet'):
-                df = pd.read_parquet(io.BytesIO(file_bytes))
-            elif object_name.lower().endswith(('.arrow', '.feather')):
-                df = pd.read_feather(io.BytesIO(file_bytes))
-            else:
-                # Try to read as parquet first, then fall back to arrow if that fails
-                try:
-                    df = pd.read_parquet(io.BytesIO(file_bytes))
-                except Exception as e:
-                    df = pd.read_feather(io.BytesIO(file_bytes))
-            
-            # Create a case-insensitive column name mapping
-            column_mapping = {col.lower(): col for col in df.columns}
-            
-            # Get the actual column name with proper case
-            actual_column = column_mapping.get(column_name.lower())
-            
-            if actual_column:
-                unique_values = df[actual_column].dropna().astype(str).unique().tolist()
-                return {"unique_values": sorted(unique_values) if unique_values else []}
-            else:
-                error_msg = f"Column '{column_name}' not found in the data source. Available columns: {', '.join(df.columns)}"
-                raise HTTPException(status_code=404, detail=error_msg)
-                
-        except S3Error as e:
-            error_msg = f"Error accessing MinIO object {object_name} in bucket {settings.minio_bucket}: {str(e)}"
-            
-            raise HTTPException(status_code=404, detail=error_msg)
-            
-    except HTTPException:
-        raise  # Re-raise HTTP exceptions
-        
-    except Exception as e:
-        error_msg = f"Error getting unique values: {str(e)}"
-        raise HTTPException(status_code=500, detail=error_msg)
+    submission = celery_task_client.submit_callable(
+        name="scope_selector.unique_values",
+        dotted_path="app.features.scope_selector.service.fetch_unique_values",
+        kwargs={"object_name": object_name, "column_name": column_name},
+        metadata={
+            "feature": "scope_selector",
+            "operation": "unique_values",
+            "object_name": object_name,
+            "column_name": column_name,
+        },
+    )
+    return format_task_response(submission)
 
 
 # =============================================================================
@@ -200,101 +164,42 @@ async def get_unique_values_filtered(
     filter_column: str = Query(..., description="Column to apply filter on"),
     filter_value: str = Query(..., description="Value of filter_column to restrict rows")
 ):
-    """Return unique values for `target_column` only for rows where `filter_column` == `filter_value`."""
-    try:
-        minio_client = get_minio_client()
-        response = minio_client.get_object(settings.minio_bucket, object_name)
-        bytes_data = response.read()
-        if object_name.lower().endswith('.parquet'):
-            df = pd.read_parquet(BytesIO(bytes_data))
-        elif object_name.lower().endswith(('.arrow', '.feather')):
-            import pyarrow as pa, pyarrow.ipc as ipc
-            df = ipc.RecordBatchFileReader(pa.BufferReader(bytes_data)).read_all().to_pandas()
-        else:
-            df = pd.read_csv(BytesIO(bytes_data))
-
-        col_map = create_column_mapping(df.columns.tolist())
-        t_col = col_map.get(target_column.lower())
-        f_col = col_map.get(filter_column.lower())
-        if not t_col or not f_col:
-            raise HTTPException(status_code=404, detail="Column not found")
-
-        filtered_df = df[df[f_col].astype(str) == filter_value]
-        uniques = filtered_df[t_col].dropna().astype(str).unique().tolist()
-        return {"unique_values": sorted(uniques)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    submission = celery_task_client.submit_callable(
+        name="scope_selector.unique_values_filtered",
+        dotted_path="app.features.scope_selector.service.fetch_unique_values_filtered",
+        kwargs={
+            "object_name": object_name,
+            "target_column": target_column,
+            "filter_column": filter_column,
+            "filter_value": filter_value,
+        },
+        metadata={
+            "feature": "scope_selector",
+            "operation": "unique_values_filtered",
+            "object_name": object_name,
+            "target_column": target_column,
+            "filter_column": filter_column,
+        },
+    )
+    return format_task_response(submission)
 
 @router.get("/date_range")
 async def get_date_range(
     object_name: str = Query(..., description="Name of the MinIO object (file)"),
     column_name: str = Query(..., description="Name of the date column to analyse")
 ):
-    """Return the minimum and maximum dates contained in the specified column of a dataset.
-
-    Example:
-        /date_range?object_name=raw-data/my_file.parquet&column_name=date
-    """
-    try:
-        minio_client = get_minio_client()
-
-        response = minio_client.get_object(settings.minio_bucket, object_name)
-        file_bytes = response.read()
-        df = None
-
-        object_name_lower = object_name.lower()
-        try:
-            if object_name_lower.endswith('.parquet'):
-                df = pd.read_parquet(BytesIO(file_bytes))
-            elif object_name_lower.endswith(('.arrow', '.feather')):
-                import pyarrow as pa  # local import to avoid mandatory dependency
-                import pyarrow.ipc as ipc
-                reader = ipc.RecordBatchFileReader(pa.BufferReader(file_bytes))
-                df = reader.read_all().to_pandas()
-            elif object_name_lower.endswith('.csv'):
-                df = pd.read_csv(BytesIO(file_bytes))
-            elif object_name_lower.endswith('.json'):
-                df = pd.read_json(BytesIO(file_bytes))
-            else:
-                # Fallback to parquet first, then feather
-                try:
-                    df = pd.read_parquet(BytesIO(file_bytes))
-                except Exception:
-                    df = pd.read_feather(BytesIO(file_bytes))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Unable to read data file: {e}")
-
-        if df is None:
-            raise HTTPException(status_code=500, detail="Unable to load dataset – unsupported format or read error")
-
-        # Case-insensitive column matching
-        column_mapping = create_column_mapping(df.columns.tolist())
-        actual_col = column_mapping.get(column_name.lower())
-        if not actual_col:
-            raise HTTPException(status_code=404, detail=f"Column '{column_name}' not found in dataset")
-
-        # Attempt to parse dates
-        try:
-            date_series = pd.to_datetime(df[actual_col], errors='coerce').dropna()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to parse dates in column '{actual_col}': {e}")
-
-        if date_series.empty:
-            raise HTTPException(status_code=404, detail=f"No valid dates found in column '{actual_col}'")
-
-        min_date = date_series.min().date().isoformat()
-        max_date = date_series.max().date().isoformat()
-
-        return {"min_date": min_date, "max_date": max_date}
-
-    except S3Error as e:
-        raise HTTPException(status_code=500, detail=f"Error accessing MinIO object: {e}")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error obtaining date range: {e}")
+    submission = celery_task_client.submit_callable(
+        name="scope_selector.date_range",
+        dotted_path="app.features.scope_selector.service.compute_date_range",
+        kwargs={"object_name": object_name, "column_name": column_name},
+        metadata={
+            "feature": "scope_selector",
+            "operation": "date_range",
+            "object_name": object_name,
+            "column_name": column_name,
+        },
+    )
+    return format_task_response(submission)
 
 # =============================================================================
 # PERCENTILE CHECK PREVIEW ENDPOINT
@@ -306,87 +211,24 @@ async def percentile_check(request: ScopeFilterRequest,
                           threshold_pct: float = Query(..., ge=0, le=100, description="Threshold as percent of base value. e.g. 10 means 10%"),
                           base: str = Query("max", regex="^(max|min|mean|dist)$", description="Base measure: max|min|mean|dist (max-min)"),
                           column: str = Query(..., description="Numeric column to evaluate")):
-    """Return boolean indicating whether the given percentile of *column* in the filtered
-    dataset is >= *threshold_pct* percent of the chosen *base* (max/min/mean/dist).
-
-    Like /row_count, this is a lightweight, non-persisting preview.
-    """
-    try:
-        minio_client = get_minio_client()
-        # Load file
-        response = minio_client.get_object(settings.minio_bucket, request.file_key)
-        file_bytes = response.read()
-        df: pd.DataFrame | None = None
-        key_lower = request.file_key.lower()
-        try:
-            if key_lower.endswith('.parquet'):
-                df = pd.read_parquet(BytesIO(file_bytes))
-            elif key_lower.endswith(('.arrow', '.feather')):
-                import pyarrow as pa, pyarrow.ipc as ipc
-                df = ipc.RecordBatchFileReader(pa.BufferReader(file_bytes)).read_all().to_pandas()
-            else:
-                df = pd.read_csv(BytesIO(file_bytes))
-        except Exception as e:
-            logger.error(f"Failed to load dataset for percentile_check: {e}")
-            raise HTTPException(status_code=500, detail="Unable to read data file for preview")
-
-        if df is None:
-            raise HTTPException(status_code=500, detail="Preview failed: DataFrame not created")
-
-        # Column mapping (case-insensitive)
-        col_map = create_column_mapping(df.columns.tolist())
-        num_col = col_map.get(column.lower())
-        if not num_col:
-            raise HTTPException(status_code=404, detail=f"Column '{column}' not found in dataset")
-
-        # Apply identifier filters
-        for col, values in request.identifier_filters.items():
-            actual_col = col_map.get(col.lower())
-            if not actual_col:
-                raise HTTPException(status_code=404, detail=f"Column '{col}' not found in dataset")
-            df = df[df[actual_col].astype(str).isin([str(v) for v in values])]
-
-        # Date filtering like /row_count
-        if request.start_date or request.end_date:
-            date_cols = [c for c in df.columns if 'date' in c.lower()]
-            if date_cols:
-                date_col = date_cols[0]
-                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                if request.start_date:
-                    df = df[df[date_col] >= pd.to_datetime(request.start_date)]
-                if request.end_date:
-                    df = df[df[date_col] <= pd.to_datetime(request.end_date)]
-
-        if df.empty:
-            return {"pass": False, "detail": "No rows after filtering"}
-
-        series = pd.to_numeric(df[num_col], errors='coerce').dropna()
-        if series.empty:
-            return {"pass": False, "detail": "No numeric data in column after filtering"}
-
-        pct_val = series.quantile(percentile/100)
-        if base == 'max':
-            base_val = series.max()
-        elif base == 'min':
-            base_val = series.min()
-        elif base == 'mean':
-            base_val = series.mean()
-        else:  # dist
-            base_val = series.max() - series.min()
-
-        target_val = (threshold_pct/100) * base_val
-        passed = pct_val >= target_val
-        return {
-            "pass": bool(passed),
-            "pct_value": pct_val,
-            "base_value": base_val,
-            "target_value": target_val
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in percentile_check: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    submission = celery_task_client.submit_callable(
+        name="scope_selector.percentile_check",
+        dotted_path="app.features.scope_selector.service.evaluate_percentile",
+        kwargs={
+            "payload": request.model_dump(),
+            "percentile": percentile,
+            "threshold_pct": threshold_pct,
+            "base": base,
+            "column": column,
+        },
+        metadata={
+            "feature": "scope_selector",
+            "operation": "percentile_check",
+            "file_key": request.file_key,
+            "column": column,
+        },
+    )
+    return format_task_response(submission)
 
 # =============================================================================
 # ROW COUNT PREVIEW ENDPOINT
@@ -394,65 +236,17 @@ async def percentile_check(request: ScopeFilterRequest,
 
 @router.post("/row_count")
 async def get_row_count(request: ScopeFilterRequest):
-    """Return number of rows in the dataset that match the given identifier filters.
-    Unlike the full scope creation, this is a lightweight preview and does **not**
-    save any files – it only loads the dataset, applies the filters, and
-    returns the resulting row count. This can be used by the frontend to show a
-    quick preview of how much data each scope would contain.
-    """
-    try:
-        minio_client = get_minio_client()
-        # Read the file from MinIO
-        response = minio_client.get_object(settings.minio_bucket, request.file_key)
-        file_bytes = response.read()
-
-        # Load into pandas DataFrame (reuse logic as in other endpoints)
-        df: pd.DataFrame | None = None
-        key_lower = request.file_key.lower()
-        try:
-            if key_lower.endswith('.parquet'):
-                df = pd.read_parquet(BytesIO(file_bytes))
-            elif key_lower.endswith(('.arrow', '.feather')):
-                import pyarrow as pa, pyarrow.ipc as ipc
-                df = ipc.RecordBatchFileReader(pa.BufferReader(file_bytes)).read_all().to_pandas()
-            else:
-                df = pd.read_csv(BytesIO(file_bytes))
-        except Exception as e:
-            logger.error(f"Failed to load dataset for row_count preview: {e}")
-            raise HTTPException(status_code=500, detail="Unable to read data file for preview")
-
-        if df is None:
-            raise HTTPException(status_code=500, detail="Preview failed: DataFrame not created")
-
-        # Create case-insensitive column mapping
-        col_map = create_column_mapping(df.columns.tolist())
-
-        # Apply identifier filters
-        for col, values in request.identifier_filters.items():
-            actual_col = col_map.get(col.lower())
-            if not actual_col:
-                raise HTTPException(status_code=404, detail=f"Column '{col}' not found in dataset")
-            df = df[df[actual_col].astype(str).isin([str(v) for v in values])]
-
-        # Optional date filtering if provided
-        if request.start_date or request.end_date:
-            # Attempt to detect date column
-            date_cols = [c for c in df.columns if 'date' in c.lower()]
-            if date_cols:
-                date_col = date_cols[0]
-                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                if request.start_date:
-                    df = df[df[date_col] >= pd.to_datetime(request.start_date)]
-                if request.end_date:
-                    df = df[df[date_col] <= pd.to_datetime(request.end_date)]
-
-        count = len(df)
-        return {"record_count": int(count)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in row_count preview: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    submission = celery_task_client.submit_callable(
+        name="scope_selector.row_count",
+        dotted_path="app.features.scope_selector.service.preview_row_count",
+        kwargs={"payload": request.model_dump()},
+        metadata={
+            "feature": "scope_selector",
+            "operation": "row_count",
+            "file_key": request.file_key,
+        },
+    )
+    return format_task_response(submission)
 
 # =============================================================================
 # BASIC HEALTH CHECK ENDPOINTS
@@ -978,30 +772,6 @@ async def get_row_count(request: ScopeFilterRequest):
 #         if client:
 #             client.close()
             
-def create_column_mapping(df_columns: List[str]) -> Dict[str, str]:
-    """
-    Create a case-insensitive mapping from lowercase column names to actual column names.
-    
-    Args:
-        df_columns: List of actual column names from DataFrame
-        
-    Returns:
-        Dictionary mapping lowercase names to actual column names
-    """
-    column_mapping = {}
-    for col in df_columns:
-        column_mapping[col.lower()] = col
-    return column_mapping
-
-def create_column_mapping(df_columns: List[str]) -> Dict[str, str]:
-    """
-    Create a case-insensitive mapping from lowercase column names to actual column names.
-    """
-    column_mapping = {}
-    for col in df_columns:
-        column_mapping[col.lower()] = col
-    return column_mapping
-
 def validate_identifier_filters_lowercase(
     identifier_filters: Dict[str, List[str]], 
     df_columns: List[str]

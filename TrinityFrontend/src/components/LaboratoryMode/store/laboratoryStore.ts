@@ -1614,12 +1614,31 @@ export interface DroppedAtom {
   settings?: any;
 }
 
+export interface CardVariable {
+  id: string;
+  name: string;
+  formula?: string;
+  value?: string;
+  description?: string;
+  usageSummary?: string;
+  appended: boolean;
+  originCardId: string;
+  originVariableId?: string;
+  originAtomId?: string;
+  clientId?: string;
+  appId?: string;
+  projectId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface LayoutCard {
   id: string;
   atoms: DroppedAtom[];
   isExhibited: boolean;
   moleculeId?: string;
   moleculeTitle?: string;
+  variables?: CardVariable[];
   order?: number; // For positioning standalone cards between molecules
   afterMoleculeId?: string; // Reference to molecule this card is positioned after
   beforeMoleculeId?: string; // Reference to molecule this card is positioned before
@@ -1720,6 +1739,11 @@ export interface PivotTableSettings {
   pivotLastSavedAt?: string | null;
   pivotFilterOptions?: Record<string, string[]>;
   pivotFilterSelections?: Record<string, string[]>;
+  pivotSorting?: Record<string, { 
+    type: 'asc' | 'desc' | 'value_asc' | 'value_desc';
+    level?: number;
+    preserve_hierarchy?: boolean;
+  }>;
   grandTotalsMode?: 'off' | 'rows' | 'columns' | 'both';
   subtotalsMode?: 'off' | 'top' | 'bottom';
   percentageMode?: 'off' | 'row' | 'column' | 'grand_total';
@@ -1754,6 +1778,7 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   pivotLastSavedAt: null,
   pivotFilterOptions: {},
   pivotFilterSelections: {},
+  pivotSorting: {},
   grandTotalsMode: 'off',
   subtotalsMode: 'off',
   percentageMode: 'off',
@@ -1770,6 +1795,57 @@ export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   collapsedKeys: [],
 };
 
+export interface UnpivotSettings {
+  atomId?: string;
+  projectId?: string;
+  workflowId?: string;
+  atomName?: string;
+  datasetPath?: string;
+  dataSourceColumns?: string[];
+  idVars: string[];
+  valueVars: string[];
+  variableColumnName: string;
+  valueColumnName: string;
+  preFilters: Array<{ field: string; include?: string[]; exclude?: string[] }>;
+  postFilters: Array<{ field: string; include?: string[]; exclude?: string[] }>;
+  autoRefresh: boolean;
+  unpivotResults: any[];
+  unpivotStatus?: 'idle' | 'pending' | 'success' | 'failed';
+  unpivotError?: string | null;
+  unpivotUpdatedAt?: string;
+  unpivotRowCount?: number;
+  unpivotSummary?: {
+    original_rows?: number;
+    original_columns?: number;
+    unpivoted_rows?: number;
+    unpivoted_columns?: number;
+    id_vars_count?: number;
+    value_vars_count?: number;
+  };
+  unpivotLastSavedPath?: string | null;
+  unpivotLastSavedAt?: string | null;
+  computationTime?: number;
+}
+
+export const DEFAULT_UNPIVOT_SETTINGS: UnpivotSettings = {
+  idVars: [],
+  valueVars: [],
+  variableColumnName: 'variable',
+  valueColumnName: 'value',
+  preFilters: [],
+  postFilters: [],
+  autoRefresh: true,
+  unpivotResults: [],
+  unpivotStatus: 'idle',
+  unpivotError: null,
+  unpivotUpdatedAt: undefined,
+  unpivotRowCount: 0,
+  unpivotSummary: {},
+  unpivotLastSavedPath: null,
+  unpivotLastSavedAt: null,
+  computationTime: 0,
+};
+
 interface LaboratoryStore {
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;
@@ -1778,6 +1854,14 @@ interface LaboratoryStore {
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
+  addCardVariable: (cardId: string, variable: CardVariable) => void;
+  updateCardVariable: (
+    cardId: string,
+    variableId: string,
+    update: Partial<Omit<CardVariable, 'id' | 'originCardId'>>
+  ) => void;
+  deleteCardVariable: (cardId: string, variableId: string) => void;
+  toggleCardVariableAppend: (cardId: string, variableId: string, appended: boolean) => void;
   reset: () => void;
 }
 
@@ -1845,6 +1929,68 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       return undefined;
     }
     return state.cards.flatMap(card => Array.isArray(card.atoms) ? card.atoms : []).find(atom => atom.id === atomId);
+  },
+
+  addCardVariable: (cardId: string, variable: CardVariable) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              variables: [...(card.variables ?? []), variable],
+            }
+          : card,
+      ),
+    }));
+  },
+
+  updateCardVariable: (cardId: string, variableId: string, update: Partial<Omit<CardVariable, 'id' | 'originCardId'>>) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              variables: (card.variables ?? []).map(variable =>
+                variable.id === variableId
+                  ? {
+                      ...variable,
+                      ...update,
+                      updatedAt: update.updatedAt ?? new Date().toISOString(),
+                    }
+                  : variable,
+              ),
+            }
+          : card,
+      ),
+    }));
+  },
+
+  deleteCardVariable: (cardId: string, variableId: string) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              variables: (card.variables ?? []).filter(variable => variable.id !== variableId),
+            }
+          : card,
+      ),
+    }));
+  },
+
+  toggleCardVariableAppend: (cardId: string, variableId: string, appended: boolean) => {
+    set(state => ({
+      cards: state.cards.map(card =>
+        card.id === cardId
+          ? {
+              ...card,
+              variables: (card.variables ?? []).map(variable =>
+                variable.id === variableId ? { ...variable, appended } : variable,
+              ),
+            }
+          : card,
+      ),
+    }));
   },
 
   reset: () => {

@@ -7,6 +7,10 @@ import os
 from typing import Dict, Any, List, Optional
 from .config import settings
 
+# Disable logging for this module
+logger = logging.getLogger(__name__)
+logger.disabled = True
+
 # MongoDB Configuration - Use same credentials as scenario planner
 MONGODB_URL = "mongodb://root:rootpass@mongo:27017/trinity_db?authSource=admin"
 
@@ -406,13 +410,13 @@ def get_workflow_from_mongo(
         if project_name and project_name.strip() and project_name != 'default_project':
             query_filter["project_name"] = project_name
         
-        print(f"🔍 MongoDB query filter: {query_filter}")
+        # print(f"🔍 MongoDB query filter: {query_filter}")  # Disabled
         
         # Fetch workflow configuration
         doc = workflow_collection.find_one(query_filter)
         
         if not doc:
-            print(f"❌ No workflow found with filter: {query_filter}")
+            # print(f"❌ No workflow found with filter: {query_filter}")  # Disabled
             return None
         
         # Convert MongoDB document back to workflow format

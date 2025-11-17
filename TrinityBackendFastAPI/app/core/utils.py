@@ -261,7 +261,7 @@ async def get_env_vars(
             _ENV_CACHE.pop(key, None)
         else:
             source = "cache"
-            print(f"🔧 cached_env_vars{key} -> {env}")
+            # print(f"🔧 cached_env_vars{key} -> {env}")  # Disabled
             return (env, source) if return_source else env
 
     if use_cache and resolved_client and resolved_project:
@@ -287,7 +287,7 @@ async def get_env_vars(
                 else:
                     _ENV_CACHE[key] = env
                     source = "redis"
-                    print(f"🔧 redis_env_vars{redis_key} -> {env}")
+                    # print(f"🔧 redis_env_vars{redis_key} -> {env}")  # Disabled
                     return (env, source) if return_source else env
             except Exception:
                 pass

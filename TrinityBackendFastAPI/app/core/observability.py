@@ -21,7 +21,7 @@ def timing_dependency_factory(logger_name: str) -> Callable[[Request], None]:
             duration_ms = (perf_counter() - start) * 1000
             endpoint = request.url.path
             method = request.method
-            logger.info("endpoint_timing path=%s method=%s duration_ms=%.2f", endpoint, method, duration_ms)
+            # logger.info("endpoint_timing path=%s method=%s duration_ms=%.2f", endpoint, method, duration_ms)  # Disabled
 
     return _timing_dependency
 

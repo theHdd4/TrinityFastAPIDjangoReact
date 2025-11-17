@@ -20,6 +20,7 @@ from .config import settings
 
 # Create router instance
 logger = logging.getLogger(__name__)
+logger.disabled = True  # Disable all logs from molecule routes
 
 timing_dependency = timing_dependency_factory("app.features.molecule")
 

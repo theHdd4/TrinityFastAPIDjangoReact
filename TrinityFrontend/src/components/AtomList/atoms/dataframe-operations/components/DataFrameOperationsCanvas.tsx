@@ -54,6 +54,8 @@ import {
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
 import FormularBar from './FormularBar';
+import CollapsibleFormulaBar from './CollapsibleFormulaBar';
+import DataFrameCardinalityView from './DataFrameCardinalityView';
 import LoadingAnimation from '@/templates/LoadingAnimation/LoadingAnimation';
 import {
   PivotTableSettings as PivotSettings,
@@ -72,6 +74,12 @@ interface DataFrameOperationsCanvasProps {
   fileId?: string | null;
   originalData?: DataFrameData | null;
 }
+
+type UndoSnapshot = {
+  data: DataFrameData;
+  columnFormulas: Record<string, string>;
+  selectedColumn: string | null;
+};
 
 interface NumberFilterComponentProps {
   column: string;
@@ -432,7 +440,7 @@ function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number
 ): (...args: Parameters<T>) => void {
-  let timeout: number | null = null;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   return (...args: Parameters<T>) => {
     if (timeout) clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), wait);
@@ -519,9 +527,16 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: string } | null>(null);
   const [selectedColumn, setSelectedColumn] = useState<string | null>(null);
   const [formulaInput, setFormulaInput] = useState('');
+  const [isEditingFormula, setIsEditingFormula] = useState(false);
+  const editingSessionRef = useRef(false);
+  const setEditingState = useCallback((next: boolean) => {
+    editingSessionRef.current = next;
+    setIsEditingFormula(next);
+  }, []);
   const [columnFormulas, setColumnFormulas] = useState<Record<string, string>>(settings.columnFormulas || {});
+  const settingsColumnFormulasRef = useRef<Record<string, string>>(settings.columnFormulas || {});
   const [formulaValidationError, setFormulaValidationError] = useState<string | null>(null);
-  const errorTimeoutRef = useRef<number | null>(null);
+  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [forceRefresh, setForceRefresh] = useState(0);
   const [isProcessingOperation, setIsProcessingOperation] = useState(false);
   const operationQueueRef = useRef<Array<() => Promise<void>>>([]);
@@ -665,6 +680,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     pivotSettingsRef.current = pivotSettings;
   }, [pivotSettings]);
 
+  useEffect(() => {
+    return () => {
+      if (headerClickTimeoutRef.current) {
+        clearTimeout(headerClickTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Track if this is the initial load to preserve restored data from MongoDB
   const isInitialLoadRef = useRef(true);
   const lastComputedSignatureRef = useRef<string | null>(null);
@@ -731,16 +754,38 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [pivotSettings.filterFields, pivotSettings.pivotFilterOptions]);
 
   const pivotComputeSignature = useMemo(() => {
-    const selectionsSnapshot = pivotSettings.filterFields.reduce<Record<string, string[]>>((acc, field) => {
-        const key = field.toLowerCase();
-        const selection =
-          pivotSettings.pivotFilterSelections?.[field] ??
-          pivotSettings.pivotFilterSelections?.[key];
-        if (selection) {
-          acc[field] = [...selection].sort();
-        }
-        return acc;
+    // Collect filter selections from:
+    // 1. Fields in filterFields (dedicated filter bucket)
+    // 2. Row fields with filter selections
+    // 3. Column fields with filter selections
+    const fieldsToCheck = new Set<string>();
+    pivotSettings.filterFields.filter(Boolean).forEach(field => fieldsToCheck.add(field));
+    pivotSettings.rowFields.filter(Boolean).forEach(field => {
+      const key = field.toLowerCase();
+      const selections = pivotSettings.pivotFilterSelections?.[field] ?? pivotSettings.pivotFilterSelections?.[key] ?? [];
+      if (selections.length > 0) {
+        fieldsToCheck.add(field);
+      }
+    });
+    pivotSettings.columnFields.filter(Boolean).forEach(field => {
+      const key = field.toLowerCase();
+      const selections = pivotSettings.pivotFilterSelections?.[field] ?? pivotSettings.pivotFilterSelections?.[key] ?? [];
+      if (selections.length > 0) {
+        fieldsToCheck.add(field);
+      }
+    });
+    
+    const selectionsSnapshot = Array.from(fieldsToCheck).reduce<Record<string, string[]>>((acc, field) => {
+      const key = field.toLowerCase();
+      const selection =
+        pivotSettings.pivotFilterSelections?.[field] ??
+        pivotSettings.pivotFilterSelections?.[key];
+      if (selection) {
+        acc[field] = [...selection].sort();
+      }
+      return acc;
     }, {});
+    
     const payload = {
       dataSource: pivotSettings.dataSource,
       rows: pivotSettings.rowFields,
@@ -748,6 +793,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       values: pivotSettings.valueFields,
       filters: pivotSettings.filterFields,
       selections: selectionsSnapshot,
+      sorting: pivotSettings.pivotSorting,
       grandTotals: pivotSettings.grandTotalsMode,
     };
     return JSON.stringify(payload);
@@ -758,6 +804,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     pivotSettings.valueFields,
     pivotSettings.filterFields,
     pivotSettings.pivotFilterSelections,
+    pivotSettings.pivotSorting,
     pivotSettings.grandTotalsMode,
   ]);
 
@@ -818,6 +865,29 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       });
 
       try {
+        // Build sorting payload
+        const sortingPayload: Record<string, { type: string; level?: number; preserve_hierarchy?: boolean }> = {};
+        if (latestSettings.pivotSorting) {
+          Object.entries(latestSettings.pivotSorting).forEach(([field, config]) => {
+            if (config && typeof config === 'object' && 'type' in config) {
+              // Use the exact field name from rowFields/columnFields to ensure case matching
+              const exactField = latestSettings.rowFields.find(f => f.toLowerCase() === field.toLowerCase()) ||
+                                latestSettings.columnFields.find(f => f.toLowerCase() === field.toLowerCase()) ||
+                                field;
+              
+              // Determine hierarchy level for this field
+              const fieldIndex = latestSettings.rowFields.findIndex(f => f.toLowerCase() === field.toLowerCase());
+              const level = fieldIndex >= 0 ? fieldIndex : undefined;
+              
+              sortingPayload[exactField] = {
+                type: config.type,
+                level: config.level !== undefined ? config.level : level,
+                preserve_hierarchy: config.preserve_hierarchy !== undefined ? config.preserve_hierarchy : true,
+              };
+            }
+          });
+        }
+
         const payload = {
           data_source: latestSettings.dataSource,
           rows: latestSettings.rowFields.filter(Boolean),
@@ -828,24 +898,54 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
               field: item.field,
               aggregation: item.aggregation || 'sum',
             })),
-          filters: latestSettings.filterFields.filter(Boolean).map((field) => {
+          filters: (() => {
+            // Collect all fields that need filtering:
+            // 1. Fields in filterFields (dedicated filter bucket)
+            // 2. Row fields with filter selections
+            // 3. Column fields with filter selections
+            const fieldsToFilter = new Set<string>();
+            
+            // Add filterFields
+            latestSettings.filterFields.filter(Boolean).forEach(field => fieldsToFilter.add(field));
+            
+            // Add row fields that have filter selections
+            latestSettings.rowFields.filter(Boolean).forEach(field => {
+              const key = field.toLowerCase();
+              const selections = latestSettings.pivotFilterSelections?.[field] ?? latestSettings.pivotFilterSelections?.[key] ?? [];
+              if (selections.length > 0) {
+                fieldsToFilter.add(field);
+              }
+            });
+            
+            // Add column fields that have filter selections
+            latestSettings.columnFields.filter(Boolean).forEach(field => {
+              const key = field.toLowerCase();
+              const selections = latestSettings.pivotFilterSelections?.[field] ?? latestSettings.pivotFilterSelections?.[key] ?? [];
+              if (selections.length > 0) {
+                fieldsToFilter.add(field);
+              }
+            });
+            
+            return Array.from(fieldsToFilter).map((field) => {
               const key = field.toLowerCase();
               const selections =
-              latestSettings.pivotFilterSelections?.[field] ??
-              latestSettings.pivotFilterSelections?.[key] ?? [];
+                latestSettings.pivotFilterSelections?.[field] ??
+                latestSettings.pivotFilterSelections?.[key] ?? [];
               const options =
-              latestSettings.pivotFilterOptions?.[field] ??
-              latestSettings.pivotFilterOptions?.[key] ?? [];
+                latestSettings.pivotFilterOptions?.[field] ??
+                latestSettings.pivotFilterOptions?.[key] ?? [];
 
               const includeValues =
                 selections.length > 0 && selections.length !== options.length
                   ? selections
                   : undefined;
 
-            return includeValues
-              ? { field, include: includeValues }
-              : { field };
-            }),
+              return includeValues
+                ? { field, include: includeValues }
+                : { field };
+            });
+          })(),
+          sorting: sortingPayload,
           grand_totals: latestSettings.grandTotalsMode || 'off',
         };
 
@@ -1164,6 +1264,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   // Ref to store header cell elements for context-menu positioning
   const headerRefs = useRef<{ [key: string]: HTMLTableCellElement | null }>({});
+  const headerClickTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowRefs = useRef<{ [key: number]: HTMLTableRowElement | null }>({});
   const [resizingCol, setResizingCol] = useState<{ key: string; startX: number; startWidth: number } | null>(null);
   const [resizingRow, setResizingRow] = useState<{ index: number; startY: number; startHeight: number } | null>(null);
@@ -1287,6 +1388,10 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
 
   useEffect(() => {
     const incoming = settings.columnFormulas || {};
+    if (areFormulaMapsEqual(incoming, settingsColumnFormulasRef.current)) {
+      return;
+    }
+    settingsColumnFormulasRef.current = incoming;
     setColumnFormulas(prev => (areFormulaMapsEqual(prev, incoming) ? prev : incoming));
   }, [settings.columnFormulas]);
 
@@ -1344,22 +1449,33 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, [data?.headers, selectedColumn]);
 
   useEffect(() => {
-    // Only clear formula input when column changes, don't restore previous formulas
+    const storedFormula = selectedColumn ? columnFormulas[selectedColumn] : undefined;
+
     if (selectedColumn !== previousSelectedColumnRef.current) {
       previousSelectedColumnRef.current = selectedColumn;
       if (selectedColumn) {
-        // Always start with empty formula input when selecting a new column
-        setFormulaInput('');
+        const nextFormula = storedFormula ?? '';
+        if (nextFormula !== formulaInput) {
+          setFormulaInput(nextFormula);
+        }
+        setEditingState(false);
+        setFormulaValidationError(null);
+      } else {
+        setEditingState(false);
         setFormulaValidationError(null);
       }
       return;
     }
 
-    if (!selectedColumn) {
-      previousSelectedColumnRef.current = undefined;
-      setFormulaValidationError(null);
+    if (
+      selectedColumn &&
+      storedFormula !== undefined &&
+      storedFormula !== formulaInput &&
+      !isEditingFormula
+    ) {
+      setFormulaInput(storedFormula);
     }
-  }, [selectedColumn]);
+  }, [selectedColumn, columnFormulas, formulaInput, isEditingFormula]);
   
   // Initialize column order when data changes
   useEffect(() => {
@@ -1412,7 +1528,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const saveSuccessTimeout = useRef<number | null>(null);
+  const saveSuccessTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [savedFiles, setSavedFiles] = useState<any[]>([]);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveFileName, setSaveFileName] = useState('');
@@ -1442,12 +1558,13 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [insertLoading, setInsertLoading] = useState(false);
   
   // Undo/Redo state management
-  const [undoStack, setUndoStack] = useState<DataFrameData[]>([]);
-  const [redoStack, setRedoStack] = useState<DataFrameData[]>([]);
+  const [undoStack, setUndoStack] = useState<UndoSnapshot[]>([]);
+  const [redoStack, setRedoStack] = useState<UndoSnapshot[]>([]);
   const [isUndoRedoOperation, setIsUndoRedoOperation] = useState(false);
 
   // History panel state
   const [historyPanelOpen, setHistoryPanelOpen] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [historyPanelMinimized, setHistoryPanelMinimized] = useState(false);
   const [historyPanelPosition, setHistoryPanelPosition] = useState({ x: 0, y: 0 });
   
@@ -1484,36 +1601,74 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     setHistoryOperations(prev => [operation, ...prev].slice(0, 100)); // Keep last 100 operations
   }, []);
 
+  const createSnapshot = useCallback(
+    (sourceData?: DataFrameData): UndoSnapshot | null => {
+      const baseData = sourceData ?? data;
+      if (!baseData) return null;
+      return {
+        data: JSON.parse(JSON.stringify(baseData)),
+        columnFormulas: JSON.parse(JSON.stringify(columnFormulas || {})),
+        selectedColumn,
+      };
+    },
+    [data, columnFormulas, selectedColumn],
+  );
+
+  const applySnapshot = useCallback(
+    (snapshot: UndoSnapshot) => {
+      const restoredData = JSON.parse(JSON.stringify(snapshot.data));
+      const restoredFormulas = JSON.parse(JSON.stringify(snapshot.columnFormulas || {}));
+      onDataChange(restoredData);
+      setColumnFormulas(restoredFormulas);
+      onSettingsChange({ columnFormulas: restoredFormulas });
+      setSelectedColumn(snapshot.selectedColumn);
+      if (snapshot.selectedColumn) {
+        setFormulaInput(restoredFormulas[snapshot.selectedColumn] || '');
+        setIsFormulaMode(true);
+      } else {
+        setFormulaInput('');
+        setIsFormulaMode(false);
+      }
+      setEditingState(false);
+    },
+    [onDataChange, onSettingsChange, setColumnFormulas, setSelectedColumn, setFormulaInput, setIsFormulaMode, setEditingState],
+  );
+
   // Function to save current state to undo stack
-  const saveToUndoStack = useCallback((currentData: DataFrameData) => {
-    if (isUndoRedoOperation) return; // Don't save during undo/redo operations
-    
-    setUndoStack(prev => {
-      const newStack = [...prev, JSON.parse(JSON.stringify(currentData))];
-      // Limit undo stack to 50 operations
-      return newStack.slice(-50);
-    });
-    // Clear redo stack when new operation is performed
-    setRedoStack([]);
-  }, [isUndoRedoOperation]);
+  const saveToUndoStack = useCallback(
+    (currentData?: DataFrameData) => {
+      if (isUndoRedoOperation) return; // Don't save during undo/redo operations
+      const snapshot = createSnapshot(currentData);
+      if (!snapshot) return;
+      setUndoStack(prev => {
+        const newStack = [...prev, snapshot];
+        // Limit undo stack to 50 operations
+        return newStack.slice(-50);
+      });
+      // Clear redo stack when new operation is performed
+      setRedoStack([]);
+    },
+    [isUndoRedoOperation, createSnapshot],
+  );
 
   // Function to undo last operation
   const handleUndo = useCallback(() => {
-    if (undoStack.length === 0 || !data) return;
+    if (undoStack.length === 0) return;
+    
+    const previousState = undoStack[undoStack.length - 1];
+    if (!previousState) return;
     
     setIsUndoRedoOperation(true);
     
-    // Move current state to redo stack
-    setRedoStack(prev => [...prev, JSON.parse(JSON.stringify(data))]);
+    const currentSnapshot = createSnapshot();
+    if (currentSnapshot) {
+      setRedoStack(prev => [...prev, currentSnapshot]);
+    }
     
-    // Restore previous state
-    const previousState = undoStack[undoStack.length - 1];
     setUndoStack(prev => prev.slice(0, -1));
     
-    // Update the data
-    onDataChange(previousState);
+    applySnapshot(previousState);
     
-    // Add to history
     addToHistory('Undo', 'Reverted last operation');
     
     toast({
@@ -1521,34 +1676,34 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       description: "Last operation has been undone",
     });
     
-    // Reset flag after a short delay
     setTimeout(() => setIsUndoRedoOperation(false), 100);
-  }, [undoStack, data, onDataChange, addToHistory]);
+  }, [undoStack, createSnapshot, applySnapshot, addToHistory]);
 
   // Function to redo last undone operation
   const handleRedo = useCallback(() => {
-    if (redoStack.length === 0 || !data) return;
+    if (redoStack.length === 0) return;
+    
+    const nextState = redoStack[redoStack.length - 1];
+    if (!nextState) return;
     
     setIsUndoRedoOperation(true);
     
-    // Move current state to undo stack
-    setUndoStack(prev => [...prev, JSON.parse(JSON.stringify(data))]);
+    const currentSnapshot = createSnapshot();
+    if (currentSnapshot) {
+      setUndoStack(prev => [...prev, currentSnapshot]);
+    }
     
-    // Restore next state
-    const nextState = redoStack[redoStack.length - 1];
     setRedoStack(prev => prev.slice(0, -1));
     
-    // Update the data
-    onDataChange(nextState);
+    applySnapshot(nextState);
     
     toast({
       title: "Redo Applied",
       description: "Last undone operation has been redone",
     });
     
-    // Reset flag after a short delay
     setTimeout(() => setIsUndoRedoOperation(false), 100);
-  }, [redoStack, data, onDataChange]);
+  }, [redoStack, createSnapshot, applySnapshot]);
 
   // Helper to convert current table to CSV (includes filtered and deleted state)
   const toCSV = () => {
@@ -1760,7 +1915,15 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   }, []);
 
    // Helper function to filter backend response to preserve deleted and hidden columns
-   const filterBackendResponse = useCallback((resp: any, currentHiddenColumns: string[], currentDeletedColumns: string[] = []) => {
+  interface FilteredBackendResponse {
+    headers: string[];
+    rows: DataFrameData['rows'];
+    columnTypes: Record<string, 'text' | 'number' | 'date'>;
+    hiddenColumns: string[];
+    deletedColumns: string[];
+  }
+
+  const filterBackendResponse = useCallback((resp: any, currentHiddenColumns: string[], currentDeletedColumns: string[] = []): FilteredBackendResponse => {
      // Combine hidden and deleted columns to filter out
      const columnsToFilter = [...currentHiddenColumns, ...currentDeletedColumns];
      
@@ -1781,7 +1944,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     });
     
     const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
-    const filteredColumnTypes: any = {};
+    const filteredColumnTypes: Record<string, 'text' | 'number' | 'date'> = {};
     filteredHeaders.forEach((header: string) => {
       if (columnTypes[header]) {
         filteredColumnTypes[header] = columnTypes[header];
@@ -1791,7 +1954,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     return {
       headers: filteredHeaders,
       rows: filteredRows,
-      columnTypes: filteredColumnTypes
+      columnTypes: filteredColumnTypes,
+      hiddenColumns: [...currentHiddenColumns],
+      deletedColumns: [...currentDeletedColumns],
     };
   }, [normalizeBackendColumnTypes, preserveColumnOrder, data?.headers]);
 
@@ -1850,6 +2015,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         pinnedColumns: data.pinnedColumns,
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
+        hiddenColumns: data.hiddenColumns || [],
+        deletedColumns: data.deletedColumns || [],
       });
 
       onSettingsChange({
@@ -2717,9 +2884,7 @@ const handleCellClick = (rowIndex: number, column: string) => {
   // 🔧 Excel-like: Set selectedColumn so the column header is highlighted
   setSelectedColumn(column);
   
-  // When clicking on a cell, activate formula bar for that column (like small screen behavior)
-  activateFormulaBar(column);
-  
+  // When clicking on a cell, just highlight column; user must click formula bar to edit
   // 🔧 FIX: Clear row AND column multi-selections when clicking a cell
   // Multi-selections should only persist when explicitly using Ctrl+Click
   setMultiSelectedRows(new Set());
@@ -2735,20 +2900,25 @@ const resetFormulaBar = () => {
   setSelectedCell(null);
   setIsFormulaMode(false); // Disable formula bar after reset
   setIsFormulaBarFrozen(false); // Don't freeze formula bar - allow continued use
+  setEditingState(false);
   showValidationError(null);
   console.log('[DataFrameOperations] Formula bar completely reset and frozen');
 };
 
 // Function to activate formula bar for a specific column
-const activateFormulaBar = (column: string) => {
+const activateFormulaBar = (column: string, options?: { editMode?: boolean }) => {
   setSelectedColumn(column);
-  // 🔧 CRITICAL FIX: Don't clear selectedCell - we need it for row number highlighting!
-  // setSelectedCell(null);  // ← REMOVED - This was clearing the active cell indicator!
   setIsFormulaMode(true);
-  setIsFormulaBarFrozen(false); // Unfreeze formula bar when explicitly activated
-  setFormulaInput('');
+  setIsFormulaBarFrozen(false);
+  const storedFormula = columnFormulas[column];
+  setFormulaInput(storedFormula || '');
+  if (options?.editMode) {
+    setEditingState(true);
+  } else {
+    setEditingState(false);
+  }
   showValidationError(null);
-  console.log('[DataFrameOperations] Formula bar activated for column:', column);
+  console.log('[DataFrameOperations] Formula bar activated for column:', column, storedFormula ? `with stored formula: ${storedFormula}` : 'new column');
 };
 
 // Helper function to replace next ColX with column name (Excel-like behavior)
@@ -2764,7 +2934,7 @@ const replaceNextColPlaceholder = (expression: string, columnName: string): stri
 
 const insertColumnIntoFormula = (columnName: string) => {
   // Only insert column into formula if formula bar is already active
-  if (!isFormulaMode) {
+  if (!isFormulaMode || !editingSessionRef.current) {
     return;
   }
   
@@ -2831,9 +3001,11 @@ const insertColumnIntoFormula = (columnName: string) => {
 
 const handleHeaderClick = (header: string) => {
   resetSaveSuccess();
-  
-  // Check if we're in formula mode (formula input starts with =)
-  if (formulaInput.trim().startsWith('=')) {
+
+  const isEditingActiveFormula = isFormulaMode && editingSessionRef.current;
+
+  // Only treat header clicks as column insertions when actively editing a formula
+  if (isEditingActiveFormula) {
     // Insert column name into formula at cursor position
     insertColumnIntoFormula(header);
     return;
@@ -2842,11 +3014,15 @@ const handleHeaderClick = (header: string) => {
   // 🔧 Excel-like: Clear cell selection when clicking column header (select entire column)
   setSelectedCell(null);
   
-  // 🔧 Excel-like: Set selectedColumn for entire column highlighting
+  // Normal column selection behavior - update selection only
+  setSelectedCell(null);
   setSelectedColumn(header);
-  
-  // Normal column selection behavior - activate formula bar
-  activateFormulaBar(header);
+  setIsFormulaMode(true);
+  setIsFormulaBarFrozen(false);
+  const storedFormula = columnFormulas[header];
+  setFormulaInput(storedFormula || '');
+  setEditingState(false);
+  showValidationError(null);
   
   console.log('[DataFrameOperations] Column header clicked:', header, 'Cell selection cleared');
 };
@@ -3012,6 +3188,57 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     
     return frontendIndex;
   }, [data]);
+
+  // Global ESC handler to clear selection (non-destructive)
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Guard: if editing formula, let FormularBar handle ESC
+      if (isEditingFormula) return;
+      // Guard: if any modal/panel is open, don't interfere
+      if (
+        historyPanelOpen ||
+        findReplaceModalOpen ||
+        deleteConfirmModal.isOpen ||
+        rowDeleteConfirmModal.isOpen ||
+        showOverwriteConfirmDialog ||
+        showResetConfirm
+      ) {
+        return;
+      }
+      // Guard: if focus is in an editable element, don't steal ESC
+      const active = document.activeElement as HTMLElement | null;
+      if (active) {
+        const tag = active.tagName?.toLowerCase();
+        const isEditable =
+          tag === 'input' ||
+          tag === 'textarea' ||
+          active.getAttribute('contenteditable') === 'true' ||
+          active.getAttribute('role') === 'textbox';
+        if (isEditable) return;
+      }
+      // Clear non-destructive selection and transient UI
+      setSelectedCell(null);
+      setSelectedColumn(null);
+      setMultiSelectedRows(new Set());
+      setMultiSelectedColumns(new Set());
+      setSelectAllRows(false);
+      setContextMenu(null);
+      setOpenDropdown(null);
+      setInsertMenuOpen(false);
+      setDeleteMenuOpen(false);
+    };
+    window.addEventListener('keydown', onEsc, { passive: true });
+    return () => window.removeEventListener('keydown', onEsc as EventListener);
+  }, [
+    isEditingFormula,
+    historyPanelOpen,
+    findReplaceModalOpen,
+    deleteConfirmModal.isOpen,
+    rowDeleteConfirmModal.isOpen,
+    showOverwriteConfirmDialog,
+    showResetConfirm,
+  ]);
 
   // Simple and direct insert column implementation
   const handleInsertColumn = async (colIdx: number) => {
@@ -3431,7 +3658,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         }
         
         const columnType = data.columnTypes[col];
-        if (columnType !== 'number' && columnType !== 'float' && columnType !== 'integer') {
+        if (columnType !== 'number') {
           console.warn(`[DataFrameOperations] Column "${col}" is not numeric (type: ${columnType}), skipping...`);
           continue;
         }
@@ -3793,8 +4020,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     });
   };
 
-  const handleColumnMultiSelect = (header: string, event: React.MouseEvent) => {
-    if (event.ctrlKey || event.metaKey) {
+  const handleColumnMultiSelect = (
+    header: string,
+    modifiers?: { ctrlKey?: boolean; metaKey?: boolean },
+  ) => {
+    const isMultiSelect = modifiers?.ctrlKey || modifiers?.metaKey;
+    if (isMultiSelect) {
       // Multi-select mode
       setMultiSelectedColumns(prev => {
         const newSet = new Set(prev);
@@ -3858,7 +4089,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         const firstVisibleColumn = data.headers.filter(h => !(data.hiddenColumns || []).includes(h))[0];
         if (firstVisibleColumn) {
           setSelectedCell({ row: originalRowIndex, col: firstVisibleColumn });
-          activateFormulaBar(firstVisibleColumn);
+          activateFormulaBar(firstVisibleColumn, { editMode: true });
         }
       }
     }
@@ -4060,6 +4291,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const handleKeyDown = (e: KeyboardEvent) => {
       // Handle Ctrl+Z for undo
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        if (isEditingFormula) {
+          return;
+        }
         e.preventDefault();
         handleUndo();
         return;
@@ -4067,6 +4301,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       
       // Handle Ctrl+Y or Ctrl+Shift+Z for redo
       if ((e.ctrlKey && e.key === 'y') || (e.ctrlKey && e.shiftKey && e.key === 'z')) {
+        if (isEditingFormula) {
+          return;
+        }
         e.preventDefault();
         handleRedo();
         return;
@@ -4102,7 +4339,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo]);
+  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo, isEditingFormula]);
 
   // Debounced search effect
   useEffect(() => {
@@ -4130,7 +4367,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       />
 
       <div id={`atom-${atomId}`} ref={containerRef} className="w-full h-full p-6 overflow-y-auto" style={{position: 'relative'}}>
-        <div className="mx-auto max-w-screen-2xl rounded-2xl border border-slate-200 bg-white shadow-sm w-full">
+        <style>{`
+          #atom-${atomId} .table-base th,
+          #atom-${atomId} .table-base td {
+            min-width: 3rem !important;
+          }
+        `}</style>
+        <div className="mx-auto w-full rounded-2xl border border-slate-200 bg-white shadow-sm">
         {/* File name display in separate blue header section */}
         {data?.fileName && (
           <div className="border-b border-blue-200 bg-blue-50">
@@ -4144,6 +4387,14 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             </div>
           </div>
         )}
+        {/* Cardinality view (aligned with Column Classifier) */}
+        {data && data.headers && data.headers.length > 0 && (
+          <div className="border-b border-slate-200 px-5 py-4">
+            <DataFrameCardinalityView data={data} atomId={atomId} />
+          </div>
+        )}
+
+        {/* Controls section */}
         
         {/* Tab Navigation and Controls */}
         <div className="border-b border-slate-200 bg-white">
@@ -4333,7 +4584,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
             >
             {data && (
               <div 
-                className="flex items-center border-b border-slate-200 min-h-0"
+                className="flex items-center border-b border-slate-200 min-h-0 mt-2"
                 onClick={(e) => {
                   // Deselect column when clicking in formula bar area
                   if (selectedColumn && e.target === e.currentTarget) {
@@ -4342,31 +4593,25 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 }}
               >
                 <div className="flex-1 min-w-0">
-                  <div className="relative w-full" style={{ position: 'relative', zIndex: 1 }}>
-                    <FormularBar
-                      data={data}
-                      selectedCell={selectedCell}
-                      selectedColumn={selectedColumn}
-                      formulaInput={formulaInput}
-                      isFormulaMode={isFormulaMode}
-                      isFormulaBarFrozen={isFormulaBarFrozen}
-                      formulaValidationError={formulaValidationError}
-                      onSelectedCellChange={setSelectedCell}
-                      onSelectedColumnChange={setSelectedColumn}
-                      onFormulaInputChange={setFormulaInput}
-                      onFormulaModeChange={setIsFormulaMode}
-                      onFormulaSubmit={handleFormulaSubmit}
-                      onValidationError={showValidationError}
-                    />
-                    {formulaLoading && (
-                      <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10">
-                        <div className="flex items-center space-x-2 text-sm text-slate-700">
-                          <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                          <span>Processing formula...</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <CollapsibleFormulaBar
+                    data={data}
+                    selectedCell={selectedCell}
+                    selectedColumn={selectedColumn}
+                    formulaInput={formulaInput}
+                    isFormulaMode={isFormulaMode}
+                    isFormulaBarFrozen={isFormulaBarFrozen}
+                    formulaValidationError={formulaValidationError}
+                    onSelectedCellChange={setSelectedCell}
+                    onSelectedColumnChange={setSelectedColumn}
+                    onFormulaInputChange={setFormulaInput}
+                    onFormulaModeChange={setIsFormulaMode}
+                    onFormulaSubmit={handleFormulaSubmit}
+                    onValidationError={showValidationError}
+                    formulaLoading={formulaLoading}
+                    columnFormulas={columnFormulas}
+                    isEditingFormula={isEditingFormula}
+                    onEditingStateChange={setEditingState}
+                  />
                 </div>
                 <button
                   onClick={() => setFindReplaceModalOpen(true)}
@@ -4383,6 +4628,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
+                </button>
+                <button
+                  onClick={() => setShowResetConfirm(true)}
+                  className="p-2 mx-1 hover:bg-gray-100 rounded-md transition-colors"
+                  title="Reset dataframe"
+                >
+                  <RotateCcw className="w-6 h-6 text-gray-500" />
                 </button>
               </div>
             )}
@@ -4548,7 +4800,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           // 🔧 Shadow on last frozen column for visual separator
                           boxShadow: colIdx === data.frozenColumns - 1 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none'
                         } : {}),
-                        textAlign: `${getColumnAlignment(header)} !important`
+                        textAlign: getColumnAlignment(header)
                       }}
                       draggable
                       onDragStart={() => handleDragStart(header)}
@@ -4567,14 +4819,30 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         });
                         setRowContextMenu(null);
                       }}
-                      onClick={(e) => {
-                        // Only handle multi-select if not in formula mode
-                        if (!isFormulaMode || !formulaInput.trim().startsWith('=')) {
-                          handleColumnMultiSelect(header, e);
+                    onClick={(e) => {
+                        const isFormulaEditingActive =
+                          isFormulaMode && isEditingFormula;
+                        // Only handle multi-select if not actively editing a formula
+                        if (!isFormulaEditingActive) {
+                          handleColumnMultiSelect(header, { ctrlKey: e.ctrlKey, metaKey: e.metaKey });
                         }
-                        handleHeaderClick(header);
+
+                        if (headerClickTimeoutRef.current) {
+                          clearTimeout(headerClickTimeoutRef.current);
+                        }
+
+                        headerClickTimeoutRef.current = setTimeout(() => {
+                          handleHeaderClick(header);
+                          headerClickTimeoutRef.current = null;
+                        }, 180);
                       }}
-                      onDoubleClick={() => {
+                      onDoubleClick={(e) => {
+                        if (headerClickTimeoutRef.current) {
+                          clearTimeout(headerClickTimeoutRef.current);
+                          headerClickTimeoutRef.current = null;
+                        }
+                        e.stopPropagation();
+                        e.preventDefault();
                         // Always allow header editing regardless of enableEditing setting
                         setEditingHeader(colIdx);
                         setEditingHeaderValue(header);
@@ -4589,7 +4857,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         <input
                           type="text"
                           className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-black truncate w-full"
-                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: `${getColumnAlignment(header)} !important`, padding: 0, margin: 0 }}
+                          style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: getColumnAlignment(header), padding: 0, margin: 0 }}
                           value={editingHeaderValue}
                           autoFocus
                           onChange={e => setEditingHeaderValue(e.target.value)}
@@ -4781,7 +5049,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                 boxShadow: colIdx === data.frozenColumns - 1 ? '2px 0 4px rgba(0,0,0,0.1)' : 'none'
                                 // 🔧 REMOVED isolation and willChange - they can interfere with scrolling
                               } : {}),
-                              textAlign: `${getColumnAlignment(column)} !important`
+                              textAlign: getColumnAlignment(column)
                             }}
                             onClick={(e) => {
                               e.stopPropagation(); // Prevent row selection when clicking cell
@@ -5530,6 +5798,31 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           </div>
         </div>
       )}
+
+      <Dialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset everything?</DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              This will restore the original dataframe and undo all operations.
+            </p>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowResetConfirm(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setShowResetConfirm(false);
+                onClearAll();
+              }}
+            >
+              Reset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmModal.isOpen && (

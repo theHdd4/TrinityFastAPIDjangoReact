@@ -2,6 +2,7 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2 } from 'lucide-react';
 import { SCOPE_SELECTOR_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { Label } from '@/components/ui/label';
 import { CheckboxTemplate } from '@/templates/checkbox';
 import { Button } from '@/components/ui/button';
@@ -93,7 +94,8 @@ const ScopeSelectorSettings: React.FC<ScopeSelectorSettingsProps> = ({ data, onD
               )}&column_name=${encodeURIComponent(identifier)}`
             );
             if (res.ok) {
-              const json = await res.json();
+              const raw = await res.json();
+              const json = await resolveTaskResponse<{ unique_values?: string[] }>(raw);
               if (Array.isArray(json.unique_values) && json.unique_values.length > 1) {
                 results.push(identifier);
               }
