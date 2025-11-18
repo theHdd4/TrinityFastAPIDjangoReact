@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
 import base64
 import os
+import logging
 from minio import Minio
 from minio.error import S3Error
 from urllib.parse import unquote
@@ -29,6 +30,7 @@ from app.features.dataframe_operations.service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger("dataframe_operations.apply_formula")
 
 # Self-contained MinIO config (match feature-overview)
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -964,9 +966,9 @@ async def insert_column(
 ):
     df = _get_df(df_id)
     
-    # Validate index
+    # Validate index - default to 0 (left) instead of len(df.columns) (right)
     if index is None:
-        index = len(df.columns)
+        index = 0
     if index < 0:
         index = 0
     elif index > len(df.columns):
