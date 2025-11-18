@@ -8,7 +8,9 @@ import {
   createErrorMessage,
   processSmartResponse,
   validateFileInput,
-  createProgressTracker 
+  createProgressTracker,
+  autoSaveStepResult,
+  constructFullPath
 } from './utils';
 
 // Import the dataframe operations API functions
@@ -95,7 +97,7 @@ const normalizeColumnName = (aiColumnName: string, availableColumns: string[] = 
 
 export const dataframeOperationsHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId, isStreamMode = false, stepAlias: workflowStepAlias } = context;
 
     if (!data.dataframe_config) {
       return { success: false, error: 'No dataframe configuration found in AI response' };
@@ -165,6 +167,201 @@ export const dataframeOperationsHandler: AtomHandler = {
       existingDataAvailable: sessionHasExistingData
     });
     
+    // 🔧 CRITICAL FIX FOR STREAM AI: Resolve file paths using same logic as create-column
+    // Skip file validation in Stream AI mode (Stream AI already validates files)
+    // Resolve full object names to ensure proper MinIO access
+    const resolveFilePathForStreamAI = async (objectName: string): Promise<string> => {
+      if (!objectName) {
+        return objectName;
+      }
+      
+      // In Stream AI mode, trust the path provided (Stream AI already validated)
+      // But still ensure it's a full path if needed
+      if (isStreamMode) {
+        console.log(`🔍 Stream AI mode: Resolving path for ${objectName}`);
+        // If already a full path (contains /), use as-is
+        if (objectName.includes('/')) {
+          console.log(`✅ Stream AI mode: Using provided full path: ${objectName}`);
+          return objectName;
+        }
+        // Otherwise, construct full path using environment context
+        const fullPath = constructFullPath(objectName, envContext);
+        if (fullPath && fullPath !== objectName) {
+          console.log(`✅ Stream AI mode: Constructed full path: ${objectName} -> ${fullPath}`);
+          return fullPath;
+        }
+        console.log(`✅ Stream AI mode: Using path as-is: ${objectName}`);
+        return objectName;
+      }
+      
+      // For Individual AI mode, do full path resolution (same as create-column)
+      try {
+        // Map AI file paths to correct file paths for UI compatibility
+        let mappedPath = objectName;
+        let matchedFrame: any = null;
+
+        console.log('🔄 Fetching frames to map AI file paths for dataframe-operations...');
+        const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+        if (framesResponse.ok) {
+          const framesData = await framesResponse.json();
+          const frames = Array.isArray(framesData.files) ? framesData.files : [];
+          
+          // Map AI file path to correct file path (same logic as create-column)
+          const mapFilePathToObjectName = (aiFilePath: string) => {
+            if (!aiFilePath) return aiFilePath;
+            
+            // Try exact match first
+            let exactMatch = frames.find((f: any) => f.object_name === aiFilePath);
+            if (exactMatch) {
+              console.log(`✅ Exact match found for dataframe-operations ${aiFilePath}: ${exactMatch.object_name}`);
+              matchedFrame = exactMatch;
+              return exactMatch.object_name;
+            }
+            
+            // Try matching by filename
+            const aiFileName = aiFilePath.includes('/') ? aiFilePath.split('/').pop() : aiFilePath;
+            let filenameMatch = frames.find((f: any) => {
+              const frameFileName = (f.arrow_name || f.object_name || '').split('/').pop();
+              return frameFileName === aiFileName;
+            });
+            
+            if (filenameMatch) {
+              console.log(`✅ Filename match found for dataframe-operations ${aiFilePath} -> ${filenameMatch.object_name}`);
+              matchedFrame = filenameMatch;
+              return filenameMatch.object_name;
+            }
+            
+            // Try partial match
+            let partialMatch = frames.find((f: any) => 
+              f.object_name?.includes(aiFileName) || 
+              f.arrow_name?.includes(aiFileName) ||
+              aiFilePath.includes(f.object_name || '')
+            );
+            
+            if (partialMatch) {
+              console.log(`✅ Partial match found for dataframe-operations ${aiFilePath} -> ${partialMatch.object_name}`);
+              matchedFrame = partialMatch;
+              return partialMatch.object_name;
+            }
+            
+            console.log(`⚠️ No match found for dataframe-operations ${aiFilePath}, using original value`);
+            return aiFilePath;
+          };
+          
+          mappedPath = mapFilePathToObjectName(objectName);
+        } else {
+          console.warn('⚠️ Failed to fetch frames for dataframe-operations mapping, using original file path');
+        }
+        
+        // Build environment context with fallbacks
+        let envWithFallback = { ...envContext };
+        const candidatePath = matchedFrame?.object_name || mappedPath || objectName;
+
+        if (candidatePath.includes('/')) {
+          const parts = candidatePath.split('/');
+          if (parts.length >= 4) {
+            if (!envWithFallback.client_name) envWithFallback.client_name = parts[0];
+            if (!envWithFallback.app_name) envWithFallback.app_name = parts[1];
+            if (!envWithFallback.project_name) envWithFallback.project_name = parts[2];
+          }
+        }
+
+        // Ensure full object name with prefix
+        let cachedPrefix: string | null = null;
+        const ensureFullObjectName = async (objName: string): Promise<string> => {
+          if (!objName) return objName;
+
+          // Keep fully qualified paths that match the active context
+          if (
+            objName.includes('/') &&
+            envWithFallback.client_name &&
+            envWithFallback.app_name &&
+            envWithFallback.project_name &&
+            objName.startsWith(`${envWithFallback.client_name}/${envWithFallback.app_name}/${envWithFallback.project_name}/`)
+          ) {
+            return objName;
+          }
+
+          if (cachedPrefix === null) {
+            try {
+              const params = new URLSearchParams();
+              if (envWithFallback.client_name) params.append('client_name', envWithFallback.client_name);
+              if (envWithFallback.app_name) params.append('app_name', envWithFallback.app_name);
+              if (envWithFallback.project_name) params.append('project_name', envWithFallback.project_name);
+
+              const prefixUrl = params.toString()
+                ? `${VALIDATE_API}/get_object_prefix?${params.toString()}`
+                : `${VALIDATE_API}/get_object_prefix`;
+
+              const prefixRes = await fetch(prefixUrl);
+              if (prefixRes.ok) {
+                const prefixData = await prefixRes.json();
+                cachedPrefix = prefixData.prefix || '';
+              } else {
+                cachedPrefix = '';
+              }
+            } catch (err) {
+              console.warn('⚠️ Failed to fetch object prefix for dataframe-operations:', err);
+              cachedPrefix = '';
+            }
+          }
+
+          if (cachedPrefix) {
+            return `${cachedPrefix}${objName}`;
+          }
+
+          const constructed = constructFullPath(objName, envWithFallback);
+          if (constructed && constructed !== objName) {
+            return constructed;
+          }
+
+          return objName;
+        };
+
+        const resolvedPath = await ensureFullObjectName(mappedPath || objectName);
+        console.log('🧭 Resolved dataframe-operations file path:', {
+          original: objectName,
+          mapped: mappedPath,
+          resolved: resolvedPath
+        });
+        
+        return resolvedPath;
+      } catch (error) {
+        console.error('❌ Error resolving file path for dataframe-operations:', error);
+        return objectName; // Return original on error
+      }
+    };
+    
+    // 🔧 CRITICAL FIX: Resolve all file paths in operations before execution
+    // This ensures proper MinIO access in Stream AI mode
+    if (config.operations && config.operations.length > 0) {
+      console.log('🔄 Resolving file paths for all operations...');
+      for (const operation of config.operations) {
+        if (operation.parameters && operation.parameters.object_name) {
+          const originalPath = operation.parameters.object_name;
+          const resolvedPath = await resolveFilePathForStreamAI(originalPath);
+          if (resolvedPath !== originalPath) {
+            console.log(`✅ Resolved path: ${originalPath} -> ${resolvedPath}`);
+            operation.parameters.object_name = resolvedPath;
+          }
+        }
+        // Also check for file_path and filename
+        if (operation.parameters) {
+          if (operation.parameters.file_path && !operation.parameters.object_name) {
+            const resolvedPath = await resolveFilePathForStreamAI(operation.parameters.file_path);
+            operation.parameters.object_name = resolvedPath;
+            delete operation.parameters.file_path;
+          }
+          if (operation.parameters.filename && !operation.parameters.object_name) {
+            const resolvedPath = await resolveFilePathForStreamAI(operation.parameters.filename);
+            operation.parameters.object_name = resolvedPath;
+            delete operation.parameters.filename;
+          }
+        }
+      }
+      console.log('✅ All file paths resolved');
+    }
+    
     // 🔧 DEFINE operationsCount for use throughout the handler
     const operationsCount = config.operations ? config.operations.length : 0;
     
@@ -192,9 +389,24 @@ export const dataframeOperationsHandler: AtomHandler = {
       console.log('⚠️ No smart_response found, using fallback success message');
     }
     
-    // Automatically execute operations if auto_execute is enabled
-    if (data.execution_plan?.auto_execute && config.operations) {
+    // 🔧 CRITICAL FIX: Default to auto_execute if operations exist but execution_plan is missing
+    const shouldAutoExecute = (data.execution_plan?.auto_execute !== false) && config.operations && config.operations.length > 0;
+    
+    console.log('🔍 EXECUTION CHECK:', {
+      hasExecutionPlan: !!data.execution_plan,
+      autoExecute: data.execution_plan?.auto_execute,
+      hasOperations: !!config.operations,
+      operationsCount: config.operations?.length || 0,
+      shouldAutoExecute
+    });
+    
+    // Automatically execute operations if auto_execute is enabled (or default to true if missing)
+    if (shouldAutoExecute) {
       console.log('🚀 Auto-executing DataFrame operations...');
+      console.log(`📊 Operations to execute: ${config.operations.length}`);
+      config.operations.forEach((op: any, idx: number) => {
+        console.log(`  ${idx + 1}. ${op.api_endpoint || op.operation_name || 'unknown'}: ${op.description || 'no description'}`);
+      });
       const progressTracker = createProgressTracker(config.operations.length, 'operation');
       
        try {
@@ -301,17 +513,35 @@ export const dataframeOperationsHandler: AtomHandler = {
               
               requestBody = operation.parameters;
             } else if (opName === 'filter_rows' || apiEndpoint === '/filter_rows') {
+              // 🔧 CRITICAL FIX: Ensure df_id is available before filter operation
+              let dfIdForFilter = operation.parameters.df_id === 'auto_from_previous' ? currentDfId : operation.parameters.df_id;
+              
+              if (!dfIdForFilter) {
+                console.error(`❌ CRITICAL: No df_id available for filter operation!`);
+                console.error(`❌ currentDfId: ${currentDfId}`);
+                console.error(`❌ operation.parameters.df_id: ${operation.parameters.df_id}`);
+                throw new Error(`Filter operation failed: No df_id available. Please ensure a file is loaded first.`);
+              }
+              
               // 🔧 CRITICAL FIX: Handle case sensitivity for column names with type safety
               const originalColumn = operation.parameters.column;
               const correctedColumn = (originalColumn && typeof originalColumn === 'string') ? 
                 normalizeColumnName(originalColumn, availableColumns) : originalColumn;
               
               requestBody = {
-                df_id: operation.parameters.df_id === 'auto_from_previous' ? currentDfId : operation.parameters.df_id,
+                df_id: dfIdForFilter,
                 column: correctedColumn,
                 value: operation.parameters.value,
                 filter_type: operation.parameters.filter_type || 'simple'
               };
+              
+              console.log(`🔍 FILTER REQUEST DEBUG:`, {
+                'df_id': dfIdForFilter,
+                'column': correctedColumn,
+                'original_column': originalColumn,
+                'value': operation.parameters.value,
+                'availableColumns': availableColumns.length
+              });
               
               if (correctedColumn !== originalColumn) {
                 console.log(`🔧 Fixed filter column case: ${originalColumn} -> ${correctedColumn}`);
@@ -379,13 +609,23 @@ export const dataframeOperationsHandler: AtomHandler = {
                 console.log(`✨ Creating NEW column: ${originalTargetColumn || 'unnamed'} (no validation data)`);
               }
               
+              // 🔧 CRITICAL FIX: Ensure formula starts with '=' (backend requirement)
+              let formula = operation.parameters.formula || '';
+              if (formula && typeof formula === 'string') {
+                const trimmedFormula = formula.trim();
+                if (trimmedFormula && !trimmedFormula.startsWith('=')) {
+                  formula = `=${trimmedFormula}`;
+                  console.log(`🔧 Added '=' prefix to formula: "${operation.parameters.formula}" -> "${formula}"`);
+                }
+              }
+              
               requestBody = {
                 df_id: operation.parameters.df_id === 'auto_from_previous' ? currentDfId : operation.parameters.df_id,
                 target_column: correctedTargetColumn,
-                formula: operation.parameters.formula
+                formula: formula
               };
               
-              console.log(`📋 APPLY_FORMULA REQUEST: target_column="${correctedTargetColumn}", formula="${operation.parameters.formula}"`);
+              console.log(`📋 APPLY_FORMULA REQUEST: target_column="${correctedTargetColumn}", formula="${formula}"`);
               console.log(`📋 COLUMN STATUS: ${availableColumns.includes(correctedTargetColumn) ? 'EXISTING (will overwrite)' : 'NEW (will create)'}`)
             } else {
               // Regular DataFrame operations (SAME as Atom_ai_chat.tsx)
@@ -402,7 +642,12 @@ export const dataframeOperationsHandler: AtomHandler = {
           }
           
           const operationEndpoint = `${DATAFRAME_OPERATIONS_API}${apiEndpoint}`;
-          console.log(`📡 Calling: ${requestMethod} ${operationEndpoint}`, requestBody);
+          console.log(`📡 ===== CALLING BACKEND API =====`);
+          console.log(`📡 Method: ${requestMethod}`);
+          console.log(`📡 Endpoint: ${operationEndpoint}`);
+          console.log(`📡 Request Body:`, JSON.stringify(requestBody, null, 2));
+          console.log(`📡 Current df_id: ${currentDfId}`);
+          console.log(`📡 ===== END API CALL LOG =====`);
           
           // 🔧 CRITICAL FIX: Handle GET requests differently (no body allowed)
           let response: Response;
@@ -437,25 +682,47 @@ export const dataframeOperationsHandler: AtomHandler = {
           
           if (!response.ok) {
             const errorText = await response.text();
-            console.error(`❌ Operation ${operation.operation_name || apiEndpoint} failed:`, {
-              status: response.status,
-              statusText: response.statusText,
-              url: operationEndpoint,
-              requestBody,
-              response: errorText
-            });
+            console.error(`❌ ===== OPERATION FAILED =====`);
+            console.error(`❌ Operation: ${operation.operation_name || apiEndpoint}`);
+            console.error(`❌ Status: ${response.status} ${response.statusText}`);
+            console.error(`❌ URL: ${operationEndpoint}`);
+            console.error(`❌ Request Body:`, JSON.stringify(requestBody, null, 2));
+            console.error(`❌ Response:`, errorText);
+            console.error(`❌ ===== END ERROR LOG =====`);
             
             throw new Error(`Operation ${operation.operation_name || apiEndpoint} failed: ${errorText}`);
           }
           
           const result = await response.json();
-          if (result.df_id) {
+          console.log(`📥 ===== BACKEND RESPONSE RECEIVED =====`);
+          console.log(`📥 Operation: ${operation.operation_name || apiEndpoint}`);
+          console.log(`📥 Status: ${response.status} ${response.statusText}`);
+          console.log(`📥 Response Keys:`, Object.keys(result));
+          console.log(`📥 Full Response:`, JSON.stringify(result, null, 2));
+          console.log(`📥 ===== END RESPONSE LOG =====`);
+          
+          // 🔧 CRITICAL FIX: Handle Celery task response format
+          // The response might be nested: { result: { df_id, headers, rows, ... } }
+          let actualResult = result;
+          if (result.result && typeof result.result === 'object') {
+            // Celery task response with embedded result
+            actualResult = result.result;
+            console.log(`🔧 Extracted nested result from Celery task response`);
+          }
+          
+          // Extract df_id (check both top level and nested)
+          if (actualResult.df_id) {
+            currentDfId = actualResult.df_id;
+            console.log(`✅ Updated currentDfId: ${currentDfId}`);
+          } else if (result.df_id) {
             currentDfId = result.df_id;
+            console.log(`✅ Updated currentDfId from top level: ${currentDfId}`);
           }
           
           // 🔧 CRITICAL: Track available columns for case correction
-          if (result.headers && Array.isArray(result.headers)) {
-            availableColumns = result.headers;
+          const headers = actualResult.headers || result.headers;
+          if (headers && Array.isArray(headers)) {
+            availableColumns = headers;
             console.log(`📊 Updated available columns (${availableColumns.length}): ${availableColumns.join(', ')}`);
             
             // 🔧 STRATEGY: If this is a load operation and we have existing data, 
@@ -465,18 +732,35 @@ export const dataframeOperationsHandler: AtomHandler = {
               console.log(`🔗 COLUMN INFO: Fresh columns loaded, now AI operations will use correct column names`);
               currentDfId = sessionExistingDfId; // Use existing modified DataFrame, not the fresh loaded one
             }
+          } else {
+            console.warn(`⚠️ No headers found in response for ${operation.operation_name || apiEndpoint}`);
+            console.warn(`⚠️ Response structure:`, Object.keys(actualResult));
           }
           
           // Only push results for operations that were actually executed
           if (!operation._skipped) {
-            results.push(result);
-            console.log(`✅ Operation completed: ${operation.operation_name}`);
+            results.push(actualResult);
+            console.log(`✅ Operation completed: ${operation.operation_name || apiEndpoint}`);
+            console.log(`📊 Operation result summary:`, {
+              hasDfId: !!actualResult.df_id,
+              hasHeaders: !!actualResult.headers,
+              hasRows: !!actualResult.rows,
+              rowCount: actualResult.rows?.length || 0
+            });
           } else {
             console.log(`⏭️ Operation skipped: ${operation.operation_name} - ${operation._reason}`);
           }
           
-          // 🔧 CRITICAL: Update UI after each operation if it returns data (SAME as Atom_ai_chat.tsx)
-          if (result && result.headers && result.rows) {
+          // 🔧 CRITICAL: Update UI after each operation if it returns data
+          const rows = actualResult.rows || result.rows;
+          
+          // 🔧 CRITICAL FIX: Ensure we have valid data before updating UI
+          if (!currentDfId && actualResult.df_id) {
+            currentDfId = actualResult.df_id;
+            console.log(`🔧 Fixed missing df_id: ${currentDfId}`);
+          }
+          
+          if (actualResult && headers && rows && Array.isArray(headers) && Array.isArray(rows)) {
             // 🔧 CRITICAL FIX: Always use the actual file name from the current operation or load operation
             const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
             
@@ -493,12 +777,13 @@ export const dataframeOperationsHandler: AtomHandler = {
             
             console.log(`🔧 USING ACTUAL FILE NAME: ${actualFileName} (from load operation: ${loadOperation?.parameters?.object_name})`);
             
+            const types = actualResult.types || result.types || {};
             const dataFrameData = {
-              headers: result.headers,
-              rows: result.rows,
+              headers: headers,
+              rows: rows,
               fileName: actualFileName, // 🔧 CRITICAL: Use actual AI file name, not temporary
-              columnTypes: Object.keys(result.types || {}).reduce((acc, col) => {
-                const type = result.types[col];
+              columnTypes: Object.keys(types).reduce((acc, col) => {
+                const type = types[col];
                 acc[col] = type.includes('Float') || type.includes('Int') ? 'number' : 'text';
                 return acc;
               }, {} as { [key: string]: 'text' | 'number' | 'date' }),
@@ -506,6 +791,8 @@ export const dataframeOperationsHandler: AtomHandler = {
               frozenColumns: 0,
               cellColors: {}
             };
+            
+            console.log(`📊 Prepared DataFrame data: ${rows.length} rows, ${headers.length} columns`);
             
             // 🔧 BATCH UI UPDATES: Collect all UI changes and apply at the end to reduce API calls
             // Store the operation result data but don't update UI immediately
@@ -542,6 +829,23 @@ export const dataframeOperationsHandler: AtomHandler = {
             }
             
             console.log(`🔄 Operation ${operation.operation_name} data prepared for batch UI update (${isLastOperation ? 'FINAL' : 'INTERMEDIATE'})`);
+          } else {
+            console.warn(`⚠️ Operation ${operation.operation_name || apiEndpoint} did not return valid data:`, {
+              hasHeaders: !!headers,
+              hasRows: !!rows,
+              headersType: typeof headers,
+              rowsType: typeof rows,
+              actualResultKeys: Object.keys(actualResult || {}),
+              resultKeys: Object.keys(result || {})
+            });
+            
+            // 🔧 CRITICAL: Even if no data returned, ensure df_id is tracked for next operation
+            if (currentDfId) {
+              console.log(`✅ df_id preserved for next operation: ${currentDfId}`);
+            } else {
+              console.error(`❌ CRITICAL: No df_id available after operation ${operation.operation_name || apiEndpoint}`);
+              console.error(`❌ This will cause subsequent operations to fail!`);
+            }
           }
           
         }
@@ -554,6 +858,9 @@ export const dataframeOperationsHandler: AtomHandler = {
           (op.api_endpoint === "/load_cached" || op.api_endpoint === "/load_file") && op._uiData
         );
         const lastDataOperation = [...config.operations].reverse().find(op => op._uiData);
+        let mappedFile: string | null = null;
+        let tableDataForAutoSave: any = lastDataOperation?._uiData?.tableData || null;
+        let autoSaveSelectedFile: string | null = null;
         
         if (loadOperation && lastDataOperation) {
           console.log(`🔄 AI OPERATIONS COMPLETE: Syncing with Properties panel`);
@@ -561,7 +868,7 @@ export const dataframeOperationsHandler: AtomHandler = {
           console.log(`📊 Final operation: ${lastDataOperation.operation_name}`);
           
           // 🔧 CRITICAL: Map AI file path to object_name (same as concat/merge handlers)
-          let mappedFile = loadOperation.parameters.object_name;
+          mappedFile = loadOperation.parameters.object_name;
           
           try {
             console.log('🔄 Fetching frames to map AI file path to object_name...');
@@ -728,6 +1035,8 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
             }, 100);
             
             console.log(`✅ Data updated - Properties dropdown + Canvas + Operations all synced`);
+            tableDataForAutoSave = lastDataOperation._uiData.tableData;
+            autoSaveSelectedFile = mappedFile;
           }
           
         } else if (lastDataOperation) {
@@ -760,6 +1069,8 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
           });
           
           console.log(`✅ Operations applied - Canvas updated, dropdown unchanged`);
+          tableDataForAutoSave = lastDataOperation._uiData.tableData;
+          autoSaveSelectedFile = existingSettings?.selectedFile || mappedFile || loadOperation?.parameters?.object_name || null;
           
         } else {
           console.log(`⚠️ FALLBACK: No operation data found`);
@@ -778,6 +1089,36 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
             lastLoadedFileName: loadOp?.parameters?.object_name || fallbackSettings?.lastLoadedFileName, // 🔧 Track last loaded file
             lastSessionId: sessionId // 🔧 Track current session
           });
+        }
+        const shouldAutoSave =
+          !!tableDataForAutoSave &&
+          (
+            !loadOperation ||
+            config.operations.some(op => op.api_endpoint !== "/load_cached" && op.api_endpoint !== "/load_file")
+          );
+        
+        if (shouldAutoSave) {
+          try {
+            const normalizedWorkflowAlias = workflowStepAlias?.trim();
+            const fallbackAliasBase = `${atomId}_dfops_${sessionId || 'session'}`;
+            const stepAliasForSave = normalizedWorkflowAlias || `${fallbackAliasBase}_${Date.now()}`;
+            await autoSaveStepResult({
+              atomType: 'dataframe-operations',
+              atomId,
+              stepAlias: stepAliasForSave,
+              result: {
+                tableData: tableDataForAutoSave,
+                selectedFile: autoSaveSelectedFile || mappedFile || loadOperation?.parameters?.object_name || '',
+                baseFileName: tableDataForAutoSave?.fileName || getFilename(autoSaveSelectedFile || mappedFile || loadOperation?.parameters?.object_name || ''),
+                dfId: currentDfId
+              },
+              updateAtomSettings,
+              setMessages,
+              isStreamMode
+            });
+          } catch (autoSaveError) {
+            console.error('⚠️ DataFrame auto-save failed:', autoSaveError);
+          }
         }
         
         // 🔧 SMART RESPONSE FIX: Don't add duplicate message if smart_response was already shown

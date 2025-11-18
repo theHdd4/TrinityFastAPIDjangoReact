@@ -39,8 +39,19 @@ export const chartMakerHandler: AtomHandler = {
     console.log('📝 User Prompt received for session:', sessionId);
     
     // 🔧 UNIFIED APPROACH: chart_json is always an array
-    const chartsList = Array.isArray(data.chart_json) ? data.chart_json : [data.chart_json];
+    const chartsList = Array.isArray(data.chart_json) ? data.chart_json : data.chart_json ? [data.chart_json] : [];
     const numberOfCharts = chartsList.length;
+    
+    if (numberOfCharts === 0) {
+      console.warn('⚠️ Chart maker success payload did not include any chart configurations.');
+      const errorMsg = createErrorMessage(
+        'Chart generation',
+        'No chart configuration returned from AI assistant.',
+        'Please try asking for the chart again with a clear file name, x-axis, and y-axis.'
+      );
+      setMessages(prev => [...prev, errorMsg]);
+      return { success: false, error: 'Empty chart configuration' };
+    }
     
     console.log('📊 Charts in chart_json:', numberOfCharts);
     console.log('🔍 ===== END CHART ANALYSIS =====');
@@ -49,11 +60,15 @@ export const chartMakerHandler: AtomHandler = {
     let targetFile = '';
     
     // Priority 1: Use AI-provided file name (exact keys from LLM)
+    // 🔧 CRITICAL FIX: Check both file_name and data_source (LLM may return either)
     if (data.file_name) {
       targetFile = data.file_name;
-      console.log('🎯 Using AI-provided file name:', targetFile);
+      console.log('🎯 Using AI-provided file_name:', targetFile);
+    } else if (data.data_source) {
+      targetFile = data.data_source;
+      console.log('🎯 Using AI-provided data_source:', targetFile);
     } else {
-      console.log('⚠️ No file name found in AI response');
+      console.log('⚠️ No file name found in AI response (checked file_name and data_source)');
     }
     
     // 🔧 CRITICAL: Find the correct object_name for the dropdown
@@ -102,18 +117,20 @@ export const chartMakerHandler: AtomHandler = {
       console.log('⚠️ Failed to fetch frames list, using targetFile as fallback:', error);
     }
     
+    const resolvedDataSource = dataSourceObjectName || targetFile;
+    
     console.log('🔍 Setting dataSource properties:', {
       targetFile,
       dataSourceObjectName,
-      dataSource: dataSourceObjectName,
-      selectedDataSource: dataSourceObjectName,
+      resolvedDataSource,
+      selectedDataSource: resolvedDataSource,
       fileName: targetFile
     });
     
     // 🔧 CRITICAL: Update settings with correct dataSource immediately
     updateAtomSettings(atomId, {
-      dataSource: dataSourceObjectName, // 🔧 CRITICAL: Use object_name for dropdown compatibility
-      selectedDataSource: dataSourceObjectName, // 🔧 FIX: Use object_name for dropdown
+      dataSource: resolvedDataSource, // 🔧 CRITICAL: Use object_name for dropdown compatibility
+      selectedDataSource: resolvedDataSource, // 🔧 FIX: Use object_name for dropdown
       fileName: targetFile, // 🔧 FIX: Add fileName property for visibility in properties section
     });
     
@@ -160,6 +177,19 @@ export const chartMakerHandler: AtomHandler = {
         filters = { ...filters, ...chartConfig.filters };
         console.log('🔧 Additional filters from chartConfig.filters:', chartConfig.filters);
       }
+
+      const legendFieldCandidate =
+        chartConfig.legend_field ??
+        chartConfig.legendField ??
+        chartConfig.segregated_field ??
+        chartConfig.segregatedField ??
+        traces[0]?.legend_field ??
+        '';
+      const normalizedLegendField =
+        legendFieldCandidate && legendFieldCandidate !== 'aggregate'
+          ? legendFieldCandidate
+          : '';
+      const legendField = normalizedLegendField || 'aggregate';
       
       return {
         id: `ai_chart_${chartConfig.chart_id || index + 1}_${Date.now()}`,
@@ -169,6 +199,7 @@ export const chartMakerHandler: AtomHandler = {
         xAxis: traces[0]?.x_column || '', // 🔧 FIX: Keep original case for backend validation
         yAxis: traces[0]?.y_column || '', // 🔧 FIX: Keep original case for backend validation
         filters: filters, // 🔧 FILTER INTEGRATION: Use AI-generated filters
+        legendField,
         chartRendered: false,
         isAdvancedMode: traces.length > 1,
         traces: traces.map((trace: any, traceIndex: number) => ({
@@ -180,24 +211,32 @@ export const chartMakerHandler: AtomHandler = {
           color: trace.color || undefined,
           aggregation: trace.aggregation || 'sum',
           chart_type: trace.chart_type || chartType, // 🔧 CRITICAL FIX: Add chart_type to traces
-          filters: filters // 🔧 FILTER INTEGRATION: Apply same filters to traces
+          filters: filters, // 🔧 FILTER INTEGRATION: Apply same filters to traces
+          legend_field:
+            trace.legend_field ||
+            trace.legendField ||
+            trace.segregated_field ||
+            trace.segregatedField ||
+            (legendField !== 'aggregate' ? legendField : undefined)
         }))
       };
     });
     
     console.log('🔧 Processed charts:', charts.length);
     
-    // 🔧 CRITICAL FIX: Update atom settings with the AI configuration AND load data
+    // 🔧 CRITICAL FIX: Update atom settings with the AI configuration
+    // Set charts first so component knows something is coming
+    // Set fileId even if it's just the filename - component will show loading state
     updateAtomSettings(atomId, { 
       aiConfig: data,
       aiMessage: data.message,
       // Add the AI-generated charts to the charts array
       charts: charts,
       // 🔧 CRITICAL: Set proper data source and file ID for chart rendering
-      dataSource: dataSourceObjectName, // 🔧 CRITICAL: Use object_name for dropdown compatibility
-      fileId: targetFile,
+      dataSource: resolvedDataSource, // 🔧 CRITICAL: Use object_name for dropdown compatibility
+      fileId: targetFile, // 🔧 CRITICAL: Set fileId so component knows file is being loaded
       fileName: targetFile, // 🔧 FIX: Add fileName property for visibility in properties section
-      selectedDataSource: dataSourceObjectName, // 🔧 FIX: Use object_name for dropdown
+      selectedDataSource: resolvedDataSource, // 🔧 FIX: Use object_name for dropdown
       // Set the first chart as active
       currentChart: charts[0],
       // Mark that AI has configured the chart(s)
@@ -212,11 +251,13 @@ export const chartMakerHandler: AtomHandler = {
       yAxisColumn: charts[0].yAxis,
       // 🔧 CRITICAL: Set chart rendering state to trigger data loading
       chartRendered: false,
-      chartLoading: false,
+      chartLoading: true, // 🔧 FIX: Set loading to true initially
       // Include environment context
       envContext,
       lastUpdateTime: Date.now()
     });
+    
+    console.log('✅ Initial atom settings updated with charts configuration and fileId:', targetFile);
     
     // Connect to file system and load data
     try {
@@ -226,7 +267,7 @@ export const chartMakerHandler: AtomHandler = {
       const loadResponse = await fetch(`${CHART_MAKER_API}/load-saved-dataframe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ object_name: targetFile })
+        body: JSON.stringify({ object_name: resolvedDataSource })
       });
       
       if (loadResponse.ok) {
@@ -234,10 +275,10 @@ export const chartMakerHandler: AtomHandler = {
         console.log('✅ File data loaded successfully:', fileData);
         
         updateAtomSettings(atomId, {
-          dataSource: dataSourceObjectName, // 🔧 CRITICAL: Use object_name for dropdown compatibility
+          dataSource: resolvedDataSource, // 🔧 CRITICAL: Use object_name for dropdown compatibility
           fileId: fileData.file_id,
           fileName: targetFile, // 🔧 FIX: Add fileName property for visibility in properties section
-          selectedDataSource: dataSourceObjectName, // 🔧 FIX: Use object_name for dropdown
+          selectedDataSource: resolvedDataSource, // 🔧 FIX: Use object_name for dropdown
           uploadedData: {
             columns: fileData.columns,
             rows: fileData.sample_data,
@@ -312,7 +353,13 @@ export const chartMakerHandler: AtomHandler = {
               name: trace.name || `Trace ${traceIndex + 1}`,
               chart_type: trace.chart_type || chartType,
               aggregation: trace.aggregation || 'sum',
-              filters: enhancedTraceFilters[traceIndex] || {}
+              filters: enhancedTraceFilters[traceIndex] || {},
+              legend_field:
+                trace.legend_field ||
+                trace.legendField ||
+                trace.segregated_field ||
+                trace.segregatedField ||
+                (chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined)
             })),
             title: title,
             filters: processedFilters
@@ -400,15 +447,32 @@ export const chartMakerHandler: AtomHandler = {
         const chartResults = await Promise.all(chartPromises);
         generatedCharts.push(...chartResults);
         
-        // Update atom settings with generated charts
+        // 🔧 CRITICAL FIX: Update atom settings with generated charts AND ensure all required fields are set
+        // This prevents white screen when component checks for fileId/uploadedData
         updateAtomSettings(atomId, {
           charts: generatedCharts,
           currentChart: generatedCharts[0] || charts[0],
           chartRendered: generatedCharts.some(chart => chart.chartRendered),
-          chartLoading: false
+          chartLoading: false,
+          // 🔧 CRITICAL: Ensure fileId and uploadedData are still set (component requires these)
+          fileId: fileData.file_id,
+          uploadedData: {
+            columns: fileData.columns,
+            rows: fileData.sample_data,
+            numeric_columns: fileData.numeric_columns,
+            categorical_columns: fileData.categorical_columns,
+            unique_values: fileData.unique_values,
+            file_id: fileData.file_id,
+            row_count: fileData.row_count
+          },
+          // 🔧 CRITICAL: Ensure dataSource is set for component rendering
+          dataSource: resolvedDataSource,
+          selectedDataSource: resolvedDataSource,
+          fileName: targetFile
         });
         
         console.log('🎉 Charts processed:', generatedCharts.length);
+        console.log('✅ Final atom settings updated with all required fields for rendering');
         
         const successCount = generatedCharts.filter(chart => chart.chartRendered).length;
         const totalCount = generatedCharts.length;

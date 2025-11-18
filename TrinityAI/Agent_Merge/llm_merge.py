@@ -4,9 +4,12 @@ import logging
 import os
 import uuid
 from datetime import datetime
+from typing import Dict, Any, Optional
 
 from Agent_Merge.ai_logic import build_merge_prompt, call_merge_llm, extract_json
 from file_loader import FileLoader
+from file_analyzer import FileAnalyzer
+from file_context_resolver import FileContextResolver, FileContextResult
 
 # --- Setup a logger for clear, informative output ---
 logger = logging.getLogger("smart.merge")
@@ -36,9 +39,24 @@ class SmartMergeAgent:
             minio_bucket=bucket,
             object_prefix=prefix
         )
+        self.file_analyzer = FileAnalyzer(
+            minio_endpoint=minio_endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            bucket=bucket,
+            prefix=prefix,
+            secure=False
+        )
+        self.file_context_resolver = FileContextResolver(
+            file_loader=self.file_loader,
+            file_analyzer=self.file_analyzer
+        )
         
         # Files will be loaded lazily when needed
         self.files_with_columns = {}
+        self.files_metadata: Dict[str, Dict[str, Any]] = {}
+        self._raw_files_with_columns: Dict[str, Any] = {}
+        self._last_context_selection: Optional[FileContextResult] = None
         self._files_loaded = False
 
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
@@ -128,98 +146,61 @@ class SmartMergeAgent:
             logger.error(f"Failed to update prefix: {e}")
 
     def _load_files(self) -> None:
-        """Load available files from MinIO with their columns using dynamic paths"""
+        """Load available files using the standardized loader and update resolver."""
         try:
-            try:
-                from minio import Minio
-                from minio.error import S3Error
-                import pyarrow as pa
-                import pyarrow.ipc as ipc
-                import pandas as pd
-                import io
-            except ImportError as ie:
-                logger.error(f"Failed to import required libraries: {ie}")
-                self.files_with_columns = {}
-                return
-            
-            # Update prefix to current path before loading files
             self._maybe_update_prefix()
-            
-            logger.info(f"Loading files with prefix: {self.prefix}")
-            
-            # Initialize MinIO client
-            minio_client = Minio(
-                self.file_loader.minio_endpoint,
-                access_key=self.file_loader.minio_access_key,
-                secret_key=self.file_loader.minio_secret_key,
-                secure=False
-            )
-            
-            # List objects in bucket with current prefix
-            objects = minio_client.list_objects(self.file_loader.minio_bucket, prefix=self.prefix, recursive=True)
-            
-            files_with_columns = {}
-            
-            for obj in objects:
-                try:
-                    if obj.object_name.endswith('.arrow'):
-                        # Get Arrow file data
-                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
-                        data = response.read()
-                        
-                        # Read Arrow file
-                        with pa.ipc.open_file(pa.BufferReader(data)) as reader:
-                            table = reader.read_all()
-                            columns = table.column_names
-                            files_with_columns[obj.object_name] = {"columns": columns}
-                            
-                        logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
-                    
-                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
-                        # For CSV/Excel files, try to read headers
-                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
-                        data = response.read()
-                        
-                        if obj.object_name.endswith('.csv'):
-                            # Read CSV headers
-                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
-                            columns = list(df_sample.columns)
-                        else:
-                            # Read Excel headers
-                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
-                            columns = list(df_sample.columns)
-                        
-                        files_with_columns[obj.object_name] = {"columns": columns}
-                        logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
-                    continue
-            
-            self.files_with_columns = files_with_columns
-            logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
-            
+            files_with_columns = self.file_loader.load_files()
+            self._raw_files_with_columns = files_with_columns or {}
+            self.files_with_columns = self._raw_files_with_columns
+            self.files_metadata = {}
+            self.file_context_resolver.update_files(self._raw_files_with_columns)
+            self._last_context_selection = None
+            logger.info(f"Loaded {len(self.files_with_columns)} files from MinIO")
         except Exception as e:
             logger.error(f"Error loading files from MinIO: {e}")
             self.files_with_columns = {}
+            self._raw_files_with_columns = {}
+            self.files_metadata = {}
+            self.file_context_resolver.update_files({})
+            self._last_context_selection = None
 
 
 
     def _enhance_context_with_columns(self, context: str, user_prompt: str) -> str:
-        """Adds file and column information to the LLM context for better accuracy."""
-        # Use FileLoader's standardized file info string method
-        file_info = self.file_loader.get_file_info_string(self.files_with_columns)
-        
-        context += "\n\n--- AVAILABLE FILES AND COLUMNS ---\n"
-        context += f"Here are all the files available for merging: {file_info}\n"
-        context += "\nDetailed file information:\n"
-        context += json.dumps(self.files_with_columns, indent=2)
+        """Adds relevant file/column information from the resolver to improve accuracy."""
+        if not self.files_with_columns:
+            context += "\n\n--- FILE CONTEXT ---\nNo files are currently loaded. Upload or select data before merging."
+            self._last_context_selection = None
+            return context
+
+        selection = self.file_context_resolver.resolve(
+            user_prompt=user_prompt,
+            top_k=4,
+            include_metadata=True
+        )
+        self._last_context_selection = selection
+
+        relevant = selection.relevant_files or self.file_context_resolver.get_available_files()
+        context += "\n\n--- RELEVANT FILES AND COLUMNS ---\n"
+        context += json.dumps(relevant, indent=2)
+
+        if selection.file_details:
+            context += "\n\n--- FILE DETAILS ---\n"
+            context += json.dumps(selection.file_details, indent=2)
+
+        if selection.matched_columns:
+            context += "\n\n--- MATCHED COLUMNS ---\n"
+            context += json.dumps(selection.matched_columns, indent=2)
+
+        if selection.other_files:
+            context += "\n\nOther available files (not included above): " + ", ".join(selection.other_files)
+
         context += "\n\n--- INSTRUCTIONS FOR LLM ---\n"
         context += "1. Analyze the user's request to identify which files they want to merge\n"
         context += "2. Use the column information above to determine the best join columns\n"
         context += "3. If the user's request is unclear, suggest appropriate files based on their description\n"
         context += "4. Always verify that the suggested files exist in the available files list\n"
-        
+
         return context
 
     def _build_context(self, session_id: str) -> str:
@@ -280,8 +261,21 @@ class SmartMergeAgent:
         # 2. Enhance context with file/column info
         context = self._enhance_context_with_columns(context, user_prompt)
         
-        # 3. Build the final prompt for the LLM
-        prompt = build_merge_prompt(user_prompt, self.files_with_columns, context)
+        # 3. Build the final prompt for the LLM using relevant file context
+        selection = self._last_context_selection or self.file_context_resolver.resolve(
+            user_prompt=user_prompt,
+            top_k=4,
+            include_metadata=True
+        )
+        available_for_prompt = selection.to_object_column_mapping(self._raw_files_with_columns) if selection else self._raw_files_with_columns
+        prompt = build_merge_prompt(
+            user_prompt,
+            available_for_prompt,
+            context,
+            file_details=selection.file_details if selection else {},
+            other_files=selection.other_files if selection else [],
+            matched_columns=selection.matched_columns if selection else {}
+        )
         logger.info("Sending final prompt to LLM...")
         logger.debug(f"LLM Prompt: {prompt}")
 

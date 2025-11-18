@@ -40,11 +40,11 @@ const StreamStepMonitor: React.FC<StreamStepMonitorProps> = ({
   const progressPercentage = Math.round((currentStep / totalSteps) * 100);
 
   return (
-    <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl border-2 border-gray-200 shadow-xl p-6 space-y-4 animate-fade-in">
+    <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl border-2 border-gray-200 shadow-xl p-6 space-y-4 animate-fade-in w-full">
       {/* Header with Progress */}
       <div>
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-bold text-gray-800 font-inter text-lg">Workflow Execution</h3>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-2">
+          <h3 className="font-bold text-gray-800 font-inter text-lg leading-tight">Workflow Execution</h3>
           <span className="text-sm font-semibold text-gray-600 font-inter">
             Step {currentStep} of {totalSteps}
           </span>
@@ -69,7 +69,7 @@ const StreamStepMonitor: React.FC<StreamStepMonitorProps> = ({
         {steps.map((step) => (
           <div
             key={step.step_number}
-            className={`flex items-start gap-3 p-3 rounded-xl transition-all duration-200 ${
+            className={`flex flex-wrap sm:flex-nowrap items-start gap-3 p-3 rounded-xl transition-all duration-200 ${
               step.status === 'running' 
                 ? 'bg-blue-50 border-2 border-blue-200 shadow-md' 
                 : step.status === 'completed'
@@ -94,7 +94,7 @@ const StreamStepMonitor: React.FC<StreamStepMonitorProps> = ({
 
             {/* Step Content */}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
                 <span className="text-sm font-bold text-gray-800 font-inter">
                   {getAtomIcon(step.atom_id)} {step.atom_id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                 </span>
@@ -115,7 +115,7 @@ const StreamStepMonitor: React.FC<StreamStepMonitorProps> = ({
                 )}
               </div>
 
-              <p className="text-xs text-gray-600 font-inter leading-relaxed">
+              <p className="text-xs text-gray-600 font-inter leading-relaxed break-words">
                 {step.description}
               </p>
 

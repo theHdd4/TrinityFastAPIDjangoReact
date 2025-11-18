@@ -48,7 +48,9 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       original: settings.fileKeyMap?.[name] || name,
     })) || []
   );
-  const [selectedMasterFile, setSelectedMasterFile] = useState<string>("");
+  const [selectedMasterFile, setSelectedMasterFile] = useState<string>(
+    settings.selectedMasterFile || ""
+  );
   const [uploadedMasterFiles, setUploadedMasterFiles] = useState<File[]>([]);
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState<string>("");
@@ -146,16 +148,87 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
 
   // Load existing configuration if validator id already present
   useEffect(() => {
-    if (!validatorId) return;
+    if (!validatorId) {
+      // If no validatorId but we have files in settings, use them
+      if (settings.requiredFiles && settings.requiredFiles.length > 0) {
+        setAllAvailableFiles(
+          settings.requiredFiles.map((name) => ({
+            name,
+            source: "upload",
+            original: settings.fileKeyMap?.[name] || name,
+          }))
+        );
+      }
+      return;
+    }
     fetch(`${VALIDATE_API}/get_validator_config/${validatorId}`)
       .then((res) => res.json())
       .then((cfg) => {
         const files = cfg.file_keys || [];
-        if (files.length > 0) {
-          setAllAvailableFiles(
-            files.map((f: string) => ({ name: f, source: "upload" })),
-          );
-          if (!selectedMasterFile) setSelectedMasterFile(files[0]);
+        // Always preserve settings.requiredFiles (saved master files) even if backend returns different files
+        const settingsFiles = settings.requiredFiles && settings.requiredFiles.length > 0
+          ? settings.requiredFiles.map((name) => ({
+              name,
+              source: "upload",
+              original: settings.fileKeyMap?.[name] || name,
+            }))
+          : [];
+        
+        if (files.length > 0 || settingsFiles.length > 0) {
+          // Preserve existing allAvailableFiles and merge with fetched files
+          // This ensures we don't lose data if the component re-renders
+          setAllAvailableFiles((prev) => {
+            // Create maps for quick lookup
+            const prevMap = new Map(prev.map(f => [f.name, f]));
+            
+            // Start with all files from settings (saved master files) - these are the source of truth
+            const resultMap = new Map<string, { name: string; source: string; original: string }>();
+            
+            // First, add all settings files (saved master files)
+            settingsFiles.forEach(file => {
+              resultMap.set(file.name, file);
+            });
+            
+            // Then, add files from backend that aren't in settings
+            files.forEach((f: string) => {
+              if (!resultMap.has(f)) {
+                // Prefer existing prev data if available
+                const fromPrev = prevMap.get(f);
+                if (fromPrev) {
+                  resultMap.set(f, fromPrev as { name: string; source: string; original: string });
+                } else {
+                  resultMap.set(f, {
+                    name: f,
+                    source: "upload",
+                    original: settings.fileKeyMap?.[f] || f,
+                  });
+                }
+              }
+            });
+            
+            // Convert map to array
+            return Array.from(resultMap.values());
+          });
+          // Restore selectedMasterFile from settings, or use first file if not set
+          const savedMasterFile = settings.selectedMasterFile;
+          if (savedMasterFile && files.includes(savedMasterFile)) {
+            setSelectedMasterFile(savedMasterFile);
+          } else if (!selectedMasterFile || !files.includes(selectedMasterFile)) {
+            setSelectedMasterFile(files[0]);
+            // Save to settings
+            updateSettings(atomId, { selectedMasterFile: files[0] });
+          }
+        } else {
+          // If no files from backend but we have files in settings, keep them
+          if (settings.requiredFiles && settings.requiredFiles.length > 0) {
+            setAllAvailableFiles(
+              settings.requiredFiles.map((name) => ({
+                name,
+                source: "upload",
+                original: settings.fileKeyMap?.[name] || name,
+              }))
+            );
+          }
         }
 
         setSchemaSamples(cfg.schemas || {});
@@ -215,7 +288,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [validatorId]); // Run when validatorId changes, not just once
 
   const periodicityOptions = [
     { value: "daily", label: "Daily" },
@@ -255,6 +328,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         backendNames.map((n) => ({ name: n, source: "upload", original: n }))
       );
       setSelectedMasterFile(backendNames[0]);
+      // Save selectedMasterFile to settings
+      updateSettings(atomId, { selectedMasterFile: backendNames[0] });
       const cfg = await fetch(
         `${VALIDATE_API}/get_validator_config/${id}`,
       ).then((r) => r.json());
@@ -305,6 +380,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
     delete newFileKeyMap[oldName];
     if (selectedMasterFile === oldName) {
       setSelectedMasterFile(newName);
+      // Save updated selectedMasterFile to settings
+      updateSettings(atomId, { selectedMasterFile: newName });
       setSkipFetch(true);
     }
 
@@ -333,7 +410,11 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   const deleteMasterFile = (name: string) => {
     setAllAvailableFiles(prev => prev.filter(f => f.name !== name));
     setUploadedMasterFiles(prev => prev.filter(f => f.name !== name));
-    if (selectedMasterFile === name) setSelectedMasterFile('');
+    if (selectedMasterFile === name) {
+      setSelectedMasterFile('');
+      // Clear selectedMasterFile from settings when file is deleted
+      updateSettings(atomId, { selectedMasterFile: '' });
+    }
     const newMap = { ...(settings.fileKeyMap || {}) } as Record<string, string>;
     delete newMap[name];
     updateSettings(atomId, { fileKeyMap: newMap });
@@ -408,7 +489,17 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   const handleDataTypeChange = (column: string, value: string) => {
-    setColumnDataTypes((prev) => ({ ...prev, [column]: value }));
+    const updatedColumnDataTypes = { ...columnDataTypes, [column]: value };
+    setColumnDataTypes(updatedColumnDataTypes);
+    // Immediately save to settings so changes persist when switching master files
+    if (selectedMasterFile) {
+      updateSettings(atomId, {
+        columnConfig: {
+          ...(settings.columnConfig || {}),
+          [selectedMasterFile]: updatedColumnDataTypes,
+        },
+      });
+    }
   };
 
   useEffect(() => {
@@ -819,6 +910,8 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
         delete renamedColumns[oldName];
       }
     });
+    // Only update the currently selected master file's configuration
+    // Preserve all other master files' configurations
     renamedValidations = {
       ...renamedValidations,
       [selectedMasterFile]: {
@@ -833,17 +926,55 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       ...renamedColumns,
       [selectedMasterFile]: columnDataTypes,
     };
+    
+    // Only clean up entries for files that no longer exist in allAvailableFiles
+    // This ensures we don't accidentally remove other master files' data
     const finalFiles = allAvailableFiles.map(f => f.name);
-    Object.keys(renamedValidations).forEach(k => { if (!finalFiles.includes(k)) delete renamedValidations[k]; });
-    Object.keys(renamedColumns).forEach(k => { if (!finalFiles.includes(k)) delete renamedColumns[k]; });
+    Object.keys(renamedValidations).forEach(k => { 
+      if (!finalFiles.includes(k) && k !== selectedMasterFile) {
+        delete renamedValidations[k];
+      }
+    });
+    Object.keys(renamedColumns).forEach(k => { 
+      if (!finalFiles.includes(k) && k !== selectedMasterFile) {
+        delete renamedColumns[k];
+      }
+    });
 
-    const newKeyMap = allAvailableFiles.reduce<Record<string, string>>(
-      (acc, f) => ({ ...acc, [f.name]: f.original }),
+    // Only include master files that have saved configurations
+    // This ensures only configured master files appear in the canvas
+    const savedMasterFiles = Object.keys(renamedValidations).filter(
+      (fileName) => renamedValidations[fileName] && 
+      (renamedValidations[fileName].ranges?.length > 0 ||
+       renamedValidations[fileName].periodicities?.length > 0 ||
+       renamedValidations[fileName].regex?.length > 0 ||
+       renamedValidations[fileName].nulls?.length > 0 ||
+       renamedValidations[fileName].referentials?.length > 0 ||
+       (renamedColumns[fileName] && Object.keys(renamedColumns[fileName]).length > 0))
+    );
+    
+    // Also include the currently selected master file if it has column types defined
+    if (selectedMasterFile && columnDataTypes && Object.keys(columnDataTypes).length > 0) {
+      if (!savedMasterFiles.includes(selectedMasterFile)) {
+        savedMasterFiles.push(selectedMasterFile);
+      }
+    }
+    
+    // Build fileKeyMap only for saved master files
+    const newKeyMap = savedMasterFiles.reduce<Record<string, string>>(
+      (acc, fileName) => {
+        const fileInfo = allAvailableFiles.find(f => f.name === fileName);
+        if (fileInfo) {
+          acc[fileName] = fileInfo.original;
+        }
+        return acc;
+      },
       {}
     );
+    
     updateSettings(atomId, {
       validatorId,
-      requiredFiles: finalFiles,
+      requiredFiles: savedMasterFiles, // Only include master files with saved configurations
       validations: renamedValidations,
       columnConfig: renamedColumns,
       fileKeyMap: newKeyMap,
@@ -1061,7 +1192,21 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
                 </label>
                 <Select
                   value={selectedMasterFile}
-                  onValueChange={setSelectedMasterFile}
+                  onValueChange={(value) => {
+                    // Save current master file's column data types before switching
+                    if (selectedMasterFile && Object.keys(columnDataTypes).length > 0) {
+                      updateSettings(atomId, {
+                        columnConfig: {
+                          ...(settings.columnConfig || {}),
+                          [selectedMasterFile]: columnDataTypes,
+                        },
+                        selectedMasterFile: value,
+                      });
+                    } else {
+                      updateSettings(atomId, { selectedMasterFile: value });
+                    }
+                    setSelectedMasterFile(value);
+                  }}
                 >
                   <SelectTrigger className="bg-white border-gray-300">
                     <SelectValue placeholder="Select a master file..." />

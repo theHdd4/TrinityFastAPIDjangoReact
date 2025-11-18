@@ -464,6 +464,11 @@ const LaboratoryMode = () => {
     setAuxActive(prev => (prev === 'settings' ? null : 'settings'));
   };
 
+  const openSettingsPanel = () => {
+    if (!canEdit) return;
+    setAuxActive('settings');
+  };
+
   const toggleHelpPanel = () => {
     if (!canEdit) return;
     setAuxActive(prev => (prev === 'help' ? null : 'help'));
@@ -812,6 +817,7 @@ const LaboratoryMode = () => {
                 onCardSelect={handleCardSelect}
                 selectedCardId={selectedCardId}
                 onToggleSettingsPanel={toggleSettingsPanel}
+                onOpenSettingsPanel={openSettingsPanel}
                 onToggleHelpPanel={toggleHelpPanel}
                 canEdit={canEdit}
                 cardEditors={cardEditors}

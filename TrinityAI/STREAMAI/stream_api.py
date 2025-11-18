@@ -80,6 +80,20 @@ async def execute_workflow_websocket(websocket: WebSocket):
         user_id = message.get("user_id", "default_user")
         session_id = message.get("session_id", None)  # Frontend chat session ID
         chat_id = message.get("chat_id", None)  # Frontend chat ID
+        history_summary = message.get("history_summary")
+        mentioned_files = message.get("mentioned_files") or []
+        if isinstance(mentioned_files, str):
+            mentioned_files = [mentioned_files]
+        elif isinstance(mentioned_files, list):
+            cleaned_files = []
+            for entry in mentioned_files:
+                if isinstance(entry, str):
+                    cleaned_files.append(entry)
+                elif isinstance(entry, bytes):
+                    cleaned_files.append(entry.decode("utf-8", "ignore"))
+            mentioned_files = cleaned_files
+        else:
+            mentioned_files = []
         
         logger.info(f"🔑 Session ID: {session_id}, Chat ID: {chat_id}")
         
@@ -91,7 +105,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
             project_context=project_context,
             user_id=user_id,
             frontend_session_id=session_id,
-            frontend_chat_id=chat_id
+            frontend_chat_id=chat_id,
+            history_override=history_summary,
+            chat_file_names=mentioned_files,
         )
         
     except WebSocketDisconnect:

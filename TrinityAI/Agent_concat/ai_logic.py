@@ -1,16 +1,35 @@
 import json
 import re
 import requests
+from typing import Dict, Any, List, Optional
 
 
-def build_prompt(user_prompt: str, available_files_with_columns: dict, context: str) -> str:
+def build_prompt(
+    user_prompt: str,
+    available_files_with_columns: dict,
+    context: str,
+    file_details: Optional[Dict[str, Any]] = None,
+    other_files: Optional[List[str]] = None,
+    matched_columns: Optional[Dict[str, List[str]]] = None
+) -> str:
     """Return the LLM prompt for the concat assistant."""
+    file_details_json = json.dumps(file_details, indent=2) if file_details else "None"
+    other_files_line = ", ".join(other_files) if other_files else "None"
+    matched_columns_json = json.dumps(matched_columns, indent=2) if matched_columns else "None"
     return f"""You are an intelligent concatenation assistant with perfect memory access to complete conversation history.
 
 USER INPUT: "{user_prompt}"
 
 AVAILABLE FILES WITH COLUMNS:
 {json.dumps(available_files_with_columns, indent=2)}
+
+RELEVANT FILE METADATA:
+{file_details_json}
+
+MATCHED COLUMNS (based on prompt):
+{matched_columns_json}
+
+OTHER AVAILABLE FILES (REFERENCE ONLY): {other_files_line}
 
 COMPLETE CONVERSATION CONTEXT:
 {context}
@@ -38,20 +57,21 @@ GENERAL RESPONSE (for questions, file info, suggestions):
   "suggestions": [
     "Here's what I found about your files:",
     "Available files for concatenation: [list relevant files]",
+    "Concatenation direction options: vertical (stack), horizontal (append columns)",
     "Based on your previous patterns, I recommend:",
-    "To complete concatenation, specify: files + direction",
+    "To complete concatenation, specify: files + direction + optional column alignment",
     "Or say 'yes' to use my suggestions"
   ],
   "message": "Here's what I can help you with",
-  "smart_response": "I'd be happy to help you with Concatenation operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you combine your data files using various strategies. What files would you like to combine?",
+  "smart_response": "I'd be happy to help you with concatenation operations! Tell me which files you'd like to combine and whether you prefer stacking rows (vertical) or adding columns side by side (horizontal).",
   "reasoning": "Providing helpful information and guidance",
   "file_analysis": {{
     "total_files": "number",
     "recommended_pairs": ["file1 + file2"],
-    "concat_tips": ["tip1", "tip2"]
+    "concat_tips": ["Ensure columns align for horizontal concatenation", "Clean column names before merging"]
   }},
   "next_steps": [
-    "Ask about specific files",
+    "Ask about specific files or columns",
     "Request concatenation suggestions",
     "Specify your concatenation requirements",
     "Say 'yes' to use my recommendations"
@@ -59,39 +79,16 @@ GENERAL RESPONSE (for questions, file info, suggestions):
 }}
 
 INTELLIGENCE RULES:
-1. USE COMPLETE HISTORY: Reference previous interactions, successful configs, and user preferences
-2. FUZZY MATCHING: "beans" matches "D0_KHC_UK_Beans.csv"
-3. CONTEXT AWARENESS: Understand "yes", "no", "use those", "combine them" based on conversation
-4. MEMORY UTILIZATION: Suggest files user has successfully used before
-5. PATTERN RECOGNITION: Identify user's preferred file combinations and directions
 
-### FILE DISPLAY RULES:
-When user asks to "show files", "show all files", "show file names", "show columns", or similar:
-- ALWAYS use GENERAL RESPONSE format (success: false)
-- Include detailed file information in smart_response
-- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
-- List ALL available files with their column counts and sample columns
+1. **CRITICAL: ALWAYS include "smart_response" field in your JSON output** - This is the user-friendly message displayed in the chat
+2. USE COMPLETE HISTORY: Reference previous interactions, successful concatenations, and user preferences
+3. SMART FILE SELECTION: Analyze user's request to identify the most appropriate files from the available list
+4. CONTEXT AWARENESS: Understand "yes", "no", "use those", "concatenate them" based on conversation
+5. MEMORY UTILIZATION: Suggest files user has successfully used before
+6. PATTERN RECOGNITION: Identify user's preferred concatenation direction (vertical vs horizontal)
+7. VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section
 
-CONVERSATIONAL HANDLING:
-- "yes" after suggestions → Use the suggested configuration
-- "no" after suggestions → Ask for different preferences
-- "use those files" → Apply to most recent file suggestion
-- "combine them" → Use default vertical direction with identified files
-- "horizontally" or "vertically" → Apply to most recent file context
-
-SUGGESTION QUALITY:
-- Always provide specific file names from available files
-- Use memory to suggest files user has worked with before
-- Explain WHY you're suggesting specific files
-- Provide concrete next steps, not generic advice
-
-EXAMPLES OF SMART BEHAVIOR:
-- If user previously used "beans.csv + mayo.csv", suggest similar food files
-- If user always chooses "vertical", default to that direction
-- If user says "yes" after you suggested files, complete the configuration
-- If user mentions partial names, match to their previous successful patterns
-
-Return ONLY the JSON response:"""
+"""
 
 
 def call_llm(api_url: str, model_name: str, bearer_token: str, prompt: str) -> str:

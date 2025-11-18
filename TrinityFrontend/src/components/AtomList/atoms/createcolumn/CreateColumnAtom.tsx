@@ -20,7 +20,14 @@ interface CreateColumnAtomProps {
 const CreateColumnAtom: React.FC<CreateColumnAtomProps> = ({ atomId }) => {
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const operations: Operation[] = (atom?.settings?.operations as Operation[]) || [];
+  // 🔧 CRITICAL FIX: Ensure operations is always an array, even if undefined
+  const operations: Operation[] = React.useMemo(() => {
+    const ops = atom?.settings?.operations;
+    if (Array.isArray(ops) && ops.length > 0) {
+      return ops as Operation[];
+    }
+    return [];
+  }, [atom?.settings?.operations]);
   const [sampleData] = React.useState([
     { id: 1, name: 'Product A', price: 100, quantity: 5, category: 'Electronics' },
     { id: 2, name: 'Product B', price: 200, quantity: 3, category: 'Clothing' },

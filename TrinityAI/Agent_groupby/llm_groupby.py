@@ -319,6 +319,7 @@ class SmartGroupByAgent:
             return {"success": False, "message": "No response from LLM", "session_id": session_id, "suggestions": ["Try again."]}
 
         parsed = extract_json_group_by(raw) or {}
+        parsed = self._normalize_groupby_result(parsed)
         
         # 🔧 LOG PARSED JSON
         logger.info(f"🔍 GROUPBY PARSED JSON:")
@@ -381,3 +382,44 @@ class SmartGroupByAgent:
     def get_session_history(self, session_id): return self.sessions.get(session_id, {}).get("memory").load_memory_variables({})
     def get_all_sessions(self): return list(self.sessions.keys())
     def clear_session(self, session_id): return self.sessions.pop(session_id, None) is not None
+
+    def _normalize_groupby_result(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Detect raw GroupBy configs (no wrapper) and convert them into the standard response shape.
+        This prevents strict validation from stripping out valid configs when smart_response is missing.
+        """
+        if not parsed or "groupby_json" in parsed:
+            return parsed
+
+        config_keys = {
+            "bucket_name",
+            "object_names",
+            "file_name",
+            "file_key",
+            "identifiers",
+            "aggregations",
+            "source_file",
+            "bucket",
+        }
+
+        if not any(key in parsed for key in config_keys):
+            return parsed
+
+        logger.info("🔄 Detected raw GroupBy configuration without wrapper – normalizing for backend/UI compatibility")
+
+        config: Dict[str, Any] = {}
+        for key in list(parsed.keys()):
+            if key in config_keys:
+                config[key] = parsed.pop(key)
+
+        if not config.get("bucket_name"):
+            config["bucket_name"] = "trinity"
+
+        parsed["groupby_json"] = config
+
+        if "success" not in parsed:
+            parsed["success"] = True
+        if "message" not in parsed:
+            parsed["message"] = "GroupBy configuration generated"
+
+        return parsed

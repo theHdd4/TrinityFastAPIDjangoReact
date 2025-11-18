@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
 import base64
 import os
+import logging
 from minio import Minio
 from minio.error import S3Error
 from urllib.parse import unquote
@@ -12,7 +13,7 @@ import re
 import datetime
 import math
 from bisect import bisect_right
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from numbers import Real
 from pydantic import BaseModel
 from app.DataStorageRetrieval.arrow_client import download_table_bytes
@@ -29,6 +30,7 @@ from app.features.dataframe_operations.service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger("dataframe_operations.apply_formula")
 
 # Self-contained MinIO config (match feature-overview)
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -445,16 +447,30 @@ def _normalize_formula_functions(expr: str) -> str:
 
 def _fetch_df_from_object(object_name: str) -> pl.DataFrame:
     """Fetch a DataFrame from the Flight server or MinIO given an object key."""
+    import logging
+    logger = logging.getLogger("dataframe_operations.load")
+    
     object_name = unquote(object_name)
+    logger.debug(f"🔍 [FETCH] Fetching object: {object_name}")
+    
     if not object_name.endswith(".arrow"):
-        raise HTTPException(
-            status_code=400, detail="Only .arrow objects are supported"
-        )
+        error_msg = f"Invalid object_name '{object_name}': Only .arrow objects are supported"
+        logger.error(f"❌ [FETCH] {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+    
     try:
+        logger.debug(f"⬇️ [FETCH] Downloading table bytes for: {object_name}")
         data = download_table_bytes(object_name)
-        return pl.read_ipc(io.BytesIO(data))
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not Found")
+        logger.debug(f"✅ [FETCH] Downloaded {len(data)} bytes, parsing Arrow IPC format")
+        df = pl.read_ipc(io.BytesIO(data))
+        logger.debug(f"✅ [FETCH] Successfully parsed DataFrame: {df.shape}")
+        return df
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = f"Failed to load object '{object_name}': {str(e)}"
+        logger.error(f"❌ [FETCH] {error_msg}")
+        raise HTTPException(status_code=404, detail=error_msg) from e
 
 @router.get("/test_alive")
 async def test_alive():
@@ -476,7 +492,21 @@ async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     
     logger.info(f"🔵 [LOAD] Starting load_cached operation - object_name: {object_name}")
     
-    df = _fetch_df_from_object(object_name)
+    # Validate and fix object_name if needed
+    if not object_name.endswith(".arrow"):
+        error_msg = f"Invalid object_name '{object_name}': Must end with '.arrow' extension"
+        logger.error(f"❌ [LOAD] {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+    
+    try:
+        df = _fetch_df_from_object(object_name)
+    except HTTPException as e:
+        logger.error(f"❌ [LOAD] Failed to fetch dataframe: {e.detail}")
+        raise
+    except Exception as e:
+        error_msg = f"Error loading dataframe '{object_name}': {str(e)}"
+        logger.error(f"❌ [LOAD] {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg) from e
     
     logger.info(f"📊 [LOAD] DataFrame loaded successfully:")
     logger.info(f"   - Shape: {df.shape}")
@@ -496,6 +526,126 @@ async def load_cached_dataframe(object_name: str = Body(..., embed=True)):
     logger.info(f"✅ [LOAD] DataFrame cached in session: {df_id}")
     
     return _df_payload(df, df_id)
+
+
+class LoadFileDetailsRequest(BaseModel):
+    object_name: str
+
+
+@router.post("/load-file-details")
+async def load_file_details(request: LoadFileDetailsRequest):
+    """
+    Load a saved dataframe from Arrow Flight and return comprehensive file info including:
+    - File ID for subsequent operations
+    - All columns
+    - Column types (numeric/categorical)
+    - Unique values for categorical columns
+    - Sample data
+    - Column data types
+    
+    This endpoint is similar to chart maker's /load-saved-dataframe and provides
+    detailed file information so the LLM can use exact column names for operations.
+    """
+    import logging
+    logger = logging.getLogger("dataframe_operations.load_file_details")
+    
+    try:
+        logger.info(f"🔍 ===== LOAD FILE DETAILS REQUEST =====")
+        logger.info(f"📥 Object name: {request.object_name}")
+        
+        # Load the dataframe from Arrow Flight
+        logger.info("🚀 Loading dataframe from Arrow Flight...")
+        df = _fetch_df_from_object(request.object_name)
+        logger.info(f"✅ Dataframe loaded: {len(df)} rows, {len(df.columns)} columns")
+        logger.info(f"📋 Available columns: {list(df.columns)}")
+        
+        # Create a session for the dataframe
+        df_id = str(uuid.uuid4())
+        SESSIONS[df_id] = df
+        
+        # Get all columns
+        all_columns = list(df.columns)
+        logger.info(f"📋 Total columns: {len(all_columns)}")
+        
+        # Classify columns into numeric and categorical
+        numeric_columns = []
+        categorical_columns = []
+        column_types = {}
+        
+        for col in df.columns:
+            dtype = df[col].dtype
+            dtype_str = str(dtype)
+            column_types[col] = dtype_str
+            
+            # Check if numeric
+            if dtype in [pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+                         pl.Float32, pl.Float64]:
+                numeric_columns.append(col)
+            else:
+                categorical_columns.append(col)
+        
+        logger.info(f"🔢 Numeric columns: {len(numeric_columns)}")
+        logger.info(f"📝 Categorical columns: {len(categorical_columns)}")
+        
+        # Get unique values for categorical columns (limit to reduce payload size)
+        unique_values = {}
+        categorical_cols_to_process = categorical_columns[:15]  # Limit to prevent large payloads
+        
+        for col in categorical_cols_to_process:
+            try:
+                unique_vals = df[col].drop_nulls().unique().to_list()
+                # Convert to strings and limit to first 30 unique values (reduced from 100)
+                unique_values[col] = [str(val) for val in unique_vals[:30]]
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get unique values for column '{col}': {e}")
+                unique_values[col] = []
+        
+        logger.info(f"🎯 Unique values for {len(categorical_cols_to_process)} categorical columns")
+        
+        # Get sample data (reduced to 2 rows to minimize payload)
+        try:
+            sample_data = df.head(2).to_dicts()
+            # Convert any non-serializable types
+            for row in sample_data:
+                for key, value in row.items():
+                    if value is None:
+                        continue
+                    # Convert polars types to Python native types
+                    if hasattr(value, 'item'):  # numpy/polars scalar
+                        try:
+                            row[key] = value.item()
+                        except (AttributeError, ValueError):
+                            row[key] = str(value)
+                    elif isinstance(value, (pl.Date, pl.Datetime)):
+                        row[key] = str(value)
+        except Exception as e:
+            logger.warning(f"⚠️ Could not get sample data: {e}")
+            sample_data = []
+        
+        logger.info(f"📄 Sample data: {len(sample_data)} rows")
+        
+        response = {
+            "file_id": df_id,
+            "columns": all_columns,
+            "numeric_columns": numeric_columns,
+            "categorical_columns": categorical_columns,
+            "unique_values": unique_values,
+            "sample_data": sample_data,
+            "row_count": len(df),
+            "column_types": column_types,
+            "object_name": request.object_name
+        }
+        
+        logger.info(f"✅ Response prepared successfully")
+        logger.info(f"🔍 ===== END RESPONSE LOG =====")
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error loading file details: {e}")
+        raise HTTPException(status_code=404, detail=f"Error loading file details for {request.object_name}: {str(e)}")
 
 class SaveRequest(BaseModel):
     csv_data: str | None = None
@@ -810,13 +960,15 @@ async def delete_rows_bulk(df_id: str = Body(...), indices: list = Body(...)):
 @router.post("/insert_column")
 async def insert_column(
     df_id: str = Body(...),
-    index: int = Body(...),
+    index: Optional[int] = Body(None),
     name: str = Body(...),
     default: Any = Body(None),
 ):
     df = _get_df(df_id)
     
-    # Validate index
+    # Validate index - default to 0 (left) instead of len(df.columns) (right)
+    if index is None:
+        index = 0
     if index < 0:
         index = 0
     elif index > len(df.columns):
@@ -875,6 +1027,8 @@ async def apply_formula(
 ):
     """Apply an Excel-like formula to one column using the vectorised engine."""
     df = _get_df(df_id)
+    logger.info(f"📊 [APPLY_FORMULA] DataFrame shape: {df.shape}, columns: {df.columns}")
+    
     expr = formula.strip()
     if not expr:
         raise HTTPException(status_code=400, detail="Formula cannot be empty.")
@@ -903,9 +1057,14 @@ async def apply_formula(
             pl.Series(name=target_column, values=result_series.to_list())
         )
     else:
+        logger.info(f"📝 [APPLY_FORMULA] No '=' prefix, treating as literal value")
         df = df.with_columns(pl.lit(expr).alias(target_column))
+    
+    logger.info(f"✅ [APPLY_FORMULA] Formula applied successfully, new DataFrame shape: {df.shape}")
     SESSIONS[df_id] = df
-    return _df_payload(df, df_id)
+    result = _df_payload(df, df_id)
+    logger.info(f"🎉 [APPLY_FORMULA] Operation completed, returning result with df_id: {result.get('df_id')}")
+    return result
 
 @router.post("/apply_udf")
 async def apply_udf(

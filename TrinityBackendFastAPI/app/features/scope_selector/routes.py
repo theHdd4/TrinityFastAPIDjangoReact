@@ -827,7 +827,7 @@ async def create_multi_filtered_scope(
         
         # base_scope lookup disabled – use a minimal placeholder
         base_scope = {
-            "validator_id": "placeholder_validator",
+            "validator_id": "scopedata",
             "time_column": "date"
         }  # scopes_collection.find_one({"scope_id": scope_id})
         if not base_scope:
@@ -931,7 +931,7 @@ async def create_multi_filtered_scope(
         
         # Generate scope ID and prepare results
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        new_scope_id = f"{base_scope['validator_id']}_multifilter_{timestamp}"
+        new_scope_id = f"{base_scope['validator_id']}_{timestamp}"
         filter_set_results = []
         overall_filtered_records = 0
         

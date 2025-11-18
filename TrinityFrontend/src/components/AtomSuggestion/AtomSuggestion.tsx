@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Grid3X3 } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Grid3X3, Search, X } from 'lucide-react';
 import { useExhibitionStore } from '../ExhibitionMode/store/exhibitionStore';
-import { VALIDATE_API } from '@/lib/api';
+import { VALIDATE_API, TRINITY_V1_ATOMS_API } from '@/lib/api';
 
 interface AtomSuggestionProps {
   cardId?: string;
@@ -24,7 +24,11 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
 }) => {
   const [savedDataframes, setSavedDataframes] = useState<SavedFrameMeta[]>([]);
   const [isLoadingDataframes, setIsLoadingDataframes] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [apiAtoms, setApiAtoms] = useState<Array<{id: string; name: string; description: string; category: string; tags: string[]; color: string}>>([]);
   const { cards } = useExhibitionStore();
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Get all atoms from all cards (similar to navigation list logic)
   const allAtoms = useMemo(() => {
@@ -112,6 +116,57 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
   const hasScenarioPlannerAtom = useMemo(() => {
     return allAtoms.some(atom => atom.atomId === 'scenario-planner');
   }, [allAtoms]);
+
+  // Helper function to get category color
+  const getCategoryColor = (category: string) => {
+    const colorMap: Record<string, string> = {
+      'Data Sources': 'bg-blue-500',
+      'Data Processing': 'bg-green-500',
+      'Analytics': 'bg-purple-500',
+      'Machine Learning': 'bg-orange-500',
+      'Visualization': 'bg-pink-500',
+      'Planning & Optimization': 'bg-indigo-500',
+      'Utilities': 'bg-gray-500',
+      'Business Intelligence': 'bg-teal-500'
+    };
+    return colorMap[category] || 'bg-gray-500';
+  };
+
+  // Fetch atoms from API
+  useEffect(() => {
+    const fetchAtoms = async () => {
+      try {
+        const response = await fetch(`${TRINITY_V1_ATOMS_API}/atoms-for-frontend/`, {
+          credentials: 'include'
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.atoms) {
+            // Transform API data to match frontend format
+            const transformedAtoms = data.atoms.map((atom: any) => ({
+              id: atom.id || '',
+              name: atom.name || '',
+              description: atom.description || '',
+              category: atom.category || 'Utilities',
+              tags: atom.tags || [],
+              color: atom.color || getCategoryColor(atom.category || 'Utilities')
+            }));
+            setApiAtoms(transformedAtoms);
+          } else {
+            setApiAtoms([]);
+          }
+        } else {
+          setApiAtoms([]);
+        }
+      } catch (error) {
+        console.error('Error fetching atoms:', error);
+        setApiAtoms([]);
+      }
+    };
+
+    fetchAtoms();
+  }, []);
 
   // Fetch saved dataframes
   const fetchSavedDataframes = async () => {
@@ -465,6 +520,32 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     }
   }, [isVisible]);
 
+  // Auto-focus search input when card becomes visible
+  useEffect(() => {
+    if (isVisible && searchInputRef.current) {
+      // Small delay to ensure the component is fully rendered
+      setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 100);
+    }
+  }, [isVisible]);
+
+  // Filter available atoms based on search query
+  const filteredAtoms = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return [];
+    }
+    const query = searchQuery.toLowerCase();
+    return apiAtoms.filter(atom => {
+      const name = atom.name || '';
+      const description = atom.description || '';
+      const tags = atom.tags || [];
+      return name.toLowerCase().includes(query) ||
+             description.toLowerCase().includes(query) ||
+             tags.some(tag => tag && tag.toLowerCase().includes(query));
+    });
+  }, [searchQuery, apiAtoms]);
+
   // Handle adding a suggested atom
   const handleAddSuggestedAtom = (atomId: string, atomName: string, color: string) => {
     if (onAddAtom) {
@@ -480,10 +561,86 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     onClose();
   };
 
+  // Handle adding atom from search
+  const handleAddAtomFromSearch = (atom: {id: string; name: string; description: string; category: string; tags: string[]; color: string}) => {
+    if (onAddAtom) {
+      const atomData = {
+        id: `${atom.id}-${Date.now()}`,
+        atomId: atom.id,
+        title: atom.name,
+        category: atom.category,
+        color: atom.color
+      };
+      onAddAtom(atom.id, atomData, cardId);
+    }
+    setSearchQuery('');
+    setShowSearchResults(false);
+    onClose();
+  };
+
   // If suggestion should be shown, return the suggestion
   if (shouldShowSuggestion) {
     return (
-      <div className="flex flex-col items-center justify-center text-center">
+      <div className="flex flex-col items-center justify-center text-center w-full">
+        {/* Search Bar */}
+        <div className="w-full mb-4 relative">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search for atoms..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setShowSearchResults(e.target.value.trim().length > 0);
+              }}
+              onFocus={() => {
+                if (searchQuery.trim().length > 0) {
+                  setShowSearchResults(true);
+                }
+              }}
+              className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-amber-700"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setShowSearchResults(false);
+                }}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          
+          {/* Search Results */}
+          {showSearchResults && filteredAtoms.length > 0 && (
+            <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+              {filteredAtoms.map((atom) => (
+                <button
+                  key={atom.id}
+                  onClick={() => handleAddAtomFromSearch(atom)}
+                  className="w-full flex items-center space-x-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 transition-colors"
+                >
+                  <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                  <div className="flex-1 text-left">
+                    <div className="text-sm font-medium text-gray-800">{atom.name}</div>
+                    <div className="text-xs text-gray-500">{atom.category}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          
+          {showSearchResults && searchQuery.trim().length > 0 && filteredAtoms.length === 0 && (
+            <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg p-4">
+              <p className="text-sm text-gray-500 text-center">No atoms found matching "{searchQuery}"</p>
+            </div>
+          )}
+        </div>
+
         <h3 className="text-lg font-bold text-gray-800 mb-4">Select What You Could Do Next...</h3>
         <div className="flex flex-wrap items-center justify-center gap-3">
           {suggestedAtoms.map((atom) => (
@@ -497,21 +654,77 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
             </button>
           ))}
         </div>
-        <p className="text-sm text-pink-600 mt-4">
-          If your desired atom is not present here, use the search bar (Ctrl+Q) to find it
-        </p>
       </div>
     );
   }
 
-  // If suggestion should not be shown, return the default empty state message
+  // If suggestion should not be shown, return the default empty state message with search
   return (
-    <div className="flex flex-col items-center justify-center text-center">
+    <div className="flex flex-col items-center justify-center text-center w-full">
+      {/* Search Bar */}
+      <div className="w-full mb-4 relative">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <input
+            ref={searchInputRef}
+            type="text"
+            placeholder="Search for atoms..."
+            value={searchQuery}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setShowSearchResults(e.target.value.trim().length > 0);
+            }}
+            onFocus={() => {
+              if (searchQuery.trim().length > 0) {
+                setShowSearchResults(true);
+              }
+            }}
+            className="w-full pl-10 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setShowSearchResults(false);
+              }}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        
+        {/* Search Results */}
+        {showSearchResults && filteredAtoms.length > 0 && (
+          <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+            {filteredAtoms.map((atom) => (
+              <button
+                key={atom.id}
+                onClick={() => handleAddAtomFromSearch(atom)}
+                className="w-full flex items-center space-x-3 px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-b-0 transition-colors"
+              >
+                <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                <div className="flex-1 text-left">
+                  <div className="text-sm font-medium text-gray-800">{atom.title}</div>
+                  <div className="text-xs text-gray-500">{atom.category}</div>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+        
+        {showSearchResults && searchQuery.trim().length > 0 && filteredAtoms.length === 0 && (
+          <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg p-4">
+            <p className="text-sm text-gray-500 text-center">No atoms found matching "{searchQuery}"</p>
+          </div>
+        )}
+      </div>
+
       <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
         <Grid3X3 className="w-8 h-8 text-gray-400" />
       </div>
       <p className="text-gray-500 mb-2">No atoms in this section</p>
-      <p className="text-sm text-gray-400">Configure this atom for your application</p>
+      <p className="text-sm text-gray-400">Search for an atom above or configure this atom for your application</p>
     </div>
   );
 };

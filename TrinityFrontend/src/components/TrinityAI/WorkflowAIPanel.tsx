@@ -134,6 +134,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   const [isResizing, setIsResizing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
+  const currentChatIdRef = useRef<string>('');
   
   // WebSocket state for Workflow Agent
   const [wsConnected, setWsConnected] = useState(false);
@@ -165,7 +166,11 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   }, [messages]);
 
   // Create new chat
-  const createNewChat = () => {
+  useEffect(() => {
+    currentChatIdRef.current = currentChatId;
+  }, [currentChatId]);
+
+  const createNewChat = (): string => {
     const newChatId = `workflow_chat_${Date.now()}`;
     const newSessionId = `workflow_session_${Date.now()}`;
     const newChat: Chat = {
@@ -185,6 +190,35 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     setChats(prev => [...prev, newChat]);
     setChatSessionIds(prev => ({ ...prev, [newChatId]: newSessionId }));
     setCurrentChatId(newChatId);
+    currentChatIdRef.current = newChatId;
+    setMessages(newChat.messages);
+
+    return newChatId;
+  };
+
+  const ensureActiveChat = (): string | null => {
+    if (currentChatId) {
+      const existingChat = chats.find(chat => chat.id === currentChatId);
+      if (existingChat) {
+        return currentChatId;
+      }
+    }
+
+    if (chats.length > 0) {
+      const fallbackChat = chats[0];
+      if (fallbackChat.id !== currentChatId) {
+        setCurrentChatId(fallbackChat.id);
+        currentChatIdRef.current = fallbackChat.id;
+        setMessages(fallbackChat.messages);
+      } else {
+        currentChatIdRef.current = fallbackChat.id;
+      }
+      return fallbackChat.id;
+    }
+
+    const newChatId = createNewChat();
+    currentChatIdRef.current = newChatId;
+    return newChatId;
   };
 
   // Load chats from localStorage on mount - Workflow Mode specific
@@ -362,20 +396,45 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
   
   // Calculate responsive message bubble max width (70% of panel width, min 200px, max 500px)
   const messageBubbleMaxWidth = Math.max(200, Math.min(500, panelWidth * 0.7));
+  const isChatReady = Boolean(currentChatId && chats.some(chat => chat.id === currentChatId));
 
-  // Update current chat messages
-  const updateCurrentChat = (newMessages: Message[]) => {
-    setChats(prev => prev.map(chat => 
-      chat.id === currentChatId 
-        ? { ...chat, messages: newMessages }
-        : chat
-    ));
-    setMessages(newMessages);
+  // Append a message to a specific chat and mirror it in the local messages state when applicable
+  const appendMessageToChat = (chatId: string, message: Message) => {
+    setChats(prevChats => {
+      const chatExists = prevChats.some(chat => chat.id === chatId);
+      if (!chatExists) {
+        console.warn('⚠️ Tried to append message to missing chat:', chatId, '— creating recovery chat entry.');
+        const recoveredChat: Chat = {
+          id: chatId,
+          title: 'Recovered Workflow',
+          messages: [message],
+          createdAt: new Date()
+        };
+        return [...prevChats, recoveredChat];
+      }
+
+      return prevChats.map(chat => 
+        chat.id === chatId
+          ? { ...chat, messages: [...chat.messages, message] }
+          : chat
+      );
+    });
+
+    if (chatId === currentChatIdRef.current) {
+      setMessages(prev => [...prev, message]);
+    }
   };
 
   // Handle send message - Call Workflow Agent API
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
+    const trimmedInput = inputValue.trim();
+    if (!trimmedInput || isLoading) return;
+
+    const activeChatId = ensureActiveChat();
+    if (!activeChatId) {
+      console.warn('⚠️ Unable to send message — chat is still initializing.');
+      return;
+    }
 
     const currentInput = inputValue;
     setInputValue('');
@@ -390,14 +449,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
     };
 
     // Add user message to chat
-    setChats(prevChats => {
-      return prevChats.map(chat => {
-        if (chat.id === currentChatId) {
-          return { ...chat, messages: [...chat.messages, userMessage] };
-        }
-        return chat;
-      });
-    });
+    appendMessageToChat(activeChatId, userMessage);
 
     try {
       // Connect to Workflow Agent WebSocket
@@ -437,11 +489,11 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
         // Skip the connected message - user already sees their message being processed
 
         // Get session ID for current chat
-        const sessionId = chatSessionIds[currentChatId] || `workflow_session_${Date.now()}`;
+        const sessionId = chatSessionIds[activeChatId] || `workflow_session_${Date.now()}`;
         
         // If no session ID exists for this chat, create and store it
-        if (!chatSessionIds[currentChatId]) {
-          setChatSessionIds(prev => ({ ...prev, [currentChatId]: sessionId }));
+        if (!chatSessionIds[activeChatId]) {
+          setChatSessionIds(prev => ({ ...prev, [activeChatId]: sessionId }));
         }
 
         // Get environment context for dynamic path resolution (SAME AS SUPERAGENT)
@@ -547,14 +599,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                 };
                 
                 console.log('📝 Adding guidance message to chat:', content.substring(0, 100));
-                setChats(prevChats => {
-                  return prevChats.map(chat => {
-                    if (chat.id === currentChatId) {
-                      return { ...chat, messages: [...chat.messages, guidanceMessage] };
-                    }
-                    return chat;
-                  });
-                });
+                appendMessageToChat(activeChatId, guidanceMessage);
                 finalResponseAdded = true;
               } 
               // If success is TRUE, show smart_response (with or without molecules)
@@ -583,14 +628,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                 };
 
                 console.log('✅ Adding molecule response to chat:', content.substring(0, 100));
-                setChats(prevChats => {
-                  return prevChats.map(chat => {
-                    if (chat.id === currentChatId) {
-                      return { ...chat, messages: [...chat.messages, responseMessage] };
-                    }
-                    return chat;
-                  });
-                });
+                appendMessageToChat(activeChatId, responseMessage);
                 
                 finalResponseAdded = true;
               } else {
@@ -614,14 +652,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
               timestamp: new Date()
             };
 
-            setChats(prevChats => {
-              return prevChats.map(chat => {
-                if (chat.id === currentChatId) {
-                  return { ...chat, messages: [...chat.messages, errorMessage] };
-                }
-                return chat;
-              });
-            });
+            appendMessageToChat(activeChatId, errorMessage);
             setIsLoading(false);
             ws.close();
             break;
@@ -639,14 +670,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           timestamp: new Date()
         };
         
-        setChats(prevChats => {
-          return prevChats.map(chat => {
-            if (chat.id === currentChatId) {
-              return { ...chat, messages: [...chat.messages, errorMsg] };
-            }
-            return chat;
-          });
-        });
+        appendMessageToChat(activeChatId, errorMsg);
         
         setIsLoading(false);
       };
@@ -667,14 +691,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
       };
       
         // Add error message to chat
-        setChats(prevChats => {
-          return prevChats.map(chat => {
-            if (chat.id === currentChatId) {
-              return { ...chat, messages: [...chat.messages, errorMessage] };
-            }
-            return chat;
-          });
-        });
+        appendMessageToChat(activeChatId, errorMessage);
       setIsLoading(false);
     }
   };
@@ -718,14 +735,9 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
       timestamp: new Date()
     };
     
-    setChats(prevChats => {
-      return prevChats.map(chat => {
-        if (chat.id === currentChatId) {
-          return { ...chat, messages: [...chat.messages, cancelMessage] };
-        }
-        return chat;
-      });
-    });
+    if (currentChatId) {
+      appendMessageToChat(currentChatId, cancelMessage);
+    }
     
     console.log('✅ Workflow request stopped successfully');
   };
@@ -793,15 +805,9 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
       timestamp: new Date()
     };
 
-    // Get current messages from state and add success message
-    setChats(prevChats => {
-      return prevChats.map(chat => {
-        if (chat.id === currentChatId) {
-          return { ...chat, messages: [...chat.messages, successMessage] };
-        }
-        return chat;
-      });
-    });
+    if (currentChatId) {
+      appendMessageToChat(currentChatId, successMessage);
+    }
   };
 
   // Handle creating workflow molecules on canvas
@@ -970,15 +976,9 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
               timestamp: new Date()
             };
             
-            // Get current messages from state and add success message
-            setChats(prevChats => {
-              return prevChats.map(chat => {
-                if (chat.id === currentChatId) {
-                  return { ...chat, messages: [...chat.messages, successMessage] };
-                }
-                return chat;
-              });
-            });
+            if (currentChatId) {
+              appendMessageToChat(currentChatId, successMessage);
+            }
           }, 1000);
         }
       }, index * 300); // Delay each step by 300ms to create animation effect
@@ -1545,7 +1545,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
                 scrollbarWidth: 'thin',
                 scrollbarColor: '#d1d5db transparent'
               }}
-              disabled={isLoading}
+              disabled={isLoading || !isChatReady}
               rows={1}
             />
           </div>
@@ -1561,7 +1561,7 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
           )}
           <Button
             onClick={handleSendMessage}
-            disabled={!inputValue.trim() || isLoading}
+            disabled={!inputValue.trim() || isLoading || !isChatReady}
             className="h-12 w-12 bg-[#FEEB99] hover:bg-[#FFBD59] text-gray-800 shadow-lg shadow-[#FFBD59]/30 hover:shadow-xl hover:shadow-[#FFBD59]/40 transition-all duration-300 hover:scale-110 rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             size="icon"
           >
@@ -1572,6 +1572,12 @@ const WorkflowAIPanel: React.FC<WorkflowAIPanelProps> = ({
             )}
           </Button>
         </div>
+        {!isChatReady && (
+          <p className="mt-3 text-xs text-gray-500 font-inter flex items-center gap-1">
+            <Clock className="w-3 h-3 text-gray-400" />
+            Preparing Workflow AI chat...
+          </p>
+        )}
       </div>
     </Card>
     

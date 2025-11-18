@@ -12,7 +12,8 @@ import logging
 import os
 import re
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple, Callable, Set
 from dataclasses import dataclass
 import uuid
 
@@ -28,13 +29,45 @@ except ImportError:  # pragma: no cover
             super().__init__(code, reason)
 
 from .atom_mapping import ATOM_MAPPING
+from .graphrag import GraphRAGWorkspaceConfig
+from .graphrag.client import GraphRAGQueryClient
+from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
+from Agent_insight.workflow_insight_agent import get_workflow_insight_agent
 
 try:
     import aiohttp  # type: ignore
 except ImportError:  # pragma: no cover
     aiohttp = None  # type: ignore
 
+try:
+    from memory_service import storage as memory_storage_module  # type: ignore
+    from memory_service.summarizer import summarize_messages as summarize_chat_messages  # type: ignore
+except Exception:  # pragma: no cover - memory service optional
+    memory_storage_module = None
+    summarize_chat_messages = None
+
 logger = logging.getLogger("trinity.trinityai.websocket")
+
+# Atom capability metadata for file/alias handling
+DATASET_OUTPUT_ATOMS = {
+    "data-upload-validate",
+    "dataframe-operations",
+    "groupby-wtg-avg",
+    "create-column",
+    "create-transform",
+    "merge",
+    "concat",
+    "pivot-table",
+}
+
+# Atoms that should default to using the latest produced dataset when inputs aren't explicit
+PREFERS_LATEST_DATASET_ATOMS = {
+    "dataframe-operations",
+    "groupby-wtg-avg",
+    "create-column",
+    "create-transform",
+    "chart-maker",
+}
 
 
 @dataclass
@@ -58,13 +91,17 @@ class WorkflowStepPlan:
     files_used: List[str]
     inputs: List[str]
     output_alias: str
+    enriched_description: Optional[str] = None  # Enriched description with file details for UI
+    atom_prompt: Optional[str] = None  # Full prompt that will be sent to atom LLM
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "step_number": self.step_number,
             "atom_id": self.atom_id,
             "description": self.description,
+            "enriched_description": self.enriched_description or self.description,
             "prompt": self.prompt,
+            "atom_prompt": self.atom_prompt,  # Include full prompt for UI display
             "files_used": self.files_used,
             "inputs": self.inputs,
             "output_alias": self.output_alias
@@ -82,6 +119,14 @@ class WorkflowPlan:
             "workflow_steps": [step.to_dict() for step in self.workflow_steps],
             "total_steps": self.total_steps
         }
+
+
+class RetryableJSONGenerationError(Exception):
+    """Exception raised when JSON generation fails after all retries"""
+    def __init__(self, message: str, attempts: int, last_error: Exception):
+        super().__init__(message)
+        self.attempts = attempts
+        self.last_error = last_error
 
 
 class StreamWebSocketOrchestrator:
@@ -102,11 +147,21 @@ class StreamWebSocketOrchestrator:
         self.parameter_generator = parameter_generator
         self.result_storage = result_storage
         self.rag_engine = rag_engine
+        self._cancelled_sequences: Set[str] = set()
+
+        # GraphRAG integration
+        self.graph_workspace_config = GraphRAGWorkspaceConfig()
+        self.graph_rag_client = GraphRAGQueryClient(self.graph_workspace_config)
+        self.graph_prompt_builder = GraphRAGPromptBuilder(self.graph_rag_client)
+        self._latest_graph_prompt: Optional[GraphRAGPhaseOnePrompt] = None
 
         # In-memory caches for step execution data and outputs
         self._step_execution_cache: Dict[str, Dict[int, Dict[str, Any]]] = {}
         self._step_output_files: Dict[str, Dict[int, str]] = {}
         self._sequence_available_files: Dict[str, List[str]] = {}
+        self._output_alias_registry: Dict[str, Dict[str, str]] = {}
+        self._chat_file_mentions: Dict[str, List[str]] = {}
+        self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
 
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
@@ -128,8 +183,86 @@ class StreamWebSocketOrchestrator:
         
         # Load atom mapping for endpoints
         self._load_atom_mapping()
+
+        # Atom execution retry configuration
+        self.atom_retry_attempts = max(
+            1, int(os.getenv("STREAM_AI_ATOM_RETRY_ATTEMPTS", "3"))
+        )
+        self.atom_retry_delay = max(
+            0.0, float(os.getenv("STREAM_AI_ATOM_RETRY_DELAY_SECONDS", "2"))
+        )
+        logger.info(
+            "🔁 Atom retry configuration | attempts=%s delay=%ss",
+            self.atom_retry_attempts,
+            self.atom_retry_delay,
+        )
+
+        self._memory_storage = memory_storage_module
+        self._memory_summarizer = summarize_chat_messages
+        if self._memory_storage and self._memory_summarizer:
+            logger.info("🧠 Chat memory summaries enabled via MinIO storage")
+        else:
+            logger.info("ℹ️ Chat memory summaries disabled (memory service unavailable)")
         
         logger.info("✅ StreamWebSocketOrchestrator initialized")
+    
+    async def _retry_llm_json_generation(
+        self,
+        llm_call_func: Callable,
+        step_name: str,
+        max_attempts: int = 3
+    ) -> Any:
+        """
+        Retry mechanism for LLM JSON generation.
+        
+        Args:
+            llm_call_func: Async function that calls LLM and returns JSON-parsed result
+            step_name: Name of the step (for logging)
+            max_attempts: Maximum number of retry attempts (default: 3)
+            
+        Returns:
+            Parsed JSON result from LLM
+            
+        Raises:
+            RetryableJSONGenerationError: If all retry attempts fail
+        """
+        last_error = None
+        last_content = None
+        
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(f"🔄 [{step_name}] Attempt {attempt}/{max_attempts}: Calling LLM for JSON generation...")
+                result = await llm_call_func()
+                logger.info(f"✅ [{step_name}] Attempt {attempt} succeeded: Valid JSON generated")
+                return result
+            except json.JSONDecodeError as e:
+                last_error = e
+                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Invalid JSON - {e}")
+                if attempt < max_attempts:
+                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
+                else:
+                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed to generate valid JSON")
+            except ValueError as e:
+                last_error = e
+                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Validation error - {e}")
+                if attempt < max_attempts:
+                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
+                else:
+                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
+            except Exception as e:
+                last_error = e
+                logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: {type(e).__name__} - {e}")
+                if attempt < max_attempts:
+                    logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
+                else:
+                    logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
+        
+        # All attempts failed
+        error_msg = (
+            f"Failed to generate valid JSON for '{step_name}' after {max_attempts} attempts. "
+            f"Please rephrase your query in a clearer way."
+        )
+        raise RetryableJSONGenerationError(error_msg, max_attempts, last_error)
     
     def _load_atom_mapping(self):
         """Load atom mapping"""
@@ -140,6 +273,64 @@ class StreamWebSocketOrchestrator:
             logger.error(f"❌ Failed to load atom mapping: {e}")
             self.atom_mapping = {}
     
+    def _build_legacy_prompt(
+        self,
+        user_prompt: str,
+        available_files: List[str],
+        files_exist: bool,
+        prompt_files: List[str],
+    ) -> str:
+        """Legacy Phase-1 prompt builder used as a fallback."""
+        atom_knowledge = self._get_atom_capabilities_for_llm()
+        files_str = "\n".join([f"  - {f}" for f in available_files]) if available_files else "  (No files available yet)"
+
+        file_instruction = ""
+        if files_exist and available_files:
+            file_instruction = f"""
+CRITICAL FILE INFORMATION:
+- The user mentioned files in their request: {', '.join(prompt_files)}
+- These files ALREADY EXIST in the system: {', '.join([f.split('/')[-1] for f in available_files[:3]])}
+- DO NOT include 'data-upload-validate' steps - files are already uploaded!
+- Start directly with the data processing step (merge, concat, etc.)
+"""
+
+        workflow_rule = (
+            "- ⚠️ CRITICAL: Files mentioned in user request already exist in available_files. DO NOT include 'data-upload-validate' steps. Start directly with data processing!"
+            if files_exist
+            else "- If files don't exist, include 'data-upload-validate' as the first step"
+        )
+
+        return f"""You are a data analysis workflow planner. Your task is to create a step-by-step workflow to accomplish the user's request.
+
+{atom_knowledge}
+
+USER REQUEST:
+"{user_prompt}"
+
+AVAILABLE FILES (already in system):
+{files_str}
+{file_instruction}
+
+TASK:
+Generate a workflow plan as a JSON array. Each step should have:
+- atom_id: The ID of the atom to use (from the list above)
+- description: Brief description of what this step does (one sentence)
+
+IMPORTANT RULES:
+{workflow_rule}
+- Workflows can be long (2-10+ steps) - break complex tasks into individual steps
+- Use ONE atom per task for clarity (e.g., one dataframe-operations step for filtering, another for formulas)
+- Put transformations before visualizations
+- Each step should logically follow the previous one
+- For dataframe-operations: Each operation type should be a separate step when workflow is complex
+
+Respond ONLY with valid JSON array, no other text:
+[
+  {{"atom_id": "merge", "description": "Merge the two datasets"}},
+  {{"atom_id": "chart-maker", "description": "Visualize the merged data"}}
+]
+"""
+
     def _get_atom_capabilities_for_llm(self) -> str:
         """
         Get comprehensive atom capabilities and knowledge for LLM.
@@ -169,12 +360,22 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
    - Output: groupby_json with groupby columns and aggregation functions
    - Example: "Group sales by region and calculate total revenue"
 
-4. **dataframe-operations** - Filter, Sort, Select
-   - Capability: Filters rows, sorts data, selects/drops columns
-   - Use when: User wants to filter, sort, select, remove, or drop data
-   - Keywords: filter, where, sort, select, drop, remove, keep, only
-   - Output: dataframe_config with operations list
-   - Example: "Filter sales where revenue > 1000 and sort by date"
+4. **dataframe-operations** - Excel-like DataFrame Operations (Powerful Tool)
+   - Capability: Comprehensive DataFrame manipulation like Excel - formulas, filters, sorts, transformations, column operations
+   - Use when: User wants to:
+     * Apply formulas/calculations (PROD, SUM, DIV, IF, etc.)
+     * Filter rows based on conditions
+     * Sort data by columns
+     * Select/drop/rename columns
+     * Transform data (case conversion, type conversion, rounding)
+     * Insert/delete rows or columns
+     * Edit cell values
+     * Find and replace values
+     * Split or manipulate data like Excel
+   - Keywords: formula, calculate, compute, filter, where, sort, order, select, drop, remove, rename, transform, convert, round, edit, insert, delete, find, replace, split, excel, spreadsheet, manipulate, clean, prepare
+   - Output: dataframe_config with operations list (can include multiple operations in sequence)
+   - Example: "Apply formula PROD(Price, Volume) to Sales column", "Filter rows where revenue > 1000 and sort by date", "Rename column A to Revenue"
+   - IMPORTANT: This atom can handle multiple operations in one step, but for complex workflows, use ONE atom per task for clarity
 
 5. **create-column** - Create Calculated Columns
    - Capability: Creates new columns using formulas and calculations
@@ -197,14 +398,7 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
    - Output: correlation configuration
    - Example: "Analyze correlation between price and sales"
 
-8. **explore** / **feature-overview** - Data Exploration
-   - Capability: Provides statistical overview and data profiling
-   - Use when: User wants to explore, understand, or get overview of data
-   - Keywords: explore, overview, summary, statistics, analyze, understand
-   - Output: exploration_config with analysis settings
-   - Example: "Explore the sales dataset and show statistics"
-
-9. **data-upload-validate** - Load Data
+8. **data-upload-validate** - Load Data
    - Capability: Loads and validates data files (CSV, Excel, Arrow)
    - Use when: Files don't exist yet and need to be uploaded
    - Keywords: load, upload, import, read
@@ -214,11 +408,13 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
 
 WORKFLOW PLANNING RULES:
 - Put data loading (data-upload-validate) FIRST only if files don't exist
-- Put data transformations (merge, concat, filter, groupby) BEFORE visualization
+- Put data transformations (merge, concat, filter, groupby, dataframe-operations) BEFORE visualization
 - Put chart-maker or visualization atoms LAST
 - Each step should build on previous steps
-- Keep workflows simple and focused (2-4 steps is ideal)
+- For dataframe-operations: Use ONE atom per task for clarity (e.g., one for filtering, one for formulas, one for sorting)
+- Workflows can be long (5-10+ steps) - break complex tasks into individual steps
 - Consider data dependencies between steps
+- Example long workflow: Load → Filter → Apply Formula → Sort → Group → Visualize
 """
     
     def _extract_file_names_from_prompt(self, user_prompt: str) -> List[str]:
@@ -267,16 +463,17 @@ WORKFLOW PLANNING RULES:
             filename = af.split('/')[-1] if '/' in af else af
             available_normalized.append(filename.lower())
         
-        # Check for matches
+        # Check for matches (case-insensitive)
         matches = []
         for pf in prompt_files:
+            pf_key = pf.lower()
             # Check exact match
-            if pf in available_normalized:
+            if pf_key in available_normalized:
                 matches.append(pf)
             else:
                 # Check partial match (filename contains prompt file)
                 for af in available_normalized:
-                    if pf in af or af in pf:
+                    if pf_key in af or af in pf_key:
                         matches.append(pf)
                         break
         
@@ -297,6 +494,55 @@ WORKFLOW PLANNING RULES:
             key = display.lower()
             lookup.setdefault(key, []).append(file_path)
         return display_names, lookup
+
+    @staticmethod
+    def _display_file_name(path: str) -> str:
+        """Return a user-friendly file name from a stored path."""
+        if not path:
+            return ""
+        if "/" in path:
+            path = path.split("/")[-1]
+        if "\\" in path:
+            path = path.split("\\")[-1]
+        return path
+
+    @staticmethod
+    def _ensure_list_of_strings(candidate: Any) -> List[str]:
+        """Coerce planner-provided values (string/dict/list) into a list of strings."""
+        if candidate is None:
+            return []
+        if isinstance(candidate, list):
+            result: List[str] = []
+            for item in candidate:
+                if item is None:
+                    continue
+                if isinstance(item, (list, tuple, set)):
+                    result.extend(
+                        str(sub_item) for sub_item in item if sub_item is not None
+                    )
+                elif isinstance(item, dict):
+                    result.extend(
+                        str(value)
+                        for value in item.values()
+                        if value is not None and value != ""
+                    )
+                else:
+                    result.append(str(item))
+            return [value for value in result if value != ""]
+        if isinstance(candidate, (tuple, set)):
+            return [str(item) for item in candidate if item is not None and item != ""]
+        if isinstance(candidate, dict):
+            values = [
+                str(value)
+                for value in candidate.values()
+                if value is not None and value != ""
+            ]
+            if values:
+                return values
+            return [str(key) for key in candidate.keys()]
+        if isinstance(candidate, str):
+            return [candidate]
+        return [str(candidate)]
 
     def _match_prompt_files_to_available(
         self,
@@ -325,6 +571,70 @@ WORKFLOW PLANNING RULES:
 
         return matched
 
+    def _atom_produces_dataset(self, atom_id: Optional[str]) -> bool:
+        """Return True if the atom is expected to save a new dataset file."""
+        return bool(atom_id and atom_id in DATASET_OUTPUT_ATOMS)
+
+    def _atom_prefers_latest_dataset(self, atom_id: Optional[str]) -> bool:
+        """
+        Return True if the atom should default to using the most recent dataset
+        when explicit file references are not provided.
+        """
+        if not atom_id:
+            return False
+        return atom_id in PREFERS_LATEST_DATASET_ATOMS or self._atom_produces_dataset(atom_id)
+
+    def _build_enriched_description(self, step: WorkflowStepPlan, available_files: List[str]) -> str:
+        """
+        Build enriched description with file details for UI display.
+        Includes file names, input/output information, and atom-specific details.
+        """
+        lines = [step.description]
+        
+        # Add file information
+        if hasattr(step, "files_used") and step.files_used:
+            file_display_names = [self._display_file_name(f) for f in step.files_used]
+            if len(step.files_used) == 1:
+                lines.append(f"📁 Input file: {file_display_names[0]} ({step.files_used[0]})")
+            else:
+                files_str = ", ".join([f"{name} ({path})" for name, path in zip(file_display_names, step.files_used)])
+                lines.append(f"📁 Input files: {files_str}")
+        
+        # Add input from previous steps
+        if hasattr(step, "inputs") and step.inputs:
+            if len(step.inputs) == 1:
+                lines.append(f"🔗 Using output from previous step: {step.inputs[0]}")
+            else:
+                inputs_str = ", ".join(step.inputs)
+                lines.append(f"🔗 Using outputs from previous steps: {inputs_str}")
+        
+        # Add output alias
+        if hasattr(step, "output_alias") and step.output_alias:
+            lines.append(f"📤 Output alias: {step.output_alias}")
+        
+        # Add atom-specific details from capabilities
+        atom_capabilities = self._get_atom_capability_info(step.atom_id)
+        if atom_capabilities:
+            capabilities = atom_capabilities.get("capabilities", [])
+            if capabilities:
+                lines.append(f"⚙️ Capabilities: {', '.join(capabilities[:2])}")
+        
+        return " | ".join(lines)
+    
+    def _get_atom_capability_info(self, atom_id: str) -> Optional[Dict[str, Any]]:
+        """Get atom capability information from JSON file"""
+        try:
+            capabilities_path = Path(__file__).parent / "rag" / "atom_capabilities.json"
+            if capabilities_path.exists():
+                with open(capabilities_path, 'r', encoding='utf-8') as f:
+                    capabilities_data = json.load(f)
+                    for atom in capabilities_data.get("atoms", []):
+                        if atom.get("atom_id") == atom_id:
+                            return atom
+        except Exception as e:
+            logger.warning(f"⚠️ Could not load atom capability for {atom_id}: {e}")
+        return None
+    
     def _compose_prompt(
         self,
         atom_id: str,
@@ -334,29 +644,56 @@ WORKFLOW PLANNING RULES:
         inputs: List[str],
         output_alias: str
     ) -> str:
-        """Build a natural language prompt for downstream atom execution."""
+        """
+        Build a natural language prompt for downstream atom execution.
+        Now includes clear file names and detailed instructions based on atom capabilities.
+        """
+        # Get atom capabilities for better prompt generation
+        atom_capabilities = self._get_atom_capability_info(atom_id)
+        
         description_text = description.strip() or guidance.get("purpose", "Perform the requested operation")
         if not description_text.endswith('.'):  # ensure sentence end
             description_text += '.'
 
         lines: List[str] = []
+        
+        # Add atom-specific instructions from capabilities
+        if atom_capabilities:
+            prompt_reqs = atom_capabilities.get("prompt_requirements", [])
+            if prompt_reqs:
+                lines.append(f"**CRITICAL REQUIREMENTS FOR {atom_id.upper()}:**")
+                for req in prompt_reqs[:3]:  # Top 3 requirements
+                    lines.append(f"- {req}")
+                lines.append("")  # Empty line for readability
 
         if files_used:
+            # Use EXACT file names with full paths
             if len(files_used) == 1:
-                lines.append(f"Use dataset `{files_used[0]}` as the primary input.")
+                file_name = self._display_file_name(files_used[0])
+                lines.append(f"**PRIMARY INPUT FILE:** Use dataset `{files_used[0]}` (display name: {file_name}) as the primary input.")
+                lines.append(f"**IMPORTANT:** Reference this file by its exact path: `{files_used[0]}`")
             else:
                 formatted = ', '.join(f"`{name}`" for name in files_used)
-                lines.append(f"Use datasets {formatted} as inputs.")
+                display_names = [self._display_file_name(f) for f in files_used]
+                lines.append(f"**INPUT FILES:** Use datasets {formatted} as inputs.")
+                lines.append(f"**FILE PATHS:** {', '.join(f'`{f}`' for f in files_used)}")
+                lines.append(f"**DISPLAY NAMES:** {', '.join(display_names)}")
         elif inputs:
             if len(inputs) == 1:
-                lines.append(f"Use dataset `{inputs[0]}` produced in earlier steps.")
+                lines.append(f"**INPUT FROM PREVIOUS STEP:** Use dataset `{inputs[0]}` produced in earlier steps.")
             else:
                 formatted = ', '.join(f"`{alias}`" for alias in inputs)
-                lines.append(f"Use datasets {formatted} produced in earlier steps.")
+                lines.append(f"**INPUTS FROM PREVIOUS STEPS:** Use datasets {formatted} produced in earlier steps.")
         else:
-            lines.append("Ask the user to provide or confirm the correct dataset before executing this atom.")
+            lines.append("**WARNING:** No input dataset specified. Ask the user to provide or confirm the correct dataset before executing this atom.")
 
-        lines.append(description_text)
+        lines.append("")
+        lines.append(f"**TASK:** {description_text}")
+        lines.append("")
+        lines.append("**COLUMN VALIDATION CHECKLIST:**")
+        lines.append("- Use ONLY column names/values that appear in the file metadata & alias map above.")
+        lines.append("- If the user uses abbreviations or synonyms, map them to the exact column names before building formulas/filters.")
+        lines.append("- If a requested column/value is not found, choose the closest matching column that exists (case-sensitive). Never invent new columns.")
 
         guidelines = guidance.get("prompt_guidelines", [])
         if guidelines:
@@ -370,7 +707,10 @@ WORKFLOW PLANNING RULES:
             for key, value in dynamic_slots.items():
                 lines.append(f"- {key}: {value}")
 
-        lines.append(f"Return the result as `{output_alias}` for downstream steps.")
+        if output_alias:
+            lines.append(f"Return the result as `{output_alias}` for downstream steps.")
+        else:
+            lines.append("Focus on producing insights/visualizations using the referenced dataset(s) without creating a new output file.")
 
         return "\n".join(lines)
 
@@ -394,65 +734,120 @@ WORKFLOW PLANNING RULES:
         matched_queue = matched_prompt_files.copy()
 
         enriched_steps: List[WorkflowStepPlan] = []
-        previous_alias: Optional[str] = initial_previous_alias
+        last_materialized_alias: Optional[str] = initial_previous_alias
 
         for idx, raw_step in enumerate(workflow_steps_raw, start_index):
             atom_id = raw_step.get("atom_id", "unknown")
             description = raw_step.get("description", "").strip()
-            output_alias = f"{atom_id.replace('-', '_')}_step_{idx}"
+            produces_dataset = self._atom_produces_dataset(atom_id)
+            prefers_latest_dataset = self._atom_prefers_latest_dataset(atom_id)
+            default_alias = f"{atom_id.replace('-', '_')}_step_{idx}"
+            if produces_dataset:
+                output_alias = raw_step.get("output_alias") or default_alias
+            else:
+                output_alias = raw_step.get("output_alias") or ""
 
             guidance = {}
             if self.rag_engine:
                 guidance = self.rag_engine.get_atom_prompt_guidance(atom_id)
 
+            files_used_raw = raw_step.get("files_used") or []
+            files_used = self._ensure_list_of_strings(files_used_raw)
             files_required = 0
             if atom_id == "data-upload-validate":
                 files_required = 1
             elif atom_id in {"merge", "concat"}:
                 files_required = 2
 
-            files_used: List[str] = []
-            for _ in range(files_required):
-                if matched_queue:
-                    files_used.append(matched_queue.pop(0))
-                elif remaining_available:
-                    files_used.append(remaining_available.pop(0))
+            if not files_used and prefers_latest_dataset and last_materialized_alias:
+                files_used = [last_materialized_alias]
 
-            inputs: List[str] = []
-            if atom_id in {"merge", "concat"}:
-                inputs = files_used.copy()
-                if len(inputs) < files_required and previous_alias:
-                    inputs.append(previous_alias)
-            elif atom_id == "data-upload-validate":
-                inputs = []
-            else:
-                if previous_alias:
-                    inputs = [previous_alias]
-                elif files_used:
+            if files_required and len(files_used) < files_required:
+                needed = files_required - len(files_used)
+                for _ in range(needed):
+                    next_file = None
+                    if matched_queue:
+                        next_file = matched_queue.pop(0)
+                    elif remaining_available:
+                        next_file = remaining_available.pop(0)
+                    if next_file and next_file not in files_used:
+                        files_used.append(next_file)
+
+            if not files_used and matched_queue:
+                files_used.append(matched_queue.pop(0))
+            if not files_used and remaining_available:
+                # For analysis atoms (groupby, chart-maker, etc.) default to first known dataset.
+                files_used.append(remaining_available[0])
+
+            inputs_raw = raw_step.get("inputs") or []
+            inputs = self._ensure_list_of_strings(inputs_raw)
+            if not inputs:
+                if atom_id in {"merge", "concat"}:
                     inputs = files_used.copy()
+                    if last_materialized_alias and last_materialized_alias not in inputs:
+                        inputs.insert(0, last_materialized_alias)
+                elif atom_id == "data-upload-validate":
+                    inputs = []
+                else:
+                    if prefers_latest_dataset and last_materialized_alias:
+                        inputs = [last_materialized_alias]
+                    elif files_used:
+                        inputs = files_used.copy()
+                    elif matched_queue:
+                        inputs = [matched_queue[0]]
+                    elif remaining_available:
+                        inputs = [remaining_available[0]]
 
-            prompt_text = self._compose_prompt(atom_id, description, guidance, files_used, inputs, output_alias)
+            prompt_text = raw_step.get("prompt")
+            if not prompt_text:
+                prompt_text = self._compose_prompt(atom_id, description, guidance, files_used, inputs, output_alias)
+
+            description_for_step = description or guidance.get("purpose", "")
+            display_files = [self._display_file_name(file_path) for file_path in files_used if file_path]
+            if display_files:
+                files_clause = ", ".join(display_files)
+                if description_for_step:
+                    if files_clause not in description_for_step:
+                        description_for_step = f"{description_for_step} (files: {files_clause})"
+                else:
+                    description_for_step = f"Files used: {files_clause}"
+
+            # Build enriched description with file details
+            temp_step = WorkflowStepPlan(
+                step_number=idx,
+                atom_id=atom_id,
+                description=description_for_step,
+                prompt=prompt_text,
+                files_used=files_used,
+                inputs=inputs,
+                output_alias=output_alias
+            )
+            enriched_description = self._build_enriched_description(temp_step, available_files)
 
             enriched_steps.append(
                 WorkflowStepPlan(
                     step_number=idx,
                     atom_id=atom_id,
-                    description=description or guidance.get("purpose", ""),
+                    description=description_for_step,
                     prompt=prompt_text,
                     files_used=files_used,
                     inputs=inputs,
-                    output_alias=output_alias
+                    output_alias=output_alias,
+                    enriched_description=enriched_description,
+                    atom_prompt=prompt_text  # Store the prompt that will be sent to atom
                 )
             )
 
-            previous_alias = output_alias
+            if produces_dataset and output_alias:
+                last_materialized_alias = output_alias
 
         return enriched_steps
 
     async def _generate_workflow_with_llm(
         self,
         user_prompt: str,
-        available_files: List[str]
+        available_files: List[str],
+        priority_files: Optional[List[str]] = None,
     ) -> Tuple[List[Dict[str, Any]], List[str], bool]:
         """
         Use LLM to generate workflow plan based on user prompt and atom capabilities.
@@ -467,60 +862,44 @@ WORKFLOW PLANNING RULES:
         if aiohttp is None:
             raise RuntimeError("aiohttp is required for LLM workflow generation but is not installed")
         
-        # Extract files mentioned in prompt
+        # Extract files mentioned in prompt and merge with tracked context
         prompt_files = self._extract_file_names_from_prompt(user_prompt)
+        prompt_files = self._merge_file_references(prompt_files, priority_files)
         files_exist = self._match_files_with_available(prompt_files, available_files) if available_files else False
         
-        # Get atom capabilities
-        atom_knowledge = self._get_atom_capabilities_for_llm()
-        
-        # Build LLM prompt
-        files_str = "\n".join([f"  - {f}" for f in available_files]) if available_files else "  (No files available yet)"
-        
-        # Enhanced prompt with file matching information
-        file_instruction = ""
-        if files_exist and available_files:
-            file_instruction = f"""
-CRITICAL FILE INFORMATION:
-- The user mentioned files in their request: {', '.join(prompt_files)}
-- These files ALREADY EXIST in the system: {', '.join([f.split('/')[-1] for f in available_files[:3]])}
-- DO NOT include 'data-upload-validate' steps - files are already uploaded!
-- Start directly with the data processing step (merge, concat, etc.)
-"""
-        
-        llm_prompt = f"""You are a data analysis workflow planner. Your task is to create a step-by-step workflow to accomplish the user's request.
-
-{atom_knowledge}
-
-USER REQUEST:
-"{user_prompt}"
-
-AVAILABLE FILES (already in system):
-{files_str}
-{file_instruction}
-
-TASK:
-Generate a workflow plan as a JSON array. Each step should have:
-- atom_id: The ID of the atom to use (from the list above)
-- description: Brief description of what this step does (one sentence)
-
-IMPORTANT RULES:
-{"- ⚠️ CRITICAL: Files mentioned in user request already exist in available_files. DO NOT include 'data-upload-validate' steps. Start directly with data processing!" if files_exist else "- If files don't exist, include 'data-upload-validate' as the first step"}
-- Keep workflow simple (2-4 steps)
-- Put transformations before visualizations
-- Each step should logically follow the previous one
-
-Respond ONLY with valid JSON array, no other text:
-[
-  {{"atom_id": "merge", "description": "Merge the two datasets"}},
-  {{"atom_id": "chart-maker", "description": "Visualize the merged data"}}
-]
-"""
+        graph_prompt: Optional[GraphRAGPhaseOnePrompt] = None
+        try:
+            graph_prompt = self.graph_prompt_builder.build_phase_one_prompt(
+                user_prompt=user_prompt,
+                available_files=available_files,
+                files_exist=files_exist,
+                prompt_files=prompt_files,
+                atom_reference=self._get_atom_capabilities_for_llm(),
+            )
+            llm_prompt = graph_prompt.prompt
+            logger.info(
+                "🧠 GraphRAG context sections: %s",
+                list(graph_prompt.context.keys()),
+            )
+            logger.debug("📎 GraphRAG context detail: %s", graph_prompt.context)
+            self._latest_graph_prompt = graph_prompt
+        except Exception as exc:
+            logger.exception("⚠️ Graph prompt builder failed; falling back to legacy prompt: %s", exc)
+            llm_prompt = self._build_legacy_prompt(
+                user_prompt=user_prompt,
+                available_files=available_files,
+                files_exist=files_exist,
+                prompt_files=prompt_files,
+            )
+            logger.info("🧠 Using legacy workflow prompt assembly")
+            self._latest_graph_prompt = None
         
         logger.info(f"🤖 Calling LLM for workflow generation...")
         logger.info(f"📝 Prompt length: {len(llm_prompt)} chars")
         
-        try:
+        # Define the LLM call function for retry mechanism
+        async def _call_llm_for_workflow() -> List[Dict[str, Any]]:
+            """Inner function that makes the LLM call and parses JSON"""
             async with aiohttp.ClientSession() as session:
                 payload = {
                     "model": self.llm_model,
@@ -557,37 +936,83 @@ Respond ONLY with valid JSON array, no other text:
                     elif "```" in content:
                         content = content.split("```")[1].split("```")[0].strip()
                     
-                    workflow_steps = json.loads(content)
-                    
-                    # Post-process: Remove data-upload-validate if files already exist
-                    if files_exist:
-                        original_count = len(workflow_steps)
-                        workflow_steps = [s for s in workflow_steps if s.get('atom_id') != 'data-upload-validate']
-                        if len(workflow_steps) < original_count:
-                            logger.info(f"🔧 Removed {original_count - len(workflow_steps)} data-upload-validate step(s) - files already exist")
-                            # Renumber steps
-                            for i, step in enumerate(workflow_steps, 1):
-                                step['step_number'] = i
-                    
-                    logger.info(f"✅ Generated {len(workflow_steps)} steps via LLM")
+                    workflow_payload = json.loads(content)
+
+                    if isinstance(workflow_payload, dict):
+                        if "steps" in workflow_payload and isinstance(workflow_payload["steps"], list):
+                            workflow_steps = workflow_payload["steps"]
+                        elif "workflow_steps" in workflow_payload and isinstance(workflow_payload["workflow_steps"], list):
+                            workflow_steps = workflow_payload["workflow_steps"]
+                        else:
+                            # Allow dict representing a single step
+                            workflow_steps = [workflow_payload]
+                    elif isinstance(workflow_payload, list):
+                        workflow_steps = workflow_payload
+                    else:
+                        raise ValueError("LLM response is not a list or object containing steps")
+
+                    normalized_steps: List[Dict[str, Any]] = []
+                    for entry in workflow_steps:
+                        if isinstance(entry, dict):
+                            normalized_steps.append(entry)
+                            continue
+                        if isinstance(entry, str):
+                            try:
+                                parsed_entry = json.loads(entry)
+                                if isinstance(parsed_entry, dict):
+                                    normalized_steps.append(parsed_entry)
+                                    continue
+                            except json.JSONDecodeError:
+                                logger.warning("⚠️ Unable to parse workflow step string into JSON: %s", entry[:200])
+                        logger.warning("⚠️ Skipping workflow step with unsupported type: %r", type(entry))
+
+                    if not normalized_steps:
+                        raise ValueError("No valid workflow steps extracted from LLM response")
+
+                    return normalized_steps
+        
+        # Use retry mechanism for workflow generation
+        try:
+            workflow_steps = await self._retry_llm_json_generation(
+                llm_call_func=_call_llm_for_workflow,
+                step_name="Workflow Generation",
+                max_attempts=3
+            )
+            
+            # Post-process: Remove data-upload-validate if files already exist
+            if files_exist:
+                original_count = len(workflow_steps)
+                workflow_steps = [s for s in workflow_steps if s.get('atom_id') != 'data-upload-validate']
+                if len(workflow_steps) < original_count:
+                    logger.info(f"🔧 Removed {original_count - len(workflow_steps)} data-upload-validate step(s) - files already exist")
+                    # Renumber steps
                     for i, step in enumerate(workflow_steps, 1):
-                        logger.info(f"   Step {i}: {step.get('atom_id')} - {step.get('description')}")
-                    
-                    return workflow_steps, prompt_files, files_exist
-                    
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ Failed to parse LLM response as JSON: {e}")
-            logger.error(f"   Content: {content}")
+                        step['step_number'] = i
+            
+            logger.info(f"✅ Generated {len(workflow_steps)} steps via LLM")
+            for i, step in enumerate(workflow_steps, 1):
+                logger.info(f"   Step {i}: {step.get('atom_id')} - {step.get('description')}")
+            
+            return workflow_steps, prompt_files, files_exist
+            
+        except RetryableJSONGenerationError as e:
+            logger.error(f"❌ Workflow generation failed after all retries: {e}")
             # Fallback to keyword-based
-            return self._fallback_to_keywords(user_prompt, available_files), prompt_files, files_exist
+            logger.info("🔄 Falling back to keyword-based workflow generation")
+            return self._fallback_to_keywords(user_prompt, available_files, priority_files)
         except Exception as e:
-            logger.error(f"❌ LLM workflow generation failed: {e}")
+            logger.error(f"❌ LLM workflow generation failed with unexpected error: {e}")
             import traceback
             traceback.print_exc()
             # Fallback to keyword-based
-            return self._fallback_to_keywords(user_prompt, available_files)
+            return self._fallback_to_keywords(user_prompt, available_files, priority_files)
     
-    def _fallback_to_keywords(self, user_prompt: str, available_files: List[str]) -> List[Dict[str, Any]]:
+    def _fallback_to_keywords(
+        self,
+        user_prompt: str,
+        available_files: List[str],
+        priority_files: Optional[List[str]] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[str], bool]:
         """Fallback to simple keyword-based workflow generation"""
         logger.info("⚠️ Falling back to keyword-based workflow generation")
         query_lower = user_prompt.lower()
@@ -595,6 +1020,7 @@ Respond ONLY with valid JSON array, no other text:
         
         # Extract files from prompt and check if they exist
         prompt_files = self._extract_file_names_from_prompt(user_prompt)
+        prompt_files = self._merge_file_references(prompt_files, priority_files)
         files_exist = self._match_files_with_available(prompt_files, available_files) if available_files else False
         
         # Skip data-upload-validate if files already exist
@@ -609,8 +1035,15 @@ Respond ONLY with valid JSON array, no other text:
         if any(kw in query_lower for kw in ["concat", "append", "stack"]):
             steps.append({"atom_id": "concat", "description": "Concatenate datasets"})
         
-        if any(kw in query_lower for kw in ["filter", "sort", "select"]):
-            steps.append({"atom_id": "dataframe-operations", "description": "Filter and transform data"})
+        # Expanded keywords for dataframe-operations (Excel-like operations)
+        dataframe_ops_keywords = [
+            "filter", "where", "sort", "order", "select", "drop", "remove", "rename",
+            "formula", "calculate", "compute", "prod", "sum", "div", "if", "average",
+            "transform", "convert", "round", "edit", "insert", "delete", "find", "replace",
+            "split", "excel", "spreadsheet", "manipulate", "clean", "prepare", "column", "row"
+        ]
+        if any(kw in query_lower for kw in dataframe_ops_keywords):
+            steps.append({"atom_id": "dataframe-operations", "description": "Perform DataFrame operations (filter, formula, transform, etc.)"})
         
         if any(kw in query_lower for kw in ["group", "aggregate", "sum", "mean"]):
             steps.append({"atom_id": "groupby-wtg-avg", "description": "Group and aggregate data"})
@@ -619,10 +1052,10 @@ Respond ONLY with valid JSON array, no other text:
             steps.append({"atom_id": "chart-maker", "description": "Create visualization"})
         
         if not steps:
-            # Default to explore if no keywords matched
-            steps.append({"atom_id": "explore", "description": "Explore the data"})
+            # Default to dataframe-operations if no keywords matched
+            steps.append({"atom_id": "dataframe-operations", "description": "Perform general dataframe operations"})
         
-        return steps
+        return steps, prompt_files, files_exist
     
     async def execute_workflow_with_websocket(
         self,
@@ -632,7 +1065,9 @@ Respond ONLY with valid JSON array, no other text:
         project_context: Dict[str, Any],
         user_id: str,
         frontend_session_id: Optional[str] = None,
-        frontend_chat_id: Optional[str] = None
+        frontend_chat_id: Optional[str] = None,
+        history_override: Optional[str] = None,
+        chat_file_names: Optional[List[str]] = None,
     ):
         """
         Execute complete workflow with WebSocket events.
@@ -653,6 +1088,36 @@ Respond ONLY with valid JSON array, no other text:
         logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
         available_files = list(available_files or [])
         self._sequence_available_files[sequence_id] = available_files
+        # Store project_context for this sequence (needed for dataframe-operations and other agents)
+        self._sequence_project_context[sequence_id] = project_context or {}
+
+        persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
+        if persisted_history:
+            logger.info(
+                "🧠 Loaded persisted chat summary for %s (%d chars)",
+                frontend_chat_id,
+                len(persisted_history),
+            )
+        else:
+            logger.info("ℹ️ No persisted chat summary found for %s", frontend_chat_id)
+
+        history_summary = self._combine_history_sources(history_override, persisted_history)
+        if history_override:
+            logger.info(
+                "🧠 Received %d chars of history context from frontend payload",
+                len(history_override),
+            )
+
+        effective_user_prompt = self._apply_history_context(user_prompt, history_summary)
+
+        file_focus = self._merge_file_references(chat_file_names, None)
+        if history_summary:
+            history_files = self._extract_file_names_from_prompt(history_summary)
+            file_focus = self._merge_file_references(file_focus, history_files)
+        if file_focus:
+            self._chat_file_mentions[sequence_id] = file_focus
+            effective_user_prompt = self._append_file_focus_note(effective_user_prompt, file_focus)
+            logger.info("📁 Tracking %d file references from chat context", len(file_focus))
 
         try:
             # Send connected event
@@ -672,11 +1137,33 @@ Respond ONLY with valid JSON array, no other text:
             # ================================================================
             logger.info("📋 PHASE 1: Generating workflow plan with LLM...")
             
-            # Use LLM to generate intelligent workflow
-            workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                user_prompt=user_prompt,
-                available_files=available_files
-            )
+            # Use LLM to generate intelligent workflow with retry mechanism
+            try:
+                workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
+                    user_prompt=effective_user_prompt,
+                    available_files=available_files,
+                    priority_files=file_focus
+                )
+            except RetryableJSONGenerationError as e:
+                logger.error(f"❌ Workflow generation failed after all retries: {e}")
+                # Send error event asking user to rephrase
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_generation_failed",
+                        {
+                            "sequence_id": sequence_id,
+                            "error": str(e),
+                            "message": (
+                                "Failed to generate workflow plan after 3 attempts. "
+                                "Please rephrase your query in a clearer way."
+                            ),
+                            "suggestion": "Try being more specific about what operations you want to perform."
+                        }
+                    ),
+                    "workflow_generation_failed event"
+                )
+                return  # Stop workflow execution
             
             # Create plan structure
             enriched_steps = self._build_enriched_plan(
@@ -747,14 +1234,45 @@ Respond ONLY with valid JSON array, no other text:
                         additional_info = approval_msg.get('additional_info', '')
                         original_prompt = approval_msg.get('original_prompt', user_prompt)
                         combined_prompt = f"{original_prompt}. Additional requirements: {additional_info}"
+                        combined_with_history = self._apply_history_context(combined_prompt, history_summary)
                         
                         logger.info(f"➕ Regenerating workflow with additional info: {additional_info}")
-                        
-                        # Regenerate workflow with combined prompt
-                        workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                            user_prompt=combined_prompt,
-                            available_files=available_files
+
+                        updated_focus = self._merge_file_references(
+                            self._chat_file_mentions.get(sequence_id),
+                            self._extract_file_names_from_prompt(additional_info),
                         )
+                        if updated_focus:
+                            self._chat_file_mentions[sequence_id] = updated_focus
+                            combined_with_history = self._append_file_focus_note(combined_with_history, updated_focus)
+                        
+                        # Regenerate workflow with combined prompt (with retry mechanism)
+                        try:
+                            workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
+                                user_prompt=combined_with_history,
+                                available_files=available_files,
+                                priority_files=updated_focus
+                            )
+                        except RetryableJSONGenerationError as e:
+                            logger.error(f"❌ Workflow regeneration failed after all retries: {e}")
+                            # Send error event asking user to rephrase
+                            await self._send_event(
+                                websocket,
+                                WebSocketEvent(
+                                    "workflow_generation_failed",
+                                    {
+                                        "sequence_id": sequence_id,
+                                        "error": str(e),
+                                        "message": (
+                                            "Failed to regenerate workflow plan after 3 attempts. "
+                                            "Please rephrase your query in a clearer way."
+                                        ),
+                                        "suggestion": "Try being more specific about what operations you want to perform."
+                                    }
+                                ),
+                                "workflow_generation_failed event (regeneration)"
+                            )
+                            return  # Stop workflow execution
                         
                         enriched_steps = self._build_enriched_plan(
                             workflow_steps_raw=workflow_steps_raw,
@@ -783,6 +1301,21 @@ Respond ONLY with valid JSON array, no other text:
                         
                         logger.info(f"✅ Regenerated workflow with {plan.total_steps} steps")
                         # Continue waiting for approval
+                    elif approval_msg.get('type') == 'stop_workflow':
+                        logger.info("🛑 User stopped workflow before execution")
+                        self._cancelled_sequences.add(sequence_id)
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "workflow_stopped",
+                                {
+                                    "message": "Workflow stopped by user before execution",
+                                    "sequence_id": sequence_id
+                                }
+                            ),
+                            "workflow_stopped (plan phase)"
+                        )
+                        return
                 except WebSocketDisconnect:
                     logger.info("🔌 WebSocket disconnected while waiting for initial approval")
                     return
@@ -810,13 +1343,34 @@ Respond ONLY with valid JSON array, no other text:
                 "workflow_started event"
             )
             
+            if sequence_id in self._cancelled_sequences:
+                logger.info(f"🛑 Workflow {sequence_id} marked as cancelled before execution start")
+                self._cancelled_sequences.discard(sequence_id)
+                return
+
             for idx, step in enumerate(plan.workflow_steps):
+                if sequence_id in self._cancelled_sequences:
+                    logger.info(f"🛑 Workflow {sequence_id} cancelled before executing step {step.step_number}")
+                    self._cancelled_sequences.discard(sequence_id)
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "workflow_stopped",
+                            {
+                                "message": "Workflow stopped by user",
+                                "sequence_id": sequence_id
+                            }
+                        ),
+                        "workflow_stopped (pre-step)"
+                    )
+                    return
+
                 await self._execute_step_with_events(
                     websocket=websocket,
                     step=step,
                     plan=plan,
                     sequence_id=sequence_id,
-                    original_prompt=user_prompt,
+                    original_prompt=effective_user_prompt,
                     project_context=project_context,
                     user_id=user_id,
                     available_files=available_files
@@ -895,11 +1449,20 @@ Respond ONLY with valid JSON array, no other text:
                                 if remaining_steps:
                                     # Combine original prompt with additional info for remaining steps
                                     combined_prompt = f"{original_prompt}. Additional requirements for remaining steps: {additional_info}"
+                                    combined_with_history = self._apply_history_context(combined_prompt, history_summary)
+                                    updated_focus = self._merge_file_references(
+                                        self._chat_file_mentions.get(sequence_id),
+                                        self._extract_file_names_from_prompt(additional_info),
+                                    )
+                                    if updated_focus:
+                                        self._chat_file_mentions[sequence_id] = updated_focus
+                                        combined_with_history = self._append_file_focus_note(combined_with_history, updated_focus)
                                     
                                     # Regenerate workflow and filter to remaining steps
                                     new_workflow_steps, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                                        user_prompt=combined_prompt,
-                                        available_files=available_files
+                                        user_prompt=combined_with_history,
+                                        available_files=available_files,
+                                        priority_files=updated_focus
                                     )
                                     
                                     # Update plan with new remaining steps enriched with prompts
@@ -934,6 +1497,21 @@ Respond ONLY with valid JSON array, no other text:
                                     
                                     # Continue to next step (which is now updated)
                                     step_approved = True
+                            elif approval_msg.get('type') == 'stop_workflow':
+                                logger.info(f"🛑 Workflow {sequence_id} stopped by user at step {step.step_number}")
+                                self._cancelled_sequences.add(sequence_id)
+                                await self._send_event(
+                                    websocket,
+                                    WebSocketEvent(
+                                        "workflow_stopped",
+                                        {
+                                            "message": f"Workflow stopped by user at step {step.step_number}",
+                                            "sequence_id": sequence_id
+                                        }
+                                    ),
+                                    "workflow_stopped (step phase)"
+                                )
+                                return
                         except WebSocketDisconnect:
                             logger.info("🔌 WebSocket disconnected while waiting for step approval")
                             return
@@ -959,6 +1537,29 @@ Respond ONLY with valid JSON array, no other text:
             )
             
             logger.info(f"✅ Workflow completed: {sequence_id}")
+
+            # 🔧 CRITICAL FIX: Check if websocket is still connected before emitting workflow insight
+            # The connection might be closed after workflow_completed event
+            try:
+                # Check connection state before emitting workflow insight
+                if hasattr(websocket, 'client_state') and websocket.client_state.name == 'DISCONNECTED':
+                    logger.warning(f"⚠️ WebSocket already disconnected, skipping workflow insight for {sequence_id}")
+                elif hasattr(websocket, 'application_state') and websocket.application_state.name == 'DISCONNECTED':
+                    logger.warning(f"⚠️ WebSocket application state disconnected, skipping workflow insight for {sequence_id}")
+                else:
+                    await self._emit_workflow_insight(
+                        websocket=websocket,
+                        sequence_id=sequence_id,
+                        plan=plan,
+                        user_prompt=user_prompt,
+                        project_context=project_context,
+                        additional_context=history_summary or "",
+                    )
+            except WebSocketDisconnect:
+                logger.info(f"🔌 WebSocket disconnected before workflow insight could be emitted for {sequence_id}")
+            except Exception as insight_error:
+                logger.warning(f"⚠️ Failed to emit workflow insight (connection may be closed): {insight_error}")
+                # Don't fail the entire workflow if insight emission fails
             
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during workflow {sequence_id}")
@@ -985,6 +1586,7 @@ Respond ONLY with valid JSON array, no other text:
                 logger.info("🔌 WebSocket disconnected before error event could be delivered")
         finally:
             self._cleanup_sequence_state(sequence_id)
+            self._cancelled_sequences.discard(sequence_id)
     async def _execute_step_with_events(
         self,
         websocket,
@@ -1011,9 +1613,15 @@ Respond ONLY with valid JSON array, no other text:
         
         try:
             # ================================================================
-            # EVENT 1: STEP_STARTED
+            # EVENT 1: STEP_STARTED (with enriched description)
             # ================================================================
             logger.info(f"📍 Step {step_number}/{plan.total_steps}: {atom_id}")
+            
+            # Ensure downstream steps reference freshly saved files instead of aliases
+            self._resolve_step_dependencies(sequence_id, step)
+            
+            # Build enriched description with file details
+            enriched_description = self._build_enriched_description(step, available_files)
             
             await self._send_event(
                 websocket,
@@ -1024,6 +1632,10 @@ Respond ONLY with valid JSON array, no other text:
                         "total_steps": plan.total_steps,
                         "atom_id": atom_id,
                         "description": step.description,
+                        "enriched_description": enriched_description,
+                        "files_used": step.files_used if hasattr(step, "files_used") else [],
+                        "inputs": step.inputs if hasattr(step, "inputs") else [],
+                        "output_alias": step.output_alias if hasattr(step, "output_alias") else "",
                         "sequence_id": sequence_id
                     }
                 ),
@@ -1037,12 +1649,49 @@ Respond ONLY with valid JSON array, no other text:
             
             # For now, use basic parameters from prompt
             # The atom handlers will process the results properly
-            parameters = await self._generate_simple_parameters(
-                atom_id=atom_id,
-                original_prompt=original_prompt,
-                available_files=available_files,
-                step_prompt=getattr(step, "prompt", None),
-                workflow_step=step
+            try:
+                parameters = await self._generate_simple_parameters(
+                    atom_id=atom_id,
+                    original_prompt=original_prompt,
+                    available_files=available_files,
+                    step_prompt=getattr(step, "prompt", None),
+                    workflow_step=step
+                )
+            except Exception as parameter_error:
+                logger.exception(
+                    "❌ Failed to generate parameters for step %s (%s)",
+                    step_number,
+                    atom_id,
+                )
+                raise
+            
+            # Extract the prompt that will be sent to the atom
+            atom_prompt = parameters.get("prompt", step.prompt if hasattr(step, "prompt") else "")
+            
+            # 🔧 NEW: Log and send prompt to UI for visibility
+            logger.info(f"📝 PROMPT FOR STEP {step_number} ({atom_id}):")
+            logger.info("="*80)
+            logger.info(atom_prompt)
+            logger.info("="*80)
+            
+            # Send prompt to UI via WebSocket event BEFORE execution
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "atom_prompt",
+                    {
+                        "step": step_number,
+                        "atom_id": atom_id,
+                        "prompt": atom_prompt,
+                        "full_prompt": atom_prompt,  # Full prompt text for UI display
+                        "parameters": parameters,
+                        "sequence_id": sequence_id,
+                        "message": f"📝 Prompt being sent to {atom_id} at step {step_number}",
+                        "description": step.description,
+                        "enriched_description": enriched_description
+                    }
+                ),
+                f"atom_prompt event (step {step_number})"
             )
             
             logger.info(f"✅ Parameters: {json.dumps(parameters, indent=2)[:150]}...")
@@ -1078,10 +1727,23 @@ Respond ONLY with valid JSON array, no other text:
             # ================================================================
             logger.info(f"⚙️ Executing atom {atom_id}...")
             
-            execution_result = await self._execute_atom_endpoint(
+            execution_result = await self._execute_atom_with_retry(
                 atom_id=atom_id,
                 parameters=parameters,
-                session_id=sequence_id
+                session_id=sequence_id,
+                step_number=step_number,
+                sequence_id=sequence_id,
+                websocket=websocket,
+            )
+
+            execution_success = bool(execution_result.get("success", True))
+            insight_text = await self._generate_step_insight(
+                step=step,
+                total_steps=plan.total_steps,
+                atom_prompt=atom_prompt,
+                parameters=parameters,
+                execution_result=execution_result,
+                execution_success=execution_success
             )
             
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
@@ -1089,7 +1751,8 @@ Respond ONLY with valid JSON array, no other text:
                 sequence_id=sequence_id,
                 step_number=step_number,
                 atom_id=atom_id,
-                execution_result=execution_result
+                execution_result=execution_result,
+                insight=insight_text
             )
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
@@ -1106,7 +1769,8 @@ Respond ONLY with valid JSON array, no other text:
                         "result": execution_result,  # merge_json, groupby_json, etc.
                         "sequence_id": sequence_id,
                         "output_alias": step.output_alias,
-                        "summary": f"Executed {atom_id}"
+                        "summary": f"Executed {atom_id}",
+                        "insight": insight_text
                     }
                 ),
                 f"agent_executed event (step {step_number})"
@@ -1125,7 +1789,8 @@ Respond ONLY with valid JSON array, no other text:
                         "atom_id": atom_id,
                         "card_id": card_id,
                         "summary": f"Step {step_number} completed",
-                        "sequence_id": sequence_id
+                        "sequence_id": sequence_id,
+                        "insight": insight_text
                     }
                 ),
                 f"step_completed event (step {step_number})"
@@ -1153,6 +1818,221 @@ Respond ONLY with valid JSON array, no other text:
                 f"step_failed event (step {step_number})"
             )
     
+    def _resolve_step_dependencies(self, sequence_id: str, step: WorkflowStepPlan) -> None:
+        """Replace alias placeholders with the actual file paths produced earlier."""
+        alias_map = self._output_alias_registry.get(sequence_id)
+        if not alias_map:
+            return
+
+        def resolve_list(values: Optional[List[str]]) -> Optional[List[str]]:
+            if not values:
+                return values
+            updated: List[str] = []
+            changed = False
+            for entry in values:
+                resolved = self._resolve_alias_value(sequence_id, entry)
+                if resolved != entry:
+                    changed = True
+                updated.append(resolved)
+            return updated if changed else values
+
+        resolved_inputs = resolve_list(step.inputs)
+        if resolved_inputs is not step.inputs:
+            step.inputs = resolved_inputs or []
+
+        resolved_files = resolve_list(step.files_used)
+        if resolved_files is not step.files_used:
+            step.files_used = resolved_files or []
+
+        if not step.files_used and step.inputs:
+            step.files_used = step.inputs.copy()
+
+    def _register_output_alias(self, sequence_id: str, alias: Optional[str], file_path: Optional[str]) -> None:
+        """Track which file path was produced for a given output alias."""
+        if not alias or not file_path:
+            return
+        alias_map = self._output_alias_registry.setdefault(sequence_id, {})
+        normalized = self._normalize_alias_token(alias)
+        alias_map[alias.strip()] = file_path
+        alias_map[normalized] = file_path
+
+    def _resolve_alias_value(self, sequence_id: str, token: Optional[str]) -> Optional[str]:
+        """Resolve an alias token to the stored file path if available."""
+        if not token:
+            return token
+        alias_map = self._output_alias_registry.get(sequence_id)
+        if not alias_map:
+            return token
+        stripped = token.strip()
+        normalized = self._normalize_alias_token(stripped)
+        return alias_map.get(stripped) or alias_map.get(normalized) or token
+
+    def _normalize_alias_token(self, alias: str) -> str:
+        """Normalize alias references (strip braces, spaces, lowercase)."""
+        return re.sub(r"\s+", "", alias.strip("{} ").lower())
+    
+    async def _generate_step_insight(
+        self,
+        step: WorkflowStepPlan,
+        total_steps: int,
+        atom_prompt: str,
+        parameters: Dict[str, Any],
+        execution_result: Dict[str, Any],
+        execution_success: bool
+    ) -> Optional[str]:
+        """Summarize a completed step using a dedicated LLM call."""
+        if aiohttp is None:
+            logger.debug("🔇 Skipping insight generation (aiohttp not available)")
+            return None
+        if not self.llm_api_url or not self.llm_model:
+            logger.debug("🔇 Skipping insight generation (LLM config missing)")
+            return None
+
+        try:
+            insight_prompt = self._build_step_insight_prompt(
+                step=step,
+                total_steps=total_steps,
+                atom_prompt=atom_prompt,
+                parameters=parameters,
+                execution_result=execution_result,
+                execution_success=execution_success
+            )
+            if not insight_prompt:
+                return None
+            return await self._call_insight_llm(insight_prompt)
+        except Exception as insight_error:
+            logger.warning(f"⚠️ Step insight generation failed: {insight_error}")
+            return None
+
+    def _build_step_insight_prompt(
+        self,
+        step: WorkflowStepPlan,
+        total_steps: int,
+        atom_prompt: str,
+        parameters: Dict[str, Any],
+        execution_result: Dict[str, Any],
+        execution_success: bool
+    ) -> str:
+        """Construct the narrative prompt for the insight LLM."""
+        base_prompt = atom_prompt or step.atom_prompt or step.prompt or ""
+        if not base_prompt and not execution_result:
+            return ""
+
+        params_str = self._safe_json_dumps(parameters or {}, fallback="{}")
+        result_preview = self._extract_result_preview(execution_result)
+
+        status_text = "SUCCESS" if execution_success else "FAILED"
+        output_alias = step.output_alias or "not_specified"
+        files_used = ", ".join(step.files_used or []) or "none"
+        inputs_used = ", ".join(step.inputs or []) or "none"
+
+        return (
+            "You are Workstream AI Insights, a narrator that explains each workflow step in plain language.\n"
+            "Summarize what the step accomplished, what tangible outputs we now possess, "
+            "and how it positions the user for the following step.\n\n"
+            "STEP CONTEXT\n"
+            f"- Step: {step.step_number} of {total_steps}\n"
+            f"- Atom ID: {step.atom_id}\n"
+            f"- Planner Description: {step.description}\n"
+            f"- Files Referenced: {files_used}\n"
+            f"- Inputs: {inputs_used}\n"
+            f"- Output Handle: {output_alias}\n"
+            f"- Execution Status: {status_text}\n\n"
+            "PROMPT SENT TO ATOM\n"
+            f"{base_prompt}\n\n"
+            "ATOM PARAMETERS\n"
+            f"{params_str}\n\n"
+            "RESULT SNAPSHOT\n"
+            f"{result_preview}\n\n"
+            "RESPONSE REQUIREMENTS\n"
+            "- Keep total response under 120 words.\n"
+            "- Use Markdown with three sections in this order:\n"
+            "  1. Step Summary – 1-2 sentences describing what happened and outcome.\n"
+            "  2. What We Obtained – bullet list (max 3) referencing concrete outputs, mention "
+            f"`{output_alias}` when relevant.\n"
+            "  3. Ready For Next Step – single sentence explaining how the result can be used next.\n"
+            "- Call out blockers or missing data if the step failed.\n"
+            "- Do not fabricate metrics; rely only on the supplied snapshot.\n"
+        )
+
+    async def _call_insight_llm(self, prompt: str) -> Optional[str]:
+        """Invoke the configured LLM to obtain a step insight."""
+        if not prompt.strip():
+            return None
+        if aiohttp is None:
+            return None
+
+        headers = {"Content-Type": "application/json"}
+        if self.bearer_token:
+            headers["Authorization"] = f"Bearer {self.bearer_token}"
+
+        payload = {
+            "model": self.llm_model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Workstream AI Insights, producing concise narratives for each workflow step. "
+                        "Follow the requested output structure exactly."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.2,
+            "max_tokens": 600,
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.llm_api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=90),
+                ) as response:
+                    if response.status >= 400:
+                        error_text = await response.text()
+                        logger.warning(
+                            f"⚠️ Insight LLM call failed: HTTP {response.status} {error_text[:200]}"
+                        )
+                        return None
+                    body = await response.json()
+        except Exception as req_error:
+            logger.warning(f"⚠️ Insight LLM request error: {req_error}")
+            return None
+
+        content = ""
+        if isinstance(body, dict):
+            choices = body.get("choices")
+            if choices:
+                content = choices[0].get("message", {}).get("content", "")
+            elif "message" in body:
+                content = body["message"].get("content", "")
+
+        return content.strip() or None
+
+    def _extract_result_preview(self, data: Any, max_chars: int = 2000) -> str:
+        """Serialize execution result data into a bounded-length snippet."""
+        if data is None:
+            return "No execution result payload returned."
+        try:
+            serialized = json.dumps(data, indent=2, default=str)
+        except (TypeError, ValueError):
+            serialized = str(data)
+
+        if len(serialized) > max_chars:
+            return f"{serialized[:max_chars]}... (truncated)"
+        return serialized
+
+    def _safe_json_dumps(self, payload: Any, fallback: str = "{}") -> str:
+        """Serialize parameters safely for inclusion in prompts."""
+        if payload is None:
+            return fallback
+        try:
+            return json.dumps(payload, indent=2, default=str)
+        except (TypeError, ValueError):
+            return str(payload)
+
     async def _auto_save_step(
         self,
         sequence_id: str,
@@ -1195,6 +2075,12 @@ Respond ONLY with valid JSON array, no other text:
                 execution_result=execution_result,
                 step_cache=step_cache
             )
+        elif atom_id in ["create-column", "create-transform"]:
+            saved_path, auto_save_response = await self._auto_save_create_transform(
+                workflow_step=workflow_step,
+                execution_result=execution_result,
+                step_cache=step_cache
+            )
         else:
             logger.info(f"ℹ️ Auto-save skipped for atom '{atom_id}' (no auto-save logic implemented)")
             return
@@ -1204,6 +2090,7 @@ Respond ONLY with valid JSON array, no other text:
 
         # Track saved output
         self._step_output_files.setdefault(sequence_id, {})[step_number] = saved_path
+        self._register_output_alias(sequence_id, workflow_step.output_alias, saved_path)
         step_cache["saved_path"] = saved_path
         step_cache["auto_saved_at"] = datetime.utcnow().isoformat()
         step_cache["auto_save_response"] = auto_save_response
@@ -1226,7 +2113,8 @@ Respond ONLY with valid JSON array, no other text:
                     "atom_id": atom_id,
                     "auto_saved": True,
                     "output_file": saved_path,
-                    "saved_at": step_cache["auto_saved_at"]
+                    "saved_at": step_cache["auto_saved_at"],
+                    "insight": step_cache.get("insight")
                 }
                 self.result_storage.store_result(
                     sequence_id=sequence_id,
@@ -1400,6 +2288,93 @@ Respond ONLY with valid JSON array, no other text:
 
         return saved_path, response
 
+    async def _auto_save_create_transform(
+        self,
+        workflow_step: WorkflowStepPlan,
+        execution_result: Dict[str, Any],
+        step_cache: Dict[str, Any]
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Auto-save helper for create-transform atom outputs."""
+        # Get result file from execution result (perform endpoint already saved it)
+        result_file = (
+            execution_result.get("result_file") 
+            or execution_result.get("createResults", {}).get("result_file")
+            or execution_result.get("createColumnResults", {}).get("result_file")
+        )
+        
+        if result_file:
+            # File already saved by perform endpoint, just return the path
+            logger.info(f"✅ Create-transform result already saved by perform endpoint: {result_file}")
+            return result_file, {"result_file": result_file, "status": "already_saved"}
+        
+        # If no result_file, the perform endpoint didn't save it, so we need to save it
+        # This should rarely happen, but handle it gracefully
+        logger.warning(f"⚠️ Create-transform perform endpoint did not return result_file, attempting to save manually")
+        
+        csv_data = execution_result.get("data") or execution_result.get("csv_data")
+        
+        if not csv_data:
+            # Try to get results from cached_dataframe endpoint if we have a file reference
+            file_ref = execution_result.get("file") or execution_result.get("object_name")
+            if file_ref:
+                try:
+                    cached_url = f"{self.fastapi_base_url}/api/create-column/cached_dataframe?object_name={file_ref}"
+                    response = await self._get_json(cached_url)
+                    csv_data = response.get("data")
+                    logger.info(f"✅ Retrieved CSV data from cached_dataframe endpoint")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not fetch cached results: {e}")
+
+        if not csv_data:
+            # If we still don't have CSV data, log warning but don't fail
+            # The file might already be saved by the perform endpoint
+            logger.warning(f"⚠️ Create-transform auto-save: No CSV data available and no result_file found")
+            logger.warning(f"⚠️ Execution result keys: {list(execution_result.keys())}")
+            # Return a placeholder path - the file should already be saved
+            filename = self._build_auto_save_filename(workflow_step, default_prefix="create_transform")
+            return filename, {"result_file": filename, "status": "skipped_no_data"}
+
+        filename = self._build_auto_save_filename(workflow_step, default_prefix="create_transform")
+        payload = {
+            "csv_data": csv_data,
+            "filename": filename
+        }
+
+        create_save_endpoint = f"{self.fastapi_base_url}/api/create-column/save"
+        response = await self._post_json(create_save_endpoint, payload)
+        saved_path = (
+            response.get("result_file")
+            or response.get("object_name")
+            or response.get("path")
+            or response.get("filename")
+            or filename
+        )
+
+        return saved_path, response
+
+    async def _get_json(self, url: str) -> Dict[str, Any]:
+        """Send GET request and return JSON payload."""
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for auto-save HTTP calls but is not installed")
+
+        logger.info(f"🌐 GET {url}")
+        timeout = aiohttp.ClientTimeout(total=180)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                text_body = await response.text()
+                if response.status >= 400:
+                    raise RuntimeError(f"{url} returned {response.status}: {text_body}")
+
+                if not text_body:
+                    return {}
+
+                try:
+                    return json.loads(text_body)
+                except json.JSONDecodeError:
+                    logger.warning(f"⚠️ Non-JSON response from {url}: {text_body[:200]}")
+                    return {}
+
     async def _post_json(self, url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Send POST request and return JSON payload."""
         if aiohttp is None:
@@ -1498,15 +2473,171 @@ Respond ONLY with valid JSON array, no other text:
         sequence_id: str,
         step_number: int,
         atom_id: str,
-        execution_result: Dict[str, Any]
+        execution_result: Dict[str, Any],
+        insight: Optional[str] = None
     ) -> None:
-        """Cache step execution results for later auto-save and lineage tracking."""
+        """Cache step execution results and generated insights for later use."""
         cache = self._step_execution_cache.setdefault(sequence_id, {})
         cache[step_number] = {
             "atom_id": atom_id,
             "execution_result": execution_result,
-            "recorded_at": datetime.utcnow().isoformat()
+            "recorded_at": datetime.utcnow().isoformat(),
+            "insight": insight
         }
+
+    def _collect_workflow_step_records(
+        self,
+        sequence_id: str,
+        plan: WorkflowPlan
+    ) -> List[Dict[str, Any]]:
+        """Prepare structured step records for the workflow insight agent."""
+        cache = self._step_execution_cache.get(sequence_id, {})
+        if not cache:
+            return []
+
+        saved_files = self._step_output_files.get(sequence_id, {}) or {}
+        records: List[Dict[str, Any]] = []
+
+        for step in plan.workflow_steps:
+            step_cache = cache.get(step.step_number)
+            if not step_cache:
+                continue
+
+            execution_result = step_cache.get("execution_result")
+            record = {
+                "step_number": step.step_number,
+                "agent": step.atom_id,
+                "description": step.description,
+                "insight": step_cache.get("insight"),
+                "result_preview": self._extract_result_preview(execution_result),
+                "output_files": [],
+            }
+
+            saved_path = saved_files.get(step.step_number)
+            if saved_path:
+                record["output_files"].append(saved_path)
+
+            records.append(record)
+
+        return records
+
+    def _collect_generated_files(self, sequence_id: str) -> List[str]:
+        """Return all files auto-saved during the workflow."""
+        step_outputs = self._step_output_files.get(sequence_id)
+        if not step_outputs:
+            return []
+        return list(dict.fromkeys(step_outputs.values()))
+
+    async def _emit_workflow_insight(
+        self,
+        websocket,
+        sequence_id: str,
+        plan: WorkflowPlan,
+        user_prompt: str,
+        project_context: Dict[str, Any],
+        additional_context: str = ""
+    ) -> None:
+        """Generate and stream the final workflow-level insight paragraph."""
+        try:
+            # 🔧 CRITICAL FIX: Check if websocket connection is still alive before proceeding
+            try:
+                # Try to check connection state
+                if hasattr(websocket, 'client_state'):
+                    if websocket.client_state.name == 'DISCONNECTED':
+                        logger.warning(f"⚠️ WebSocket client disconnected, skipping workflow insight for {sequence_id}")
+                        return
+                if hasattr(websocket, 'application_state'):
+                    if websocket.application_state.name == 'DISCONNECTED':
+                        logger.warning(f"⚠️ WebSocket application disconnected, skipping workflow insight for {sequence_id}")
+                        return
+            except Exception as state_check_error:
+                logger.debug(f"Could not check websocket state: {state_check_error}")
+                # Continue anyway - the send will fail gracefully if disconnected
+            
+            step_records = self._collect_workflow_step_records(sequence_id, plan)
+            if not step_records:
+                logger.info("Skipped workflow insight emission (no step records)")
+                return
+
+            agent = get_workflow_insight_agent()
+            payload = {
+                "user_prompt": user_prompt,
+                "step_records": step_records,
+                "session_id": sequence_id,
+                "workflow_id": sequence_id,
+                "available_files": self._sequence_available_files.get(sequence_id, []),
+                "generated_files": self._collect_generated_files(sequence_id),
+                "additional_context": additional_context,
+                "client_name": project_context.get("client_name", ""),
+                "app_name": project_context.get("app_name", ""),
+                "project_name": project_context.get("project_name", ""),
+                "metadata": {"total_steps": plan.total_steps},
+            }
+
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, lambda: agent.generate_workflow_insight(payload))
+
+            if not result.get("success"):
+                logger.warning("Workflow insight agent returned error: %s", result.get("error"))
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "workflow_insight_failed",
+                            {
+                                "sequence_id": sequence_id,
+                                "error": result.get("error") or "Insight agent returned unsuccessful response",
+                            },
+                        ),
+                        "workflow_insight_failed event",
+                    )
+                except (WebSocketDisconnect, RuntimeError) as send_error:
+                    logger.info(f"🔌 Connection closed while sending workflow_insight_failed: {send_error}")
+                return
+
+            # 🔧 CRITICAL FIX: Check connection again before sending insight (connection might have closed during LLM call)
+            try:
+                if hasattr(websocket, 'client_state') and websocket.client_state.name == 'DISCONNECTED':
+                    logger.warning(f"⚠️ WebSocket disconnected during insight generation, skipping send for {sequence_id}")
+                    return
+            except Exception:
+                pass  # Continue - send will fail gracefully if disconnected
+
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "workflow_insight",
+                    {
+                        "sequence_id": sequence_id,
+                        "insight": result.get("insight"),
+                        "used_steps": result.get("used_steps"),
+                        "files_profiled": result.get("files_profiled"),
+                    },
+                ),
+                "workflow_insight event",
+            )
+            logger.info("✅ Workflow insight emitted for %s", sequence_id)
+        except WebSocketDisconnect as ws_exc:
+            logger.info(f"🔌 WebSocket disconnected during workflow insight generation for {sequence_id}: {ws_exc}")
+            # Connection was destroyed - this is expected if client closed connection
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("⚠️ Failed to emit workflow insight: %s", exc, exc_info=True)
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_insight_failed",
+                        {
+                            "sequence_id": sequence_id,
+                            "error": str(exc),
+                        },
+                    ),
+                    "workflow_insight_failed event",
+                )
+            except (WebSocketDisconnect, RuntimeError) as send_error:
+                logger.debug(f"Unable to notify client about workflow insight failure (connection closed): {send_error}")
+            except Exception as send_exc:
+                logger.debug(f"Unable to notify client about workflow insight failure: {send_exc}")
 
     async def _send_event(
         self,
@@ -1532,6 +2663,136 @@ Respond ONLY with valid JSON array, no other text:
         self._step_execution_cache.pop(sequence_id, None)
         self._step_output_files.pop(sequence_id, None)
         self._sequence_available_files.pop(sequence_id, None)
+        self._output_alias_registry.pop(sequence_id, None)
+        self._chat_file_mentions.pop(sequence_id, None)
+
+    def _load_persisted_chat_summary(
+        self,
+        chat_id: Optional[str],
+        project_context: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        if not chat_id or not self._memory_storage:
+            return None
+
+        context = project_context or {}
+        client_name = context.get("client_name")
+        app_name = context.get("app_name")
+        project_name = context.get("project_name")
+
+        try:
+            record = self._memory_storage.load_chat(
+                chat_id,
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.warning("⚠️ Failed to load persisted chat %s: %s", chat_id, exc)
+            return None
+
+        if not record:
+            return None
+
+        messages = record.get("messages") or []
+        if not messages:
+            return None
+
+        if self._memory_summarizer:
+            return self._memory_summarizer(messages)
+        return self._fallback_history_summary(messages)
+
+    def _fallback_history_summary(
+        self,
+        messages: List[Dict[str, Any]],
+        limit: int = 6,
+    ) -> str:
+        lines: List[str] = []
+        for msg in messages[-limit:]:
+            sender_raw = str(msg.get("sender") or msg.get("role") or "assistant").strip()
+            sender = sender_raw.capitalize() or "Assistant"
+            content = self._condense_text(str(msg.get("content") or ""))
+            if not content:
+                continue
+            if len(content) > 180:
+                content = content[:177].rstrip() + "..."
+            lines.append(f"{sender}: {content}")
+        return "\n".join(lines)
+
+    def _apply_history_context(self, latest_prompt: str, history_summary: Optional[str]) -> str:
+        if not history_summary:
+            return latest_prompt
+        summary = history_summary.strip()
+        if not summary:
+            return latest_prompt
+        latest = latest_prompt.strip()
+        combined = (
+            "Previous conversation summary (use it for continuity, avoid repeating completed work):\n"
+            f"{summary}\n\n"
+            "Latest user request:\n"
+            f"{latest}"
+        )
+        return combined.strip()
+
+    def _combine_history_sources(
+        self,
+        frontend_summary: Optional[str],
+        persisted_summary: Optional[str],
+    ) -> Optional[str]:
+        parts: List[str] = []
+        for source in (frontend_summary, persisted_summary):
+            if source and source.strip():
+                parts.append(source.strip())
+        if not parts:
+            return None
+        if len(parts) == 1:
+            return parts[0]
+        return "\n\n".join(parts)
+
+    def _append_file_focus_note(self, prompt: str, files: Optional[List[str]]) -> str:
+        if not files:
+            return prompt
+        sanitized = [f for f in files if isinstance(f, str) and f.strip()]
+        if not sanitized:
+            return prompt
+        file_lines = "\n".join(f"- {entry.strip()}" for entry in sanitized[:10])
+        note = (
+            "\n\nFiles referenced in this chat (preserve these exact names and prioritize their usage):\n"
+            f"{file_lines}"
+        )
+        return f"{prompt}{note}"
+
+    def _normalize_file_reference(self, value: Optional[str]) -> Optional[str]:
+        if not value or not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    def _merge_file_references(
+        self,
+        existing: Optional[List[str]],
+        new_refs: Optional[List[str]],
+    ) -> List[str]:
+        merged: List[str] = []
+        seen: Set[str] = set()
+
+        def _add(values: Optional[List[str]]) -> None:
+            if not values:
+                return
+            for entry in values:
+                if not isinstance(entry, str):
+                    continue
+                cleaned = self._normalize_file_reference(entry)
+                if not cleaned:
+                    continue
+                key = cleaned.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(cleaned)
+
+        _add(existing)
+        _add(new_refs)
+        return merged
 
     def _determine_fastapi_base_url(self) -> str:
         """Resolve FastAPI base URL for downstream atom services."""
@@ -1583,11 +2844,12 @@ Respond ONLY with valid JSON array, no other text:
         description_summary = self._condense_text(step_description)
 
         header_lines: List[str] = [
-            f"You are configuring the `{atom_id}` atom inside Trinity Stream AI's automated workflow executor.",
-            f"User goal summary: {user_summary}"
+            f"Atom: `{atom_id}`",
+            f"User goal: {user_summary}"
         ]
         if description_summary:
-            header_lines.append(f"Planner step description: {description_summary}")
+            header_lines.append(f"Step goal: {description_summary}")
+        header_lines.append("Respond with configuration details only – no filler text.")
 
         header_section = "\n".join(header_lines)
         dataset_section = self._build_dataset_section(atom_id, files_used, inputs, output_alias)
@@ -1617,6 +2879,9 @@ Respond ONLY with valid JSON array, no other text:
         inputs: List[str],
         output_alias: Optional[str]
     ) -> str:
+        files_used = self._ensure_list_of_strings(files_used)
+        inputs = self._ensure_list_of_strings(inputs)
+
         lines: List[str] = []
 
         def append_line(label: str, value: Optional[str]) -> None:
@@ -1661,6 +2926,10 @@ Respond ONLY with valid JSON array, no other text:
             return self._build_groupby_section(original_prompt, inputs or files_used)
         if atom_id == "concat":
             return self._build_concat_section(original_prompt, files_used)
+        if atom_id == "dataframe-operations":
+            return self._build_dataframe_operations_section(original_prompt, inputs or files_used)
+        if atom_id == "chart-maker":
+            return self._build_chart_section(original_prompt, inputs or files_used)
         return self._build_generic_section(atom_id, original_prompt)
 
     def _build_available_files_section(self, available_files: List[str]) -> str:
@@ -1771,6 +3040,169 @@ Respond ONLY with valid JSON array, no other text:
 
         return "\n".join(lines)
 
+    def _build_dataframe_operations_section(self, original_prompt: str, possible_inputs: List[str]) -> str:
+        """
+        Build detailed instructions for dataframe-operations atom.
+        This atom supports Excel-like operations: formulas, filters, sorts, transformations, etc.
+        """
+        prompt_lower = original_prompt.lower()
+        lines: List[str] = ["DataFrame operations requirements (Excel-like capabilities):"]
+        
+        # Detect operation types from prompt
+        has_formula = any(kw in prompt_lower for kw in ["formula", "calculate", "compute", "prod", "sum", "div", "if", "average", "multiply", "divide"])
+        has_filter = any(kw in prompt_lower for kw in ["filter", "where", "remove", "exclude", "keep only"])
+        has_sort = any(kw in prompt_lower for kw in ["sort", "order", "arrange", "ascending", "descending"])
+        has_transform = any(kw in prompt_lower for kw in ["transform", "convert", "round", "case", "rename", "edit"])
+        has_column_ops = any(kw in prompt_lower for kw in ["column", "select", "drop", "remove column", "add column", "insert column"])
+        has_row_ops = any(kw in prompt_lower for kw in ["row", "insert row", "delete row", "remove row"])
+        has_find_replace = any(kw in prompt_lower for kw in ["find", "replace", "search"])
+        
+        # Formula operations
+        if has_formula:
+            lines.append("- Formula operations:")
+            lines.append("  * Detect formula type: PROD (multiply), SUM (add), DIV (divide), IF (conditional), AVG (average), etc.")
+            lines.append("  * Extract column names from prompt (case-insensitive matching)")
+            lines.append("  * Ensure formulas start with '=' prefix (required by backend)")
+            lines.append("  * Example: 'PROD(Price, Volume)' → '=PROD(Price, Volume)'")
+            lines.append("  * Target column: Create new column or overwrite existing based on user intent")
+        
+        # Filter operations
+        if has_filter:
+            lines.append("- Filter operations:")
+            lines.append("  * Extract filter conditions (e.g., 'revenue > 1000', 'status == active')")
+            lines.append("  * Support multiple conditions with AND/OR logic")
+            lines.append("  * Handle numeric, string, and date comparisons")
+        
+        # Sort operations
+        if has_sort:
+            lines.append("- Sort operations:")
+            lines.append("  * Extract sort column(s) and direction (asc/desc)")
+            lines.append("  * Support multi-column sorting if mentioned")
+        
+        # Transform operations
+        if has_transform:
+            lines.append("- Transform operations:")
+            lines.append("  * Column renaming: Extract old and new column names")
+            lines.append("  * Type conversion: Detect target types (text, number, date)")
+            lines.append("  * Case conversion: lower, upper, snake_case, etc.")
+            lines.append("  * Rounding: Extract decimal places if mentioned")
+        
+        # Column operations
+        if has_column_ops:
+            lines.append("- Column operations:")
+            lines.append("  * Select/drop: Identify columns to keep or remove")
+            lines.append("  * Insert: Detect position and default values")
+            lines.append("  * Rename: Map old names to new names")
+        
+        # Row operations
+        if has_row_ops:
+            lines.append("- Row operations:")
+            lines.append("  * Insert: Detect position (above/below) and default values")
+            lines.append("  * Delete: Identify rows to remove (by index or condition)")
+        
+        # Find and replace
+        if has_find_replace:
+            lines.append("- Find and replace:")
+            lines.append("  * Extract search text and replacement text")
+            lines.append("  * Detect case sensitivity and replace all options")
+        
+        # General guidance
+        if not (has_formula or has_filter or has_sort or has_transform or has_column_ops or has_row_ops or has_find_replace):
+            lines.append("- General operations:")
+            lines.append("  * Analyze prompt to determine which DataFrame operations are needed")
+            lines.append("  * Support multiple operations in sequence if user requests multiple tasks")
+            lines.append("  * Use operations list in dataframe_config to chain operations")
+        
+        # Input dataset
+        if possible_inputs:
+            lines.append(f"- Use input dataset: `{possible_inputs[0]}`")
+        
+        # Output guidance
+        lines.append("- Output format:")
+        lines.append("  * Return dataframe_config with operations array")
+        lines.append("  * Each operation should have: operation_name, api_endpoint, method, parameters")
+        lines.append("  * Use 'auto_from_previous' for df_id to chain operations")
+        lines.append("  * Ensure operations are ordered correctly (load first, then transformations)")
+        
+        return "\n".join(lines)
+
+    def _build_chart_section(self, original_prompt: str, possible_inputs: List[str]) -> str:
+        """
+        Build precise configuration instructions for chart-maker atom.
+        Emphasizes returning structured JSON with exact column names.
+        """
+        prompt_lower = original_prompt.lower()
+        chart_type = self._detect_chart_type(prompt_lower)
+        focus_columns = self._extract_focus_entities(prompt_lower)
+        filters = self._extract_filter_clauses(original_prompt)
+
+        lines: List[str] = ["Chart configuration (return JSON only):"]
+        lines.append("{")
+        lines.append('  "chart_type": "<bar|line|pie|scatter|area|combo>",')
+        lines.append('  "data_source": "<input dataset name>",')
+        lines.append('  "x_column": "<categorical column>",')
+        lines.append('  "y_column": "<numeric measure>",')
+        lines.append('  "breakdown_columns": ["<optional category columns>"],')
+        lines.append('  "filters": [{"column": "<column>", "operator": "==|>|<|contains", "value": "<exact value>"}],')
+        lines.append('  "title": "<human friendly title>"')
+        lines.append("}")
+        lines.append("")
+        lines.append("Rules:")
+        lines.append("- Use EXACT column names from dataset metadata (case-sensitive, spaces preserved).")
+        lines.append("- If the user used abbreviations (e.g., 'reg', 'rev'), map them to the canonical column names before filling the JSON.")
+        lines.append("- Choose chart_type based on user request (default to 'bar' if unspecified).")
+        lines.append("- x_column should be a categorical column (e.g., Region, Brand, Month).")
+        lines.append("- y_column must be a numeric measure (e.g., Sales, Revenue, Quantity).")
+        lines.append("- Filters: capture regions/brands/time ranges mentioned by the user; use equality comparisons unless a range is specified.")
+        lines.append("- Title: Summarize the chart purpose (e.g., 'Sales of Brand GERC in Rajasthan').")
+
+        if chart_type:
+            lines.append(f"- Detected chart type hint: {chart_type}")
+        if focus_columns:
+            lines.append(f"- Entities mentioned by user: {', '.join(focus_columns)} (ensure these map to actual columns)")
+        if filters:
+            lines.append("- Filter hints from prompt:")
+            for flt in filters:
+                lines.append(f"  * {flt}")
+
+        if possible_inputs:
+            lines.append(f"- Use dataset: `{possible_inputs[0]}` as data_source.")
+
+        lines.append("- Output must be pure JSON (no prose).")
+        return "\n".join(lines)
+
+    def _detect_chart_type(self, prompt_lower: str) -> Optional[str]:
+        chart_keywords = {
+            "bar": ["bar", "column"],
+            "line": ["line", "trend"],
+            "pie": ["pie", "share", "distribution"],
+            "scatter": ["scatter", "correlation", "relationship"],
+            "area": ["area"],
+            "combo": ["combo", "combined"]
+        }
+        for chart, keywords in chart_keywords.items():
+            if any(keyword in prompt_lower for keyword in keywords):
+                return chart
+        return None
+
+    def _extract_focus_entities(self, prompt_lower: str) -> List[str]:
+        tokens = re.findall(r"[A-Za-z0-9_]+", prompt_lower)
+        common_entities = {"brand", "region", "market", "channel", "product", "country", "customer"}
+        entities = [token for token in tokens if token in common_entities]
+        return list(dict.fromkeys(entities))
+
+    def _extract_filter_clauses(self, prompt: str) -> List[str]:
+        clauses = []
+        patterns = [
+            r"in\s+(?:the\s+)?([A-Za-z0-9_\s]+)",
+            r"for\s+(?:the\s+)?([A-Za-z0-9_\s]+)",
+            r"where\s+([A-Za-z0-9_\s><=]+)"
+        ]
+        for pattern in patterns:
+            for match in re.findall(pattern, prompt, flags=re.IGNORECASE):
+                clauses.append(match.strip())
+        return clauses
+    
     def _build_generic_section(self, atom_id: str, original_prompt: str) -> str:
         lines = [
             "Execution requirements:",
@@ -1778,8 +3210,6 @@ Respond ONLY with valid JSON array, no other text:
             "- Reuse upstream datasets and maintain Quant Matrix AI styling and naming conventions.",
             f"- Ensure the `{atom_id}` atom returns a result ready for the next workflow step."
         ]
-        if "filter" in original_prompt.lower() and atom_id == "dataframe-operations":
-            lines.append("- Explicitly encode filter and sort logic mentioned by the user.")
         return "\n".join(lines)
 
     def _extract_join_columns(self, text: str) -> List[str]:
@@ -1958,6 +3388,130 @@ Respond ONLY with valid JSON array, no other text:
             return ""
         return " ".join(text.split())
     
+    async def _execute_atom_with_retry(
+        self,
+        *,
+        atom_id: str,
+        parameters: Dict[str, Any],
+        session_id: str,
+        step_number: int,
+        sequence_id: str,
+        websocket
+    ) -> Dict[str, Any]:
+        """
+        Execute atom endpoint with retry support when success=False or request fails.
+        """
+        last_result: Dict[str, Any] = {}
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, self.atom_retry_attempts + 1):
+            try:
+                result = await self._execute_atom_endpoint(
+                    atom_id=atom_id,
+                    parameters=parameters,
+                    session_id=session_id,
+                )
+            except Exception as exec_error:
+                last_error = exec_error
+                logger.warning(
+                    "⚠️ Atom %s execution attempt %s/%s failed with exception: %s",
+                    atom_id,
+                    attempt,
+                    self.atom_retry_attempts,
+                    exec_error,
+                )
+                if attempt >= self.atom_retry_attempts:
+                    raise
+                await self._notify_atom_retry(
+                    websocket,
+                    atom_id=atom_id,
+                    step_number=step_number,
+                    sequence_id=sequence_id,
+                    attempt=attempt,
+                    reason=str(exec_error),
+                )
+                if self.atom_retry_delay:
+                    await asyncio.sleep(self.atom_retry_delay)
+                continue
+
+            success = bool(result.get("success", True))
+            if success:
+                if attempt > 1:
+                    logger.info(
+                        "✅ Atom %s succeeded after %s attempts",
+                        atom_id,
+                        attempt,
+                    )
+                return result
+
+            last_result = result
+            reason = (
+                result.get("error")
+                or result.get("message")
+                or "Atom returned success=false"
+            )
+            logger.warning(
+                "⚠️ Atom %s returned success=False on attempt %s/%s: %s",
+                atom_id,
+                attempt,
+                self.atom_retry_attempts,
+                reason,
+            )
+            if attempt >= self.atom_retry_attempts:
+                break
+
+            await self._notify_atom_retry(
+                websocket,
+                atom_id=atom_id,
+                step_number=step_number,
+                sequence_id=sequence_id,
+                attempt=attempt,
+                reason=reason,
+            )
+            if self.atom_retry_delay:
+                await asyncio.sleep(self.atom_retry_delay)
+
+        if last_result:
+            return last_result
+        if last_error:
+            raise last_error
+        return {}
+
+    async def _notify_atom_retry(
+        self,
+        websocket,
+        *,
+        atom_id: str,
+        step_number: int,
+        sequence_id: str,
+        attempt: int,
+        reason: str,
+    ) -> None:
+        """Notify frontend that an atom attempt failed and a retry is scheduled."""
+        reason_text = self._condense_text(str(reason))[:400]
+        payload = {
+            "sequence_id": sequence_id,
+            "step": step_number,
+            "atom_id": atom_id,
+            "attempt": attempt,
+            "max_attempts": self.atom_retry_attempts,
+            "reason": reason_text,
+        }
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent("atom_retry", payload),
+                f"atom_retry event (step {step_number})",
+            )
+        except WebSocketDisconnect:
+            raise
+        except Exception as notify_error:
+            logger.debug(
+                "Unable to notify client about atom retry (step %s): %s",
+                step_number,
+                notify_error,
+            )
+
     async def _execute_atom_endpoint(
         self,
         atom_id: str,
@@ -1977,6 +3531,20 @@ Respond ONLY with valid JSON array, no other text:
             "prompt": parameters.get("prompt", ""),
             "session_id": session_id
         }
+        
+        # 🔧 CRITICAL FIX: Include client_name, app_name, project_name for dataframe-operations
+        # These are required for the agent to find files in MinIO using the correct prefix
+        if atom_id == "dataframe-operations":
+            project_context = self._sequence_project_context.get(session_id, {})
+            client_name = project_context.get("client_name", "")
+            app_name = project_context.get("app_name", "")
+            project_name = project_context.get("project_name", "")
+            
+            payload["client_name"] = client_name
+            payload["app_name"] = app_name
+            payload["project_name"] = project_name
+            
+            logger.info(f"🔧 Added project context for dataframe-operations: client={client_name}, app={app_name}, project={project_name}")
         
         logger.info(f"📡 Calling {full_url}")
         logger.info(f"📦 Payload: {payload}")

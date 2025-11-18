@@ -1,6 +1,24 @@
 import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
 
+const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
+  if (!Array.isArray(cards)) return [];
+
+  const seen = new Set<string>();
+  const deduped: LayoutCard[] = [];
+
+  // Keep last occurrence of each id to mirror backend behavior
+  for (let i = cards.length - 1; i >= 0; i--) {
+    const card = cards[i];
+    if (!card?.id) continue;
+    if (seen.has(card.id)) continue;
+    seen.add(card.id);
+    deduped.push(card);
+  }
+
+  return deduped.reverse();
+};
+
 export interface TextBoxSettings {
   format: "quill-delta" | "markdown" | "html" | "plain";
   content: string;
@@ -62,6 +80,7 @@ export interface DataUploadSettings {
   /** Array of file names that have saved classifier configurations */
   classifierSavedFiles?: string[];
   validatorId?: string;
+  selectedMasterFile?: string;
   requiredFiles?: string[];
   validations?: Record<string, any>;
   fileMappings?: Record<string, string>;
@@ -371,6 +390,7 @@ export interface CorrelationSettings {
   selectedFile?: string;  // Selected dataframe object_name
   validatorAtomId?: string;  // Validator atom ID for column extraction
   selectedColumns?: string[];  // Selected columns for correlation analysis
+  selectedNumericColumnsForMatrix?: string[];  // Selected numerical columns to display in correlation matrix (default: all)
   // File processing related data
   fileData?: {
     fileName: string;
@@ -547,6 +567,7 @@ export interface ChartTraceConfig {
   filters: Record<string, string[]>;
   color?: string;
   aggregation?: 'sum' | 'mean' | 'count' | 'min' | 'max';
+  legend_field?: string;
 }
 
 export interface ChartMakerConfig {
@@ -1587,8 +1608,8 @@ export const DEFAULT_BUILD_MODEL_FEATURE_BASED_SETTINGS: BuildModelFeatureBasedS
     xVariables: [],
     transformations: [],
     availableFiles: [],
-    availableColumns: ['Feature 1', 'Feature 2', 'Feature 3', 'Feature 4', 'Feature 5', 'Feature 6', 'Feature 7', 'Feature 8'],
-    scopes: ['Scope 1', 'Scope 2', 'Scope 3', 'Scope 4', 'Scope 5'],
+    availableColumns: [],
+    scopes: [],
     outputFileName: '',
     kFolds: 5,
     testSize: 0.2
@@ -1874,7 +1895,14 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       set({ cards: [] });
       return;
     }
-    set({ cards });
+    const uniqueCards = dedupeCards(cards);
+    if (uniqueCards.length !== cards.length) {
+      console.warn('[Laboratory Store] Deduped cards to avoid duplicates', {
+        incoming: cards.length,
+        unique: uniqueCards.length,
+      });
+    }
+    set({ cards: uniqueCards });
   },
   
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => {

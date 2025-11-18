@@ -25,6 +25,30 @@ logger = logging.getLogger(__name__)
 logger.disabled = True  # Disable all logs from laboratory websocket
 
 
+def _dedupe_cards(cards: list[dict]) -> list[dict]:
+    """Ensure cards list only contains a single entry per card id.
+
+    We keep the last-seen version of each id while preserving the overall
+    ordering so that broadcasts and persistence do not introduce duplicates
+    when multiple clients send overlapping payloads.
+    """
+
+    if not isinstance(cards, list):
+        return []
+
+    seen_ids = set()
+    deduped_reversed = []
+
+    for card in reversed(cards):
+        card_id = card.get("id") if isinstance(card, dict) else None
+        if card_id is None or card_id in seen_ids:
+            continue
+        seen_ids.add(card_id)
+        deduped_reversed.append(card)
+
+    return list(reversed(deduped_reversed))
+
+
 class ConnectionManager:
     """Manages WebSocket connections for collaborative editing."""
     
@@ -236,9 +260,13 @@ class ConnectionManager:
     ):
         """Handle state update from a client."""
         project_key = self._get_project_key(client_name, app_name, project_name)
-        
+
         # Store pending state
         if message.get("payload"):
+            payload = message["payload"]
+            if isinstance(payload, dict) and "cards" in payload:
+                payload["cards"] = _dedupe_cards(payload.get("cards", []))
+                message["payload"] = payload
             self.pending_states[project_key] = message["payload"]
         
         # Cancel existing save task
@@ -312,10 +340,10 @@ class ConnectionManager:
         
         if not card_found:
             cards.append(card_payload)
-        
-        current_state["cards"] = cards
+
+        current_state["cards"] = _dedupe_cards(cards)
         self.pending_states[project_key] = current_state
-        
+
         # Cancel existing save task
         if project_key in self.save_tasks:
             self.save_tasks[project_key].cancel()
@@ -345,9 +373,14 @@ class ConnectionManager:
     ):
         """Handle full sync from a client."""
         project_key = self._get_project_key(client_name, app_name, project_name)
-        
+
         logger.info(f"📡 Full sync received for project {project_key}")
-        
+
+        payload = message.get("payload") or {}
+        if isinstance(payload, dict) and "cards" in payload:
+            payload["cards"] = _dedupe_cards(payload.get("cards", []))
+            message["payload"] = payload
+
         # Store pending state
         if message.get("payload"):
             self.pending_states[project_key] = message["payload"]

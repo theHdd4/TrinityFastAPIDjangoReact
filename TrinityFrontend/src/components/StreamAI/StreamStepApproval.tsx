@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { X, Check, Plus, FastForward } from 'lucide-react';
+import { useAgentMode } from './context/AgentModeContext';
 
 interface StreamStepApprovalProps {
   stepNumber: number;
@@ -34,6 +35,22 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [additionalInfo, setAdditionalInfo] = useState('');
+  const [autoTriggered, setAutoTriggered] = useState(false);
+  const { isAgentMode } = useAgentMode();
+
+  useEffect(() => {
+    if (isAutoRunning && !autoTriggered) {
+      console.log(`⏩ [Auto-run] Auto-approving step ${stepNumber}`);
+      setAutoTriggered(true);
+      onRunAll();
+    }
+  }, [isAutoRunning, autoTriggered, onRunAll, stepNumber]);
+
+  useEffect(() => {
+    if (!isAutoRunning && autoTriggered) {
+      setAutoTriggered(false);
+    }
+  }, [isAutoRunning, autoTriggered]);
 
   const handleAddClick = () => {
     setShowAddModal(true);
@@ -49,12 +66,12 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
 
   return (
     <>
-      <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl border-2 border-gray-200 shadow-xl p-6 space-y-4 animate-fade-in">
+      <div className="bg-gradient-to-br from-white to-gray-50 rounded-2xl border-2 border-gray-200 shadow-xl p-6 space-y-4 animate-fade-in w-full">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="font-bold text-gray-800 font-inter text-lg">Step {stepNumber} Completed</h3>
-            <p className="text-xs text-gray-600 font-inter mt-1">{stepDescription}</p>
+            <p className="text-xs text-gray-600 font-inter mt-1 break-words">{stepDescription}</p>
           </div>
           <span className="text-sm font-semibold text-gray-600 font-inter">
             Step {stepNumber} of {totalSteps}
@@ -106,51 +123,70 @@ const StreamStepApproval: React.FC<StreamStepApprovalProps> = ({
           )}
         </div>
 
-        {/* Action Buttons */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
-          <Button
-            onClick={onReject}
-            variant="outline"
-            className="h-11 w-full border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-medium font-inter rounded-xl transition-all duration-200 text-sm"
-          >
-            <X className="w-4 h-4 mr-1" />
-            Reject
-          </Button>
+        {/* Action / Status */}
+        {isAgentMode ? (
+          <div className="pt-2">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-[#41C185]/10 border border-[#41C185]/30 rounded-2xl px-4 py-3 transition-all duration-300">
+              <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-[#41C185] text-white shadow-lg shadow-[#41C185]/30">
+                <Check className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-[#1f6b4a] font-inter">Agent Mode continuing</p>
+                <p className="text-xs text-[#2f855a] font-inter">
+                  Steps advance automatically. You&apos;ll see progress updates as each step completes.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-3 pt-2">
+              <Button
+                onClick={onReject}
+                variant="outline"
+                className="h-11 flex-1 min-w-[150px] border-2 border-red-200 text-red-600 hover:bg-red-50 hover:border-red-300 font-medium font-inter rounded-xl transition-all duration-200 text-sm"
+              >
+                <X className="w-4 h-4 mr-1" />
+                Reject
+              </Button>
 
-          <Button
-            onClick={handleAddClick}
-            className="h-11 w-full bg-gradient-to-r from-[#FFBD59] to-[#FFA726] hover:from-[#FFA726] hover:to-[#FF9800] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
-          >
-            <Plus className="w-4 h-4 mr-1" />
-            Add
-          </Button>
+              <Button
+                onClick={handleAddClick}
+                className="h-11 flex-1 min-w-[150px] bg-gradient-to-r from-[#FFBD59] to-[#FFA726] hover:from-[#FFA726] hover:to-[#FF9800] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Add
+              </Button>
 
-          <Button
-            onClick={onAccept}
-            className="h-11 w-full bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
-          >
-            <Check className="w-4 h-4 mr-1" />
-            Continue
-          </Button>
+              <Button
+                onClick={onAccept}
+                disabled={isAutoRunning}
+                className="h-11 flex-1 min-w-[150px] bg-gradient-to-r from-[#41C185] to-[#3AB077] hover:from-[#3AB077] hover:to-[#34A06B] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm"
+              >
+                <Check className="w-4 h-4 mr-1" />
+                Continue
+              </Button>
 
-          <Button
-            onClick={() => {
-              if (!isAutoRunning) {
-                onRunAll();
-              }
-            }}
-            className="h-11 w-full bg-gradient-to-r from-[#458EE2] to-[#3C7CC5] hover:from-[#3C7CC5] hover:to-[#356CB0] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm disabled:opacity-70 disabled:hover:scale-100"
-            disabled={isAutoRunning}
-          >
-            <FastForward className="w-4 h-4 mr-1" />
-            {isAutoRunning ? 'Auto-running' : 'Run All'}
-          </Button>
-        </div>
+              <Button
+                onClick={() => {
+                  if (!isAutoRunning) {
+                    onRunAll();
+                  }
+                }}
+                className="h-11 flex-1 min-w-[150px] bg-gradient-to-r from-[#458EE2] to-[#3C7CC5] hover:from-[#3C7CC5] hover:to-[#356CB0] text-white font-medium font-inter rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 text-sm disabled:opacity-70 disabled:hover:scale-100"
+                disabled={isAutoRunning}
+              >
+                <FastForward className="w-4 h-4 mr-1" />
+                {isAutoRunning ? 'Auto-running' : 'Run All'}
+              </Button>
+            </div>
 
-        {isAutoRunning && (
-          <p className="text-xs text-[#458EE2] font-inter font-medium text-center">
-            Auto-run in progress. Steps advance automatically.
-          </p>
+            {isAutoRunning && (
+              <p className="text-xs text-[#458EE2] font-inter font-medium text-center">
+                Auto-run in progress. Steps advance automatically.
+              </p>
+            )}
+          </>
         )}
       </div>
 

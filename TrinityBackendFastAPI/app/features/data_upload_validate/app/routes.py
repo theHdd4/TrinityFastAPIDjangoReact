@@ -1,6 +1,6 @@
 # app/routes.py - API Routes
 from fastapi import APIRouter, Depends, HTTPException, File, Form, UploadFile, Query, Request, Response
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import base64
 import json
 import pandas as pd
@@ -13,16 +13,13 @@ from time import perf_counter
 from app.core.utils import get_env_vars
 from pathlib import Path
 import fastexcel
+from urllib.parse import unquote
 
 # Add this line with your other imports
 from datetime import datetime, timezone
 import logging
 
 
-from app.features.data_upload_validate.app.validators.mmm import validate_mmm
-from app.features.data_upload_validate.app.validators.category_forecasting import validate_category_forecasting
-# Add this import at the top of your routes.py file
-from app.features.data_upload_validate.app.validators.promo import validate_promo_intensity
 # app/routes.py - Add this import
 from app.features.data_upload_validate.app.schemas import (
     # Create validator schemas
@@ -44,7 +41,9 @@ from app.features.data_upload_validate.app.schemas import (
     ValidateResponse,
     FileValidationResult,
     ValidationSummary,
-    MinIOUploadResult,ConditionFailure
+    MinIOUploadResult,ConditionFailure,
+    ProcessDataframeRequest,
+    ProcessDataframeResponse,
 )
 
 # Add to your existing imports in app/routes.py
@@ -111,15 +110,11 @@ def _smart_csv_parse(content: bytes, csv_kwargs: dict) -> tuple[pl.DataFrame, li
     return data_upload_service._smart_csv_parse(content, csv_kwargs)
 
 
-# Health check
-@router.get("/health")
-async def health_check():
-    return {"status": "healthy", "message": "Validate Atom API is running"}
-
 # app/routes.py - Add MinIO imports and configuration
 
 from minio import Minio
 from minio.error import S3Error
+from minio.commonconfig import CopySource
 from app.core.feature_cache import feature_cache
 from app.DataStorageRetrieval.db import (
     fetch_client_app_project,
@@ -162,6 +157,124 @@ MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
 MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minio")
 MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
 MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
+
+
+def _metadata_object_name(object_name: str) -> str:
+    return f"{object_name}.meta.json"
+
+
+def _save_workbook_metadata(object_name: str, payload: Dict[str, Any]) -> None:
+    if not object_name:
+        return
+    data = json.dumps(payload, indent=2).encode("utf-8")
+    buffer = io.BytesIO(data)
+    minio_client.put_object(
+        MINIO_BUCKET,
+        _metadata_object_name(object_name),
+        buffer,
+        len(data),
+        content_type="application/json",
+    )
+
+
+def _remove_workbook_metadata(object_name: str) -> None:
+    if not object_name:
+        return
+    meta_name = _metadata_object_name(object_name)
+    try:
+        minio_client.remove_object(MINIO_BUCKET, meta_name)
+    except S3Error as exc:
+        code = getattr(exc, "code", "")
+        if code not in {"NoSuchKey", "NoSuchBucket"}:
+            logger.warning("Failed to remove workbook metadata %s: %s", meta_name, exc)
+    except Exception:
+        logger.warning("Failed to remove workbook metadata %s", meta_name)
+
+
+def _load_workbook_metadata(object_name: str) -> Dict[str, Any]:
+    if not object_name:
+        raise FileNotFoundError("Missing object name for metadata lookup")
+    meta_name = _metadata_object_name(object_name)
+    try:
+        response = minio_client.get_object(MINIO_BUCKET, meta_name)
+    except S3Error as exc:
+        code = getattr(exc, "code", "")
+        if code in {"NoSuchKey", "NoSuchBucket"}:
+            raise FileNotFoundError(meta_name) from exc
+        raise
+    with response as obj:
+        data = obj.read()
+    return json.loads(data.decode("utf-8"))
+
+
+def _copy_workbook_artifacts(old_object: str, new_object: str) -> None:
+    if not old_object or not new_object or old_object == new_object:
+        return
+    old_meta = _metadata_object_name(old_object)
+    new_meta = _metadata_object_name(new_object)
+    try:
+        minio_client.copy_object(
+            MINIO_BUCKET,
+            new_meta,
+            CopySource(MINIO_BUCKET, old_meta),
+        )
+        try:
+            minio_client.remove_object(MINIO_BUCKET, old_meta)
+        except S3Error:
+            pass
+    except S3Error as exc:
+        code = getattr(exc, "code", "")
+        if code not in {"NoSuchKey", "NoSuchBucket"}:
+            logger.warning("Failed to copy workbook metadata %s -> %s: %s", old_meta, new_meta, exc)
+        return
+    except Exception as exc:
+        logger.warning("Failed to copy workbook metadata %s -> %s: %s", old_meta, new_meta, exc)
+        return
+
+    try:
+        metadata = _load_workbook_metadata(new_object)
+    except FileNotFoundError:
+        return
+
+    workbook_path = metadata.get("workbook_path")
+    if workbook_path:
+        new_workbook_path = f"{new_object}.workbook{Path(workbook_path).suffix}"
+        try:
+            minio_client.copy_object(
+                MINIO_BUCKET,
+                new_workbook_path,
+                CopySource(MINIO_BUCKET, workbook_path),
+            )
+            try:
+                minio_client.remove_object(MINIO_BUCKET, workbook_path)
+            except S3Error:
+                pass
+            metadata["workbook_path"] = new_workbook_path
+            _save_workbook_metadata(new_object, metadata)
+        except S3Error as exc:
+            code = getattr(exc, "code", "")
+            if code not in {"NoSuchKey", "NoSuchBucket"}:
+                logger.warning("Failed to copy workbook file %s -> %s: %s", workbook_path, new_workbook_path, exc)
+        except Exception as exc:
+            logger.warning("Failed to copy workbook file %s -> %s: %s", workbook_path, new_workbook_path, exc)
+
+
+def _delete_workbook_artifacts(object_name: str) -> None:
+    try:
+        metadata = _load_workbook_metadata(object_name)
+    except FileNotFoundError:
+        return
+    workbook_path = metadata.get("workbook_path")
+    if workbook_path:
+        try:
+            minio_client.remove_object(MINIO_BUCKET, workbook_path)
+        except S3Error as exc:
+            code = getattr(exc, "code", "")
+            if code not in {"NoSuchKey", "NoSuchBucket"}:
+                logger.warning("Failed to remove workbook %s: %s", workbook_path, exc)
+        except Exception:
+            logger.warning("Failed to remove workbook %s", workbook_path)
+    _remove_workbook_metadata(object_name)
 
 
 def _parse_numeric_id(value: str | int | None) -> int:
@@ -328,7 +441,8 @@ async def upload_file(
     project_id: str = Form(""),
     client_name: str = Form(""),
     app_name: str = Form(""),
-    project_name: str = Form("")
+    project_name: str = Form(""),
+    sheet_name: str = Form(""),
 ):
     start_time = perf_counter()
     logger.info(
@@ -368,6 +482,7 @@ async def upload_file(
             "file_b64": base64.b64encode(content).decode("utf-8"),
             "filename": file.filename,
             "tmp_prefix": tmp_prefix,
+            "sheet_name": sheet_name or None,
         },
         metadata={
             "feature": "data_upload_validate",
@@ -609,32 +724,6 @@ async def create_new(
     
     
     
-# GET: VIEW_NEW - Retrieve only schemas for all file keys
-@router.get("/view_new/{validator_atom_id}")
-async def view_new(validator_atom_id: str):
-    """
-    Retrieve only schemas for all file keys - no metadata
-    """
-    if validator_atom_id not in extraction_results:
-        raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
-    
-    # ✅ RETURN ONLY SCHEMAS - No config_saved, config_path, validator_atom_id
-    data = extraction_results[validator_atom_id]
-    return data.get("schemas", {})
-
-
-#     # Check if validator atom exists (MongoDB first, then fallback)
-#     validator_data = get_validator_atom_from_mongo(validator_atom_id)
-#     if not validator_data:
-#         # Fallback to old method for backward compatibility
-#         validator_data = get_validator_from_memory_or_disk(validator_atom_id)
-
-#     if not validator_data:
-#         raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
-
-
-
-
 # POST: UPDATE_COLUMN_TYPES - Allow user to change column data types
 @router.post("/update_column_types", response_model=UpdateColumnTypesResponse)
 async def update_column_types(
@@ -782,138 +871,6 @@ async def update_column_types(
 
     
     
-
-
-
-
-# # POST: DEFINE_DIMENSIONS - Complete fixed version for both validator types
-# @router.post("/define_dimensions", response_model=DefineDimensionsResponse)
-# async def define_dimensions(
-#     validator_atom_id: str = Form(...),
-#     file_key: str = Form(...),
-#     dimensions: str = Form(...)
-# ):
-#     """
-#     Endpoint to define business dimensions for a specific file key in a validator atom.
-#     Maximum of 4 dimensions allowed per file key.
-#     Works for both regular validator atoms (from /create_new) and template validator atoms (from /validate_*)
-#     """
-#     # Parse dimensions JSON
-#     try:
-#         dims = json.loads(dimensions)
-#     except json.JSONDecodeError as e:
-#         raise HTTPException(status_code=400, detail=f"Invalid JSON format for dimensions: {str(e)}")
-
-#     # Validate dims structure
-#     if not isinstance(dims, list):
-#         raise HTTPException(status_code=400, detail="Dimensions must be a list of objects")
-
-#     # ✅ ENFORCE MAX 4 DIMENSIONS
-#     if len(dims) > 4:
-#         raise HTTPException(status_code=400, detail="Maximum of 4 dimensions allowed")
-    
-#     if len(dims) == 0:
-#         raise HTTPException(status_code=400, detail="At least 1 dimension must be provided")
-
-#     # Validate each dimension structure
-#     required_fields = ['id', 'name']
-#     dimension_ids = []
-#     dimension_names = []
-    
-#     for i, dim in enumerate(dims):
-#         if not isinstance(dim, dict):
-#             raise HTTPException(status_code=400, detail=f"Dimension {i+1} must be an object")
-        
-#         # Check required fields
-#         for field in required_fields:
-#             if field not in dim:
-#                 raise HTTPException(status_code=400, detail=f"Dimension {i+1} missing required field: '{field}'")
-#             if not dim[field] or not isinstance(dim[field], str):
-#                 raise HTTPException(status_code=400, detail=f"Dimension {i+1} field '{field}' must be a non-empty string")
-        
-#         # Check for duplicate IDs and names
-#         if dim['id'] in dimension_ids:
-#             raise HTTPException(status_code=400, detail=f"Duplicate dimension ID: '{dim['id']}'")
-#         if dim['name'] in dimension_names:
-#             raise HTTPException(status_code=400, detail=f"Duplicate dimension name: '{dim['name']}'")
-        
-#         dimension_ids.append(dim['id'])
-#         dimension_names.append(dim['name'])
-
-#     # ✅ UPDATED: Check if validator atom exists (MongoDB first)
-#     validator_data = get_validator_atom_from_mongo(validator_atom_id)
-#     if not validator_data:
-#         # Fallback to old method for backward compatibility
-#         validator_data = get_validator_from_memory_or_disk(validator_atom_id)
-
-#     if not validator_data:
-#         raise HTTPException(status_code=404, detail=f"Validator atom '{validator_atom_id}' not found")
-
-#     # Check if file_key exists
-#     if file_key not in validator_data["schemas"]:
-#         available_keys = list(validator_data["schemas"].keys())
-#         raise HTTPException(
-#             status_code=400, 
-#             detail=f"File key '{file_key}' not found in validator. Available file keys: {available_keys}"
-#         )
-
-#     # Store dimensions for this specific file key
-#     dims_dict = {dim['id']: dim for dim in dims}
-    
-#     # Add metadata
-#     dimension_data = {
-#         "dimensions": dims_dict,
-#         "file_key": file_key,
-#         "validator_atom_id": validator_atom_id,
-#         "timestamp": datetime.now().isoformat(),
-#         "validator_type": validator_data.get("template_type", "custom"),
-#         "dimensions_count": len(dims)
-#     }
-
-#     # ✅ REPLACE: Save to MongoDB instead of file
-#     try:
-#         mongo_result = save_business_dimensions_to_mongo(validator_atom_id, file_key, dimension_data)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Failed to save dimensions to MongoDB: {str(e)}")
-
-#     # ✅ FIXED: Safe update in memory (works for both validator types)
-#     try:
-#         # Initialize extraction_results entry if it doesn't exist (for template validator atoms)
-#         if validator_atom_id not in extraction_results:
-#             extraction_results[validator_atom_id] = {}
-        
-#         if "business_dimensions" not in extraction_results[validator_atom_id]:
-#             extraction_results[validator_atom_id]["business_dimensions"] = {}
-        
-#         extraction_results[validator_atom_id]["business_dimensions"][file_key] = dims_dict
-#         in_memory_status = "success"
-#     except Exception as e:
-#         # Log but don't fail - MongoDB save is what matters
-#         print(f"Warning: Could not update in-memory results for {validator_atom_id}: {e}")
-#         in_memory_status = "warning"
-
-#     return {
-#         "status": "success",
-#         "message": f"Business dimensions defined successfully for file key '{file_key}' ({len(dims)} dimensions)",
-#         "validator_atom_id": validator_atom_id,
-#         "file_key": file_key,
-#         "validator_type": validator_data.get("template_type", "custom"),
-#         "dimensions": dims_dict,
-#         "dimensions_count": len(dims),
-#         "max_allowed": 4,
-#         "dimension_details": {
-#             "dimension_ids": dimension_ids,
-#             "dimension_names": dimension_names,
-#             "created_at": datetime.now().isoformat()
-#         },
-#         "mongodb_saved": mongo_result.get("status") == "success",
-#         "in_memory_saved": in_memory_status,
-#         "next_steps": {
-#             "assign_identifiers": f"POST /assign_identifiers_to_dimensions with validator_atom_id: {validator_atom_id}",
-#             "view_assignments": f"GET /get_identifier_assignments/{validator_atom_id}/{file_key}"
-#         }
-#     }
-
 
 # POST: DEFINE_DIMENSIONS - Complete fixed version for both validator types
 @router.post("/define_dimensions", response_model=DefineDimensionsResponse)
@@ -1661,942 +1618,8 @@ async def get_validator_config(validator_atom_id: str):
     return {**validator_data, **extra, "validations": validations}
 
 
-############################prebuild
-
-# # ✅ UPDATED: Complete MMM Validation Endpoint with MinIO Upload
-# @router.post("/validate_mmm")
-# async def validate_mmm_endpoint(
-#     files: List[UploadFile] = File(...),
-#     file_keys: str = Form(...)
-# ):
-#     """
-#     Validate files using MMM (Media Mix Modeling) validation rules and save to MinIO if passed.
-#     Requires both 'media' and 'sales' datasets.
-#     """
-#     try:
-#         keys = json.loads(file_keys)
-#     except json.JSONDecodeError:
-#         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
-    
-#     if len(files) != len(keys):
-#         raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    
-#     if len(files) != 2:
-#         raise HTTPException(status_code=400, detail="MMM validation requires exactly 2 files: media and sales")
-    
-#     # ✅ FIXED: Column preprocessing function that matches MMM validation expectations
-#     def preprocess_column_name(col_name: str) -> str:
-#         """Preprocess column name: strip, lowercase, replace spaces with underscores"""
-#         col_name = col_name.strip().lower()
-#         col_name = col_name.replace(' ', '_').replace('-', '_').replace('__', '_')
-#         col_name = col_name.strip('_')  # Remove leading/trailing underscores
-#         return col_name
-    
-#     # Parse files and store data
-#     files_data = {}
-#     file_contents = []
-    
-#     for file, key in zip(files, keys):
-#         try:
-#             content = await file.read()
-#             file_contents.append((content, file.filename, key))
-            
-#             # Parse file based on extension
-#             if file.filename.lower().endswith(".csv"):
-#                 df = pd.read_csv(io.BytesIO(content))
-#             elif file.filename.lower().endswith((".xls", ".xlsx")):
-#                 df = pl.read_excel(io.BytesIO(content))
-#             else:
-#                 raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-            
-#             # ✅ FIXED: Preprocess columns to match MMM validation expectations
-#             df.columns = [preprocess_column_name(col) for col in df.columns]
-#             files_data[key] = df
-            
-#         except Exception as e:
-#             raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
-    
-#     # Check required keys
-#     if 'media' not in files_data or 'sales' not in files_data:
-#         available_keys = list(files_data.keys())
-#         raise HTTPException(
-#             status_code=400, 
-#             detail=f"MMM validation requires 'media' and 'sales' file keys. Found: {available_keys}"
-#         )
-    
-#     media_df = files_data['media']
-#     sales_df = files_data['sales']
-    
-#     # Validate that datasets are not empty
-#     if media_df.empty:
-#         raise HTTPException(status_code=400, detail="Media dataset is empty")
-#     if sales_df.empty:
-#         raise HTTPException(status_code=400, detail="Sales dataset is empty")
-    
-#     try:
-#         # Call MMM validation
-#         validation_report = validate_mmm(media_df, sales_df)
-        
-#         # ✅ NEW: Auto-generate validator_atom_id for MMM
-#         from datetime import datetime
-#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         validator_atom_id = f"mmm_template_{timestamp}"
-        
-#         # ✅ NEW: MinIO upload if validation passes
-#         minio_uploads = []
-#         mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
-        
-#         if validation_report.status == "success":
-#             for content, filename, key in file_contents:
-#                 upload_result = upload_to_minio(content, filename, validator_atom_id, key)
-#                 minio_uploads.append({
-#                     "file_key": key,
-#                     "filename": filename,
-#                     "minio_upload": upload_result
-#                 })
-            
-#             # ✅ NEW: Save validation log to MongoDB
-#             validation_log_data = {
-#                 "validator_atom_id": validator_atom_id,
-#                 "validation_type": "mmm_template",
-#                 "files_validated": [
-#                     {
-#                         "file_key": key,
-#                         "filename": next(f[1] for f in file_contents if f[2] == key),
-#                         "file_size_bytes": len(next(f[0] for f in file_contents if f[2] == key)),
-#                         "overall_status": "passed",
-#                         "records_count": len(files_data[key]),
-#                         "columns_found": list(files_data[key].columns),
-#                         "validation_duration_ms": 0
-#                     }
-#                     for key in keys
-#                 ],
-#                 "overall_status": "passed",
-#                 "total_files": len(keys),
-#                 "minio_uploads": minio_uploads,
-#                 "timestamp": datetime.now().isoformat(),
-#                 "summary_stats": {
-#                     "media_records": len(media_df),
-#                     "sales_records": len(sales_df),
-#                     "total_validation_checks": len(validation_report.results)
-#                 }
-#             }
-#             mongo_log_result = save_validation_log_to_mongo(validation_log_data)
-        
-#         # Build detailed response
-#         validation_results = {
-#             "overall_status": "passed" if validation_report.status == "success" else "failed",
-#             "validation_type": "mmm_template",
-#             "file_results": {
-#                 "media": {
-#                     "status": "passed" if not validation_report.has_failures("media") else "failed",
-#                     "errors": validation_report.get_failures("media"),
-#                     "warnings": validation_report.get_warnings("media"),
-#                     "successes": validation_report.get_successes("media"),
-#                     "columns_checked": len(media_df.columns),
-#                     "records_count": len(media_df),
-#                     "columns_found": list(media_df.columns)
-#                 },
-#                 "sales": {
-#                     "status": "passed" if not validation_report.has_failures("sales") else "failed", 
-#                     "errors": validation_report.get_failures("sales"),
-#                     "warnings": validation_report.get_warnings("sales"),
-#                     "successes": validation_report.get_successes("sales"),
-#                     "columns_checked": len(sales_df.columns),
-#                     "records_count": len(sales_df),
-#                     "columns_found": list(sales_df.columns)
-#                 }
-#             },
-#             "summary": {
-#                 "total_files": 2,
-#                 "media_records": len(media_df),
-#                 "sales_records": len(sales_df),
-#                 "validation_checks_performed": len(validation_report.results)
-#             },
-#             "mmm_specific_validations": {
-#                 "media_columns_validated": len([col for col in media_df.columns if col in validation_report.media_rules["required"]]),
-#                 "sales_columns_validated": len([col for col in sales_df.columns if col in validation_report.sales_rules["required"]])
-#             }
-#         }
-        
-#         return {
-#             "overall_status": validation_results["overall_status"],
-#             "validation_type": "mmm_template",
-#             "validator_atom_id": validator_atom_id,  # ✅ NEW
-#             "file_validation_results": validation_results["file_results"],
-#             "summary": validation_results["summary"],
-#             "mmm_specific_results": validation_results["mmm_specific_validations"],
-#             "minio_uploads": minio_uploads,  # ✅ NEW
-#             "validation_log_saved": mongo_log_result.get("status") == "success",  # ✅ NEW
-#             "validation_log_id": mongo_log_result.get("mongo_id", ""),  # ✅ NEW
-#             "files_processed": {
-#                 "media": {
-#                     "filename": file_contents[0][1] if len(file_contents) > 0 else "unknown",
-#                     "size_bytes": len(file_contents[0][0]) if len(file_contents) > 0 else 0
-#                 },
-#                 "sales": {
-#                     "filename": file_contents[1][1] if len(file_contents) > 1 else "unknown", 
-#                     "size_bytes": len(file_contents[1][0]) if len(file_contents) > 1 else 0
-#                 }
-#             },
-#             "debug_info": {
-#                 "media_columns_after_preprocessing": list(media_df.columns),
-#                 "sales_columns_after_preprocessing": list(sales_df.columns),
-#                 "validation_results_count": len(validation_report.results)
-#             }
-#         }
-        
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"MMM validation failed: {str(e)}")
-
-# ✅ UPDATED: Complete MMM Validation Endpoint with Full Integration
-@router.post("/validate_mmm")
-async def validate_mmm_endpoint(
-    files: List[UploadFile] = File(...),
-    file_keys: str = Form(...)
-):
-    """
-    Validate files using MMM (Media Mix Modeling) validation rules and save to MinIO if passed.
-    Requires both 'media' and 'sales' datasets.
-    """
-    try:
-        keys = json.loads(file_keys)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
-    
-    if len(files) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    
-    if len(files) != 2:
-        raise HTTPException(status_code=400, detail="MMM validation requires exactly 2 files: media and sales")
-    
-    # ✅ FIXED: Column preprocessing function that matches MMM validation expectations
-    def preprocess_column_name(col_name: str) -> str:
-        """Preprocess column name: strip, lowercase, replace spaces with underscores"""
-        col_name = col_name.strip().lower()
-        col_name = col_name.replace(' ', '_').replace('-', '_').replace('__', '_')
-        col_name = col_name.strip('_')  # Remove leading/trailing underscores
-        return col_name
-    
-    # Parse files and store data
-    files_data = {}
-    file_contents = []
-    
-    for file, key in zip(files, keys):
-        try:
-            content = await file.read()
-            file_contents.append((content, file.filename, key))
-
-            # Parse file based on extension using Polars, then convert to pandas
-            if file.filename.lower().endswith(".csv"):
-                df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
-            elif file.filename.lower().endswith((".xls", ".xlsx")):
-                df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
-            else:
-                raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-
-            df = df_pl.to_pandas()
-
-            # ✅ FIXED: Preprocess columns to match MMM validation expectations
-            df.columns = [preprocess_column_name(col) for col in df.columns]
-            files_data[key] = df
-
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
-    
-    # Check required keys
-    if 'media' not in files_data or 'sales' not in files_data:
-        available_keys = list(files_data.keys())
-        raise HTTPException(
-            status_code=400, 
-            detail=f"MMM validation requires 'media' and 'sales' file keys. Found: {available_keys}"
-        )
-    
-    media_df = files_data['media']
-    sales_df = files_data['sales']
-    
-    # Validate that datasets are not empty
-    if media_df.empty:
-        raise HTTPException(status_code=400, detail="Media dataset is empty")
-    if sales_df.empty:
-        raise HTTPException(status_code=400, detail="Sales dataset is empty")
-    
-    try:
-        # Call MMM validation
-        validation_report = validate_mmm(media_df, sales_df)
-        
-        # ✅ NEW: Auto-generate validator_atom_id for MMM
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        validator_atom_id = f"mmm_template_{timestamp}"
-        
-        # ✅ NEW: MinIO upload and validator atom schema saving if validation passes
-        minio_uploads = []
-        mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
-        validator_atom_result = {"status": "skipped", "reason": "validation_failed"}
-        
-        if validation_report.status == "success":
-            prefix = await get_object_prefix()
-            for content, filename, key in file_contents:
-                upload_result = upload_to_minio(content, filename, prefix)
-                minio_uploads.append({
-                    "file_key": key,
-                    "filename": filename,
-                    "minio_upload": upload_result
-                })
-            
-            # Save validator atom schema to MongoDB
-            validator_atom_schema = {
-                "_id": validator_atom_id,
-                "validator_atom_id": validator_atom_id,
-                "template_type": "mmm_template",
-                "schemas": {
-                    key: {
-                        "columns": [{"column": col} for col in files_data[key].columns],
-                        "column_types": {
-                            col: "numeric" if pd.api.types.is_numeric_dtype(files_data[key][col]) 
-                                 else "datetime" if pd.api.types.is_datetime64_any_dtype(files_data[key][col])
-                                 else "string"
-                            for col in files_data[key].columns
-                        },
-                        "template_type": "mmm_template"
-                    }
-                    for key in keys  # Creates schema for both media and sales
-                },
-                "created_at": datetime.now().isoformat(),
-                "template_generated": True
-            }
-            
-            # Save validator atom schema
-            validator_atom_result = save_validator_atom_to_mongo(validator_atom_id, validator_atom_schema)
-            
-            # ✅ NEW: Save validation log to MongoDB
-            validation_log_data = {
-                "validator_atom_id": validator_atom_id,
-                "validation_type": "mmm_template",
-                "files_validated": [
-                    {
-                        "file_key": key,
-                        "filename": next(f[1] for f in file_contents if f[2] == key),
-                        "file_size_bytes": len(next(f[0] for f in file_contents if f[2] == key)),
-                        "overall_status": "passed",
-                        "records_count": len(files_data[key]),
-                        "columns_found": list(files_data[key].columns),
-                        "validation_duration_ms": 0
-                    }
-                    for key in keys
-                ],
-                "overall_status": "passed",
-                "total_files": len(keys),
-                "minio_uploads": minio_uploads,
-                "timestamp": datetime.now().isoformat(),
-                "summary_stats": {
-                    "media_records": len(media_df),
-                    "sales_records": len(sales_df),
-                    "total_validation_checks": len(validation_report.results)
-                }
-            }
-            mongo_log_result = save_validation_log_to_mongo(validation_log_data)
-        
-        # Build detailed response
-        validation_results = {
-            "overall_status": "passed" if validation_report.status == "success" else "failed",
-            "validation_type": "mmm_template",
-            "file_results": {
-                "media": {
-                    "status": "passed" if not validation_report.has_failures("media") else "failed",
-                    "errors": validation_report.get_failures("media"),
-                    "warnings": validation_report.get_warnings("media"),
-                    "successes": validation_report.get_successes("media"),
-                    "columns_checked": len(media_df.columns),
-                    "records_count": len(media_df),
-                    "columns_found": list(media_df.columns)
-                },
-                "sales": {
-                    "status": "passed" if not validation_report.has_failures("sales") else "failed", 
-                    "errors": validation_report.get_failures("sales"),
-                    "warnings": validation_report.get_warnings("sales"),
-                    "successes": validation_report.get_successes("sales"),
-                    "columns_checked": len(sales_df.columns),
-                    "records_count": len(sales_df),
-                    "columns_found": list(sales_df.columns)
-                }
-            },
-            "summary": {
-                "total_files": 2,
-                "media_records": len(media_df),
-                "sales_records": len(sales_df),
-                "validation_checks_performed": len(validation_report.results)
-            },
-            "mmm_specific_validations": {
-                "media_columns_validated": len([col for col in media_df.columns if col in validation_report.media_rules["required"]]),
-                "sales_columns_validated": len([col for col in sales_df.columns if col in validation_report.sales_rules["required"]])
-            }
-        }
-        
-        return {
-            "overall_status": validation_results["overall_status"],
-            "validation_type": "mmm_template",
-            "validator_atom_id": validator_atom_id,
-            "file_validation_results": validation_results["file_results"],
-            "summary": validation_results["summary"],
-            "mmm_specific_results": validation_results["mmm_specific_validations"],
-            "minio_uploads": minio_uploads,
-            "validation_log_saved": mongo_log_result.get("status") == "success",
-            "validation_log_id": mongo_log_result.get("mongo_id", ""),
-            # ✅ NEW: Template integration section
-            "template_integration": {
-                "validator_atom_saved": validator_atom_result.get("status") == "success" if validation_report.status == "success" else False,
-                "available_file_keys": keys if validation_report.status == "success" else [],
-                "next_steps": {
-                    "dimensions_media": f"POST /define_dimensions with validator_atom_id: {validator_atom_id}, file_key: media",
-                    "dimensions_sales": f"POST /define_dimensions with validator_atom_id: {validator_atom_id}, file_key: sales"
-                } if validation_report.status == "success" else {}
-            },
-            "files_processed": {
-                "media": {
-                    "filename": file_contents[0][1] if len(file_contents) > 0 else "unknown",
-                    "size_bytes": len(file_contents[0][0]) if len(file_contents) > 0 else 0
-                },
-                "sales": {
-                    "filename": file_contents[1][1] if len(file_contents) > 1 else "unknown", 
-                    "size_bytes": len(file_contents[1][0]) if len(file_contents) > 1 else 0
-                }
-            },
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"MMM validation failed: {str(e)}")
-
-
-# # ✅ UPDATED: Category Forecasting Validation Endpoint with MinIO Upload
-# @router.post("/validate_category_forecasting")
-# async def validate_category_forecasting_endpoint(
-#     files: List[UploadFile] = File(...),
-#     file_keys: str = Form(...),
-#     date_col: str = Form(default="Date"),
-#     fiscal_start_month: int = Form(default=4)
-# ):
-#     """
-#     Validate files using Category Forecasting validation rules and save to MinIO if passed.
-#     Requires one file with category forecasting data.
-#     """
-#     try:
-#         keys = json.loads(file_keys)
-#     except json.JSONDecodeError:
-#         raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
-    
-#     if len(files) != len(keys):
-#         raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    
-#     if len(files) != 1:
-#         raise HTTPException(status_code=400, detail="Category Forecasting validation requires exactly 1 file")
-    
-#     # Column preprocessing function
-#     def preprocess_column_name(col_name: str) -> str:
-#         """Preprocess column name: strip, lowercase, minimal processing for CF"""
-#         col_name = col_name.strip()
-#         return col_name
-    
-#     # Parse file
-#     file = files[0]
-#     key = keys[0]
-    
-#     try:
-#         content = await file.read()
-        
-#         # Parse file based on extension
-#         if file.filename.lower().endswith(".csv"):
-#             df = pd.read_csv(io.BytesIO(content))
-#         elif file.filename.lower().endswith((".xls", ".xlsx")):
-#             df = pl.read_excel(io.BytesIO(content))
-#         else:
-#             raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-        
-#         # Light preprocessing (CF validation handles most column standardization)
-#         df.columns = [preprocess_column_name(col) for col in df.columns]
-        
-#     except Exception as e:
-#         raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
-    
-#     # Validate that dataset is not empty
-#     if df.empty:
-#         raise HTTPException(status_code=400, detail="Dataset is empty")
-    
-#     try:
-#         # Call Category Forecasting validation
-#         validation_report = validate_category_forecasting(
-#             df, 
-#             date_col=date_col, 
-#             fiscal_start_month=fiscal_start_month
-#         )
-        
-#         # ✅ NEW: Auto-generate validator_atom_id for Category Forecasting
-#         from datetime import datetime
-#         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         validator_atom_id = f"category_forecasting_template_{timestamp}"
-        
-#         # ✅ NEW: MinIO upload if validation passes
-#         minio_uploads = []
-#         mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
-        
-#         if validation_report.status == "success":
-#             upload_result = upload_to_minio(content, file.filename, validator_atom_id, key)
-#             minio_uploads.append({
-#                 "file_key": key,
-#                 "filename": file.filename,
-#                 "minio_upload": upload_result
-#             })
-            
-#             # ✅ NEW: Save validation log to MongoDB
-#             validation_log_data = {
-#                 "validator_atom_id": validator_atom_id,
-#                 "validation_type": "category_forecasting_template",
-#                 "files_validated": [{
-#                     "file_key": key,
-#                     "filename": file.filename,
-#                     "file_size_bytes": len(content),
-#                     "overall_status": "passed",
-#                     "date_column_used": date_col,
-#                     "fiscal_start_month": fiscal_start_month,
-#                     "records_count": len(df),
-#                     "columns_found": list(df.columns),
-#                     "validation_duration_ms": 0
-#                 }],
-#                 "overall_status": "passed",
-#                 "total_files": 1,
-#                 "minio_uploads": minio_uploads,
-#                 "timestamp": datetime.now().isoformat(),
-#                 "summary_stats": {
-#                     "total_records": len(df),
-#                     "total_columns": len(df.columns),
-#                     "validation_checks": len(validation_report.results)
-#                 }
-#             }
-#             mongo_log_result = save_validation_log_to_mongo(validation_log_data)
-        
-#         # Build response
-#         return {
-#             "overall_status": "passed" if validation_report.status == "success" else "failed",
-#             "validation_type": "category_forecasting_template",
-#             "validator_atom_id": validator_atom_id,  # ✅ NEW
-#             "file_validation_results": {
-#                 key: {
-#                     "status": "passed" if not validation_report.has_failures() else "failed",
-#                     "errors": validation_report.get_failures(),
-#                     "warnings": validation_report.get_warnings(),
-#                     "successes": validation_report.get_successes(),
-#                     "columns_checked": len(df.columns),
-#                     "records_count": len(df),
-#                     "columns_found": list(df.columns)
-#                 }
-#             },
-#             "summary": {
-#                 "total_files": 1,
-#                 "records_processed": len(df),
-#                 "columns_processed": len(df.columns),
-#                 "validation_checks_performed": len(validation_report.results),
-#                 "date_column_used": date_col,
-#                 "fiscal_start_month": fiscal_start_month
-#             },
-#             "category_forecasting_specific_results": {
-#                 "date_column_validation": any("date" in r["check"] for r in validation_report.results),
-#                 "dimension_columns_found": len([r for r in validation_report.results if "dimension" in r["check"] and r["status"] == "passed"]),
-#                 "fiscal_year_handling": any("fiscal" in r["check"] for r in validation_report.results)
-#             },
-#             "minio_uploads": minio_uploads,  # ✅ NEW
-#             "validation_log_saved": mongo_log_result.get("status") == "success",  # ✅ NEW
-#             "validation_log_id": mongo_log_result.get("mongo_id", ""),  # ✅ NEW
-#             "files_processed": {
-#                 key: {
-#                     "filename": file.filename,
-#                     "size_bytes": len(content)
-#                 }
-#             }
-#         }
-        
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Category Forecasting validation failed: {str(e)}")
-
-
-
-# ✅ UPDATED: Complete Category Forecasting Validation Endpoint with Full Integration
-@router.post("/validate_category_forecasting")
-async def validate_category_forecasting_endpoint(
-    files: List[UploadFile] = File(...),
-    file_keys: str = Form(...),
-    date_col: str = Form(default="Date"),
-    fiscal_start_month: int = Form(default=4)
-):
-    """
-    Validate files using Category Forecasting validation rules and save to MinIO if passed.
-    Requires one file with category forecasting data.
-    """
-    try:
-        keys = json.loads(file_keys)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
-    
-    if len(files) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    
-    if len(files) != 1:
-        raise HTTPException(status_code=400, detail="Category Forecasting validation requires exactly 1 file")
-    
-    # Column preprocessing function
-    def preprocess_column_name(col_name: str) -> str:
-        """Preprocess column name: strip, lowercase, minimal processing for CF"""
-        col_name = col_name.strip()
-        return col_name
-    
-    # Parse file
-    file = files[0]
-    key = keys[0]
-    
-    try:
-        content = await file.read()
-        
-        # Parse file based on extension using Polars
-        if file.filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
-        elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
-        else:
-            raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-
-        df = df_pl.to_pandas()
-
-        # Light preprocessing (CF validation handles most column standardization)
-        df.columns = [preprocess_column_name(col) for col in df.columns]
-        
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
-    
-    # Validate that dataset is not empty
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Dataset is empty")
-    
-    try:
-        # Call Category Forecasting validation
-        validation_report = validate_category_forecasting(
-            df, 
-            date_col=date_col, 
-            fiscal_start_month=fiscal_start_month
-        )
-        
-        # ✅ NEW: Auto-generate validator_atom_id for Category Forecasting
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        validator_atom_id = f"category_forecasting_template_{timestamp}"
-        
-        # ✅ NEW: MinIO upload and validator atom schema saving if validation passes
-        minio_uploads = []
-        mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
-        validator_atom_result = {"status": "skipped", "reason": "validation_failed"}
-        
-        if validation_report.status == "success":
-            prefix = await get_object_prefix()
-            upload_result = upload_to_minio(content, file.filename, prefix)
-            minio_uploads.append({
-                "file_key": key,
-                "filename": file.filename,
-                "minio_upload": upload_result
-            })
-            
-            # Save validator atom schema to MongoDB
-            validator_atom_schema = {
-                "_id": validator_atom_id,
-                "validator_atom_id": validator_atom_id,
-                "template_type": "category_forecasting_template",
-                "schemas": {
-                    key: {
-                        "columns": [{"column": col} for col in df.columns],
-                        "column_types": {
-                            col: "numeric" if pd.api.types.is_numeric_dtype(df[col]) 
-                                 else "datetime" if pd.api.types.is_datetime64_any_dtype(df[col])
-                                 else "string"
-                            for col in df.columns
-                        },
-                        "template_type": "category_forecasting_template"
-                    }
-                },
-                "created_at": datetime.now().isoformat(),
-                "template_generated": True
-            }
-            
-            # Save validator atom schema
-            validator_atom_result = save_validator_atom_to_mongo(validator_atom_id, validator_atom_schema)
-            
-            # ✅ NEW: Save validation log to MongoDB
-            validation_log_data = {
-                "validator_atom_id": validator_atom_id,
-                "validation_type": "category_forecasting_template",
-                "files_validated": [{
-                    "file_key": key,
-                    "filename": file.filename,
-                    "file_size_bytes": len(content),
-                    "overall_status": "passed",
-                    "date_column_used": date_col,
-                    "fiscal_start_month": fiscal_start_month,
-                    "records_count": len(df),
-                    "columns_found": list(df.columns),
-                    "validation_duration_ms": 0
-                }],
-                "overall_status": "passed",
-                "total_files": 1,
-                "minio_uploads": minio_uploads,
-                "timestamp": datetime.now().isoformat(),
-                "summary_stats": {
-                    "total_records": len(df),
-                    "total_columns": len(df.columns),
-                    "validation_checks": len(validation_report.results)
-                }
-            }
-            mongo_log_result = save_validation_log_to_mongo(validation_log_data)
-        
-        # Build response
-        return {
-            "overall_status": "passed" if validation_report.status == "success" else "failed",
-            "validation_type": "category_forecasting_template",
-            "validator_atom_id": validator_atom_id,
-            "file_validation_results": {
-                key: {
-                    "status": "passed" if not validation_report.has_failures() else "failed",
-                    "errors": validation_report.get_failures(),
-                    "warnings": validation_report.get_warnings(),
-                    "successes": validation_report.get_successes(),
-                    "columns_checked": len(df.columns),
-                    "records_count": len(df),
-                    "columns_found": list(df.columns)
-                }
-            },
-            "summary": {
-                "total_files": 1,
-                "records_processed": len(df),
-                "columns_processed": len(df.columns),
-                "validation_checks_performed": len(validation_report.results),
-                "date_column_used": date_col,
-                "fiscal_start_month": fiscal_start_month
-            },
-            "category_forecasting_specific_results": {
-                "date_column_validation": any("date" in r["check"] for r in validation_report.results),
-                "dimension_columns_found": len([r for r in validation_report.results if "dimension" in r["check"] and r["status"] == "passed"]),
-                "fiscal_year_handling": any("fiscal" in r["check"] for r in validation_report.results)
-            },
-            "minio_uploads": minio_uploads,
-            "validation_log_saved": mongo_log_result.get("status") == "success",
-            "validation_log_id": mongo_log_result.get("mongo_id", ""),
-            # ✅ NEW: Template integration section
-            "template_integration": {
-                "validator_atom_saved": validator_atom_result.get("status") == "success" if validation_report.status == "success" else False,
-                "available_file_keys": [key] if validation_report.status == "success" else [],
-                "next_steps": {
-                    "dimensions": f"POST /define_dimensions with validator_atom_id: {validator_atom_id}"
-                } if validation_report.status == "success" else {}
-            },
-            "files_processed": {
-                key: {
-                    "filename": file.filename,
-                    "size_bytes": len(content)
-                }
-            },
-            # ✅ NEW: Debug info for troubleshooting
-            "debug_info": {
-                "columns_after_preprocessing": list(df.columns),
-                "validation_results_count": len(validation_report.results)
-            }
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Category Forecasting validation failed: {str(e)}")
-
-
-
-
-
-# ✅ UPDATED: Complete Promo Validation Endpoint with MinIO Upload
-@router.post("/validate_promo")
-async def validate_promo_endpoint(
-    files: List[UploadFile] = File(...),
-    file_keys: str = Form(...)
-):
-    """
-    Validate files using Promo Intensity validation rules and save to MinIO if passed.
-    Requires one file with promotional data.
-    """
-    try:
-        keys = json.loads(file_keys)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON format for file_keys")
-    
-    if len(files) != len(keys):
-        raise HTTPException(status_code=400, detail="Number of files must match number of keys")
-    
-    if len(files) != 1:
-        raise HTTPException(status_code=400, detail="Promo validation requires exactly 1 file")
-    
-    # Column preprocessing function
-    def preprocess_column_name(col_name: str) -> str:
-        """Preprocess column name: strip, minimal processing for Promo"""
-        col_name = col_name.strip()
-        return col_name
-    
-    # Parse file
-    file = files[0]
-    key = keys[0]
-    
-    try:
-        content = await file.read()
-        
-        # Parse file based on extension
-        if file.filename.lower().endswith(".csv"):
-            df_pl = pl.read_csv(io.BytesIO(content), **CSV_READ_KWARGS)
-        elif file.filename.lower().endswith((".xls", ".xlsx")):
-            df_pl = pl.from_pandas(pd.read_excel(io.BytesIO(content)))
-        else:
-            raise HTTPException(status_code=400, detail="Only CSV and XLSX files supported")
-
-        df = df_pl.to_pandas()
-
-        # Light preprocessing (Promo validation handles column standardization)
-        df.columns = [preprocess_column_name(col) for col in df.columns]
-        
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error parsing file {file.filename}: {str(e)}")
-    
-    # Validate that dataset is not empty
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Dataset is empty")
-    
-    try:
-        # Call Promo validation
-        validation_report = validate_promo_intensity(df)
-        
-        # ✅ NEW: Auto-generate validator_atom_id for Promo
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        validator_atom_id = f"promo_template_{timestamp}"
-        
-        # ✅ NEW: MinIO upload if validation passes
-        minio_uploads = []
-        mongo_log_result = {"status": "skipped", "reason": "validation_failed"}
-        
-        if validation_report.status == "success":
-            prefix = await get_object_prefix()
-            upload_result = upload_to_minio(content, file.filename, prefix)
-            minio_uploads.append({
-                "file_key": key,
-                "filename": file.filename,
-                "minio_upload": upload_result
-            })
-            
-            
-            # Save validator atom schema to MongoDB
-            # ✅ CORRECT: Use the actual key from file_keys
-            validator_atom_schema = {
-                "_id": validator_atom_id,
-                "validator_atom_id": validator_atom_id,
-                "template_type": "promo_template",
-                "schemas": {
-                    key: {  # ✅ Use the actual key variable (which should be "promo")
-                        "columns": [{"column": col} for col in df.columns],
-                        "column_types": {
-                            col: "numeric" if pd.api.types.is_numeric_dtype(df[col]) 
-                                else "datetime" if pd.api.types.is_datetime64_any_dtype(df[col])
-                                else "string"
-                            for col in df.columns
-                        },
-                        "template_type": "promo_template"
-                    }
-                },
-                "created_at": datetime.now().isoformat(),
-                "template_generated": True
-            }
-            
-            validator_atom_result = save_validator_atom_to_mongo(validator_atom_id, validator_atom_schema)
-            
-            
-            # ✅ NEW: Save validation log to MongoDB
-            validation_log_data = {
-                "validator_atom_id": validator_atom_id,
-                "validation_type": "promo_template",
-                "files_validated": [{
-                    "file_key": key,
-                    "filename": file.filename,
-                    "file_size_bytes": len(content),
-                    "overall_status": "passed",
-                    "records_count": len(df),
-                    "columns_found": list(df.columns),
-                    "validation_duration_ms": 0
-                }],
-                "overall_status": "passed",
-                "total_files": 1,
-                "minio_uploads": minio_uploads,
-                "timestamp": datetime.now().isoformat(),
-                "summary_stats": {
-                    "total_records": len(df),
-                    "total_columns": len(df.columns),
-                    "validation_checks": len(validation_report.results)
-                }
-            }
-            mongo_log_result = save_validation_log_to_mongo(validation_log_data)
-        
-        # Build response
-        return {
-            "overall_status": "passed" if validation_report.status == "success" else "failed",
-            "validation_type": "promo_template",
-            "validator_atom_id": validator_atom_id,  # ✅ NEW
-            "file_validation_results": {
-                key: {
-                    "status": "passed" if not validation_report.has_failures() else "failed",
-                    "errors": validation_report.get_failures(),
-                    "warnings": validation_report.get_warnings(),
-                    "successes": validation_report.get_successes(),
-                    "columns_checked": len(df.columns),
-                    "records_count": len(df),
-                    "columns_found": list(df.columns)
-                }
-            },
-            "summary": {
-                "total_files": 1,
-                "records_processed": len(df),
-                "columns_processed": len(df.columns),
-                "validation_checks_performed": len(validation_report.results)
-            },
-            "promo_specific_results": {
-                "required_columns_validated": len([r for r in validation_report.results if "required" in r["check"]]),
-                "time_granularity_detected": any("granularity" in r["check"] for r in validation_report.results),
-                "promotion_indicators_found": len([r for r in validation_report.results if "promotion_indicator" in r["check"] and r["status"] == "passed"]),
-                "price_columns_validated": len([r for r in validation_report.results if "price" in r["check"] or "Price" in r["check"]]),
-                "aggregator_columns_found": len([r for r in validation_report.results if "aggregator" in r["check"] and r["status"] == "passed"])
-            },
-            "minio_uploads": minio_uploads,  # ✅ NEW
-            "validation_log_saved": mongo_log_result.get("status") == "success",  # ✅ NEW
-            "validation_log_id": mongo_log_result.get("mongo_id", ""),  # ✅ NEW
-            "files_processed": {
-                key: {
-                    "filename": file.filename,
-                    "size_bytes": len(content)
-                }
-            },
-            "template_integration": {
-                "validator_atom_saved": validator_atom_result.get("status") == "success" if validation_report.status == "success" else False,
-                "available_file_keys": [key] if validation_report.status == "success" else [],
-                "next_steps": {
-                    "dimensions": f"POST /define_dimensions with validator_atom_id: {validator_atom_id}"
-                } if validation_report.status == "success" else {}
-            }
-
-        }
-
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Promo validation failed: {str(e)}")
-
-
 # Call this function when the module loads
 load_existing_configs()
-
 
 # --- New endpoints for saving and listing validated dataframes ---
 # Accept both trailing and non-trailing slash variants and explicitly
@@ -2614,6 +1637,8 @@ async def save_dataframes(
     files: List[UploadFile] | None = File(None),
     file_keys: str = Form(...),
     file_paths: str = Form(default=""),
+    workbook_paths: str = Form(default=""),
+    sheet_metadata: str = Form(default=""),
     overwrite: bool = Form(False),
     client_id: str = Form(""),
     user_id: str = Form(""),
@@ -2657,6 +1682,22 @@ async def save_dataframes(
         raise HTTPException(
             status_code=400, detail="file_paths must be a JSON array of non-empty strings"
         )
+
+    try:
+        workbook_path_inputs = json.loads(workbook_paths) if workbook_paths else []
+    except json.JSONDecodeError:
+        logger.exception("Invalid JSON for workbook_paths")
+        raise HTTPException(status_code=400, detail="Invalid JSON format for workbook_paths")
+    if workbook_path_inputs and not isinstance(workbook_path_inputs, list):
+        raise HTTPException(status_code=400, detail="workbook_paths must be a JSON array")
+
+    try:
+        sheet_metadata_inputs = json.loads(sheet_metadata) if sheet_metadata else []
+    except json.JSONDecodeError:
+        logger.exception("Invalid JSON for sheet_metadata")
+        raise HTTPException(status_code=400, detail="Invalid JSON format for sheet_metadata")
+    if sheet_metadata_inputs and not isinstance(sheet_metadata_inputs, list):
+        raise HTTPException(status_code=400, detail="sheet_metadata must be a JSON array")
 
     files_list = files or []
     source_count = len(files_list) if files_list else len(paths)
@@ -2702,6 +1743,17 @@ async def save_dataframes(
                 detail=f"Malformed file key: {k}",
             )
 
+    normalized_workbook_paths = (
+        [p if isinstance(p, str) else "" for p in workbook_path_inputs]
+        if isinstance(workbook_path_inputs, list)
+        else []
+    )
+    normalized_sheet_metadata = (
+        [m if isinstance(m, dict) else {} for m in sheet_metadata_inputs]
+        if isinstance(sheet_metadata_inputs, list)
+        else []
+    )
+
     uploads = []
     flights = []
     if client_id:
@@ -2721,20 +1773,45 @@ async def save_dataframes(
     print(f"📤 saving to prefix {prefix}")
 
     tmp_prefix = prefix + "tmp/"
+    iter_sources: List[Dict[str, Any]] = []
     if files_list:
-        iter_sources = [
-            (k, f.filename, f.file, None) for k, f in zip(keys, files_list)
-        ]
+        for idx, (k, f) in enumerate(zip(keys, files_list)):
+            iter_sources.append(
+                {
+                    "key": k,
+                    "filename": f.filename,
+                    "fileobj": f.file,
+                    "orig_path": None,
+                    "workbook_path": normalized_workbook_paths[idx] if idx < len(normalized_workbook_paths) else "",
+                    "sheet_meta": normalized_sheet_metadata[idx] if idx < len(normalized_sheet_metadata) else {},
+                }
+            )
     else:
-        iter_sources = []
-        for k, p in zip(keys, paths):
+        for idx, (k, p) in enumerate(zip(keys, paths)):
             data = read_minio_object(p)
-            iter_sources.append((k, Path(p).name, io.BytesIO(data), p))
+            iter_sources.append(
+                {
+                    "key": k,
+                    "filename": Path(p).name,
+                    "fileobj": io.BytesIO(data),
+                    "orig_path": p,
+                    "workbook_path": normalized_workbook_paths[idx] if idx < len(normalized_workbook_paths) else "",
+                    "sheet_meta": normalized_sheet_metadata[idx] if idx < len(normalized_sheet_metadata) else {},
+                }
+            )
 
     MAX_FILE_SIZE = 512 * 1024 * 1024  # 512 MB
     STATUS_TTL = 3600
 
-    for key, filename, fileobj, orig_path in iter_sources:
+    for source in iter_sources:
+        key = source["key"]
+        filename = source["filename"]
+        fileobj = source["fileobj"]
+        orig_path = source.get("orig_path")
+        workbook_path = source.get("workbook_path") or ""
+        sheet_meta = source.get("sheet_meta") or {}
+        if not isinstance(sheet_meta, dict):
+            sheet_meta = {}
         logger.info("Processing file %s with key %s", filename, key)
         progress_key = f"upload_status:{validator_atom_id}:{key}"
         redis_client.set(progress_key, "uploading", ex=STATUS_TTL)
@@ -2774,18 +1851,31 @@ async def save_dataframes(
                     )
                     flights.append({"file_key": key})
                     continue
+                # Normalize column names in first chunk
+                first_chunk_normalized = data_upload_service._normalize_column_names(first_chunk)
+                normalized_cols = first_chunk_normalized.columns
+                original_cols = first_chunk.columns
+                # Build rename mapping if columns changed
+                rename_map = dict(zip(original_cols, normalized_cols)) if original_cols != normalized_cols else None
+                
                 arrow_buf = io.BytesIO()
                 # Use PyArrow conversion to avoid "string_view" byte-range errors
-                first_arrow = first_chunk.to_arrow(use_pyarrow=True)
+                first_arrow = first_chunk_normalized.to_arrow(use_pyarrow=True)
                 with pa.ipc.new_file(arrow_buf, first_arrow.schema) as writer:
                     writer.write(first_arrow)
                     for chunk in reader:
+                        # Apply same normalization to subsequent chunks
+                        if rename_map:
+                            chunk = chunk.rename(rename_map)
+                        else:
+                            chunk = data_upload_service._normalize_column_names(chunk)
                         writer.write(chunk.to_arrow(use_pyarrow=True))
                 arrow_bytes = arrow_buf.getvalue()
                 df_pl = None
             else:
                 data_bytes = fileobj.read()
                 df_pl = pl.read_csv(io.BytesIO(data_bytes), **CSV_READ_KWARGS)
+                df_pl = data_upload_service._normalize_column_names(df_pl)
                 arrow_buf = io.BytesIO()
                 df_pl.write_ipc(arrow_buf)
                 arrow_bytes = arrow_buf.getvalue()
@@ -2794,6 +1884,7 @@ async def save_dataframes(
             reader = fastexcel.read_excel(data_bytes)
             sheet = reader.load_sheet_by_idx(0)
             df_pl = sheet.to_polars()
+            df_pl = data_upload_service._normalize_column_names(df_pl)
             if df_pl.height == 0:
                 uploads.append({"file_key": key, "already_saved": False, "error": "empty file"})
                 flights.append({"file_key": key})
@@ -2838,6 +1929,45 @@ async def save_dataframes(
             flight_path,
             filename,
         )
+
+        if workbook_path:
+            sheet_names_meta = sheet_meta.get("sheet_names")
+            if not isinstance(sheet_names_meta, list):
+                sheet_names_meta = []
+            selected_sheet_meta = sheet_meta.get("selected_sheet")
+            if not isinstance(selected_sheet_meta, str) or not selected_sheet_meta:
+                selected_sheet_meta = sheet_names_meta[0] if sheet_names_meta else ""
+            original_filename_meta = sheet_meta.get("original_filename") or filename
+            extension = Path(workbook_path).suffix if isinstance(workbook_path, str) else ""
+            workbook_dest = f"{result.get('object_name', '')}.workbook{extension}"
+            try:
+                minio_client.copy_object(
+                    MINIO_BUCKET,
+                    workbook_dest,
+                    CopySource(MINIO_BUCKET, workbook_path),
+                )
+                metadata_payload = {
+                    "workbook_path": workbook_dest,
+                    "sheet_names": sheet_names_meta,
+                    "selected_sheet": selected_sheet_meta,
+                    "has_multiple_sheets": len(sheet_names_meta) > 1,
+                    "validator_atom_id": validator_atom_id,
+                    "file_key": key,
+                    "flight_path": flight_path,
+                    "original_filename": original_filename_meta,
+                }
+                _save_workbook_metadata(result.get("object_name", ""), metadata_payload)
+                if isinstance(workbook_path, str) and workbook_path.startswith(tmp_prefix):
+                    try:
+                        minio_client.remove_object(MINIO_BUCKET, workbook_path)
+                    except Exception:
+                        logger.warning("Failed to remove temp workbook %s", workbook_path)
+            except S3Error as exc:
+                logger.warning("Failed to persist workbook %s: %s", workbook_path, exc)
+            except Exception as exc:
+                logger.warning("Failed to persist workbook %s: %s", workbook_path, exc)
+        else:
+            _remove_workbook_metadata(result.get("object_name", ""))
 
         redis_client.set(progress_key, "saved", ex=STATUS_TTL)
         # Remove temporary upload if it exists
@@ -3391,6 +2521,7 @@ async def delete_dataframe(object_name: str):
         except S3Error as e:
             if getattr(e, "code", "") not in {"NoSuchKey", "NoSuchBucket"}:
                 raise
+        _delete_workbook_artifacts(object_name)
         redis_client.delete(object_name)
         redis_client.delete(csv_name)
         remove_arrow_object(object_name)
@@ -3443,7 +2574,6 @@ async def rename_dataframe(object_name: str = Form(...), new_filename: str = For
         # Nothing to do if the name hasn't changed
         return {"old_name": object_name, "new_name": object_name}
     try:
-        from minio.commonconfig import CopySource
         minio_client.copy_object(
             MINIO_BUCKET,
             new_object,
@@ -3459,6 +2589,7 @@ async def rename_dataframe(object_name: str = Form(...), new_filename: str = For
             redis_client.delete(object_name)
         rename_arrow_object(object_name, new_object)
         await rename_arrow_dataset(object_name, new_object)
+        _copy_workbook_artifacts(object_name, new_object)
         return {"old_name": object_name, "new_name": new_object}
     except S3Error as e:
         code = getattr(e, "code", "")
@@ -3541,6 +2672,247 @@ async def copy_dataframe(object_name: str = Form(...), new_filename: str = Form(
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/workbook_metadata")
+async def get_workbook_metadata_endpoint(object_name: str = Query(...)):
+    decoded = unquote(object_name)
+    prefix = await get_object_prefix()
+    if not decoded.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    try:
+        metadata = _load_workbook_metadata(decoded)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Workbook metadata not found")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return metadata
+
+
+@router.post("/change_sheet")
+async def change_workbook_sheet(
+    object_name: str = Form(...),
+    sheet_name: str = Form(...),
+):
+    decoded = unquote(object_name)
+    sheet_name_clean = sheet_name.strip()
+    if not sheet_name_clean:
+        raise HTTPException(status_code=400, detail="sheet_name is required")
+    prefix = await get_object_prefix()
+    if not decoded.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    try:
+        metadata = _load_workbook_metadata(decoded)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Workbook metadata not found")
+
+    workbook_path = metadata.get("workbook_path")
+    if not workbook_path:
+        raise HTTPException(status_code=400, detail="Workbook not associated with dataframe")
+
+    try:
+        workbook_bytes = read_minio_object(workbook_path)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to read workbook: {exc}")
+
+    try:
+        excel_file = pd.ExcelFile(io.BytesIO(workbook_bytes))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to open workbook: {exc}")
+
+    sheet_names = excel_file.sheet_names or []
+    if sheet_name_clean not in sheet_names:
+        raise HTTPException(status_code=400, detail=f"Sheet '{sheet_name_clean}' not found")
+
+    try:
+        df = excel_file.parse(sheet_name_clean)
+        df_pl = pl.from_pandas(df)
+        arrow_buf = io.BytesIO()
+        df_pl.write_ipc(arrow_buf)
+        arrow_bytes = arrow_buf.getvalue()
+        minio_client.put_object(
+            MINIO_BUCKET,
+            decoded,
+            io.BytesIO(arrow_bytes),
+            len(arrow_bytes),
+            content_type="application/octet-stream",
+        )
+        flight_path = metadata.get("flight_path")
+        if flight_path:
+            upload_dataframe(df, flight_path)
+        metadata["selected_sheet"] = sheet_name_clean
+        metadata["sheet_names"] = sheet_names
+        metadata["has_multiple_sheets"] = len(sheet_names) > 1
+        _save_workbook_metadata(decoded, metadata)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to update sheet: {exc}")
+
+    return {"status": "success", "selected_sheet": sheet_name_clean}
+
+
+def _load_dataframe_for_processing(object_name: str, content: bytes) -> pd.DataFrame:
+    if object_name.lower().endswith(".arrow"):
+        reader = pa.ipc.RecordBatchFileReader(pa.BufferReader(content))
+        table = reader.read_all()
+        return table.to_pandas()
+    if object_name.lower().endswith(".csv"):
+        return pd.read_csv(io.BytesIO(content))
+    if object_name.lower().endswith(".parquet"):
+        return pd.read_parquet(io.BytesIO(content))
+    raise ValueError("Unsupported file format for processing")
+
+
+def _cast_series_dtype(series: pd.Series, dtype: str, datetime_format: str | None = None) -> pd.Series:
+    dtype_lower = dtype.lower()
+    if dtype_lower in {"string", "str", "text", "object"}:
+        return series.astype("string")
+    if dtype_lower in {"int", "integer", "int64"}:
+        numeric = pd.to_numeric(series, errors="coerce")
+        return numeric.round().astype("Int64")
+    if dtype_lower in {"float", "double", "float64"}:
+        return pd.to_numeric(series, errors="coerce")
+    if dtype_lower in {"bool", "boolean"}:
+        return series.astype("boolean")
+    if dtype_lower in {"datetime", "timestamp", "datetime64"}:
+        return pd.to_datetime(series, format=datetime_format, errors="coerce")
+    if dtype_lower == "date":
+        parsed = pd.to_datetime(series, format=datetime_format, errors="coerce")
+        if datetime_format:
+            # When a format was supplied (typically via auto-detect), keep full datetime precision
+            return parsed
+        return parsed.dt.date
+    return series
+
+
+def _apply_missing_strategy(
+    df: pd.DataFrame, column: str, strategy: str, custom_value: Optional[Any]
+) -> pd.DataFrame:
+    series = df[column]
+    strategy_lower = strategy.lower()
+    if strategy_lower == "drop":
+        return df[series.notna()]
+
+    fill_value: Any | None = None
+    if strategy_lower == "mean":
+        fill_value = pd.to_numeric(series, errors="coerce").mean()
+    elif strategy_lower == "median":
+        fill_value = pd.to_numeric(series, errors="coerce").median()
+    elif strategy_lower == "zero":
+        fill_value = 0
+    elif strategy_lower == "mode":
+        mode_series = series.mode(dropna=True)
+        fill_value = mode_series.iloc[0] if not mode_series.empty else ""
+    elif strategy_lower == "empty":
+        fill_value = ""
+    elif strategy_lower == "custom":
+        fill_value = custom_value
+    else:
+        fill_value = custom_value
+
+    if fill_value is not None:
+        df[column] = series.fillna(fill_value)
+    return df
+
+
+@router.post("/process_saved_dataframe", response_model=ProcessDataframeResponse)
+async def process_saved_dataframe(payload: ProcessDataframeRequest):
+    """Apply column-level processing (rename, dtype conversion, missing value handling) to a saved dataframe."""
+    decoded = unquote(payload.object_name)
+    prefix = await get_object_prefix()
+    if not decoded.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid object name")
+    if not payload.instructions:
+        raise HTTPException(status_code=400, detail="No processing instructions supplied")
+
+    try:
+        content = read_minio_object(decoded)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Dataframe not found: {exc}") from exc
+
+    try:
+        df = _load_dataframe_for_processing(decoded, content)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to load dataframe: {exc}") from exc
+
+    df_processed = df.copy()
+    for instruction in payload.instructions:
+        source_col = instruction.column
+        if instruction.new_name and instruction.new_name in df_processed.columns and source_col != instruction.new_name:
+            # Avoid clobbering existing column names by appending suffix
+            logger.warning("process_saved_dataframe: target column %s already exists, skipping rename", instruction.new_name)
+            continue
+        if source_col not in df_processed.columns:
+            logger.warning("process_saved_dataframe: column %s not found", source_col)
+            continue
+        if getattr(instruction, "drop_column", False):
+            df_processed.drop(columns=[source_col], inplace=True)
+            continue
+        target_col = source_col
+        if instruction.new_name and instruction.new_name != source_col:
+            df_processed.rename(columns={source_col: instruction.new_name}, inplace=True)
+            target_col = instruction.new_name
+        if instruction.dtype:
+            try:
+                df_processed[target_col] = _cast_series_dtype(
+                    df_processed[target_col],
+                    instruction.dtype,
+                    getattr(instruction, "datetime_format", None),
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to cast column '{target_col}' to {instruction.dtype}: {exc}",
+                ) from exc
+        missing_strategy = getattr(instruction, "missing_strategy", None)
+        custom_value = getattr(instruction, "custom_value", None)
+        fill_value = (
+            custom_value
+            if custom_value is not None
+            else getattr(instruction, "fill_value", None)
+        )
+        if missing_strategy:
+            df_processed = _apply_missing_strategy(
+                df_processed, target_col, missing_strategy, fill_value
+            )
+        elif fill_value is not None:
+            df_processed[target_col] = df_processed[target_col].fillna(fill_value)
+
+    arrow_buffer = io.BytesIO()
+    pl.from_pandas(df_processed).write_ipc(arrow_buffer)
+    arrow_bytes = arrow_buffer.getvalue()
+    minio_client.put_object(
+        MINIO_BUCKET,
+        decoded,
+        io.BytesIO(arrow_bytes),
+        len(arrow_bytes),
+        content_type="application/octet-stream",
+    )
+
+    flight_path = get_flight_path_for_csv(decoded)
+    if flight_path:
+        upload_dataframe(df_processed, flight_path)
+
+    redis_client.setex(decoded, 3600, arrow_bytes)
+
+    columns_meta = []
+    for name in df_processed.columns:
+        column_series = df_processed[name]
+        columns_meta.append(
+            {
+                "name": name,
+                "dtype": str(column_series.dtype),
+                "missing_count": int(column_series.isna().sum()),
+            }
+        )
+
+    return ProcessDataframeResponse(
+        status="success",
+        object_name=decoded,
+        rows=len(df_processed),
+        columns=columns_meta,
+    )
 
 
 @router.post("/file-metadata")
@@ -3834,36 +3206,9 @@ async def apply_data_transformations(request: Request):
                 elif new_dtype == "object":
                     df[col_name] = df[col_name].astype(str)
                 elif new_dtype == "datetime64":
-                    # Use provided format if available
+                    # Mirror process_saved_dataframe behavior: single-step conversion with optional format
                     if datetime_format:
-                        # logger.info(f"Converting column '{col_name}' to datetime64 with format: {datetime_format}")
-                        # logger.info(f"Sample values before conversion: {df[col_name].head(5).tolist()}")
-                        # logger.info(f"Column dtype before conversion: {df[col_name].dtype}")
-                        
-                        # Two-step process: First auto-parse and standardize, then convert
-                        # Step 1: Auto-detect parse (no format) and convert to standardized format string
-                        def parse_and_format(x):
-                            try:
-                                # Auto-detect the date format (no format parameter)
-                                parsed = pd.to_datetime(x, errors='coerce')
-                                if pd.notna(parsed):
-                                    # Format to the user's selected format
-                                    result = parsed.strftime(datetime_format)
-                                    return result
-                                return None
-                            except Exception as e:
-                                logger.warning(f"Error parsing value '{x}': {str(e)}")
-                                return None
-                        
-                        df[col_name] = df[col_name].apply(parse_and_format)
-                        # logger.info(f"After Step 1 (auto-parse & format): {df[col_name].head(5).tolist()}")
-                        # logger.info(f"Non-null count after Step 1: {df[col_name].notna().sum()} out of {len(df[col_name])}")
-                        
-                        # Step 2: Convert to datetime64 using the standardized format
                         df[col_name] = pd.to_datetime(df[col_name], format=datetime_format, errors='coerce')
-                        # logger.info(f"After Step 2 (final conversion): {df[col_name].head(5).tolist()}")
-                        # logger.info(f"Non-null count after Step 2: {df[col_name].notna().sum()} out of {len(df[col_name])}")
-                        # logger.info(f"Column dtype after conversion: {df[col_name].dtype}")
                     else:
                         logger.info(f"Converting column '{col_name}' to datetime64 without specific format")
                         df[col_name] = pd.to_datetime(df[col_name], errors='coerce')

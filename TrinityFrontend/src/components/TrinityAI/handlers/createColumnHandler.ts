@@ -1,5 +1,4 @@
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, VALIDATE_API } from '@/lib/api';
-import { resolveTaskResponse } from '@/lib/taskQueue';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
   getEnvironmentContext, 
@@ -9,8 +8,10 @@ import {
   processSmartResponse,
   executePerformOperation,
   validateFileInput,
-  constructFullPath
+  constructFullPath,
+  autoSaveStepResult
 } from './utils';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 export const createColumnHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
@@ -40,11 +41,27 @@ export const createColumnHandler: AtomHandler = {
       console.warn('⚠️ No smart response text found!');
     }
     
-    if (!data.json) {
+    if (!data.json || !Array.isArray(data.json) || data.json.length === 0) {
+      const errorMsg = createErrorMessage(
+        'Create Column configuration',
+        'No create column configuration found in AI response',
+        'Configuration validation'
+      );
+      setMessages(prev => [...prev, errorMsg]);
       return { success: false, error: 'No create column configuration found in AI response' };
     }
 
     const cfg = data.json[0]; // Get first configuration object
+    if (!cfg || typeof cfg !== 'object') {
+      const errorMsg = createErrorMessage(
+        'Create Column configuration',
+        'Invalid configuration format in AI response',
+        'Configuration validation'
+      );
+      setMessages(prev => [...prev, errorMsg]);
+      return { success: false, error: 'Invalid configuration format' };
+    }
+    
     console.log('🤖 AI CREATE COLUMN CONFIG EXTRACTED:', cfg, 'Session:', sessionId);
     
     // Validate data source
@@ -67,16 +84,37 @@ export const createColumnHandler: AtomHandler = {
       key.match(/^(add|subtract|multiply|divide|power|sqrt|log|abs|dummy|rpi|residual|stl_outlier|logistic|detrend|deseasonalize|detrend_deseasonalize|exp|standardize_zscore|standardize_minmax)_\d+$/)
     );
     
+    // Parse and sort operations by index to ensure correct order
+    const operationsWithIndex: Array<{op: any, index: number}> = [];
+    
     operationKeys.forEach((opKey) => {
       const match = opKey.match(/^(\w+)_(\d+)$/);
       if (match) {
         const opType = match[1];
         const opIndex = parseInt(match[2]);
-        const columns = cfg[opKey].split(',').map((col: string) => col.trim());
+        const rawColumns = cfg[opKey];
+        console.log(`🔍 Parsing operation ${opKey}: type=${opType}, index=${opIndex}, rawColumns=${rawColumns}`);
+        
+        // Parse columns - handle both string and array formats
+        let columns: string[] = [];
+        if (Array.isArray(rawColumns)) {
+          columns = rawColumns.map((col: any) => String(col).trim()).filter(Boolean);
+        } else if (typeof rawColumns === 'string') {
+          columns = rawColumns.split(',').map((col: string) => col.trim()).filter(Boolean);
+        }
+        
+        console.log(`🔍 Parsed columns for ${opKey}:`, columns);
+        
+        // Skip if no columns
+        if (columns.length === 0) {
+          console.warn(`⚠️ Skipping operation ${opKey} - no columns provided (raw: ${rawColumns})`);
+          return;
+        }
+        
         const renameKey = `${opType}_${opIndex}_rename`;
         const rename = cfg[renameKey] || '';
         
-        operations.push({
+        const operation = {
           id: `${opType}_${opIndex}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
           type: opType,
           name: opType.charAt(0).toUpperCase() + opType.slice(1),
@@ -84,21 +122,27 @@ export const createColumnHandler: AtomHandler = {
           newColumnName: rename || `${opType}_${columns.join('_')}`,
           rename: rename,
           param: null // Will be added if param exists
-        });
+        };
         
         // Check if there are parameters
         const paramKey = `${opType}_${opIndex}_param`;
         if (cfg[paramKey]) {
-          operations[operations.length - 1].param = cfg[paramKey];
+          operation.param = cfg[paramKey];
         }
         
         // Check if there are period parameters
         const periodKey = `${opType}_${opIndex}_period`;
         if (cfg[periodKey]) {
-          operations[operations.length - 1].param = cfg[periodKey];
+          operation.param = cfg[periodKey];
         }
+        
+        operationsWithIndex.push({ op: operation, index: opIndex });
       }
     });
+    
+    // Sort by index to ensure correct order
+    operationsWithIndex.sort((a, b) => a.index - b.index);
+    operations.push(...operationsWithIndex.map(item => item.op));
     
     // Validate operations
     if (operations.length === 0) {
@@ -331,15 +375,23 @@ export const createColumnHandler: AtomHandler = {
       file_key: resolvedDataSource,
       // 🔧 CRITICAL FIX: Set operations in the format expected by CreateColumnCanvas
       // This ensures the UI automatically displays the AI-configured operations
-      operations: operations.map((op, index) => ({
-        id: op.id,
-        type: op.type,
-        name: op.name,
-        columns: op.columns,
-        newColumnName: op.newColumnName,
-        rename: op.rename,
-        param: op.param
-      })),
+      // Validate and ensure all required fields are present
+      operations: operations.map((op, index) => {
+        // Ensure columns is always an array
+        const columns = Array.isArray(op.columns) ? op.columns.filter(Boolean) : [];
+        return {
+          id: op.id || `${op.type}_${index}_${Date.now()}`,
+          type: op.type,
+          name: op.name || (op.type.charAt(0).toUpperCase() + op.type.slice(1)),
+          columns: columns,
+          newColumnName: op.newColumnName || op.rename || `${op.type}_${columns.join('_')}`,
+          rename: op.rename || '',
+          param: op.param || null
+        };
+      }).filter(op => {
+        // Filter out operations with no columns
+        return op.columns && op.columns.length > 0;
+      }),
       // Include environment context
       envContext: envWithFallback,
       lastUpdateTime: Date.now()
@@ -391,8 +443,7 @@ export const createColumnHandler: AtomHandler = {
         // Fetch column summary to populate allColumns with full object name
         const columnRes = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fullObjectName)}`);
         if (columnRes.ok) {
-          const rawColumn = await columnRes.json();
-          const columnData = await resolveTaskResponse<{ summary?: any[] }>(rawColumn);
+          const columnData = await columnRes.json();
           const allColumns = Array.isArray(columnData.summary) ? columnData.summary.filter(Boolean) : [];
           
           console.log('✅ Columns loaded successfully:', allColumns.length);
@@ -410,11 +461,10 @@ export const createColumnHandler: AtomHandler = {
             const resp = await fetch(`${CREATECOLUMN_API}/classification?validator_atom_id=${encodeURIComponent(atomId)}&file_key=${encodeURIComponent(resolvedDataSource)}`);
             console.log('🔍 Classification response status:', resp.status);
             if (resp.ok) {
-              const rawClassification = await resp.json();
-              const classificationData = await resolveTaskResponse<Record<string, any>>(rawClassification);
+              const classificationData = await resp.json();
               console.log('🔍 Classification identifiers:', classificationData.identifiers);
               updateAtomSettings(atomId, {
-                selectedIdentifiers: (classificationData.identifiers as string[]) || []
+                selectedIdentifiers: classificationData.identifiers || []
               });
             } else {
               // Fallback to categorical columns
@@ -471,71 +521,223 @@ export const createColumnHandler: AtomHandler = {
       console.log('📋 Operations to execute:', operations);
       
       // 🔧 CRITICAL FIX: Convert to FormData format that CreateColumn backend expects
+      // EXACTLY match the manual perform logic from CreateColumnCanvas.tsx
       const formData = new FormData();
       const { client_name = '', app_name = '', project_name = '' } = envWithFallback || {};
 
-      formData.append('object_names', cfg.object_name || resolvedDataSource || '');
+      // 🔧 CRITICAL FIX: Always use resolvedDataSource (full path) - never use cfg.object_name which might be just filename
+      formData.append('object_names', resolvedDataSource || '');
       formData.append('bucket_name', cfg.bucket_name || 'trinity');
-      formData.append('client_name', client_name);
-      formData.append('app_name', app_name);
-      formData.append('project_name', project_name);
+      // 🔧 CRITICAL FIX: Match manual perform exactly - don't add client_name/app_name/project_name to FormData
+      // The backend gets these from the request context, not from FormData
+      // Only add them if they're actually needed (but manual perform doesn't send them)
+      // formData.append('client_name', client_name);
+      // formData.append('app_name', app_name);
+      // formData.append('project_name', project_name);
       
-      // Add operations in the format backend expects
-      operations.forEach((op, index) => {
-        if (op.columns && op.columns.filter(Boolean).length > 0) {
-          const colString = op.columns.filter(Boolean).join(',');
+      // 🔧 CRITICAL FIX: Validate and add operations EXACTLY like manual perform
+      // Track how many operations were actually added
+      console.log('🔍 Starting operations validation and FormData building...');
+      console.log('🔍 Total operations to process:', operations.length);
+      console.log('🔍 Operations details:', operations.map((op, idx) => ({
+        index: idx,
+        type: op.type,
+        columns: op.columns,
+        columnsCount: op.columns ? op.columns.filter(Boolean).length : 0,
+        rename: op.rename,
+        param: op.param
+      })));
+      
+      let operationsAdded = 0;
+      operations.forEach((op, idx) => {
+        const filteredColumns = op.columns ? op.columns.filter(Boolean) : [];
+        console.log(`🔍 Processing operation ${idx}: type=${op.type}, columns=${filteredColumns.length}, filteredColumns=${filteredColumns.join(',')}`);
+        
+        if (op.columns && filteredColumns.length > 0) {
+          const colString = filteredColumns.join(',');
           const rename = op.rename && op.rename.trim() ? op.rename.trim() : '';
-          const key = `${op.type}_${index}`;
+          const key = `${op.type}_${idx}`;
+          console.log(`🔍 Operation ${idx} passed initial check: key=${key}, colString=${colString}, rename=${rename}`);
           
-          // Add the operation
-          formData.append(key, colString);
-          
-          // Add rename if specified
-          if (rename) {
-            formData.append(`${key}_rename`, rename);
-          }
-          
-          // Add parameters if specified
-          if (op.param) {
-            if (['detrend', 'deseasonalize', 'detrend_deseasonalize'].includes(op.type)) {
-              formData.append(`${key}_period`, String(op.param));
-            } else if (op.type === 'power') {
+          // 🔧 CRITICAL FIX: Validate operations before adding (EXACTLY like manual perform)
+          // For multi-column operations (add, subtract, multiply, divide, residual)
+          if (["add", "subtract", "multiply", "divide", "residual"].includes(op.type)) {
+            if (op.type === "residual") {
+              if (op.columns.filter(Boolean).length >= 2) {
+                if (rename) {
+                  formData.append(`${key}_rename`, rename);
+                }
+                formData.append(key, colString);
+                operationsAdded++;
+              }
+            } else {
+              const colCount = filteredColumns.length;
+              console.log(`🔍 Operation ${idx} (${op.type}): checking if ${colCount} >= 2`);
+              if (colCount >= 2) {
+                if (rename) {
+                  formData.append(`${key}_rename`, rename);
+                  console.log(`✅ Added ${key}_rename=${rename}`);
+                }
+                formData.append(key, colString);
+                console.log(`✅ Added ${key}=${colString}`);
+                operationsAdded++;
+                console.log(`✅ Operation ${idx} added successfully. Total added: ${operationsAdded}`);
+              } else {
+                console.warn(`⚠️ Operation ${idx} (${op.type}) skipped: needs 2+ columns, got ${colCount}`);
+              }
+            }
+          } else if (op.type === "stl_outlier") {
+            if (op.columns.filter(Boolean).length >= 1) {
+              if (rename) {
+                formData.append(`${key}_rename`, rename);
+              }
+              formData.append(key, colString);
+              operationsAdded++;
+            }
+          } else if (op.type === 'power') {
+            if (op.param) {
               formData.append(`${key}_param`, String(op.param));
-            } else if (op.type === 'logistic') {
+            }
+            if (rename) {
+              formData.append(`${key}_rename`, rename);
+            }
+            formData.append(key, colString);
+            operationsAdded++;
+          } else if (op.type === 'logistic') {
+            if (op.param) {
               formData.append(`${key}_param`, JSON.stringify(op.param));
             }
+            if (rename) {
+              formData.append(`${key}_rename`, rename);
+            }
+            formData.append(key, colString);
+            operationsAdded++;
+          } else if (op.type === 'datetime') {
+            if (op.param) {
+              formData.append(`${key}_param`, String(op.param));
+            }
+            if (rename) {
+              formData.append(`${key}_rename`, rename);
+            }
+            formData.append(key, colString);
+            operationsAdded++;
+          } else {
+            // For dummy, rpi, etc., require at least 1 column
+            if (rename) {
+              formData.append(`${key}_rename`, rename);
+            }
+            formData.append(key, colString);
+            operationsAdded++;
+          }
+          
+          // Add period if user supplied for this op
+          if (['detrend', 'deseasonalize', 'detrend_deseasonalize'].includes(op.type) && op.param) {
+            formData.append(`${key}_period`, String(op.param));
           }
         }
       });
       
-      // Add identifiers
-      const identifiers = cfg.identifiers || [];
-      formData.append('identifiers', identifiers.join(','));
+      // 🔧 CRITICAL FIX: Validate that at least one operation was added
+      if (operationsAdded === 0) {
+        throw new Error('No valid operations to perform. Please ensure all operations have the required columns selected.');
+      }
+      
+      // 🔧 CRITICAL FIX: Add options field with ONLY validated operations (EXACTLY like manual perform)
+      // Filter to only include operations that passed validation
+      const addedOperationTypes = operations
+        .map((op, idx) => {
+          return op.type;
+        })
+        .filter((type, idx) => {
+          // Filter to only include operations that passed validation
+          const op = operations[idx];
+          if (!op.columns || op.columns.filter(Boolean).length === 0) return false;
+          
+          if (["add", "subtract", "multiply", "divide", "residual"].includes(op.type)) {
+            return op.columns.filter(Boolean).length >= 2;
+          } else if (op.type === "stl_outlier") {
+            return op.columns.filter(Boolean).length >= 1;
+          }
+          return true; // power, logistic, datetime, dummy, rpi, etc. are always added if they have columns
+        });
+      
+      formData.append('options', addedOperationTypes.join(','));
+      
+      // 🔧 CRITICAL FIX: Match manual perform exactly - get identifiers from atom settings or use empty array
+      // Manual perform uses: atom?.settings?.selectedIdentifiers || selectedIdentifiers (local state) || []
+      // Don't use cfg.identifiers which might not match what's in the UI
+      const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+      const identifiersFromSettings = currentAtom?.settings?.selectedIdentifiers || [];
+      const identifiersToUse = Array.isArray(identifiersFromSettings) && identifiersFromSettings.length > 0
+        ? identifiersFromSettings
+        : (cfg.identifiers || []);
+      formData.append('identifiers', identifiersToUse.join(','));
+      
+      console.log('🔍 Identifiers being sent:', {
+        fromSettings: identifiersFromSettings,
+        fromConfig: cfg.identifiers,
+        final: identifiersToUse,
+        joined: identifiersToUse.join(',')
+      });
       
       console.log('📁 Auto-executing with form data:', {
-        object_names: cfg.object_name || resolvedDataSource || '',
+        object_names: resolvedDataSource || '',
         bucket_name: cfg.bucket_name || 'trinity',
         client_name,
         app_name,
         project_name,
-        operations: operations.map((op, index) => ({
-          index,
+        operations_count: operations.length,
+        operations_added: operationsAdded,
+        operations_types: addedOperationTypes,
+        options: addedOperationTypes.join(','),
+        operations: operations.map((op, idx) => ({
+          index: idx,
           type: op.type,
           columns: op.columns,
           rename: op.rename,
-          param: op.param
+          param: op.param,
+          valid: (() => {
+            if (!op.columns || op.columns.filter(Boolean).length === 0) return false;
+            if (["add", "subtract", "multiply", "divide", "residual"].includes(op.type)) {
+              return op.columns.filter(Boolean).length >= 2;
+            } else if (op.type === "stl_outlier") {
+              return op.columns.filter(Boolean).length >= 1;
+            }
+            return true;
+          })()
         })),
-        identifiers: identifiers
+        identifiers: identifiersToUse
       });
       
       const performEndpoint = `${CREATECOLUMN_API}/perform`;
       console.log('📡 Calling perform endpoint:', performEndpoint);
+      
+      // 🔧 CRITICAL DEBUG: Log FormData contents in detail
       console.log('📦 FormData payload (converted to object for logging):');
       const formDataObj: any = {};
+      const formDataEntries: Array<{key: string, value: any}> = [];
       formData.forEach((value, key) => {
         formDataObj[key] = value;
+        formDataEntries.push({ key, value });
       });
-      console.log(formDataObj);
+      console.log('📋 FormData entries:', formDataEntries);
+      console.log('📋 FormData object:', formDataObj);
+      
+      // 🔧 CRITICAL DEBUG: Verify operations are in FormData
+      const operationKeys = formDataEntries.filter(entry => /^(add|subtract|multiply|divide|power|sqrt|log|abs|dummy|rpi|residual|stl_outlier|logistic|detrend|deseasonalize|detrend_deseasonalize|exp|standardize_zscore|standardize_minmax)_\d+$/.test(entry.key));
+      console.log('🔍 Operation keys found in FormData:', operationKeys);
+      console.log('🔍 Options field value:', formDataObj.options);
+      console.log('🔍 Operations added count:', operationsAdded);
+      
+      if (operationKeys.length === 0) {
+        console.error('❌ CRITICAL: No operation keys found in FormData!');
+        throw new Error('No operations were added to FormData. Please check operation validation.');
+      }
+      
+      if (!formDataObj.options || formDataObj.options === '') {
+        console.error('❌ CRITICAL: Options field is empty!');
+        throw new Error('Options field is required but was empty.');
+      }
       
       const res2 = await fetch(performEndpoint, {
         method: 'POST',
@@ -544,26 +746,202 @@ export const createColumnHandler: AtomHandler = {
       
       console.log('📨 Perform endpoint response status:', res2.status);
       
+      // 🔧 CRITICAL DEBUG: Get error details from backend
+      if (!res2.ok) {
+        let errorDetail = res2.statusText;
+        try {
+          const errorData = await res2.json();
+          errorDetail = errorData.detail || errorData.message || errorData.error || res2.statusText;
+          console.error('❌ Backend error details:', errorDetail);
+          console.error('❌ Full error response:', errorData);
+        } catch (e) {
+          const errorText = await res2.text();
+          console.error('❌ Backend error (text):', errorText);
+          errorDetail = errorText || res2.statusText;
+        }
+        
+        // Log what we sent vs what backend expects
+        console.error('❌ FormData that was sent:', {
+          object_names: formDataObj.object_names,
+          bucket_name: formDataObj.bucket_name,
+          operations: operationKeys.map(k => ({ key: k.key, value: k.value })),
+          options: formDataObj.options,
+          identifiers: formDataObj.identifiers,
+          client_name: formDataObj.client_name,
+          app_name: formDataObj.app_name,
+          project_name: formDataObj.project_name
+        });
+      }
+      
       if (res2.ok) {
         const result = await res2.json();
         console.log('✅ Auto-execution successful:', result);
         
-        // 🔧 CRITICAL FIX: Update atom settings with results
+        // 🔧 CRITICAL FIX: Extract result data and file path (like groupby)
+        let parsedRows: any[] | null = null;
+        let parsedCsv: string | null = null;
+        let resultFilePath: string | null = null;
+        
+        if (result.status === 'SUCCESS' && result.result_file) {
+          resultFilePath = result.result_file;
+          console.log('🔄 Backend operation completed, retrieving results from saved file:', result.result_file);
+          
+          // Extract results from response if available
+          if (result.results && Array.isArray(result.results)) {
+            parsedRows = result.results;
+            console.log('✅ Results extracted from perform response:', {
+              rowCount: parsedRows.length,
+              columns: result.columns?.length || 0
+            });
+          }
+          
+          // Try to get CSV data from cached_dataframe endpoint (like groupby)
+          try {
+            const rawRowCount = typeof result.row_count === 'number' && Number.isFinite(result.row_count) && result.row_count > 0
+              ? Math.ceil(result.row_count)
+              : parsedRows?.length;
+            const pageSize = rawRowCount && rawRowCount > 0 ? rawRowCount : 100000;
+            const cachedUrl = `${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(result.result_file)}&page=1&page_size=${pageSize}`;
+            const cachedRes = await fetch(cachedUrl);
+            if (!cachedRes.ok) {
+              throw new Error(`cached_dataframe responded with ${cachedRes.status}`);
+            }
+
+            const cachedJson = await cachedRes.json();
+            parsedCsv = cachedJson?.data ?? '';
+            console.log('📄 Retrieved CSV data from saved file, length:', parsedCsv.length);
+            
+            // Parse CSV to get actual results if not already available
+            if (!parsedRows && parsedCsv) {
+              const lines = parsedCsv.split('\n');
+              if (lines.length > 1) {
+                const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                parsedRows = lines
+                  .slice(1)
+                  .filter(line => line.trim())
+                  .map(line => {
+                    const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+                    const row: Record<string, string> = {};
+                    headers.forEach((header, index) => {
+                      row[header] = values[index] || '';
+                    });
+                    return row;
+                  });
+              }
+            }
+          } catch (fetchError) {
+            console.warn('⚠️ Could not fetch cached results, using perform response data:', fetchError);
+          }
+        }
+        
+        // 🔧 CRITICAL FIX: Update atom settings with results (like groupby)
+        // Use 'createResults' (not 'createColumnResults') to match CreateColumnCanvas expectations
+        const finalResultFile = resultFilePath || result.result_file;
+        const finalResults = parsedRows || result.results || [];
+        
         updateAtomSettings(atomId, {
           operationCompleted: true,
-          createColumnResults: result,
+          createResults: {
+            ...(result.createResults || {}),
+            result_file: finalResultFile,
+            results: finalResults, // 🔧 CRITICAL: Set 'results' array for UI display
+            row_count: result.row_count || finalResults.length || 0,
+            columns: result.columns || [],
+            new_columns: result.new_columns || []
+          },
+          // Also set previewFile so UI can display paginated results
+          previewFile: finalResultFile,
+          // Also keep createColumnResults for backward compatibility
+          createColumnResults: {
+            ...result,
+            unsaved_data: finalResults,
+            result_file: finalResultFile,
+            row_count: result.row_count || finalResults.length || 0,
+            columns: result.columns || []
+          },
           lastUpdateTime: Date.now()
         });
         
-        // Add success message
-        const completionDetails = {
-          'File': resolvedDataSource || 'N/A',
-          'Operations': operations.map(op => `${op.type}(${op.columns.join(', ')})`).join(', '),
-          'Result': 'New columns created successfully'
-        };
-        const completionMsg = createSuccessMessage('Create Column operations', completionDetails);
-        completionMsg.content += '\n\n📊 Results are ready! New columns have been created.\n\n💡 You can now view the results in the Create Column interface.';
-        setMessages(prev => [...prev, completionMsg]);
+        console.log('✅ Updated atom settings with results:', {
+          result_file: finalResultFile,
+          results_count: finalResults.length,
+          columns: result.columns?.length || 0,
+          new_columns: result.new_columns?.length || 0
+        });
+        
+        // 🔧 CRITICAL FIX: Auto-save the result (like groupby)
+        // Always save as Arrow file - perform endpoint saves CSV, we need to convert to Arrow
+        try {
+          // Ensure we have CSV data for auto-save
+          let csvDataForSave = parsedCsv;
+          if (!csvDataForSave && parsedRows && parsedRows.length > 0) {
+            // Convert parsedRows to CSV if we don't have CSV data
+            const headers = Object.keys(parsedRows[0]);
+            const csvLines = [
+              headers.join(','),
+              ...parsedRows.map(row => headers.map(h => {
+                const val = row[h];
+                return val !== null && val !== undefined ? String(val).replace(/"/g, '""') : '';
+              }).join(','))
+            ];
+            csvDataForSave = csvLines.join('\n');
+            console.log('✅ Converted parsedRows to CSV for auto-save');
+          }
+          
+          // If still no CSV data, try fetching from cached_dataframe
+          if (!csvDataForSave && resultFilePath) {
+            try {
+              const cachedRes = await fetch(`${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(resultFilePath)}`);
+              if (cachedRes.ok) {
+                const cachedJson = await cachedRes.json();
+                csvDataForSave = cachedJson?.data ?? null;
+                console.log('✅ Retrieved CSV data from cached_dataframe for auto-save');
+              }
+            } catch (fetchError) {
+              console.warn('⚠️ Could not fetch CSV from cached_dataframe:', fetchError);
+            }
+          }
+
+          const autoSavePayload = {
+            unsaved_data: parsedRows || result.results || null,
+            data: csvDataForSave || parsedCsv || null, // 🔧 CRITICAL: Ensure CSV data is available
+            result_file: resultFilePath || result.result_file || null,
+          };
+
+          console.log('💾 Calling autoSaveStepResult with:', {
+            hasUnsavedData: !!autoSavePayload.unsaved_data,
+            hasCsvData: !!autoSavePayload.data,
+            resultFile: autoSavePayload.result_file
+          });
+
+          await autoSaveStepResult({
+            atomType: 'create-column',
+            atomId,
+            stepAlias: `create_transform`, // 🔧 FIX: Use simple alias without atomId/timestamp to avoid duplication (timestamp added in utils)
+            result: autoSavePayload,
+            updateAtomSettings,
+            setMessages,
+            isStreamMode: context.isStreamMode || false
+          });
+          
+          console.log('✅ Auto-save completed successfully');
+        } catch (autoSaveError) {
+          console.error('❌ Create Column auto-save failed:', autoSaveError);
+          // Don't fail the whole operation if auto-save fails
+        }
+        
+        // Add success message (only in Individual AI mode, not Stream mode)
+        if (!context.isStreamMode) {
+          const completionDetails = {
+            'Result File': resultFilePath || result.result_file || 'N/A',
+            'Rows': (parsedRows?.length || result.row_count || 0).toLocaleString(),
+            'Columns': (result.columns?.length || 0).toLocaleString(),
+            'New Columns': result.new_columns?.length || 0
+          };
+          const completionMsg = createSuccessMessage('Create Column operations', completionDetails);
+          completionMsg.content += '\n\n📊 Results are ready! New columns have been created and saved.\n\n💡 You can now view the results in the Create Column interface - no need to click Perform again!';
+          setMessages(prev => [...prev, completionMsg]);
+        }
         
       } else {
         console.error('❌ Auto-execution failed:', res2.status, res2.statusText);
@@ -648,3 +1026,5 @@ export const createColumnHandler: AtomHandler = {
     return { success: true };
   }
 };
+
+

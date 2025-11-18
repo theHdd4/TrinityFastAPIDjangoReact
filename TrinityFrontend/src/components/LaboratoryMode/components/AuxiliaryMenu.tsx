@@ -191,7 +191,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
             </span>
           </button>
         </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
+        <div className="p-3 border-b border-gray-200 flex items-center justify-center hidden">
           <button
             onClick={openHelp}
             className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${

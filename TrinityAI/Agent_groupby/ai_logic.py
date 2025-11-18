@@ -3,7 +3,7 @@ import json
 import re
 import requests
 import logging
-from typing import Optional, Union, Dict
+from typing import Optional, Union, Dict, List, Any
 
 logger = logging.getLogger("ai_logic.group_by")
 
@@ -13,11 +13,18 @@ def build_prompt_group_by(
     files_with_columns: dict,
     supported_aggs_detailed: str,
     operation_format: str,
-    history_string: str
+    history_string: str,
+    file_details: Optional[Dict[str, Any]] = None,
+    other_files: Optional[List[str]] = None,
+    matched_columns: Optional[Dict[str, List[str]]] = None,
 ) -> str:
     """
     Build the LLM prompt for group-by aggregation operations.
     """
+    file_details_json = json.dumps(file_details, indent=2) if file_details else "None"
+    other_files_line = ", ".join(other_files) if other_files else "None"
+    matched_columns_json = json.dumps(matched_columns, indent=2) if matched_columns else "None"
+
     return f"""
 You are an expert AI assistant that converts natural language into JSON for GROUP BY aggregations.
 
@@ -89,6 +96,15 @@ When user asks to "show files", "show all files", "show file names", "show colum
 
 Available files and columns:
 {json.dumps(files_with_columns, indent=2)}
+
+Relevant file metadata:
+{file_details_json}
+
+Matched columns detected from prompt:
+{matched_columns_json}
+
+Other available files (not included above):
+{other_files_line}
 
 Supported aggregations:
 {supported_aggs_detailed}
