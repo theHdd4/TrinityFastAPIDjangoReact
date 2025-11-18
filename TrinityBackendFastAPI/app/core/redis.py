@@ -28,19 +28,36 @@ from redis.connection import (
 
 logger = logging.getLogger("app.core.redis")
 activity_logger = logging.getLogger("redis.activity")
-activity_logger.setLevel(logging.INFO)
-activity_logger.propagate = False
 
-_activity_formatter = logging.Formatter("%(message)s")
+# Helper function to read boolean from environment variable (defined early for use in logger setup)
+def _env_bool_early(name: str, default: bool = False) -> bool:
+    """Helper to read boolean from environment variable."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
 
-if not activity_logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setLevel(logging.INFO)
-    handler.setFormatter(_activity_formatter)
-    activity_logger.addHandler(handler)
-else:
-    for handler in activity_logger.handlers:
+# Check if Redis activity logging is disabled via environment variable
+_redis_activity_logging_enabled = _env_bool_early("REDIS_ACTIVITY_LOGGING_ENABLED", True)
+
+if _redis_activity_logging_enabled:
+    activity_logger.setLevel(logging.INFO)
+    activity_logger.propagate = False
+
+    _activity_formatter = logging.Formatter("%(message)s")
+
+    if not activity_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
         handler.setFormatter(_activity_formatter)
+        activity_logger.addHandler(handler)
+    else:
+        for handler in activity_logger.handlers:
+            handler.setFormatter(_activity_formatter)
+else:
+    # Disable the logger completely
+    activity_logger.disabled = True
+    activity_logger.setLevel(logging.CRITICAL)
 
 
 def _service_name() -> str:
@@ -69,6 +86,10 @@ def _log_cache_event(
     allow_empty_keys: bool = False,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
+    # Early return if logging is disabled
+    if not _redis_activity_logging_enabled or activity_logger.disabled:
+        return
+    
     materialised_keys = []
     for candidate in keys:
         rendered = _stringify_key(candidate)

@@ -8,9 +8,9 @@ import io
 from .database import client
 
 logger = logging.getLogger(__name__)
-# logger.disabled = True  # Disabled earlier; now we keep logging enabled
-# Suppress routine noise; we will log important values using CRITICAL
-logger.setLevel(logging.CRITICAL)
+# Enable logging for debugging S-curve issues
+# Use INFO level to see combination/model matching logs
+logger.setLevel(logging.INFO)
 
 def generate_scaled_media_series(recent_series: List[float], x_range: List[float]) -> Tuple[List[List[float]], List[float]]:
     """
@@ -30,7 +30,7 @@ def generate_scaled_media_series(recent_series: List[float], x_range: List[float
         decimal_change = x / 100.0
         new_series = [v * (1 + decimal_change) for v in recent_series]
         scaled_series_list.append(new_series)
-        percent_changes.append(x)  # Keep as percentage value
+        percent_changes.append(x) 
     return scaled_series_list, percent_changes
 
 def apply_transformation_steps(series: List[float], transformation_steps: List[Dict[str, Any]]) -> List[float]:
@@ -244,26 +244,64 @@ async def get_model_coefficients_from_mongodb(db, client_name: str, app_name: st
         if not build_config:
             logger.warning(f"⚠️ No build configuration found for {document_id}")
             logger.info(f"🔍 Available collections in database: {await db.list_collection_names()}")
-            return {}
+            return {}, None
         
         logger.info(f"✅ Build configuration found")
         
         # Get model coefficients for the specified combination and model
         model_coefficients = build_config.get("model_coefficients", {})
-
         
+        # Log all available combinations for debugging
+        logger.info(f"🔍 Searching for combination: '{combination_name}' and model: '{model_name}'")
+        logger.info(f"🔍 All available combinations in MongoDB: {list(model_coefficients.keys())}")
+        
+        # Try exact match first
         combination_coefficients = model_coefficients.get(combination_name, {})
         
+        # If exact match fails, try case-insensitive and whitespace-normalized matching
+        if not combination_coefficients:
+            logger.warning(f"⚠️ Exact match failed for combination '{combination_name}', trying fuzzy match...")
+            # Normalize the search key (lowercase, strip whitespace)
+            normalized_search = combination_name.strip().lower()
+            for key in model_coefficients.keys():
+                normalized_key = key.strip().lower()
+                if normalized_key == normalized_search:
+                    logger.info(f"✅ Found combination using fuzzy match: '{key}' (searched for '{combination_name}')")
+                    combination_coefficients = model_coefficients[key]
+                    break
         
+        if not combination_coefficients:
+            logger.warning(f"⚠️ No combination found matching '{combination_name}'")
+            logger.info(f"🔍 Available combinations (with details):")
+            for combo_key in model_coefficients.keys():
+                models_in_combo = list(model_coefficients[combo_key].keys()) if isinstance(model_coefficients[combo_key], dict) else []
+                logger.info(f"   - '{combo_key}' (models: {models_in_combo})")
+            return {}, build_config
+        
+        logger.info(f"✅ Found combination, available models: {list(combination_coefficients.keys())}")
+        
+        # Try exact match for model name
         model_coeffs = combination_coefficients.get(model_name, {})
+        
+        # If exact match fails, try case-insensitive and whitespace-normalized matching
+        if not model_coeffs:
+            logger.warning(f"⚠️ Exact match failed for model '{model_name}', trying fuzzy match...")
+            normalized_search = model_name.strip().lower()
+            for key in combination_coefficients.keys():
+                normalized_key = key.strip().lower()
+                if normalized_key == normalized_search:
+                    logger.info(f"✅ Found model using fuzzy match: '{key}' (searched for '{model_name}')")
+                    model_coeffs = combination_coefficients[key]
+                    break
+        
         logger.info(f"🔍 Model '{model_name}' coefficients: {list(model_coeffs.keys()) if model_coeffs else 'Not found'}")
         
         if not model_coeffs:
             logger.warning(f"⚠️ No coefficients found for combination '{combination_name}' and model '{model_name}'")
-            logger.info(f"🔍 Available combinations: {list(model_coefficients.keys())}")
-            if combination_name in model_coefficients:
-                logger.info(f"🔍 Available models for '{combination_name}': {list(model_coefficients[combination_name].keys())}")
-            return {}
+            logger.info(f"🔍 Available models for this combination: {list(combination_coefficients.keys())}")
+            logger.info(f"🔍 Model name searched: '{model_name}' (normalized: '{model_name.strip().lower()}')")
+            logger.info(f"🔍 Available model names (normalized): {[k.strip().lower() for k in combination_coefficients.keys()]}")
+            return {}, build_config
         
         # Extract model coefficients
         coefficients = {
@@ -279,7 +317,7 @@ async def get_model_coefficients_from_mongodb(db, client_name: str, app_name: st
         logger.error(f"❌ Error getting model coefficients from MongoDB: {str(e)}")
         import traceback
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
-        return {}
+        return {}, None
 
 def calculate_transformed_means(df: pd.DataFrame, transformation_metadata: Dict[str, Any]) -> tuple[Dict[str, float], Dict[str, Any]]:
     """
@@ -744,9 +782,34 @@ async def get_s_curve_endpoint(
         else:
             # Regular model - get coefficients from MongoDB
             logger.info(f"🔍 Getting model coefficients from MongoDB...")
-            model_coefficients, build_config = await get_model_coefficients_from_mongodb(
-                db, client_name, app_name, project_name, combination_name, model_name
-            )
+            try:
+                model_coefficients, build_config = await get_model_coefficients_from_mongodb(
+                    db, client_name, app_name, project_name, combination_name, model_name
+                )
+                
+                # Check if we got valid coefficients
+                if not model_coefficients or not build_config:
+                    logger.warning(f"⚠️ No model coefficients or build config found for {combination_name}/{model_name}")
+                    return {
+                        "success": False,
+                        "error": f"No model coefficients found for combination '{combination_name}' and model '{model_name}'",
+                        "s_curves": {}
+                    }
+            except ValueError as ve:
+                # Handle unpacking errors
+                logger.error(f"❌ Error unpacking model coefficients: {str(ve)}")
+                return {
+                    "success": False,
+                    "error": f"Error getting model coefficients: {str(ve)}",
+                    "s_curves": {}
+                }
+            except Exception as e:
+                logger.error(f"❌ Error getting model coefficients: {str(e)}")
+                return {
+                    "success": False,
+                    "error": f"Error getting model coefficients: {str(e)}",
+                    "s_curves": {}
+                }
         
         
         # Get ROI configuration from the already fetched build_config

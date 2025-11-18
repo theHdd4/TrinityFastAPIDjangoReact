@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.task_queue import celery_task_client, format_task_response
+
+logger = logging.getLogger(__name__)
 
 from .schemas import (
     ActualVsPredictedRequest,
@@ -139,8 +143,14 @@ def get_variable_ranges_endpoint(
     file_key: str = Query(...),
     combination_id: str | None = Query(None),
     variables: str = Query(..., description="Comma separated list of variables"),
+    method: str | None = Query(None, description="Method type: elasticity, beta, average, or roi"),
 ) -> VariableRangesResponse:
-    payload = get_variable_ranges(file_key, combination_id, [var.strip() for var in variables.split(",") if var.strip()])
+    payload = get_variable_ranges(
+        file_key, 
+        combination_id, 
+        [var.strip() for var in variables.split(",") if var.strip()],
+        method=method
+    )
     return VariableRangesResponse.model_validate(payload)
 
 
@@ -161,54 +171,35 @@ def post_save_model(request: GenericModelSelectionRequest) -> SavedModelResponse
 
 @router.get("/models/contribution")
 def get_contribution(
-    file_key: str = Query(...),
-    combination_id: str = Query(...),
-    model_name: str = Query(...),
+    file_key: str = Query(..., description="MinIO file key for the model results file"),
+    combination_id: str = Query(..., description="Combination ID to filter by"),
+    model_name: str = Query(..., description="Model name to get contribution for"),
 ) -> dict:
-    return _submit_task(
-        name="select_models_feature_based.contribution",
-        dotted_path="app.features.select_models_feature_based.service.get_model_contribution",
-        kwargs={
-            "file_key": file_key,
-            "combination_id": combination_id,
-            "model_name": model_name,
-        },
-        metadata={
-            "feature": "select_models_feature_based",
-            "operation": "model_contribution",
-            "file_key": file_key,
-            "combination_id": combination_id,
-            "model_name": model_name,
-        },
-    )
+    """Get contribution data for a specific model and combination"""
+    try:
+        result = get_model_contribution(file_key, combination_id, model_name)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.get("/models/performance")
 def get_performance(
-    file_key: str = Query(...),
-    combination_id: str = Query(...),
-    model_name: str = Query(...),
+    file_key: str = Query(..., description="MinIO file key for the model results file"),
+    combination_id: str = Query(..., description="Combination ID to filter by"),
+    model_name: str = Query(..., description="Model name to get performance for"),
 ) -> dict:
-    return _submit_task(
-        name="select_models_feature_based.performance",
-        dotted_path="app.features.select_models_feature_based.service.get_model_performance",
-        kwargs={
-            "file_key": file_key,
-            "combination_id": combination_id,
-            "model_name": model_name,
-        },
-        metadata={
-            "feature": "select_models_feature_based",
-            "operation": "model_performance",
-            "file_key": file_key,
-            "combination_id": combination_id,
-            "model_name": model_name,
-        },
-    )
+    """Get performance metrics for a specific model and combination"""
+    try:
+        result = get_model_performance(file_key, combination_id, model_name)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/actual-vs-predicted")
 def post_actual_vs_predicted(request: ActualVsPredictedRequest) -> dict:
+    """Calculate actual vs predicted values using stored coefficients and actual X values from MongoDB"""
     return _submit_task(
         name="select_models_feature_based.actual_vs_predicted",
         dotted_path="app.features.select_models_feature_based.service.calculate_actual_vs_predicted",
@@ -216,7 +207,8 @@ def post_actual_vs_predicted(request: ActualVsPredictedRequest) -> dict:
         metadata={
             "feature": "select_models_feature_based",
             "operation": "actual_vs_predicted",
-            "combination_id": request.combination_name,
+            "file_key": request.file_key,
+            "combination_name": request.combination_name,
             "model_name": request.model_name,
         },
     )
@@ -224,80 +216,67 @@ def post_actual_vs_predicted(request: ActualVsPredictedRequest) -> dict:
 
 @router.post("/yoy-calculation")
 def post_yoy(request: ActualVsPredictedRequest) -> dict:
+    """Calculate Year-over-Year (YoY) growth using stored coefficients and actual X values from MongoDB"""
     return _submit_task(
-        name="select_models_feature_based.yoy",
+        name="select_models_feature_based.yoy_calculation",
         dotted_path="app.features.select_models_feature_based.service.calculate_yoy",
         kwargs={"payload": request.model_dump()},
         metadata={
             "feature": "select_models_feature_based",
             "operation": "yoy_calculation",
-            "combination_id": request.combination_name,
+            "file_key": request.file_key,
+            "combination_name": request.combination_name,
             "model_name": request.model_name,
         },
     )
 
 
-@router.get("/models/actual-vs-predicted-ensemble")
+@router.get("/models/actual-vs-predicted-ensemble", tags=["Ensemble Actual vs Predicted"])
 def get_ensemble_actual_vs_predicted_endpoint(
-    file_key: str = Query(...),
-    combination_id: str = Query(...),
+    file_key: str = Query(..., description="MinIO file key for the model results file"),
+    combination_id: str = Query(..., description="Combination ID to filter data"),
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
 ) -> dict:
-    return _submit_task(
-        name="select_models_feature_based.ensemble_actual_vs_predicted",
-        dotted_path="app.features.select_models_feature_based.service.get_ensemble_actual_vs_predicted",
-        kwargs={
-            "file_key": file_key,
-            "combination_id": combination_id,
-        },
-        metadata={
-            "feature": "select_models_feature_based",
-            "operation": "ensemble_actual_vs_predicted",
-            "file_key": file_key,
-            "combination_id": combination_id,
-        },
-    )
+    """Calculate actual vs predicted values using ensemble weighted metrics and source file data"""
+    try:
+        result = get_ensemble_actual_vs_predicted(file_key, combination_id, client_name, app_name, project_name)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/models/contribution-ensemble")
+@router.get("/models/contribution-ensemble", tags=["Ensemble Contribution"])
 def get_ensemble_contribution_endpoint(
-    file_key: str = Query(...),
-    combination_id: str = Query(...),
+    file_key: str = Query(..., description="MinIO file key for the model results file"),
+    combination_id: str = Query(..., description="Combination ID to filter data"),
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
 ) -> dict:
-    return _submit_task(
-        name="select_models_feature_based.ensemble_contribution",
-        dotted_path="app.features.select_models_feature_based.service.get_ensemble_contribution",
-        kwargs={
-            "file_key": file_key,
-            "combination_id": combination_id,
-        },
-        metadata={
-            "feature": "select_models_feature_based",
-            "operation": "ensemble_contribution",
-            "file_key": file_key,
-            "combination_id": combination_id,
-        },
-    )
+    """Get contribution data for ensemble using weighted ensemble metrics"""
+    try:
+        result = get_ensemble_contribution(file_key, combination_id, client_name, app_name, project_name)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/models/yoy-calculation-ensemble")
+@router.get("/models/yoy-calculation-ensemble", tags=["Ensemble YoY Calculation"])
 def get_ensemble_yoy_endpoint(
-    file_key: str = Query(...),
-    combination_id: str = Query(...),
+    file_key: str = Query(..., description="MinIO file key for the model results file"),
+    combination_id: str = Query(..., description="Combination ID to filter data"),
+    client_name: str = Query(..., description="Client name"),
+    app_name: str = Query(..., description="App name"),
+    project_name: str = Query(..., description="Project name"),
 ) -> dict:
-    return _submit_task(
-        name="select_models_feature_based.ensemble_yoy",
-        dotted_path="app.features.select_models_feature_based.service.get_ensemble_yoy",
-        kwargs={
-            "file_key": file_key,
-            "combination_id": combination_id,
-        },
-        metadata={
-            "feature": "select_models_feature_based",
-            "operation": "ensemble_yoy",
-            "file_key": file_key,
-            "combination_id": combination_id,
-        },
-    )
+    """Calculate Year-over-Year (YoY) growth using ensemble weighted metrics and source file data"""
+    try:
+        result = get_ensemble_yoy(file_key, combination_id, client_name, app_name, project_name)
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/models/weighted-ensemble")
@@ -316,6 +295,7 @@ def post_weighted_ensemble(request: WeightedEnsembleRequest) -> dict:
 
 @router.post("/models/s-curve")
 def post_s_curve(request: SCurveRequest) -> dict:
+    """Generate S-curve data for media variables with ROI calculations."""
     return _submit_task(
         name="select_models_feature_based.s_curve",
         dotted_path="app.features.select_models_feature_based.service.generate_s_curve",
@@ -330,13 +310,60 @@ def post_s_curve(request: SCurveRequest) -> dict:
 
 
 @router.get("/application-type", response_model=ApplicationTypeResponse)
-def get_application_type_endpoint(
+async def get_application_type_endpoint(
     client_name: str = Query(...),
     app_name: str = Query(...),
     project_name: str = Query(...),
 ) -> ApplicationTypeResponse:
-    payload = get_application_type(client_name, app_name, project_name)
-    return ApplicationTypeResponse.model_validate(payload)
+    """Get the application type for a specific project from MongoDB build configuration."""
+    from .database import db, client
+    
+    try:
+        # Check database connection
+        if db is None or client is None:
+            logger.warning("MongoDB connection not available, defaulting to 'general'")
+            application_type = "general"
+        else:
+            # Get the build configuration document
+            document_id = f"{client_name}/{app_name}/{project_name}"
+            logger.info(f"Fetching application type for: {document_id}")
+            
+            try:
+                build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
+                
+                if not build_config:
+                    logger.warning(f"No build configuration found for {document_id}, defaulting to 'general'")
+                    application_type = "general"
+                else:
+                    # Extract application type from build config
+                    application_type = build_config.get("application_type", "general")
+                    logger.info(f"Application type from build config for {document_id}: {application_type}")
+            except Exception as db_error:
+                logger.error(f"Database error while fetching application type: {str(db_error)}")
+                application_type = "general"
+        
+        payload = {
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "application_type": application_type,
+            "is_mmm": application_type == "mmm",
+        }
+        
+        return ApplicationTypeResponse.model_validate(payload)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Error getting application type: {str(exc)}", exc_info=True)
+        # Return default instead of raising error to prevent CORS issues
+        payload = {
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "application_type": "general",
+            "is_mmm": False,
+        }
+        return ApplicationTypeResponse.model_validate(payload)
 
 
 __all__ = ["router"]

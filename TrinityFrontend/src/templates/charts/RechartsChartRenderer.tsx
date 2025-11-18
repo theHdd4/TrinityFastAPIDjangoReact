@@ -196,7 +196,7 @@ interface Props {
   showDataLabels?: boolean; // External control for data labels visibility
   initialShowDataLabels?: boolean; // Default state for data labels
   showGrid?: boolean; // External control for grid visibility
-  chartsPerRow?: number; // For multi pie chart layouts
+  chartsPerRow?: number;
   captureId?: string;
   forceSingleAxis?: boolean; // Force rendering multiple series on single axis instead of dual axes
   stackBars?: boolean; // Enable stacked bar chart when legendField is present
@@ -588,7 +588,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   
   // DEBUG: Log theme changes
   useEffect(() => {
-    console.log('🎨 Theme changed:', { selectedTheme, storedTheme, propTheme, currentTheme });
+    // console.log('🎨 Theme changed:', { selectedTheme, storedTheme, propTheme, currentTheme });
   }, [selectedTheme, storedTheme, propTheme, currentTheme]);
   
   // Update selectedTheme when propTheme changes (but only if user hasn't made a selection)
@@ -624,7 +624,7 @@ const RechartsChartRenderer: React.FC<Props> = ({
   
   // Debug log when sortColumn changes
   useEffect(() => {
-    console.log('🔍 CHART: sortColumn changed', { sortColumn, propSortColumn, internalSortColumn, sortOrder });
+    // console.log('🔍 CHART: sortColumn changed', { sortColumn, propSortColumn, internalSortColumn, sortOrder });
   }, [sortColumn, propSortColumn, internalSortColumn, sortOrder]);
   const [chartTypeSubmenuPos, setChartTypeSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [axisLabelSubmenuPos, setAxisLabelSubmenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -1149,15 +1149,15 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const finalPalette = themePalette && themePalette.length > 0 ? themePalette : DEFAULT_COLORS;
     
     // DEBUG: Log palette changes
-    console.log('🎨 Palette recalculated:', { 
-      currentTheme, 
-      selectedTheme,
-      useThemePalette: true,
-      hasColorsProp: !!(colors && colors.length > 0),
-      paletteLength: finalPalette.length,
-      firstColor: finalPalette[0],
-      lastColor: finalPalette[finalPalette.length - 1]
-    });
+    // console.log('🎨 Palette recalculated:', { 
+    //   currentTheme, 
+    //   selectedTheme,
+    //   useThemePalette: true,
+    //   hasColorsProp: !!(colors && colors.length > 0),
+    //   paletteLength: finalPalette.length,
+    //   firstColor: finalPalette[0],
+    //   lastColor: finalPalette[finalPalette.length - 1]
+    // });
     
     return finalPalette;
   }, [colors, currentTheme, selectedTheme]);
@@ -2841,12 +2841,12 @@ const RechartsChartRenderer: React.FC<Props> = ({
     const renderPalette = palette && palette.length > 0 ? palette : DEFAULT_COLORS;
     
     // DEBUG: Log renderChart palette usage
-    console.log('📊 renderChart using palette:', { 
-      currentTheme, 
-      paletteLength: renderPalette.length,
-      firstColor: renderPalette[0],
-      chartType: type
-    });
+    // console.log('📊 renderChart using palette:', { 
+    //   currentTheme, 
+    //   paletteLength: renderPalette.length,
+    //   firstColor: renderPalette[0],
+    //   chartType: type
+    // });
     
 
     

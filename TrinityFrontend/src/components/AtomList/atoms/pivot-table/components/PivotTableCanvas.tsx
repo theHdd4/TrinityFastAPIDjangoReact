@@ -2608,7 +2608,6 @@ const PivotTableCanvas: React.FC<PivotTableCanvasProps> = ({
           <div className="px-4 py-3 overflow-hidden">
             <div className="flex w-full flex-nowrap items-center gap-3 sm:gap-4 overflow-x-auto min-w-0 scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent">
               <div className="flex flex-nowrap items-center gap-3 min-w-0 flex-shrink-0">
-                <span className="text-xs font-semibold text-[#595959] tracking-wide uppercase whitespace-nowrap">Layout</span>
                 <div className="flex flex-nowrap items-center gap-1 flex-shrink-0">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>

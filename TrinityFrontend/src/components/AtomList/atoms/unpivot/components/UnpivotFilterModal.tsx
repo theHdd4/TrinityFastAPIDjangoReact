@@ -35,6 +35,7 @@ const UnpivotFilterModal: React.FC<UnpivotFilterModalProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [tempSelections, setTempSelections] = useState<string[]>(selections);
+  const [hasInitialized, setHasInitialized] = useState(false);
 
   const filteredOptions = useMemo(() => {
     if (!searchTerm.trim()) {
@@ -47,16 +48,27 @@ const UnpivotFilterModal: React.FC<UnpivotFilterModalProps> = ({
 
   // Update temp selections when modal opens or selections prop changes
   // If selections are empty but options are available, select all options by default
+  // Only auto-select on initial open, not when options change while modal is open
   useEffect(() => {
-    if (open) {
-      // If selections are empty and we have options, select all options
+    if (open && !hasInitialized) {
+      // First time opening - initialize temp selections
       if (selections.length === 0 && options.length > 0) {
         setTempSelections([...options]);
       } else {
         setTempSelections(selections);
       }
+      setHasInitialized(true);
+    } else if (!open) {
+      // Modal closed - reset initialization flag
+      setHasInitialized(false);
+    } else if (open && hasInitialized) {
+      // Modal is open and already initialized - only update if selections prop changed externally
+      // Don't auto-select all if user hasn't applied yet
+      if (selections.length > 0) {
+        setTempSelections(selections);
+      }
     }
-  }, [open, selections, options]);
+  }, [open, selections, options, hasInitialized]);
 
   const allSelected = useMemo(() => {
     return filteredOptions.length > 0 && filteredOptions.every(opt => tempSelections.includes(opt));

@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { 
   Pagination,
@@ -665,7 +666,16 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     ...(settings.pivotSettings || {}),
   }), [settings.pivotSettings]);
 
+  const [showPivotTab, setShowPivotTab] = useState(false);
   const [activeTab, setActiveTab] = useState<'dataframe' | 'pivot'>('dataframe');
+  
+  // Ensure we switch back to dataframe tab if pivot tab is hidden while we're on it
+  useEffect(() => {
+    if (!showPivotTab && activeTab === 'pivot') {
+      setActiveTab('dataframe');
+    }
+  }, [showPivotTab, activeTab]);
+  
   const [pivotIsComputing, setPivotIsComputing] = useState(false);
   const [pivotComputeError, setPivotComputeError] = useState<string | null>(null);
   const [pivotManualRefreshToken, setPivotManualRefreshToken] = useState(0);
@@ -776,14 +786,14 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     });
     
     const selectionsSnapshot = Array.from(fieldsToCheck).reduce<Record<string, string[]>>((acc, field) => {
-      const key = field.toLowerCase();
-      const selection =
-        pivotSettings.pivotFilterSelections?.[field] ??
-        pivotSettings.pivotFilterSelections?.[key];
-      if (selection) {
-        acc[field] = [...selection].sort();
-      }
-      return acc;
+        const key = field.toLowerCase();
+        const selection =
+          pivotSettings.pivotFilterSelections?.[field] ??
+          pivotSettings.pivotFilterSelections?.[key];
+        if (selection) {
+          acc[field] = [...selection].sort();
+        }
+        return acc;
     }, {});
     
     const payload = {
@@ -929,20 +939,20 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
             return Array.from(fieldsToFilter).map((field) => {
               const key = field.toLowerCase();
               const selections =
-                latestSettings.pivotFilterSelections?.[field] ??
-                latestSettings.pivotFilterSelections?.[key] ?? [];
+              latestSettings.pivotFilterSelections?.[field] ??
+              latestSettings.pivotFilterSelections?.[key] ?? [];
               const options =
-                latestSettings.pivotFilterOptions?.[field] ??
-                latestSettings.pivotFilterOptions?.[key] ?? [];
+              latestSettings.pivotFilterOptions?.[field] ??
+              latestSettings.pivotFilterOptions?.[key] ?? [];
 
               const includeValues =
                 selections.length > 0 && selections.length !== options.length
                   ? selections
                   : undefined;
 
-              return includeValues
-                ? { field, include: includeValues }
-                : { field };
+            return includeValues
+              ? { field, include: includeValues }
+              : { field };
             });
           })(),
           sorting: sortingPayload,
@@ -4412,17 +4422,19 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 <Table className="w-4 h-4" />
                 <span>DataFrame Operations</span>
               </button>
-              <button
-                onClick={() => setActiveTab('pivot')}
-                className={`px-4 py-2.5 text-sm font-medium transition-all duration-200 rounded-md flex items-center space-x-2 ${
-                  activeTab === 'pivot'
-                    ? 'bg-white text-emerald-600 shadow-sm border border-emerald-200'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
-                }`}
-              >
-                <Grid3x3 className="w-4 h-4" />
-                <span>Pivot Table</span>
-              </button>
+              {showPivotTab && (
+                <button
+                  onClick={() => setActiveTab('pivot')}
+                  className={`px-4 py-2.5 text-sm font-medium transition-all duration-200 rounded-md flex items-center space-x-2 ${
+                    activeTab === 'pivot'
+                      ? 'bg-white text-emerald-600 shadow-sm border border-emerald-200'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                  }`}
+                >
+                  <Grid3x3 className="w-4 h-4" />
+                  <span>Pivot Table</span>
+                </button>
+              )}
             </div>
 
             {/* Alignment Control and Save Buttons */}
@@ -4636,6 +4648,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                 >
                   <RotateCcw className="w-6 h-6 text-gray-500" />
                 </button>
+                <div className="flex items-center gap-2 mx-1 px-2 py-1 rounded-md hover:bg-gray-50 transition-colors">
+                  <Switch
+                    checked={showPivotTab}
+                    onCheckedChange={(checked) => {
+                      setShowPivotTab(checked);
+                      if (checked) {
+                        // When enabling, switch to pivot tab
+                        setActiveTab('pivot');
+                      } else if (activeTab === 'pivot') {
+                        // When disabling and on pivot tab, switch back to dataframe
+                        setActiveTab('dataframe');
+                      }
+                    }}
+                    title="Show Pivot Table Tab"
+                  />
+                  <span className="text-xs text-gray-600 whitespace-nowrap">Pivot</span>
+                </div>
               </div>
             )}
             <div className="flex-1 min-h-0" style={{maxHeight: 'calc(100vh - 300px)'}}>

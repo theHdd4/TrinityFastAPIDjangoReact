@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional, Tuple
 import logging
-from .database import client
+from .database import client, db
 
 logger = logging.getLogger(__name__)
 
@@ -286,7 +286,7 @@ async def get_ensemble_build_config(
     """
     try:
         document_id = f"{client_name}/{app_name}/{project_name}"
-        build_config = await client["trinity_db"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+        build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
         
         if not build_config:
             logger.error(f"❌ No build configuration found for {document_id}")
