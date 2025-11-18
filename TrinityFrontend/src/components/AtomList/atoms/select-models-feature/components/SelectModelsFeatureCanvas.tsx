@@ -3722,9 +3722,9 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                 )}
             </div>
 
-            {/* Y-O-Y Growth (Waterfall Chart) */}
+            {/* Y-O-Y Growth */}
             <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200">
-              <h5 className="text-sm font-medium text-orange-800 mb-3">Y-O-Y Growth (Waterfall)</h5>
+              <h5 className="text-sm font-medium text-orange-800 mb-3">Y-O-Y Growth</h5>
               {data.yoyData && data.yoyData.length > 0 ? (
                 <div className="w-full h-[300px]">
                   <RechartsChartRenderer
