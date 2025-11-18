@@ -165,6 +165,39 @@ def _load_build_config(client_name: str, app_name: str, project_name: str) -> Di
         logger.warning(
             "Failed to load build config for %s/%s/%s", client_name, app_name, project_name, exc_info=True
         )
+
+    try:
+        # Fallback to the build-model feature's Mongo helper when the local
+        # connection is unavailable (e.g. eager Celery runs without Motor).
+        from app.features.build_model_feature_based.mongodb_saver import (
+            get_build_config_from_mongo,
+        )
+
+        def _fetch_fallback() -> Dict[str, Any] | None:
+            try:
+                return asyncio.run(get_build_config_from_mongo(client_name, app_name, project_name))
+            except RuntimeError:
+                _loop = asyncio.new_event_loop()
+                try:
+                    return _loop.run_until_complete(
+                        get_build_config_from_mongo(client_name, app_name, project_name)
+                    )
+                finally:
+                    _loop.close()
+
+        fallback_config = _fetch_fallback()
+        if fallback_config:
+            logger.info(
+                "Loaded build config via build_model_feature_based fallback for %s/%s/%s",
+                client_name,
+                app_name,
+                project_name,
+            )
+        return fallback_config
+    except Exception:
+        logger.warning(
+            "Unable to fetch build config fallback for %s/%s/%s", client_name, app_name, project_name, exc_info=True
+        )
         return None
 
 
