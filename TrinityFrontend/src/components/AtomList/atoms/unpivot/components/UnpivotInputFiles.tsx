@@ -58,9 +58,12 @@ const UnpivotInputFiles: React.FC<UnpivotInputFilesProps> = ({ atomId }) => {
     try {
       const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${envQuery}`);
       if (!res.ok) {
-        throw new Error(`Failed to fetch dataframes (${res.status})`);
+        const errorText = await res.text().catch(() => '');
+        throw new Error(errorText || `Failed to fetch dataframes (${res.status})`);
       }
-      const json = await res.json();
+      const json = await res.json().catch((err) => {
+        throw new Error(`Failed to parse dataframes response: ${err.message}`);
+      });
       const files = Array.isArray(json.files) ? json.files : [];
       const arrowFiles = files.filter((f: SavedFrame) => f?.object_name?.endsWith('.arrow'));
       if (settings.datasetPath && !arrowFiles.some(f => f.object_name === settings.datasetPath)) {
@@ -96,20 +99,26 @@ const UnpivotInputFiles: React.FC<UnpivotInputFilesProps> = ({ atomId }) => {
         });
         
         if (schemaRes.ok) {
-          const schemaData = await schemaRes.json();
+          const schemaData = await schemaRes.json().catch((err) => {
+            throw new Error(`Failed to parse schema response: ${err.message}`);
+          });
           columns = Array.isArray(schemaData.columns) ? schemaData.columns : [];
           console.log('UnpivotInputFiles: Loaded columns from dataset-schema:', columns.length);
         } else {
-          throw new Error(`Schema endpoint failed (${schemaRes.status})`);
+          const errorText = await schemaRes.text().catch(() => '');
+          throw new Error(errorText || `Schema endpoint failed (${schemaRes.status})`);
         }
       } catch (schemaErr) {
         // Fallback to FEATURE_OVERVIEW_API if unpivot schema endpoint fails
         console.warn('UnpivotInputFiles: Falling back to FEATURE_OVERVIEW_API', schemaErr);
         const res = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(normalized)}`);
         if (!res.ok) {
-          throw new Error(`Failed to load column summary (${res.status})`);
+          const errorText = await res.text().catch(() => '');
+          throw new Error(errorText || `Failed to load column summary (${res.status})`);
         }
-        const raw = await res.json();
+        const raw = await res.json().catch((err) => {
+          throw new Error(`Failed to parse column summary response: ${err.message}`);
+        });
         const json = await resolveTaskResponse<{ summary?: any[] }>(raw);
         const summary = Array.isArray(json.summary) ? json.summary.filter(Boolean) : [];
         // Try multiple possible field names

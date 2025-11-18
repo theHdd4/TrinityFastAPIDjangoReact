@@ -38,19 +38,178 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     }
   }, [atom?.settings, atomId, updateSettings]);
 
-  // Track previous dataset path to detect changes
+  // Track previous dataset path to detect changes (only reset if actually changed, not on initial load)
   const prevDatasetPathRef = React.useRef<string | undefined>(settings.datasetPath);
+  const isInitialMountRef = React.useRef(true);
   
-  // Reset atomId when dataset path changes to ensure backend uses new dataset
+  // Reset backend atomId when dataset path changes to ensure backend uses new dataset
+  // But only if it's not the initial mount and the path actually changed
   React.useEffect(() => {
-    if (prevDatasetPathRef.current !== undefined && 
-        prevDatasetPathRef.current !== settings.datasetPath && 
-        settings.datasetPath) {
-      // Dataset path changed - reset atomId so new backend atom is created with new dataset
+    // Skip on initial mount - preserve existing atomId on page refresh
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      prevDatasetPathRef.current = settings.datasetPath;
+      // On initial mount, if we have an atomId but no datasetPath, that's fine
+      // If we have both, that's also fine - don't reset
+      return;
+    }
+    
+    // Only reset if dataset path actually changed (not just initialized or restored from storage)
+    // Make sure both old and new paths are valid and different
+    const oldPath = prevDatasetPathRef.current;
+    const newPath = settings.datasetPath;
+    
+    if (oldPath !== undefined && 
+        oldPath !== '' &&
+        newPath !== undefined && 
+        newPath !== '' &&
+        oldPath !== newPath) {
+      // Dataset path actually changed - reset backend atomId so new backend atom is created
+      console.log('UnpivotAtom: Dataset path changed, resetting backend atomId', {
+        oldPath,
+        newPath,
+        frontendAtomId: atomId,
+        currentBackendAtomId: settings.atomId
+      });
       updateSettings(atomId, { atomId: undefined });
     }
     prevDatasetPathRef.current = settings.datasetPath;
   }, [settings.datasetPath, atomId, updateSettings]);
+
+  // Helper function to ensure backend atom exists, recreating if needed
+  const ensureBackendAtom = React.useCallback(async (): Promise<string> => {
+    let currentAtomId = settings.atomId;
+    
+    // If no atom ID, create one
+    if (!currentAtomId) {
+      const envStr = localStorage.getItem('env');
+      let projectId = '';
+      let workflowId = '';
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          projectId = env.PROJECT_ID || '';
+          workflowId = env.WORKFLOW_ID || '';
+        } catch (e) {
+          console.warn('Failed to parse env', e);
+        }
+      }
+
+      const createResponse = await fetch(`${UNPIVOT_API}/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          workflow_id: workflowId,
+          atom_name: `Unpivot ${atomId}`,
+          dataset_path: settings.datasetPath || '',
+        }),
+      });
+
+      if (!createResponse.ok) {
+        const errorText = await createResponse.text().catch(() => '');
+        throw new Error(errorText || `Failed to create atom (${createResponse.status})`);
+      }
+
+      const createResult = await createResponse.json().catch((err) => {
+        throw new Error(`Failed to parse response: ${err.message}`);
+      });
+      currentAtomId = createResult.atom_id;
+      updateSettings(atomId, { atomId: currentAtomId });
+      return currentAtomId;
+    }
+    
+    // Check if backend atom exists by trying to get metadata
+    try {
+      const metadataResponse = await fetch(
+        `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/metadata`
+      );
+      
+      if (metadataResponse.status === 404) {
+        // Atom expired, recreate it
+        console.log('Backend atom expired, recreating:', currentAtomId);
+        const envStr = localStorage.getItem('env');
+        let projectId = '';
+        let workflowId = '';
+        if (envStr) {
+          try {
+            const env = JSON.parse(envStr);
+            projectId = env.PROJECT_ID || '';
+            workflowId = env.WORKFLOW_ID || '';
+          } catch (e) {
+            console.warn('Failed to parse env', e);
+          }
+        }
+
+        const createResponse = await fetch(`${UNPIVOT_API}/create`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_id: projectId,
+            workflow_id: workflowId,
+            atom_name: `Unpivot ${atomId}`,
+            dataset_path: settings.datasetPath || '',
+          }),
+        });
+
+        if (!createResponse.ok) {
+          const errorText = await createResponse.text().catch(() => '');
+          throw new Error(errorText || `Failed to recreate atom (${createResponse.status})`);
+        }
+
+        const createResult = await createResponse.json().catch((err) => {
+          throw new Error(`Failed to parse response: ${err.message}`);
+        });
+        currentAtomId = createResult.atom_id;
+        updateSettings(atomId, { atomId: currentAtomId });
+        return currentAtomId;
+      }
+      
+      if (!metadataResponse.ok) {
+        throw new Error(`Failed to check atom existence (${metadataResponse.status})`);
+      }
+    } catch (error) {
+      // If check fails, try to recreate
+      console.warn('Failed to check backend atom, recreating:', error);
+      const envStr = localStorage.getItem('env');
+      let projectId = '';
+      let workflowId = '';
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          projectId = env.PROJECT_ID || '';
+          workflowId = env.WORKFLOW_ID || '';
+        } catch (e) {
+          console.warn('Failed to parse env', e);
+        }
+      }
+
+      const createResponse = await fetch(`${UNPIVOT_API}/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          workflow_id: workflowId,
+          atom_name: `Unpivot ${atomId}`,
+          dataset_path: settings.datasetPath || '',
+        }),
+      });
+
+      if (!createResponse.ok) {
+        const errorText = await createResponse.text().catch(() => '');
+        throw new Error(errorText || `Failed to recreate atom (${createResponse.status})`);
+      }
+
+      const createResult = await createResponse.json().catch((err) => {
+        throw new Error(`Failed to parse response: ${err.message}`);
+      });
+      currentAtomId = createResult.atom_id;
+      updateSettings(atomId, { atomId: currentAtomId });
+      return currentAtomId;
+    }
+    
+    return currentAtomId;
+  }, [atomId, settings.atomId, settings.datasetPath, updateSettings]);
 
   const handleDataChange = React.useCallback(
     (newData: Partial<UnpivotSettings>) => {
@@ -116,45 +275,10 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
           auto_refresh: settings.autoRefresh,
         };
 
-        // Get or create atom_id
-        let currentAtomId = settings.atomId;
-        if (!currentAtomId) {
-          // Create atom if it doesn't exist
-          const envStr = localStorage.getItem('env');
-          let projectId = '';
-          let workflowId = '';
-          if (envStr) {
-            try {
-              const env = JSON.parse(envStr);
-              projectId = env.PROJECT_ID || '';
-              workflowId = env.WORKFLOW_ID || '';
-            } catch (e) {
-              console.warn('Failed to parse env', e);
-            }
-          }
+        // Ensure backend atom exists (create or recreate if expired)
+        const currentAtomId = await ensureBackendAtom();
 
-          const createResponse = await fetch(`${UNPIVOT_API}/create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              project_id: projectId,
-              workflow_id: workflowId,
-              atom_name: `Unpivot ${atomId}`,
-              dataset_path: settings.datasetPath || '',
-            }),
-            signal: controller.signal,
-          });
-
-          if (!createResponse.ok) {
-            throw new Error(`Failed to create atom (${createResponse.status})`);
-          }
-
-          const createResult = await createResponse.json();
-          currentAtomId = createResult.atom_id;
-          updateSettings(atomId, { atomId: currentAtomId });
-        }
-
-        // Update properties
+        // Update properties (if this fails with 404, ensureBackendAtom will have already recreated it)
         const updateResponse = await fetch(
           `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/properties`,
           {
@@ -166,13 +290,33 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         );
 
         if (!updateResponse.ok) {
-          const text = await updateResponse.text();
-          throw new Error(text || `Properties update failed (${updateResponse.status})`);
+          // If 404, atom might have expired between check and update - try to ensure again
+          if (updateResponse.status === 404) {
+            const recreatedAtomId = await ensureBackendAtom();
+            // Retry update with recreated atom
+            const retryResponse = await fetch(
+              `${UNPIVOT_API}/${encodeURIComponent(recreatedAtomId)}/properties`,
+              {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updatePayload),
+                signal: controller.signal,
+              }
+            );
+            if (!retryResponse.ok) {
+              const text = await retryResponse.text();
+              throw new Error(text || `Properties update failed (${retryResponse.status})`);
+            }
+          } else {
+            const text = await updateResponse.text();
+            throw new Error(text || `Properties update failed (${updateResponse.status})`);
+          }
         }
 
         // Compute (auto-refresh will trigger this, but we can also call it explicitly)
+        let computeAtomId = currentAtomId;
         const computeResponse = await fetch(
-          `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/compute`,
+          `${UNPIVOT_API}/${encodeURIComponent(computeAtomId)}/compute`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -182,11 +326,44 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         );
 
         if (!computeResponse.ok) {
-          const text = await computeResponse.text();
+          // If 404, atom expired - recreate and retry
+          if (computeResponse.status === 404) {
+            computeAtomId = await ensureBackendAtom();
+            // Retry compute with recreated atom
+            const retryComputeResponse = await fetch(
+              `${UNPIVOT_API}/${encodeURIComponent(computeAtomId)}/compute`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force_recompute: true }),
+                signal: controller.signal,
+              }
+            );
+            if (!retryComputeResponse.ok) {
+              const text = await retryComputeResponse.text().catch(() => '');
+              throw new Error(text || `Compute failed (${retryComputeResponse.status})`);
+            }
+            const retryResult = await retryComputeResponse.json().catch((err) => {
+              throw new Error(`Failed to parse compute response: ${err.message}`);
+            });
+            updateSettings(atomId, {
+              unpivotStatus: 'success',
+              unpivotError: null,
+              unpivotResults: retryResult.dataframe || [],
+              unpivotRowCount: retryResult.row_count || 0,
+              unpivotSummary: retryResult.summary || {},
+              unpivotUpdatedAt: retryResult.updated_at,
+              computationTime: retryResult.computation_time,
+            });
+            return;
+          }
+          const text = await computeResponse.text().catch(() => '');
           throw new Error(text || `Compute failed (${computeResponse.status})`);
         }
 
-        const result = await computeResponse.json();
+        const result = await computeResponse.json().catch((err) => {
+          throw new Error(`Failed to parse compute response: ${err.message}`);
+        });
         updateSettings(atomId, {
           unpivotResults: result?.dataframe ?? [],
           unpivotStatus: result?.status ?? 'success',
@@ -233,16 +410,15 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     if (!settings.datasetPath || !(settings.unpivotResults?.length ?? 0)) {
       return;
     }
-    if (!settings.atomId) {
-      setSaveError('Atom ID not found. Please compute first.');
-      return;
-    }
     setIsSaving(true);
     setSaveError(null);
     setSaveMessage(null);
     try {
+      // Ensure backend atom exists before saving
+      const currentAtomId = await ensureBackendAtom();
+      
       const response = await fetch(
-        `${UNPIVOT_API}/${encodeURIComponent(settings.atomId)}/save`,
+        `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/save`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -250,10 +426,40 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         }
       );
       if (!response.ok) {
-        const text = await response.text();
+        // If 404, atom expired - recreate and retry
+        if (response.status === 404) {
+          const recreatedAtomId = await ensureBackendAtom();
+          const retryResponse = await fetch(
+            `${UNPIVOT_API}/${encodeURIComponent(recreatedAtomId)}/save`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ format: 'parquet' }),
+            }
+          );
+          if (!retryResponse.ok) {
+            const text = await retryResponse.text().catch(() => '');
+            throw new Error(text || `Save failed (${retryResponse.status})`);
+          }
+          const retryResult = await retryResponse.json().catch((err) => {
+            throw new Error(`Failed to parse save response: ${err.message}`);
+          });
+          const message = retryResult?.minio_path
+            ? `Saved to ${retryResult.minio_path}`
+            : 'Unpivot result saved successfully';
+          setSaveMessage(message);
+          updateSettings(atomId, {
+            unpivotLastSavedPath: retryResult?.minio_path ?? null,
+            unpivotLastSavedAt: retryResult?.updated_at ?? null,
+          });
+          return;
+        }
+        const text = await response.text().catch(() => '');
         throw new Error(text || `Save failed (${response.status})`);
       }
-      const result = await response.json();
+      const result = await response.json().catch((err) => {
+        throw new Error(`Failed to parse save response: ${err.message}`);
+      });
       const message = result?.minio_path
         ? `Saved to ${result.minio_path}`
         : 'Unpivot result saved successfully';
@@ -269,7 +475,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [atomId, settings.datasetPath, settings.unpivotResults, settings.atomId, updateSettings]);
+  }, [atomId, settings.datasetPath, settings.unpivotResults, ensureBackendAtom, updateSettings]);
 
   const handleSaveAs = React.useCallback(() => {
     const defaultFilename = `unpivot_${atomId}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
@@ -281,10 +487,6 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     if (!settings.datasetPath || !(settings.unpivotResults?.length ?? 0)) {
       return;
     }
-    if (!settings.atomId) {
-      setSaveError('Atom ID not found. Please compute first.');
-      return;
-    }
     if (!saveAsFileName.trim()) {
       setSaveError('Please enter a filename');
       return;
@@ -293,8 +495,11 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     setSaveError(null);
     setSaveMessage(null);
     try {
+      // Ensure backend atom exists before saving
+      const currentAtomId = await ensureBackendAtom();
+      
       const response = await fetch(
-        `${UNPIVOT_API}/${encodeURIComponent(settings.atomId)}/save`,
+        `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/save`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -302,10 +507,42 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         }
       );
       if (!response.ok) {
-        const text = await response.text();
+        // If 404, atom expired - recreate and retry
+        if (response.status === 404) {
+          const recreatedAtomId = await ensureBackendAtom();
+          const retryResponse = await fetch(
+            `${UNPIVOT_API}/${encodeURIComponent(recreatedAtomId)}/save`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ format: 'parquet', filename: saveAsFileName.trim() }),
+            }
+          );
+          if (!retryResponse.ok) {
+            const text = await retryResponse.text().catch(() => '');
+            throw new Error(text || `Save failed (${retryResponse.status})`);
+          }
+          const retryResult = await retryResponse.json().catch((err) => {
+            throw new Error(`Failed to parse save response: ${err.message}`);
+          });
+          const message = retryResult?.minio_path
+            ? `Saved as ${retryResult.minio_path}`
+            : 'Unpivot result saved successfully';
+          setSaveMessage(message);
+          updateSettings(atomId, {
+            unpivotLastSavedPath: retryResult?.minio_path ?? null,
+            unpivotLastSavedAt: retryResult?.updated_at ?? null,
+          });
+          setShowSaveAsModal(false);
+          setSaveAsFileName('');
+          return;
+        }
+        const text = await response.text().catch(() => '');
         throw new Error(text || `Save failed (${response.status})`);
       }
-      const result = await response.json();
+      const result = await response.json().catch((err) => {
+        throw new Error(`Failed to parse save response: ${err.message}`);
+      });
       const message = result?.minio_path
         ? `Saved as ${result.minio_path}`
         : 'Unpivot result saved successfully';
@@ -323,7 +560,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [atomId, settings.datasetPath, settings.unpivotResults, settings.atomId, saveAsFileName, updateSettings]);
+  }, [atomId, settings.datasetPath, settings.unpivotResults, saveAsFileName, ensureBackendAtom, updateSettings]);
 
   const readinessMessage = React.useMemo(() => {
     if (!settings.datasetPath) {
