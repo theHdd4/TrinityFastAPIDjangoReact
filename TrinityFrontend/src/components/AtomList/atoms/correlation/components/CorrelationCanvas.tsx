@@ -727,7 +727,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
         .map((x: any, index: number) => {
           const v1Raw = seriesData.column1_values[index];
           const v2Raw = seriesData.column2_values[index];
-          if (v1Raw === undefined || v2Raw === undefined) return null;
+          if (v1Raw === undefined || v1Raw === null || v2Raw === undefined || v2Raw === null) return null;
           const v1 = parseFloat(v1Raw);
           const v2 = parseFloat(v2Raw);
           if (!isFinite(v1) || !isFinite(v2)) return null;

@@ -4378,12 +4378,13 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
                           <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                             {card.atoms.length === 0 ? (
-                              <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
-                                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                                  <Grid3X3 className="w-8 h-8 text-gray-400" />
-                                </div>
-                                <p className="text-gray-500 mb-2">No atoms in this section</p>
-                                <p className="text-sm text-gray-400">Configure this atom for your application</p>
+                              <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
+                                <AtomSuggestion
+                                  cardId={card.id}
+                                  isVisible={true}
+                                  onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
+                                  onAddAtom={handleAddAtomFromSuggestion}
+                                />
                               </div>
                             ) : (
                               <div
@@ -4645,7 +4646,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
                       <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                         {card.atoms.length === 0 ? (
-                          <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
+                          <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
                             <AtomSuggestion
                               cardId={card.id}
                               isVisible={true}
@@ -5131,7 +5132,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             {/* Card Content */}
             <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
               {card.atoms.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[140px] mb-4">
+                <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
                   <AtomSuggestion
                     cardId={card.id}
                     isVisible={true}

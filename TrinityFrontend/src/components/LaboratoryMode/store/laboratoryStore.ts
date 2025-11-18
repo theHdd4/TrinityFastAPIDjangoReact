@@ -108,6 +108,12 @@ export interface DataUploadSettings {
     total_rows: number;
     total_columns: number;
   }>;
+  /** Map of file names to validation results (success/failure messages) - saved when validation steps enabled */
+  validationResults?: Record<string, string>;
+  /** Map of file names to detailed validation reports - saved when validation steps enabled */
+  validationDetails?: Record<string, any[]>;
+  /** List of file names that were validated (from saved dataframes) - saved when validation steps enabled */
+  validatedFiles?: string[];
 }
 
 export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {

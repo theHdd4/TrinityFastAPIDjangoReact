@@ -184,8 +184,8 @@ class HighestCorrelationResponse(BaseModel):
 
 class TimeSeriesDataResponse(BaseModel):
     """Response for time series Y-axis data"""
-    column1_values: List[float]
-    column2_values: List[float]
+    column1_values: List[Optional[float]]
+    column2_values: List[Optional[float]]
     column1_name: str
     column2_name: str
     filtered_rows: int
