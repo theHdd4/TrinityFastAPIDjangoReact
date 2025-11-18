@@ -3,6 +3,7 @@
 import requests
 import json
 import re
+import pandas as pd
 from .ai_logic import build_prompt, call_llm, extract_json
 from pathlib import Path
 from datetime import datetime
@@ -15,6 +16,41 @@ from file_analyzer import FileAnalyzer
 from file_context_resolver import FileContextResolver, FileContextResult
 
 logger = logging.getLogger("trinity.df_validate")
+
+
+def safe_json_dumps(obj, indent=2):
+    """
+    Safely serialize object to JSON, handling NaT and other non-serializable types.
+    
+    Args:
+        obj: Object to serialize
+        indent: JSON indentation level
+        
+    Returns:
+        JSON string
+    """
+    def default_serializer(obj):
+        """Custom default serializer for json.dumps"""
+        # Handle pandas NaT (Not a Time)
+        if pd.isna(obj):
+            return None
+        # Handle pandas Timestamp
+        if isinstance(obj, pd.Timestamp):
+            if pd.isna(obj):
+                return None
+            return str(obj)
+        # Handle pandas Timedelta
+        if isinstance(obj, pd.Timedelta):
+            if pd.isna(obj):
+                return None
+            return str(obj)
+        # Handle other non-serializable types
+        try:
+            return str(obj)
+        except Exception:
+            return None
+    
+    return json.dumps(obj, indent=indent, default=default_serializer)
 
 
 def _describe_endpoint(client) -> str:
@@ -267,7 +303,7 @@ class SmartDfValidateAgent:
             for i, conv in enumerate(history[-10:], 1):  # Last 10 interactions
                 context_parts.append(f"\n--- INTERACTION {i} ---")
                 context_parts.append(f"User Input: '{conv['user_prompt']}'")
-                context_parts.append(f"System Response: {json.dumps(conv['system_response'], indent=2)}")
+                context_parts.append(f"System Response: {safe_json_dumps(conv['system_response'], indent=2)}")
                 context_parts.append(f"Result Type: {conv['result_type']}")
                 context_parts.append(f"Timestamp: {conv['timestamp']}")
         
@@ -278,25 +314,25 @@ class SmartDfValidateAgent:
             for i, config in enumerate(successful[-5:], 1):  # Last 5 successful configs
                 context_parts.append(f"\n--- SUCCESS {i} ---")
                 context_parts.append(f"User Request: '{config['user_prompt']}'")
-                context_parts.append(f"Configuration: {json.dumps(config['config'], indent=2)}")
+                context_parts.append(f"Configuration: {safe_json_dumps(config['config'], indent=2)}")
                 context_parts.append(f"Timestamp: {config['timestamp']}")
         
         # User preferences and patterns
         prefs = session.get("user_preferences", {})
         if prefs.get("favorite_files"):
             context_parts.append("\n\nUSER PREFERENCES:")
-            context_parts.append(f"Favorite Files: {json.dumps(prefs['favorite_files'], indent=2)}")
+            context_parts.append(f"Favorite Files: {safe_json_dumps(prefs['favorite_files'], indent=2)}")
             if prefs.get("preferred_dtypes"):
-                context_parts.append(f"Preferred Dtypes: {json.dumps(prefs['preferred_dtypes'], indent=2)}")
+                context_parts.append(f"Preferred Dtypes: {safe_json_dumps(prefs['preferred_dtypes'], indent=2)}")
             if prefs.get("common_patterns"):
-                context_parts.append(f"Common Patterns: {json.dumps(prefs['common_patterns'], indent=2)}")
+                context_parts.append(f"Common Patterns: {safe_json_dumps(prefs['common_patterns'], indent=2)}")
         
         # Recent context for conversational responses
         if history:
             last_interaction = history[-1]
             context_parts.append(f"\n\nLAST INTERACTION CONTEXT:")
             context_parts.append(f"Last User Input: '{last_interaction['user_prompt']}'")
-            context_parts.append(f"Last System Response: {json.dumps(last_interaction['system_response'], indent=2)}")
+            context_parts.append(f"Last System Response: {safe_json_dumps(last_interaction['system_response'], indent=2)}")
             if last_interaction.get('suggested_files'):
                 context_parts.append(f"Files I Suggested: {last_interaction['suggested_files']}")
         

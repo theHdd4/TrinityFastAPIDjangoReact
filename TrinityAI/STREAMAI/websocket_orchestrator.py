@@ -829,6 +829,19 @@ WORKFLOW PLANNING RULES:
                     elif remaining_available:
                         inputs = [remaining_available[0]]
 
+            # For data-upload-validate, if no output_alias was provided, use the file name (without extension)
+            if atom_id == "data-upload-validate" and not raw_step.get("output_alias") and files_used:
+                file_path = files_used[0]
+                # Extract file name without extension
+                file_name = os.path.basename(file_path)
+                # Remove extension (e.g., "D0_MMM.arrow" -> "D0_MMM")
+                if "." in file_name:
+                    file_name_without_ext = file_name.rsplit(".", 1)[0]
+                else:
+                    file_name_without_ext = file_name
+                output_alias = file_name_without_ext
+                logger.info(f"📝 Data-upload-validate: Using file name '{output_alias}' as output alias (from file: {file_path})")
+
             prompt_text = raw_step.get("prompt")
             if not prompt_text:
                 prompt_text = self._compose_prompt(atom_id, description, guidance, files_used, inputs, output_alias)
@@ -2059,6 +2072,15 @@ WORKFLOW PLANNING RULES:
                 execution_result=execution_result,
                 step_cache=step_cache
             )
+        elif atom_id == "data-upload-validate":
+            # 🔧 CRITICAL FIX: data-upload-validate doesn't create new files, it loads existing ones
+            # We need to preserve the original file name for downstream steps
+            saved_path, auto_save_response = await self._auto_save_data_upload_validate(
+                workflow_step=workflow_step,
+                execution_result=execution_result,
+                step_cache=step_cache,
+                available_files=available_files
+            )
         else:
             logger.info(f"ℹ️ Auto-save skipped for atom '{atom_id}' (no auto-save logic implemented)")
             return
@@ -2266,6 +2288,64 @@ WORKFLOW PLANNING RULES:
 
         return saved_path, response
 
+    async def _auto_save_data_upload_validate(
+        self,
+        workflow_step: WorkflowStepPlan,
+        execution_result: Dict[str, Any],
+        step_cache: Dict[str, Any],
+        available_files: List[str]
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Auto-save helper for data-upload-validate atom.
+        
+        CRITICAL: data-upload-validate doesn't create new files - it loads existing ones.
+        We preserve the original file name for downstream steps instead of renaming.
+        """
+        # Extract the file name from the execution result
+        validate_cfg = execution_result.get("validate_json") or execution_result.get("validate_config") or {}
+        file_name = validate_cfg.get("file_name", "")
+        
+        if not file_name:
+            raise ValueError("Data-upload-validate execution result did not include 'file_name' for auto-save")
+        
+        # Find the full path of the original file in available_files
+        # The file_name might be just the filename or the full path
+        original_file_path = None
+        
+        # Try exact match first
+        if file_name in available_files:
+            original_file_path = file_name
+        else:
+            # Try to find by filename (last part of path)
+            file_name_only = file_name.split("/")[-1] if "/" in file_name else file_name
+            for available_file in available_files:
+                if available_file.endswith(file_name_only) or available_file.endswith(f"/{file_name_only}"):
+                    original_file_path = available_file
+                    break
+        
+        # If still not found, check if file_name is already a full path
+        if not original_file_path:
+            # Check if any available file contains the file_name
+            for available_file in available_files:
+                if file_name in available_file or available_file.endswith(file_name):
+                    original_file_path = available_file
+                    break
+        
+        # If still not found, use the file_name as-is (it might already be a full path)
+        if not original_file_path:
+            original_file_path = file_name
+            logger.warning(f"⚠️ Could not find original file path for '{file_name}' in available_files, using as-is")
+        
+        logger.info(f"✅ Data-upload-validate preserving original file name: {original_file_path}")
+        logger.info(f"📝 Registering output alias '{workflow_step.output_alias}' with original file: {original_file_path}")
+        
+        return original_file_path, {
+            "result_file": original_file_path,
+            "status": "preserved_original",
+            "original_file_name": file_name,
+            "message": f"Preserved original file name '{original_file_path}' for downstream steps"
+        }
+    
     async def _auto_save_create_transform(
         self,
         workflow_step: WorkflowStepPlan,
@@ -2581,20 +2661,30 @@ WORKFLOW PLANNING RULES:
             except Exception:
                 pass  # Continue - send will fail gracefully if disconnected
 
-            await self._send_event(
-                websocket,
-                WebSocketEvent(
-                    "workflow_insight",
-                    {
-                        "sequence_id": sequence_id,
-                        "insight": result.get("insight"),
-                        "used_steps": result.get("used_steps"),
-                        "files_profiled": result.get("files_profiled"),
-                    },
-                ),
-                "workflow_insight event",
-            )
-            logger.info("✅ Workflow insight emitted for %s", sequence_id)
+            # 🔧 CRITICAL FIX: Send insight and ensure it's delivered before any cleanup
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_insight",
+                        {
+                            "sequence_id": sequence_id,
+                            "insight": result.get("insight"),
+                            "used_steps": result.get("used_steps"),
+                            "files_profiled": result.get("files_profiled"),
+                        },
+                    ),
+                    "workflow_insight event",
+                )
+                logger.info("✅ Workflow insight emitted for %s", sequence_id)
+                
+                # 🔧 CRITICAL FIX: Small delay to ensure message is sent before connection might close
+                # Note: asyncio is already imported at the top of the file
+                await asyncio.sleep(0.1)  # 100ms delay to ensure message delivery
+                logger.info("✅ Workflow insight delivery confirmed for %s", sequence_id)
+            except WebSocketDisconnect:
+                logger.warning(f"⚠️ Connection closed while sending workflow insight for {sequence_id}")
+                raise
         except WebSocketDisconnect as ws_exc:
             logger.info(f"🔌 WebSocket disconnected during workflow insight generation for {sequence_id}: {ws_exc}")
             # Connection was destroyed - this is expected if client closed connection

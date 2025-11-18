@@ -3,6 +3,45 @@ import re
 import requests
 from typing import Dict, Any, List, Optional
 
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
+
+
+def safe_json_dumps(obj, indent=2):
+    """
+    Safely serialize object to JSON, handling NaT and other non-serializable types.
+    
+    Args:
+        obj: Object to serialize
+        indent: JSON indentation level
+        
+    Returns:
+        JSON string
+    """
+    def default_serializer(obj):
+        """Custom default serializer for json.dumps"""
+        # Handle pandas NaT (Not a Time) if pandas is available
+        if HAS_PANDAS:
+            if pd.isna(obj):
+                return None
+            if isinstance(obj, (pd.Timestamp, pd.Timedelta)):
+                if pd.isna(obj):
+                    return None
+                return str(obj)
+        # Handle other non-serializable types
+        try:
+            # Check if it's a string representation of NaT
+            if str(obj) == 'NaT':
+                return None
+            return str(obj)
+        except Exception:
+            return None
+    
+    return json.dumps(obj, indent=indent, default=default_serializer)
+
 
 def build_prompt(
     user_prompt: str,
@@ -13,15 +52,15 @@ def build_prompt(
     matched_columns: Optional[Dict[str, List[str]]] = None
 ) -> str:
     """Return the LLM prompt for the data validation and dtype conversion assistant."""
-    file_details_json = json.dumps(file_details, indent=2) if file_details else "None"
+    file_details_json = safe_json_dumps(file_details, indent=2) if file_details else "None"
     other_files_line = ", ".join(other_files) if other_files else "None"
-    matched_columns_json = json.dumps(matched_columns, indent=2) if matched_columns else "None"
+    matched_columns_json = safe_json_dumps(matched_columns, indent=2) if matched_columns else "None"
     return f"""You are an intelligent data validation and dtype conversion assistant with perfect memory access to complete conversation history.
 
 USER INPUT: "{user_prompt}"
 
 AVAILABLE FILES WITH COLUMNS:
-{json.dumps(available_files_with_columns, indent=2)}
+{safe_json_dumps(available_files_with_columns, indent=2)}
 
 RELEVANT FILE METADATA:
 {file_details_json}
