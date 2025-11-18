@@ -267,7 +267,23 @@ def _coerce_optional_float(value: Any) -> float | None:
 
 
 def _row_value(row: pd.Series, lookup: Dict[str, str], key: str) -> Any:
+    """Return a row value using tolerant column matching.
+
+    The model result exports are not always consistent with their column naming
+    (e.g., "base price" vs. "base_price").  We first attempt an exact
+    lower-case match and then fall back to a normalised comparison that strips
+    underscores and spaces so we can still pick up the correct column when
+    these minor naming differences occur.
+    """
+
     column = lookup.get(key.lower())
+    if column is None:
+        normalised_key = key.lower().replace("_", "").replace(" ", "")
+        for candidate_lower, column_name in lookup.items():
+            candidate_normalised = candidate_lower.replace("_", "").replace(" ", "")
+            if candidate_normalised == normalised_key:
+                column = column_name
+                break
     if column is None:
         return None
     return row.get(column)
@@ -1348,17 +1364,106 @@ def _curve_analysis(
     return analysis
 
 
-def _price_curve_series(record: ModelRecord) -> Dict[str, Any]:
+def _resolve_base_values(
+    record: ModelRecord, request: CurveRequestPayload
+) -> tuple[float, float]:
+    """Fill in missing base price/volume values using available metadata."""
+
+    base_price = record.base_price
+    base_volume = record.base_volume
+
+    if base_price <= 0:
+        avg_price = record.variable_averages.get(record.price_variable)
+        if avg_price and avg_price > 0:
+            base_price = float(avg_price)
+
+    if base_volume <= 0:
+        self_avg = record.metrics.get("self_avg")
+        if self_avg and self_avg > 0:
+            base_volume = float(self_avg)
+
+    if base_volume <= 0 and record.series.actual:
+        valid_actual = [value for value in record.series.actual if value is not None]
+        if valid_actual:
+            base_volume = float(statistics.mean(valid_actual))
+
+    if base_volume <= 0 and record.series.predicted:
+        valid_predicted = [value for value in record.series.predicted if value is not None]
+        if valid_predicted:
+            base_volume = float(statistics.mean(valid_predicted))
+
+    if base_price > 0 and base_volume > 0:
+        return base_price, base_volume
+
+    build_config = _load_build_config(
+        request.client_name, request.app_name, request.project_name
+    )
+    if build_config:
+        resolved_file_key = _normalise_file_key(request.file_key)
+        for combo_info in build_config.get("combination_file_keys", []):
+            if (
+                combo_info.get("combination") == request.combination_name
+                and combo_info.get("file_key")
+            ):
+                resolved_file_key = _normalise_file_key(str(combo_info.get("file_key")))
+                break
+
+        try:
+            frame = get_minio_df(MINIO_BUCKET, resolved_file_key)
+
+            if base_price <= 0 and record.price_variable in frame.columns:
+                price_series = pd.to_numeric(
+                    frame[record.price_variable], errors="coerce"
+                ).dropna()
+                if not price_series.empty:
+                    base_price = float(price_series.mean())
+
+            combination_models = build_config.get("model_coefficients", {}).get(
+                request.combination_name, {}
+            )
+            model_coeffs = (
+                combination_models.get(request.model_name, {})
+                if isinstance(combination_models, dict)
+                else {}
+            )
+            y_variable = (
+                model_coeffs.get("y_variable")
+                if isinstance(model_coeffs, dict)
+                else None
+            )
+
+            if base_volume <= 0 and y_variable and y_variable in frame.columns:
+                volume_series = pd.to_numeric(frame[y_variable], errors="coerce").dropna()
+                if not volume_series.empty:
+                    base_volume = float(volume_series.mean())
+
+        except Exception:
+            logger.exception(
+                "Failed to derive base values from build config for %s", resolved_file_key
+            )
+
+    return base_price, base_volume
+
+
+def _price_curve_series(
+    record: ModelRecord,
+    *,
+    base_price: float | None = None,
+    base_volume: float | None = None,
+) -> Dict[str, Any]:
     percent_steps = [-50, -25, -10, 0, 10, 25, 50]
     elasticity = record.metrics.get("self_elasticity") or -1.0
+
+    resolved_price = base_price if base_price is not None else record.base_price
+    resolved_volume = base_volume if base_volume is not None else record.base_volume
 
     media_values: List[float] = []
     total_volumes: List[float] = []
     percent_changes: List[float] = []
     for change in percent_steps:
         multiplier = 1 + change / 100.0
-        price = max(record.base_price * multiplier, 0.0)
-        demand = max(record.base_volume * multiplier ** elasticity, 0.0)
+        price = max(resolved_price * multiplier, 0.0)
+        demand = max(resolved_volume * multiplier ** elasticity, 0.0)
         media_values.append(round(price, 4))
         total_volumes.append(round(demand, 4))
         percent_changes.append(float(change))
@@ -1407,12 +1512,15 @@ def generate_s_curve(payload: Dict[str, Any]) -> Dict[str, Any]:
     record = next((model for model in models if model.model_name == request.model_name), None)
     if record is None:
         raise ValueError("Requested model not found")
-    if record.base_price <= 0 or record.base_volume <= 0:
+    base_price, base_volume = _resolve_base_values(record, request)
+    if base_price <= 0 or base_volume <= 0:
         raise ModelDataUnavailableError(
             f"Base price or volume missing for model '{request.model_name}'"
         )
 
-    price_series = _price_curve_series(record)
+    price_series = _price_curve_series(
+        record, base_price=base_price, base_volume=base_volume
+    )
 
     revenues = [
         round(media * volume, 4)
@@ -1446,9 +1554,9 @@ def generate_s_curve(payload: Dict[str, Any]) -> Dict[str, Any]:
         "model_name": request.model_name,
         "price_variable": record.price_variable,
         "intercept": record.metrics.get("self_beta", -0.8),
-        "base_price": record.base_price,
-        "base_volume": record.base_volume,
-        "base_revenue": record.base_revenue,
+        "base_price": base_price,
+        "base_volume": base_volume,
+        "base_revenue": base_price * base_volume,
         "elasticity_at_base": record.metrics.get("self_elasticity"),
         "rpi_competitor_prices": record.rpi_competitors,
         "quality": {
