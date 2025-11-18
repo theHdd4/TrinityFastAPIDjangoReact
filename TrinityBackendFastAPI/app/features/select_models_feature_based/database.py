@@ -137,9 +137,12 @@ def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
         df = pd.read_csv(BytesIO(content))
     elif file_key.endswith(".xlsx"):
         df = pd.read_excel(BytesIO(content))
-    elif file_key.endswith(".arrow"):
+    elif file_key.endswith(".parquet"):
+        df = pd.read_parquet(BytesIO(content))
+    elif file_key.endswith((".arrow", ".feather")):
         import pyarrow as pa
         import pyarrow.ipc as ipc
+
         reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
         df = reader.read_all().to_pandas()
     else:

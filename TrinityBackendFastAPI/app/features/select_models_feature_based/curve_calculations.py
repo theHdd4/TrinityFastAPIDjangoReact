@@ -81,7 +81,7 @@ def _transformation_metadata(row: pd.Series, lookup: Dict[str, str]) -> Dict[str
 
 
 def _detect_date_column(df: pd.DataFrame) -> Optional[str]:
-    return _detect_column(
+    column = _detect_column(
         df.columns,
         [
             "date",
@@ -91,8 +91,20 @@ def _detect_date_column(df: pd.DataFrame) -> Optional[str]:
             "month",
             "period",
             "year",
+            "timestamp",
+            "time",
+            "week",
         ],
     )
+    if column:
+        return column
+
+    # As a final fallback, pick any column that contains "date"-like text
+    for name in df.columns:
+        lower = name.lower()
+        if "date" in lower or "period" in lower or "month" in lower or "year" in lower:
+            return name
+    return None
 
 
 def _detect_target(results_row: pd.Series, lookup: Dict[str, str], df: pd.DataFrame) -> str:
