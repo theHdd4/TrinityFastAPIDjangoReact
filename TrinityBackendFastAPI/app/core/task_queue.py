@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
@@ -61,6 +62,7 @@ class CeleryTaskClient:
             if always_eager is None
             else always_eager
         )
+        self.logger = logging.getLogger("app.core.task_queue")
 
     def _execute_callable(self, dotted_path: str, args: List[Any], kwargs: Dict[str, Any]) -> Any:
         callable_obj = import_callable(dotted_path)
@@ -86,6 +88,18 @@ class CeleryTaskClient:
         task_metadata.setdefault("callable", dotted_path)
         self.result_store.create(task_id, name, task_metadata)
 
+        self.logger.info(
+            "Task submission prepared: id=%s name=%s callable=%s eager=%s queue=%s metadata=%s args=%s kwargs=%s",
+            task_id,
+            name,
+            dotted_path,
+            self.always_eager,
+            queue,
+            task_metadata,
+            args_list,
+            kwargs_dict,
+        )
+
         if self.always_eager:
             try:
                 result = self._execute_callable(dotted_path, args_list, kwargs_dict)
@@ -98,6 +112,7 @@ class CeleryTaskClient:
                 )
             except Exception as exc:  # pragma: no cover - relies on runtime behaviour
                 self.result_store.mark_failure(task_id, str(exc))
+                self.logger.exception("Eager task %s (%s) failed", name, dotted_path)
                 return TaskSubmission(
                     task_id=task_id,
                     status="failure",
@@ -109,6 +124,13 @@ class CeleryTaskClient:
         options: Dict[str, Any] = {"task_id": task_id}
         if queue:
             options["queue"] = queue
+        self.logger.info(
+            "Dispatching Celery task id=%s name=%s callable=%s options=%s",
+            task_id,
+            name,
+            dotted_path,
+            options,
+        )
         self.celery.send_task(
             "app.tasks.execute_callable",
             args=[dotted_path],

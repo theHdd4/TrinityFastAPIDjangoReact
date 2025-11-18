@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.task_queue import celery_task_client, format_task_response
@@ -45,6 +47,8 @@ from .service import (
 
 router = APIRouter(prefix="/select", tags=["Select Feature Based"])
 
+logger = logging.getLogger("app.features.select_models_feature_based.endpoint")
+
 
 def _submit_task(name: str, dotted_path: str, kwargs: dict, metadata: dict) -> dict:
     try:
@@ -54,7 +58,17 @@ def _submit_task(name: str, dotted_path: str, kwargs: dict, metadata: dict) -> d
             kwargs=kwargs,
             metadata=metadata,
         )
+        logger.info(
+            "Submitting task %s (%s) with kwargs=%s metadata=%s -> id=%s status=%s",
+            name,
+            dotted_path,
+            kwargs,
+            metadata,
+            submission.task_id,
+            submission.status,
+        )
     except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Failed to submit task %s (%s)", name, dotted_path)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return format_task_response(submission)
 

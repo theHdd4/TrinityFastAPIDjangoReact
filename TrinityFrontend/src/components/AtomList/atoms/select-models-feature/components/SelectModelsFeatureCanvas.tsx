@@ -53,17 +53,22 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
   data
 }) => {
   const { toast } = useToast();
+  const debugPrefix = `[SelectModelsFeature:${atomId}]`;
   const fetchAndResolve = useCallback(
     async (
       input: RequestInfo | URL,
       init?: RequestInit,
       errorMessage = 'Request failed',
     ) => {
+      console.log(`${debugPrefix} -> fetch start`, { input, init, errorMessage });
       const response = await fetch(input, init);
+      console.log(`${debugPrefix} -> fetch response`, { status: response.status, ok: response.ok, url: response.url });
       let payload: any;
       try {
         payload = await response.json();
+        console.log(`${debugPrefix} -> fetch payload parsed`, payload);
       } catch (error) {
+        console.error(`${debugPrefix} -> payload parse failed`, error);
         throw new Error(errorMessage);
       }
 
@@ -72,12 +77,15 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           payload && typeof payload === 'object' && 'detail' in payload
             ? (payload.detail as string)
             : null;
+        console.error(`${debugPrefix} -> fetch failed`, { detail, status: response.status, payload });
         throw new Error(detail || errorMessage);
       }
 
-      return resolveTaskResponse(payload);
+      const resolved = await resolveTaskResponse(payload, debugPrefix);
+      console.log(`${debugPrefix} -> fetch resolved`, resolved);
+      return resolved;
     },
-    [],
+    [debugPrefix],
   );
   // State for variable selection popover
   const [variablePopoverOpen, setVariablePopoverOpen] = useState(false);
@@ -378,6 +386,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     if (combinationId === 'all' || !fileKey) return;
     
     try {
+      console.log(`${debugPrefix} -> fetching actual vs predicted`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -459,6 +468,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
     
     try {
+      console.log(`${debugPrefix} -> fetching YoY`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -504,6 +514,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     if (!variable || !fileKey) return;
     
     try {
+      console.log(`${debugPrefix} -> fetching actual vs predicted`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -758,6 +769,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     if (!variable || !fileKey) return [];
     
     try {
+      console.log(`${debugPrefix} -> fetching YoY`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1075,6 +1087,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     if (!variable || !fileKey) return [];
     
     try {
+      console.log(`${debugPrefix} -> fetching actual vs predicted`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1182,6 +1195,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     if (!variable || !fileKey) return [];
     
     try {
+      console.log(`${debugPrefix} -> fetching YoY`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1311,6 +1325,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     setIsLoadingCombinationStatus(true);
     
     try {
+      console.log(`${debugPrefix} -> fetching actual vs predicted`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1351,6 +1366,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     setIsSaving(true);
     
     try {
+      console.log(`${debugPrefix} -> fetching YoY`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1411,6 +1427,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
     
     try {
+      console.log(`${debugPrefix} -> fetching actual vs predicted`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1455,6 +1472,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
     
     try {
+      console.log(`${debugPrefix} -> fetching YoY`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1497,6 +1515,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
 
     try {
+      console.log(`${debugPrefix} -> fetching actual vs predicted`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1510,6 +1529,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         model_name: modelName
       };
 
+      console.log(`${debugPrefix} -> actual vs predicted request body`, requestBody);
       const result = await fetchAndResolve(
         baseUrl,
         {
@@ -1521,7 +1541,8 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         },
         'Failed to fetch actual vs predicted data',
       );
-      
+
+      console.log(`${debugPrefix} -> actual vs predicted response`, result);
       if (result && result.success && result.actual_values && result.predicted_values) {
         
         // Check for extreme values
@@ -1572,6 +1593,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           actualVsPredictedData: chartData,  // Use all data points
           actualVsPredictedMetrics: result.performance_metrics
         });
+
+        console.log(`${debugPrefix} -> actual vs predicted chart data prepared`, {
+          chartData,
+          domains: { xDomain, yDomain },
+          extremes: { maxActual, minActual, maxPredicted, minPredicted },
+          outliers: { sortedPredicted, sortedActual, extremePredicted, extremeActual, nanPredicted, nanActual, suspiciousPredicted, suspiciousActual }
+        });
         
         // Calculate dynamic domain ranges based on all data
         const actualMin = Math.min(...chartData.map(d => d.actual));
@@ -1591,9 +1619,14 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         handleDataChange({
           scatterChartDomains: { x: xDomain, y: yDomain }
         });
+      } else {
+        console.warn(`${debugPrefix} -> actual vs predicted returned empty result`, result);
+        handleDataChange({ actualVsPredictedData: [] });
       }
-      
+
     } catch (error) {
+      console.error(`${debugPrefix} -> failed actual vs predicted`, error);
+      handleDataChange({ actualVsPredictedData: [] });
     }
   };
 
@@ -1604,6 +1637,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
 
     try {
+      console.log(`${debugPrefix} -> fetching YoY`, { modelName, combinationId, fileKey: data.selectedDataset });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1617,6 +1651,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         model_name: modelName
       };
 
+      console.log(`${debugPrefix} -> YoY request body`, requestBody);
       const result = await fetchAndResolve(
         baseUrl,
         {
@@ -1628,20 +1663,24 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         },
         'Failed to fetch YoY data',
       );
-      
+
+      console.log(`${debugPrefix} -> YoY response`, result);
       if (result && result.success && result.dates && Array.isArray(result.actual)) {
         const chartData = result.dates.map((date: string, index: number) => ({
           name: date,
           value: result.actual[index] || 0,
           predicted: result.predicted ? result.predicted[index] || 0 : 0,
         }));
-        
+
         handleDataChange({ yoyData: chartData });
+        console.log(`${debugPrefix} -> YoY chart data prepared`, chartData);
       } else {
+        console.warn(`${debugPrefix} -> YoY returned empty result`, result);
         handleDataChange({ yoyData: [] });
       }
-      
+
     } catch (error) {
+      console.error(`${debugPrefix} -> failed YoY`, error);
       handleDataChange({ yoyData: [] });
     }
   };
@@ -1654,6 +1693,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const ensemble = data.weightedEnsembleData[0];
+      console.log(`${debugPrefix} -> fetching ensemble actual vs predicted`, { combinationId, fileKey: data.selectedDataset, ensemble });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1671,8 +1711,9 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
+      console.log(`${debugPrefix} -> ensemble actual vs predicted url`, url);
       const result = await fetchAndResolve(url, undefined, 'Failed to fetch actual vs predicted data');
-      
+
       // Transform the data to match the expected format
       if (result.actual_values && result.predicted_values && Array.isArray(result.actual_values)) {
         const actualVsPredictedData = result.actual_values.map((actual: number, index: number) => ({
@@ -1716,9 +1757,20 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         handleDataChange({
           scatterChartDomains: { x: xDomain, y: yDomain }
         });
+
+        console.log(`${debugPrefix} -> ensemble actual vs predicted prepared`, {
+          actualVsPredictedData,
+          transformedData,
+          domains: { xDomain, yDomain },
+          extremes: { actualMin, actualMax, predictedMin, predictedMax }
+        });
+      } else {
+        console.warn(`${debugPrefix} -> ensemble actual vs predicted returned empty result`, result);
+        handleDataChange({ actualVsPredictedData: [] });
       }
-      
+
     } catch (error) {
+      console.error(`${debugPrefix} -> failed ensemble actual vs predicted`, error);
       handleDataChange({ actualVsPredictedData: [] });
     }
   };
@@ -1774,6 +1826,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     
     try {
       const ensemble = data.weightedEnsembleData[0];
+      console.log(`${debugPrefix} -> fetching ensemble YoY`, { combinationId, fileKey: data.selectedDataset, ensemble });
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
@@ -1791,8 +1844,9 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
+      console.log(`${debugPrefix} -> ensemble YoY url`, url);
       const result = await fetchAndResolve(url, undefined, 'Failed to fetch YoY data');
-      
+
       // Transform the data to match the expected format
       if (result && result.success && result.dates && Array.isArray(result.actual)) {
         const chartData = result.dates.map((date: string, index: number) => ({
@@ -1800,13 +1854,16 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           value: result.actual[index] || 0,
           predicted: result.predicted ? result.predicted[index] || 0 : 0,
         }));
-        
+
         handleDataChange({ yoyData: chartData });
+        console.log(`${debugPrefix} -> ensemble YoY chart data prepared`, chartData);
       } else {
+        console.warn(`${debugPrefix} -> ensemble YoY returned empty result`, result);
         handleDataChange({ yoyData: [] });
       }
-      
+
     } catch (error) {
+      console.error(`${debugPrefix} -> failed ensemble YoY`, error);
       handleDataChange({ yoyData: [] });
     }
   };
