@@ -161,6 +161,11 @@ def _load_build_config(client_name: str, app_name: str, project_name: str) -> Di
             return loop.run_until_complete(_fetch_build_config(document_id))
         finally:
             loop.close()
+    except Exception:
+        logger.warning(
+            "Failed to load build config for %s/%s/%s", client_name, app_name, project_name, exc_info=True
+        )
+        return None
 
 
 def _detect_date_column(frame: pd.DataFrame) -> str | None:
