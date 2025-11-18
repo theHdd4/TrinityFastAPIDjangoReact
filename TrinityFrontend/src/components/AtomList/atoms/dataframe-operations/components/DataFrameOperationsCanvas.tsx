@@ -1287,8 +1287,30 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
       if (!prev || !contextMenuRef.current) {
         return prev;
       }
-      const rect = contextMenuRef.current.getBoundingClientRect();
-      const { x, y } = clampMenuPosition(prev.pointerX, prev.pointerY, rect.width, rect.height);
+      
+      // 🔧 FIX: Get the column header element to track its position
+      const headerElement = headerRefs.current[prev.col];
+      if (!headerElement) {
+        // Fallback to original behavior if header ref not found
+        const rect = contextMenuRef.current.getBoundingClientRect();
+        const { x, y } = clampMenuPosition(prev.pointerX, prev.pointerY, rect.width, rect.height);
+        if (x === prev.x && y === prev.y) {
+          return prev;
+        }
+        return { ...prev, x, y };
+      }
+      
+      // Get current position of the column header
+      const headerRect = headerElement.getBoundingClientRect();
+      const menuRect = contextMenuRef.current.getBoundingClientRect();
+      
+      // Position menu to the right of the column header, aligned with the original click Y position
+      // Use the header's right edge + small offset for X, and keep original Y
+      const newX = headerRect.right + 5; // 5px offset from column edge
+      const newY = prev.pointerY; // Keep original Y position
+      
+      const { x, y } = clampMenuPosition(newX, newY, menuRect.width, menuRect.height);
+      
       if (x === prev.x && y === prev.y) {
         return prev;
       }
@@ -1538,6 +1560,69 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [editingCellValue, setEditingCellValue] = useState<string>('');
   const [editingHeaderValue, setEditingHeaderValue] = useState<string>('');
   const [headerDisplayNames, setHeaderDisplayNames] = useState<{ [key: string]: string }>({});
+  // Add refs for input elements to set cursor position
+  const editingCellInputRef = useRef<HTMLInputElement | null>(null);
+  const editingHeaderInputRef = useRef<HTMLInputElement | null>(null);
+  const [cursorPosition, setCursorPosition] = useState<number | null>(null);
+
+  // Helper function to calculate cursor position from click event
+  const getCursorPositionFromClick = useCallback((event: React.MouseEvent, text: string): number => {
+    try {
+      // Try to use caretRangeFromPoint if available (Chrome, Firefox)
+      if (document.caretRangeFromPoint) {
+        const range = document.caretRangeFromPoint(event.clientX, event.clientY);
+        if (range) {
+          const textNode = range.startContainer;
+          if (textNode.nodeType === Node.TEXT_NODE) {
+            return Math.min(range.startOffset, text.length);
+          }
+        }
+      }
+      
+      // Fallback: calculate based on click position relative to text
+      const target = event.currentTarget as HTMLElement;
+      const rect = target.getBoundingClientRect();
+      const clickX = event.clientX - rect.left;
+      const style = window.getComputedStyle(target);
+      
+      // Account for padding
+      const paddingLeft = parseFloat(style.paddingLeft) || 0;
+      const adjustedX = clickX - paddingLeft;
+      
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (ctx && text) {
+        ctx.font = `${style.fontSize || '12px'} ${style.fontFamily || 'Arial'}`;
+        let position = 0;
+        for (let i = 0; i <= text.length; i++) {
+          const width = ctx.measureText(text.substring(0, i)).width;
+          if (width >= adjustedX) {
+            position = i;
+            break;
+          }
+          position = i;
+        }
+        return Math.min(position, text.length);
+      }
+    } catch (error) {
+      console.warn('Error calculating cursor position:', error);
+    }
+    return text.length; // Default to end if calculation fails
+  }, []);
+
+  // Set cursor position when input is focused
+  useEffect(() => {
+    if (cursorPosition !== null) {
+      const input = editingCellInputRef.current || editingHeaderInputRef.current;
+      if (input) {
+        // Use setTimeout to ensure input is fully focused
+        setTimeout(() => {
+          input.setSelectionRange(cursorPosition, cursorPosition);
+          setCursorPosition(null); // Reset after setting
+        }, 0);
+      }
+    }
+  }, [cursorPosition, editingCell, editingHeader]);
 
   // Add local state for raw min/max input in the component
   const [filterMinInput, setFilterMinInput] = useState<string | number>('');
@@ -2100,13 +2185,51 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     const handleWindowUpdate = () => {
       repositionColumnContextMenu();
     };
+    
+    // Listen to window events
     window.addEventListener('resize', handleWindowUpdate);
     window.addEventListener('scroll', handleWindowUpdate, true);
+    
+    // 🔧 FIX: Also listen to scroll events on all scrollable containers
+    // Find all scrollable parents of the table and listen to their scroll events
+    const scrollableContainers: (Element | Window)[] = [window];
+    
+    // Find the table element and its scrollable parents
+    const tableElement = document.querySelector(`#atom-${atomId} .table-base`);
+    if (tableElement) {
+      let parent: Element | null = tableElement.parentElement;
+      while (parent) {
+        const style = window.getComputedStyle(parent);
+        if (style.overflow === 'auto' || style.overflow === 'scroll' || 
+            style.overflowX === 'auto' || style.overflowX === 'scroll' ||
+            style.overflowY === 'auto' || style.overflowY === 'scroll') {
+          scrollableContainers.push(parent);
+        }
+        parent = parent.parentElement;
+      }
+    }
+    
+    // Add scroll listeners to all scrollable containers
+    scrollableContainers.forEach(container => {
+      if (container === window) {
+        container.addEventListener('scroll', handleWindowUpdate, true);
+      } else {
+        container.addEventListener('scroll', handleWindowUpdate, { passive: true });
+      }
+    });
+    
     return () => {
       window.removeEventListener('resize', handleWindowUpdate);
       window.removeEventListener('scroll', handleWindowUpdate, true);
+      scrollableContainers.forEach(container => {
+        if (container === window) {
+          container.removeEventListener('scroll', handleWindowUpdate, true);
+        } else {
+          container.removeEventListener('scroll', handleWindowUpdate);
+        }
+      });
     };
-  }, [contextMenu, repositionColumnContextMenu]);
+  }, [contextMenu, repositionColumnContextMenu, atomId]);
 
   useEffect(() => {
     if (!rowContextMenu) {
@@ -2805,8 +2928,18 @@ const handleSortAsc = (colIdx: number) => {
   if (!data) return;
   // 🔧 FIX: colIdx is the visible column index, map to actual column
   const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+  
+  // Validate colIdx is within bounds
+  if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+    console.error('[DataFrameOperations] Invalid colIdx in sortAsc:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
+    return;
+  }
+  
   const col = visibleHeaders[colIdx];
-  if (!col) return;
+  if (!col) {
+    console.error('[DataFrameOperations] No column found at colIdx in sortAsc:', colIdx);
+    return;
+  }
   handleSort(col, 'asc');
   addToHistory('Sort', `Sorted column "${col}" in ascending order`);
   setContextMenu(null);
@@ -2817,8 +2950,18 @@ const handleSortDesc = (colIdx: number) => {
   if (!data) return;
   // 🔧 FIX: colIdx is the visible column index, map to actual column
   const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+  
+  // Validate colIdx is within bounds
+  if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+    console.error('[DataFrameOperations] Invalid colIdx in sortDesc:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
+    return;
+  }
+  
   const col = visibleHeaders[colIdx];
-  if (!col) return;
+  if (!col) {
+    console.error('[DataFrameOperations] No column found at colIdx in sortDesc:', colIdx);
+    return;
+  }
   handleSort(col, 'desc');
   addToHistory('Sort', `Sorted column "${col}" in descending order`);
   setContextMenu(null);
@@ -3253,17 +3396,37 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     saveToUndoStack(data);
     
     // Get the column name at the clicked position
+    // colIdx is the visible column index (after filtering hidden columns)
     const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    
+    // Validate colIdx is within bounds
+    if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+      console.error('[DataFrameOperations] Invalid colIdx:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
+      return;
+    }
+    
     const clickedColumn = visibleHeaders[colIdx];
+    if (!clickedColumn) {
+      console.error('[DataFrameOperations] No column found at colIdx:', colIdx);
+      return;
+    }
     
     // Find the position of this column in the original headers array
-    const insertPosition = data.headers.indexOf(clickedColumn) + 1;
+    // Insert BEFORE the clicked column (at its current position, which will push it to the right)
+    const insertPosition = data.headers.indexOf(clickedColumn);
+    
+    // Validate insertPosition is valid
+    if (insertPosition === -1) {
+      console.error('[DataFrameOperations] Column not found in headers:', clickedColumn);
+      return;
+    }
     
     console.log('[DataFrameOperations] Insert details:', {
       colIdx,
       clickedColumn,
       insertPosition,
-      totalColumns: data.headers.length
+      totalColumns: data.headers.length,
+      visibleHeadersCount: visibleHeaders.length
     });
     
     // Generate a unique column name
@@ -3291,17 +3454,17 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       setSelectedColumn(newColumnName);
       
       // Add to history
-      addToHistory('Insert Column', `Inserted column "${newColumnName}" after "${clickedColumn}"`);
+      addToHistory('Insert Column', `Inserted column "${newColumnName}" before "${clickedColumn}"`);
       
       toast({
         title: "Column Inserted",
-        description: `New column "${newColumnName}" inserted after "${clickedColumn}"`,
+        description: `New column "${newColumnName}" inserted before "${clickedColumn}"`,
       });
       
     } catch (err) {
       console.error('[DataFrameOperations] Insert column error:', err);
       handleApiError('Insert column failed', err);
-      addToHistory('Insert Column', `Failed to insert column after "${clickedColumn}"`, 'error');
+      addToHistory('Insert Column', `Failed to insert column before "${clickedColumn}"`, 'error');
     } finally {
       setInsertLoading(false);
     }
@@ -3314,12 +3477,15 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // 🔧 FIX: colIdx is the visible column index, need to map to actual column
     const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
     
+    // Validate colIdx is within bounds
     if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+      console.error('[DataFrameOperations] Invalid colIdx in delete:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
       return;
     }
-    const col = visibleHeaders[colIdx];
     
+    const col = visibleHeaders[colIdx];
     if (!col) {
+      console.error('[DataFrameOperations] No column found at colIdx in delete:', colIdx);
       return;
     }
     
@@ -3335,7 +3501,17 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Check if there are multiple selected columns
     if (multiSelectedColumns.size > 1) {
       // Show confirmation modal for multiple columns
-      const columnsToDelete = Array.from(multiSelectedColumns);
+      // 🔧 FIX: Filter out hidden columns from multi-selection before deletion
+      const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+      const columnsToDelete = Array.from(multiSelectedColumns).filter(col => 
+        visibleHeaders.includes(col) && !(data.hiddenColumns || []).includes(col)
+      );
+      
+      // Also remove hidden columns from multiSelectedColumns state
+      if (columnsToDelete.length !== multiSelectedColumns.size) {
+        setMultiSelectedColumns(new Set(columnsToDelete));
+      }
+      
       setDeleteConfirmModal({
         isOpen: true,
         columnsToDelete,
@@ -3403,11 +3579,30 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     setDuplicateLoading(true);
     
     // Get the actual column name from visible headers
+    // colIdx is the visible column index (after filtering hidden columns)
     const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    
+    // Validate colIdx is within bounds
+    if (colIdx < 0 || colIdx >= visibleHeaders.length) {
+      console.error('[DataFrameOperations] Invalid colIdx in duplicate:', colIdx, 'visibleHeaders.length:', visibleHeaders.length);
+      setDuplicateLoading(false);
+      return;
+    }
+    
     const originalColumn = visibleHeaders[colIdx];
+    if (!originalColumn) {
+      console.error('[DataFrameOperations] No column found at colIdx in duplicate:', colIdx);
+      setDuplicateLoading(false);
+      return;
+    }
     
     // Find the position of the original column in the full headers array
     const originalPosition = data.headers.indexOf(originalColumn);
+    if (originalPosition === -1) {
+      console.error('[DataFrameOperations] Column not found in headers during duplicate:', originalColumn);
+      setDuplicateLoading(false);
+      return;
+    }
     
     console.log('[DataFrameOperations] Duplicate details:', {
       colIdx,
@@ -3593,15 +3788,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleMultiColumnRetype = async (columns: string[], newType: string) => {
     if (!data || !settings.fileId || columns.length === 0) return;
     
+    // 🔧 FIX: Filter out hidden columns (defensive check)
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    const filteredColumns = columns.filter(col => visibleHeaders.includes(col) && !(data.hiddenColumns || []).includes(col));
+    
+    if (filteredColumns.length === 0) {
+      console.warn('[DataFrameOperations] No visible columns to retype after filtering');
+      return;
+    }
+    
     const fileId = settings.fileId;
     
     setConvertLoading(true);
     try {
-      console.log('[DataFrameOperations] Retype multiple columns:', columns, 'to', newType);
+      console.log('[DataFrameOperations] Retype multiple columns:', filteredColumns, 'to', newType);
       
       // Process each column sequentially
       let currentData = data;
-      for (const col of columns) {
+      for (const col of filteredColumns) {
         const resp = await apiRetypeColumn(fileId, col, newType === 'text' ? 'string' : newType);
         
         // Preserve deleted columns by filtering out columns that were previously deleted
@@ -3623,18 +3827,18 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       }
       
       onDataChange(currentData);
-      addToHistory('Multi-Column Retype', `${columns.length} columns converted to ${newType}: ${columns.join(', ')}`);
+      addToHistory('Multi-Column Retype', `${filteredColumns.length} columns converted to ${newType}: ${filteredColumns.join(', ')}`);
       
       toast({
         title: "Multiple Columns Converted",
-        description: `${columns.length} columns converted to ${newType}`,
+        description: `${filteredColumns.length} columns converted to ${newType}`,
       });
       
       // Clear selection
       setMultiSelectedColumns(new Set());
     } catch (err) {
       handleApiError('Multi-column retype failed', err);
-      addToHistory('Multi-Column Retype', `Failed to convert ${columns.length} columns`, 'error');
+      addToHistory('Multi-Column Retype', `Failed to convert ${filteredColumns.length} columns`, 'error');
     } finally {
       setConvertLoading(false);
     }
@@ -3643,15 +3847,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleRoundColumns = async (columns: string[], decimalPlaces: number) => {
     if (!data || !settings.fileId || columns.length === 0) return;
     
+    // 🔧 FIX: Filter out hidden columns (defensive check)
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    const filteredColumns = columns.filter(col => visibleHeaders.includes(col) && !(data.hiddenColumns || []).includes(col));
+    
+    if (filteredColumns.length === 0) {
+      console.warn('[DataFrameOperations] No visible columns to round after filtering');
+      return;
+    }
+    
     const fileId = settings.fileId;
     
     setConvertLoading(true);
     try {
-      console.log('[DataFrameOperations] Round columns:', columns, 'to', decimalPlaces, 'decimal places');
+      console.log('[DataFrameOperations] Round columns:', filteredColumns, 'to', decimalPlaces, 'decimal places');
       
       // Process each column sequentially
       let currentData = data;
-      for (const col of columns) {
+      for (const col of filteredColumns) {
         // Check if column exists and is numeric
         if (!data.headers.includes(col)) {
           throw new Error(`Column "${col}" does not exist`);
@@ -3684,11 +3897,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       }
       
       onDataChange(currentData);
-      addToHistory('Round Columns', `${columns.length} columns rounded to ${decimalPlaces} decimal places: ${columns.join(', ')}`);
+      addToHistory('Round Columns', `${filteredColumns.length} columns rounded to ${decimalPlaces} decimal places: ${filteredColumns.join(', ')}`);
       
       toast({
         title: "Columns Rounded",
-        description: `${columns.length} columns rounded to ${decimalPlaces} decimal places`,
+        description: `${filteredColumns.length} columns rounded to ${decimalPlaces} decimal places`,
       });
       
       // Clear selection
@@ -3705,15 +3918,24 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   const handleTransformColumnCase = async (columns: string[], caseType: 'lower' | 'upper' | 'camel' | 'pascal' | 'lower_camel' | 'snake' | 'screaming_snake' | 'kebab' | 'train' | 'flat') => {
     if (!data || !settings.fileId || columns.length === 0) return;
     
+    // 🔧 FIX: Filter out hidden columns (defensive check)
+    const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+    const filteredColumns = columns.filter(col => visibleHeaders.includes(col) && !(data.hiddenColumns || []).includes(col));
+    
+    if (filteredColumns.length === 0) {
+      console.warn('[DataFrameOperations] No visible columns to transform after filtering');
+      return;
+    }
+    
     const fileId = settings.fileId;
     
     setConvertLoading(true);
     try {
-      console.log('[DataFrameOperations] Transform column case:', columns, 'to', caseType);
+      console.log('[DataFrameOperations] Transform column case:', filteredColumns, 'to', caseType);
       
       // Process each column sequentially
       let currentData = data;
-      for (const col of columns) {
+      for (const col of filteredColumns) {
         // Check if column exists
         if (!data.headers.includes(col)) {
           throw new Error(`Column "${col}" does not exist`);
@@ -3741,11 +3963,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       
       onDataChange(currentData);
       const caseTypeLabel = caseType === 'lower' ? 'lowercase' : caseType === 'upper' ? 'uppercase' : 'camelCase';
-      addToHistory('Transform Column Case', `${columns.length} columns transformed to ${caseTypeLabel}: ${columns.join(', ')}`);
+      addToHistory('Transform Column Case', `${filteredColumns.length} columns transformed to ${caseTypeLabel}: ${filteredColumns.join(', ')}`);
       
       toast({
         title: "Columns Case Transformed",
-        description: `${columns.length} columns transformed to ${caseTypeLabel}`,
+        description: `${filteredColumns.length} columns transformed to ${caseTypeLabel}`,
       });
       
       // Clear selection
@@ -3951,7 +4173,11 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Check if there are multiple selected columns
     if (multiSelectedColumns.size > 1) {
       // Hide all selected columns at once
-      const columnsToHide = Array.from(multiSelectedColumns);
+      // 🔧 FIX: Filter out already-hidden columns (defensive check)
+      const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+      const columnsToHide = Array.from(multiSelectedColumns).filter(col => 
+        visibleHeaders.includes(col) && !(data.hiddenColumns || []).includes(col)
+      );
       
       // Save current state before making changes
       saveToUndoStack(data);
@@ -3985,6 +4211,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       };
       
       onDataChange(updatedData);
+      
+      // 🔧 FIX: Remove hidden column from multi-selection if it's selected
+      setMultiSelectedColumns(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(col);
+        return newSet;
+      });
       
       // Add to history
       addToHistory('Hide Column', `Hidden column "${col}"`);
@@ -4024,17 +4257,27 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     header: string,
     modifiers?: { ctrlKey?: boolean; metaKey?: boolean },
   ) => {
+    // 🔧 FIX: Prevent selecting hidden columns
+    if (data?.hiddenColumns?.includes(header)) {
+      console.warn('[DataFrameOperations] Cannot select hidden column:', header);
+      return;
+    }
+    
     const isMultiSelect = modifiers?.ctrlKey || modifiers?.metaKey;
     if (isMultiSelect) {
       // Multi-select mode
       setMultiSelectedColumns(prev => {
         const newSet = new Set(prev);
-        if (newSet.has(header)) {
-          newSet.delete(header);
+        // Also filter out any hidden columns that might be in the set
+        const visibleHeaders = data?.headers?.filter(h => !(data?.hiddenColumns || []).includes(h)) || [];
+        const filteredSet = new Set(Array.from(newSet).filter(h => visibleHeaders.includes(h)));
+        
+        if (filteredSet.has(header)) {
+          filteredSet.delete(header);
         } else {
-          newSet.add(header);
+          filteredSet.add(header);
         }
-        return newSet;
+        return filteredSet;
       });
     } else {
       // Single select mode
@@ -4184,7 +4427,18 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     try {
       // ALWAYS do frontend-only delete - no API calls
       // This avoids backend sync issues and 404 errors
-      const columnsToDelete = deleteConfirmModal.columnsToDelete;
+      // 🔧 FIX: Filter out hidden columns (defensive check)
+      const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+      const columnsToDelete = deleteConfirmModal.columnsToDelete.filter(col => 
+        visibleHeaders.includes(col) && !(data.hiddenColumns || []).includes(col)
+      );
+      
+      if (columnsToDelete.length === 0) {
+        console.warn('[DataFrameOperations] No visible columns to delete after filtering');
+        setDeleteConfirmModal({ isOpen: false, columnsToDelete: [] });
+        setBulkDeleteLoading(false);
+        return;
+      }
       
       // Remove columns from headers
       const headers = data.headers.filter(h => !columnsToDelete.includes(h));
@@ -4317,7 +4571,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         }
         if (e.key === 'a' && data?.headers) {
           e.preventDefault();
-          setMultiSelectedColumns(new Set(data.headers));
+          // 🔧 FIX: Only select visible columns (exclude hidden ones)
+          const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
+          setMultiSelectedColumns(new Set(visibleHeaders));
           // Select all filtered rows (not just visible ones)
           const filteredIndices = processedData.filteredRows.map(filteredRow => {
             return data.rows.findIndex((row, origIndex) => {
@@ -4809,11 +5065,21 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                       onContextMenu={e => {
                         e.preventDefault();
                         const { clientX, clientY } = e;
+                        
+                        // 🔧 FIX: Use column header position for menu placement
+                        // Get the header element's current position
+                        const headerElement = e.currentTarget as HTMLElement;
+                        const headerRect = headerElement.getBoundingClientRect();
+                        
+                        // Position menu to the right of the column header
+                        const menuX = headerRect.right + 5; // 5px offset from column edge
+                        const menuY = clientY; // Use click Y position
+                        
                         setContextMenu({
                           pointerX: clientX,
                           pointerY: clientY,
-                          x: clientX,
-                          y: clientY,
+                          x: menuX,
+                          y: menuY,
                           col: header,
                           colIdx
                         });
@@ -4844,8 +5110,10 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         e.stopPropagation();
                         e.preventDefault();
                         // Always allow header editing regardless of enableEditing setting
+                        const clickPosition = getCursorPositionFromClick(e, header);
                         setEditingHeader(colIdx);
                         setEditingHeaderValue(header);
+                        setCursorPosition(clickPosition);
                       }}
                       ref={el => {
                         if (headerRefs.current) {
@@ -4855,6 +5123,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     >
                       {editingHeader === colIdx ? (
                         <input
+                          ref={editingHeaderInputRef}
                           type="text"
                           className="h-7 text-xs outline-none border-none bg-white px-0 font-bold text-black truncate w-full"
                           style={{ width: '100%', boxSizing: 'border-box', background: 'inherit', textAlign: getColumnAlignment(header), padding: 0, margin: 0 }}
@@ -4878,10 +5147,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                              textOverflow: 'ellipsis',
                              whiteSpace: 'nowrap'
                            }}
-                           onDoubleClick={() => {
+                           onDoubleClick={(e) => {
                              // Always allow header editing regardless of enableEditing setting
+                             const clickPosition = getCursorPositionFromClick(e, header);
                              setEditingHeader(colIdx);
                              setEditingHeaderValue(header);
+                             setCursorPosition(clickPosition);
                            }}
                            title={`Click to select • Ctrl+Click for multi-select • Double-click to edit • Delete key to delete selected\nHeader: ${headerDisplayNames[header] ?? header}`}
                          >
@@ -5063,6 +5334,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         >
                           {editingCell?.row === rowIndex && editingCell?.col === column ? (
                             <input
+                              ref={editingCellInputRef}
                               type="text"
                               className="h-7 text-xs outline-none border-none bg-white px-1"
                               style={{ width: '100%', boxSizing: 'border-box', background: 'inherit' }}
@@ -5086,10 +5358,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                 justifyContent: getColumnAlignment(column) === 'left' ? 'flex-start' : 
                                               getColumnAlignment(column) === 'center' ? 'center' : 'flex-end'
                               }}
-                              onDoubleClick={() => {
+                              onDoubleClick={(e) => {
                                 // Always allow cell editing regardless of enableEditing setting
+                                const cellValue = safeToString(row[column]);
+                                const clickPosition = getCursorPositionFromClick(e, cellValue);
                                 setEditingCell({ row: rowIndex, col: column });
-                                setEditingCellValue(safeToString(row[column]));
+                                setEditingCellValue(cellValue);
+                                setCursorPosition(clickPosition);
                               }}
                               title={`Double-click to edit cell\nValue: ${safeToString(row[column])}`}
                             >
