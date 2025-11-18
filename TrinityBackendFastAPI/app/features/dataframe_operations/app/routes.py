@@ -1053,8 +1053,21 @@ async def apply_formula(
             )
 
         result_series = result_series.reset_index(drop=True)
+        
+        # 🔧 FIX: Replace inf, -inf, and nan with None to make JSON-compliant
+        # Convert to list and replace non-finite values
+        result_values = []
+        for val in result_series.to_list():
+            if isinstance(val, float):
+                if math.isnan(val) or math.isinf(val):
+                    result_values.append(None)
+                else:
+                    result_values.append(val)
+            else:
+                result_values.append(val)
+        
         df = df.with_columns(
-            pl.Series(name=target_column, values=result_series.to_list())
+            pl.Series(name=target_column, values=result_values)
         )
     else:
         logger.info(f"📝 [APPLY_FORMULA] No '=' prefix, treating as literal value")
