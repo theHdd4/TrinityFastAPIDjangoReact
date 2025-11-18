@@ -1074,18 +1074,28 @@ def _compute_performance_metrics(actual: Sequence[float], predicted: Sequence[fl
 
 def calculate_actual_vs_predicted(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
-    try:
-        models = _models_for_file(request.file_key, request.combination_name)
-        record = next((model for model in models if model.model_name == request.model_name), None)
-        if record is None:
-            raise ValueError("Requested model not found")
-        if not record.series.actual or not record.series.predicted:
-            raise ModelDataUnavailableError(
-                f"Actual vs predicted series unavailable for model '{request.model_name}'"
-            )
-        return _actual_vs_predicted_payload(record)
-    except Exception:
-        return _calculate_curves_from_coefficients(request)
+    candidate_file_keys, build_config = _resolve_candidate_file_keys(request)
+    last_error: Exception | None = None
+
+    for file_key in candidate_file_keys:
+        try:
+            models = _models_for_file(file_key, request.combination_name)
+            record = next((model for model in models if model.model_name == request.model_name), None)
+            if record is None:
+                raise ValueError("Requested model not found")
+            if not record.series.actual or not record.series.predicted:
+                raise ModelDataUnavailableError(
+                    f"Actual vs predicted series unavailable for model '{request.model_name}'"
+                )
+            return _actual_vs_predicted_payload(record)
+        except Exception as exc:  # pragma: no cover - defensive catch over data resolution
+            last_error = exc
+            continue
+
+    if last_error:
+        logger.warning("Falling back to coefficient reconstruction: %s", last_error)
+
+    return _calculate_curves_from_coefficients(request, build_config)
 
 
 def _compute_year_over_year(series: Sequence[float]) -> List[float]:
@@ -1099,8 +1109,44 @@ def _compute_year_over_year(series: Sequence[float]) -> List[float]:
     return yoy
 
 
-def _calculate_curves_from_coefficients(request: CurveRequestPayload) -> Dict[str, Any]:
-    build_config = _load_build_config(request.client_name, request.app_name, request.project_name)
+def _resolve_candidate_file_keys(
+    request: CurveRequestPayload, build_config: Dict[str, Any] | None = None
+) -> tuple[list[str], Dict[str, Any] | None]:
+    """Resolve potential MinIO file keys for a given combination.
+
+    The select atom receives a ``file_key`` from the UI, but build-model persists
+    per-combination result artefacts and stores their keys inside the build
+    configuration. We mirror the build-model resolution by checking those stored
+    entries first so we fetch the same artefact that build-model produced.
+    """
+
+    resolved_config = build_config or _load_build_config(
+        request.client_name, request.app_name, request.project_name
+    )
+    candidates: list[str] = []
+
+    ui_key = _normalise_file_key(request.file_key)
+    if ui_key:
+        candidates.append(ui_key)
+
+    if resolved_config:
+        for combo_info in resolved_config.get("combination_file_keys", []):
+            combination = _coerce_optional_str(combo_info.get("combination"))
+            if not combination or combination != request.combination_name:
+                continue
+            candidate_key = _normalise_file_key(str(combo_info.get("file_key", "")))
+            if candidate_key and candidate_key not in candidates:
+                candidates.insert(0, candidate_key)
+
+    return candidates, resolved_config
+
+
+def _calculate_curves_from_coefficients(
+    request: CurveRequestPayload, build_config: Dict[str, Any] | None = None
+) -> Dict[str, Any]:
+    build_config = build_config or _load_build_config(
+        request.client_name, request.app_name, request.project_name
+    )
     if not build_config:
         raise ModelDataUnavailableError("Model configuration not available")
 
@@ -1110,12 +1156,8 @@ def _calculate_curves_from_coefficients(request: CurveRequestPayload) -> Dict[st
     if not model_coeffs:
         raise ModelDataUnavailableError("Model coefficients unavailable for requested model")
 
-    combination_file_keys = build_config.get("combination_file_keys", [])
-    resolved_file_key = _normalise_file_key(request.file_key)
-    for combo_info in combination_file_keys:
-        if combo_info.get("combination") == request.combination_name and combo_info.get("file_key"):
-            resolved_file_key = _normalise_file_key(str(combo_info.get("file_key")))
-            break
+    candidate_file_keys, _ = _resolve_candidate_file_keys(request, build_config)
+    resolved_file_key = candidate_file_keys[0] if candidate_file_keys else _normalise_file_key(request.file_key)
 
     try:
         frame = get_minio_df(MINIO_BUCKET, resolved_file_key)
@@ -1171,18 +1213,23 @@ def calculate_yoy(payload: Dict[str, Any]) -> Dict[str, Any]:
     predicted_series: List[float] = []
     dates: List[str] = []
 
-    try:
-        models = _models_for_file(request.file_key, request.combination_name)
-        record = next((model for model in models if model.model_name == request.model_name), None)
-        if record:
-            actual_series = list(record.series.actual or [])
-            predicted_series = list(record.series.predicted or [])
-            dates = list(record.series.dates)
-    except Exception:
-        pass
+    candidate_file_keys, build_config = _resolve_candidate_file_keys(request)
+
+    for file_key in candidate_file_keys:
+        try:
+            models = _models_for_file(file_key, request.combination_name)
+            record = next((model for model in models if model.model_name == request.model_name), None)
+            if record:
+                actual_series = list(record.series.actual or [])
+                predicted_series = list(record.series.predicted or [])
+                dates = list(record.series.dates)
+                break
+        except Exception as exc:  # pragma: no cover - defensive catch over data resolution
+            logger.info("Skipping candidate %s due to %s", file_key, exc)
+            continue
 
     if not actual_series or not predicted_series:
-        fallback = _calculate_curves_from_coefficients(request)
+        fallback = _calculate_curves_from_coefficients(request, build_config)
         actual_series = fallback["actual_values"]
         predicted_series = fallback["predicted_values"]
         dates = fallback.get("dates", [])
