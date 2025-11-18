@@ -10,3 +10,13 @@ providers:
     allowUiUpdates: true
     options:
       path: /var/lib/grafana/dashboards
+  - name: Trinity Celery
+    folder: Trinity Celery
+    folderUid: trinity-celery
+    orgId: 1
+    type: file
+    disableDeletion: false
+    editable: true
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
