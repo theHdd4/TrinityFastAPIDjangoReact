@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import statistics
@@ -16,7 +17,7 @@ import pandas as pd
 from minio.error import S3Error
 from pydantic import BaseModel, Field
 
-from .database import MINIO_BUCKET, get_minio_df, minio_client
+from .database import MINIO_BUCKET, client, get_minio_df, minio_client
 
 
 logger = logging.getLogger("app.features.select_models_feature_based.service")
@@ -141,6 +142,44 @@ def _load_dataframe(file_key: str) -> pd.DataFrame | None:
         logger.warning("Failed to fetch %s from MinIO", normalised, exc_info=True)
     except Exception:  # pragma: no cover - defensive catch to keep feature usable
         logger.exception("Unexpected error loading %s from MinIO", normalised)
+    return None
+
+
+async def _fetch_build_config(document_id: str) -> Dict[str, Any] | None:
+    if client is None:
+        return None
+    return await client["trinity_prod"]["build-model_featurebased_configs"].find_one({"_id": document_id})
+
+
+def _load_build_config(client_name: str, app_name: str, project_name: str) -> Dict[str, Any] | None:
+    document_id = f"{client_name}/{app_name}/{project_name}"
+    try:
+        return asyncio.run(_fetch_build_config(document_id))
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_fetch_build_config(document_id))
+        finally:
+            loop.close()
+
+
+def _detect_date_column(frame: pd.DataFrame) -> str | None:
+    date_candidates = [
+        "Date",
+        "date",
+        "Invoice_Date",
+        "Bill_Date",
+        "Order_Date",
+        "Month",
+        "month",
+        "Period",
+        "period",
+        "Year",
+        "year",
+    ]
+    for candidate in date_candidates:
+        if candidate in frame.columns:
+            return candidate
     return None
 
 
@@ -976,36 +1015,67 @@ def get_model_performance(file_key: str, combination_id: str, model_name: str) -
 
 
 def _actual_vs_predicted_payload(record: ModelRecord) -> Dict[str, Any]:
-    residuals = [a - p for a, p in zip(record.series.actual, record.series.predicted)]
-    mae = statistics.fmean(abs(residual) for residual in residuals)
-    rmse = math.sqrt(statistics.fmean(residual ** 2 for residual in residuals))
+    metrics = _compute_performance_metrics(record.series.actual, record.series.predicted)
 
     return {
         "success": True,
         "actual_values": list(record.series.actual),
         "predicted_values": list(record.series.predicted),
         "dates": list(record.series.dates),
-        "rmse": round(rmse, 3),
+        "rmse": metrics["rmse"],
+        "mae": metrics["mae"],
+        "performance_metrics": metrics,
+    }
+
+
+def _compute_performance_metrics(actual: Sequence[float], predicted: Sequence[float]) -> Dict[str, float]:
+    pairs = list(zip(actual, predicted))
+    if not pairs:
+        return {"mae": 0.0, "mse": 0.0, "rmse": 0.0, "r2": 0.0, "mape": 0.0}
+
+    absolute_errors = [abs(a - p) for a, p in pairs]
+    squared_errors = [(a - p) ** 2 for a, p in pairs]
+    mae = statistics.fmean(absolute_errors)
+    mse = statistics.fmean(squared_errors)
+    rmse = math.sqrt(mse)
+
+    actual_mean = statistics.fmean(actual) if actual else 0.0
+    ss_tot = sum((a - actual_mean) ** 2 for a in actual)
+    ss_res = sum(squared_errors)
+    r2 = 1 - (ss_res / ss_tot) if ss_tot else 0.0
+
+    mape_values = [abs((a - p) / a) * 100 for a, p in pairs if a]
+    mape = statistics.fmean(mape_values) if mape_values else 0.0
+
+    return {
         "mae": round(mae, 3),
+        "mse": round(mse, 3),
+        "rmse": round(rmse, 3),
+        "r2": round(r2, 3),
+        "mape": round(mape, 3),
     }
 
 
 def calculate_actual_vs_predicted(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
-    models = _models_for_file(request.file_key, request.combination_name)
-    record = next((model for model in models if model.model_name == request.model_name), None)
-    if record is None:
-        raise ValueError("Requested model not found")
-    if not record.series.actual or not record.series.predicted:
-        raise ModelDataUnavailableError(
-            f"Actual vs predicted series unavailable for model '{request.model_name}'"
-        )
-    return _actual_vs_predicted_payload(record)
+    try:
+        models = _models_for_file(request.file_key, request.combination_name)
+        record = next((model for model in models if model.model_name == request.model_name), None)
+        if record is None:
+            raise ValueError("Requested model not found")
+        if not record.series.actual or not record.series.predicted:
+            raise ModelDataUnavailableError(
+                f"Actual vs predicted series unavailable for model '{request.model_name}'"
+            )
+        return _actual_vs_predicted_payload(record)
+    except Exception:
+        return _calculate_curves_from_coefficients(request)
 
 
 def _compute_year_over_year(series: Sequence[float]) -> List[float]:
     yoy: List[float] = []
-    for index in range(12):
+    length = min(len(series), 12)
+    for index in range(length):
         previous = series[index - 1] if index > 0 else series[index]
         current = series[index]
         change = ((current - previous) / previous) * 100 if previous else 0
@@ -1013,23 +1083,107 @@ def _compute_year_over_year(series: Sequence[float]) -> List[float]:
     return yoy
 
 
+def _calculate_curves_from_coefficients(request: CurveRequestPayload) -> Dict[str, Any]:
+    build_config = _load_build_config(request.client_name, request.app_name, request.project_name)
+    if not build_config:
+        raise ModelDataUnavailableError("Model configuration not available")
+
+    model_coefficients = build_config.get("model_coefficients", {})
+    combination_coefficients = model_coefficients.get(request.combination_name, {})
+    model_coeffs = combination_coefficients.get(request.model_name, {})
+    if not model_coeffs:
+        raise ModelDataUnavailableError("Model coefficients unavailable for requested model")
+
+    combination_file_keys = build_config.get("combination_file_keys", [])
+    resolved_file_key = _normalise_file_key(request.file_key)
+    for combo_info in combination_file_keys:
+        if combo_info.get("combination") == request.combination_name and combo_info.get("file_key"):
+            resolved_file_key = _normalise_file_key(str(combo_info.get("file_key")))
+            break
+
+    try:
+        frame = get_minio_df(MINIO_BUCKET, resolved_file_key)
+    except Exception as exc:  # pragma: no cover - defensive catch around I/O
+        raise ModelDataUnavailableError(f"Unable to load source data: {exc}") from exc
+
+    intercept = model_coeffs.get("intercept", 0.0)
+    coefficients = model_coeffs.get("coefficients", {})
+    x_variables = model_coeffs.get("x_variables", []) or []
+    y_variable = model_coeffs.get("y_variable", "")
+
+    if not y_variable or y_variable not in frame.columns:
+        raise ModelDataUnavailableError("Target variable missing from source data")
+
+    date_column = _detect_date_column(frame)
+    dates: List[str] = []
+    if date_column:
+        frame[date_column] = pd.to_datetime(frame[date_column], errors="coerce")
+        frame = frame.dropna(subset=[date_column])
+        dates = [value.isoformat() for value in frame[date_column]]
+
+    actual_values = frame[y_variable].tolist()
+    predicted_values: List[float] = []
+
+    for _, row in frame.iterrows():
+        predicted_value = intercept
+        for x_var in x_variables:
+            beta_key = f"Beta_{x_var}"
+            if beta_key in coefficients and x_var in frame.columns:
+                beta_value = coefficients[beta_key]
+                x_value = row[x_var]
+                try:
+                    predicted_value += beta_value * x_value
+                except Exception:
+                    continue
+        predicted_values.append(predicted_value)
+
+    metrics = _compute_performance_metrics(actual_values, predicted_values)
+    return {
+        "success": True,
+        "actual_values": actual_values,
+        "predicted_values": predicted_values,
+        "dates": dates or [f"Period {index + 1}" for index in range(len(actual_values))],
+        "rmse": metrics["rmse"],
+        "mae": metrics["mae"],
+        "performance_metrics": metrics,
+    }
+
+
 def calculate_yoy(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
-    models = _models_for_file(request.file_key, request.combination_name)
-    record = next((model for model in models if model.model_name == request.model_name), None)
-    if record is None:
-        raise ValueError("Requested model not found")
-    if not record.series.actual or not record.series.predicted:
+    try:
+        models = _models_for_file(request.file_key, request.combination_name)
+        record = next((model for model in models if model.model_name == request.model_name), None)
+        if record is None:
+            raise ValueError("Requested model not found")
+        if not record.series.actual or not record.series.predicted:
+            raise ModelDataUnavailableError(
+                f"Series data unavailable for model '{request.model_name}'"
+            )
+
+        actual_series = record.series.actual
+        predicted_series = record.series.predicted
+        dates = list(record.series.dates)
+    except Exception:
+        fallback = _calculate_curves_from_coefficients(request)
+        actual_series = fallback["actual_values"]
+        predicted_series = fallback["predicted_values"]
+        dates = fallback.get("dates", [])
+
+    if not actual_series or not predicted_series:
         raise ModelDataUnavailableError(
             f"Series data unavailable for model '{request.model_name}'"
         )
 
-    actual_yoy = _compute_year_over_year(record.series.actual)
-    predicted_yoy = _compute_year_over_year(record.series.predicted)
+    actual_yoy = _compute_year_over_year(actual_series)
+    predicted_yoy = _compute_year_over_year(predicted_series)
+
+    if not dates or len(dates) < len(actual_yoy):
+        dates = dates[:len(actual_yoy)] if dates else [f"Period {index + 1}" for index in range(len(actual_yoy))]
 
     return {
         "success": True,
-        "dates": list(record.series.dates),
+        "dates": dates,
         "actual": actual_yoy,
         "predicted": predicted_yoy,
     }
@@ -1051,16 +1205,16 @@ def get_ensemble_actual_vs_predicted(file_key: str, combination_id: str) -> Dict
     actual = list(models[0].series.actual)
     dates = list(models[0].series.dates)
     residuals = [a - p for a, p in zip(actual, predicted)]
-    mae = statistics.fmean(abs(residual) for residual in residuals)
-    rmse = math.sqrt(statistics.fmean(residual ** 2 for residual in residuals))
+    metrics = _compute_performance_metrics(actual, predicted)
 
     return {
         "success": True,
         "actual_values": actual,
         "predicted_values": predicted,
         "dates": dates,
-        "rmse": round(rmse, 3),
-        "mae": round(mae, 3),
+        "rmse": metrics["rmse"],
+        "mae": metrics["mae"],
+        "performance_metrics": metrics,
         "models_used": [model.model_name for model in models],
     }
 
