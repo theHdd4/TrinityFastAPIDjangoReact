@@ -16,6 +16,7 @@ import pandas as pd
 from minio.error import S3Error
 from pydantic import BaseModel, Field
 
+from .curve_calculations import actual_vs_predicted_from_source, yoy_growth_from_source
 from .database import MINIO_BUCKET, get_minio_df, minio_client
 
 
@@ -992,15 +993,23 @@ def _actual_vs_predicted_payload(record: ModelRecord) -> Dict[str, Any]:
 
 def calculate_actual_vs_predicted(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
-    models = _models_for_file(request.file_key, request.combination_name)
-    record = next((model for model in models if model.model_name == request.model_name), None)
-    if record is None:
-        raise ValueError("Requested model not found")
-    if not record.series.actual or not record.series.predicted:
-        raise ModelDataUnavailableError(
-            f"Actual vs predicted series unavailable for model '{request.model_name}'"
-        )
-    return _actual_vs_predicted_payload(record)
+    try:
+        models = _models_for_file(request.file_key, request.combination_name)
+        record = next((model for model in models if model.model_name == request.model_name), None)
+        if record and record.series.actual and record.series.predicted:
+            return _actual_vs_predicted_payload(record)
+    except ModelDataUnavailableError:
+        logger.info("Model data unavailable in results file; falling back to source computation")
+    except Exception:
+        logger.warning("Failed to read actual/predicted series from results file", exc_info=True)
+
+    # Fallback to computing the curve from the source dataset
+    return actual_vs_predicted_from_source(
+        results_file_key=request.file_key,
+        combination_id=request.combination_name,
+        model_name=request.model_name,
+        bucket=MINIO_BUCKET,
+    )
 
 
 def _compute_year_over_year(series: Sequence[float]) -> List[float]:
@@ -1015,24 +1024,30 @@ def _compute_year_over_year(series: Sequence[float]) -> List[float]:
 
 def calculate_yoy(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
-    models = _models_for_file(request.file_key, request.combination_name)
-    record = next((model for model in models if model.model_name == request.model_name), None)
-    if record is None:
-        raise ValueError("Requested model not found")
-    if not record.series.actual or not record.series.predicted:
-        raise ModelDataUnavailableError(
-            f"Series data unavailable for model '{request.model_name}'"
-        )
+    try:
+        models = _models_for_file(request.file_key, request.combination_name)
+        record = next((model for model in models if model.model_name == request.model_name), None)
+        if record and record.series.actual and record.series.predicted:
+            actual_yoy = _compute_year_over_year(record.series.actual)
+            predicted_yoy = _compute_year_over_year(record.series.predicted)
 
-    actual_yoy = _compute_year_over_year(record.series.actual)
-    predicted_yoy = _compute_year_over_year(record.series.predicted)
+            return {
+                "success": True,
+                "dates": list(record.series.dates),
+                "actual": actual_yoy,
+                "predicted": predicted_yoy,
+            }
+    except ModelDataUnavailableError:
+        logger.info("YoY series unavailable in results file; computing from source data")
+    except Exception:
+        logger.warning("Failed to build YoY curve from results file", exc_info=True)
 
-    return {
-        "success": True,
-        "dates": list(record.series.dates),
-        "actual": actual_yoy,
-        "predicted": predicted_yoy,
-    }
+    return yoy_growth_from_source(
+        results_file_key=request.file_key,
+        combination_id=request.combination_name,
+        model_name=request.model_name,
+        bucket=MINIO_BUCKET,
+    )
 
 
 def _ensemble_models(file_key: str, combination_id: str) -> List[ModelRecord]:
