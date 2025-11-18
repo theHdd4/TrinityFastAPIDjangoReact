@@ -1079,7 +1079,8 @@ def get_filtered_time_series_values(
     column2: str, 
     datetime_column: str = None,
     start_date: str = None, 
-    end_date: str = None
+    end_date: str = None,
+    expected_dates: List[str] = None
 ) -> Dict[str, Any]:
     """Get Y-axis values for time series with date averaging for duplicates"""
     try:
@@ -1140,22 +1141,56 @@ def get_filtered_time_series_values(
             except Exception as e:
                 print(f"⚠️ Date averaging failed: {e}")
         
-        # Extract numeric values for the specified columns while preserving index alignment
+        # Extract numeric values for the specified columns
         col1_series = pd.to_numeric(working_df[column1], errors="coerce")
         col2_series = pd.to_numeric(working_df[column2], errors="coerce")
 
-        # Ensure both lists have same length and replace NaN with None for JSON serialization
-        min_length = min(len(col1_series), len(col2_series))
-        col1_values = [
-            (v if pd.notna(v) else None)
-            for v in col1_series.iloc[:min_length].tolist()
-        ]
-        col2_values = [
-            (v if pd.notna(v) else None)
-            for v in col2_series.iloc[:min_length].tolist()
-        ]
+        # Align values with expected dates if provided and datetime column exists
+        if expected_dates and datetime_column and datetime_column in working_df.columns:
+            try:
+                print(f"🔗 Aligning values with {len(expected_dates)} expected dates")
+                
+                # Convert expected dates to datetime
+                expected_dt = pd.to_datetime(expected_dates, errors='coerce')
+                
+                # Create date-indexed series from working_df
+                date_indexed_df = working_df.set_index(datetime_column)
+                
+                # Reindex to match expected dates (NaN for missing dates)
+                col1_aligned = date_indexed_df[column1].reindex(expected_dt)
+                col2_aligned = date_indexed_df[column2].reindex(expected_dt)
+                
+                # Convert to lists, replacing NaN with None for JSON serialization
+                col1_values = [float(v) if pd.notna(v) else None for v in col1_aligned.tolist()]
+                col2_values = [float(v) if pd.notna(v) else None for v in col2_aligned.tolist()]
+                
+                # Count valid pairs (both not None)
+                valid_count = sum(1 for v1, v2 in zip(col1_values, col2_values) if v1 is not None and v2 is not None)
+                
+                print(f"✅ Aligned {len(col1_values)} values with expected dates ({valid_count} valid pairs)")
+                
+                return {
+                    "column1_values": col1_values,
+                    "column2_values": col2_values,
+                    "column1_name": column1,
+                    "column2_name": column2,
+                    "filtered_rows": valid_count,
+                    "has_duplicates_averaged": has_duplicates_averaged
+                }
+            except Exception as e:
+                print(f"⚠️ Date alignment failed: {e}, falling back to original method")
         
-        print(f"✅ Extracted {len(col1_values)} value pairs")
+        # Fallback to original method if alignment not possible
+        # Filter out rows where either value is NaN to ensure we only return valid float pairs
+        valid_mask = pd.notna(col1_series) & pd.notna(col2_series)
+        col1_valid = col1_series[valid_mask]
+        col2_valid = col2_series[valid_mask]
+        
+        # Convert to lists of floats (no None values)
+        col1_values = [float(v) for v in col1_valid.tolist()]
+        col2_values = [float(v) for v in col2_valid.tolist()]
+        
+        print(f"✅ Extracted {len(col1_values)} valid value pairs (filtered out {len(col1_series) - len(col1_values)} rows with missing values)")
         
         return {
             "column1_values": col1_values,

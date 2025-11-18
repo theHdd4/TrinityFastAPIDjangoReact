@@ -758,7 +758,16 @@ async def get_time_series_data(file_path: str, request: TimeSeriesRequest):
         df = await load_csv_from_minio(file_path)
         print(f"📋 Loaded dataframe: {df.shape}")
         
-        # Get time series values with averaging
+        # Get axis dates to align values with
+        expected_dates = None
+        if request.datetime_column:
+            from .service import get_time_series_axis_data
+            axis_data = get_time_series_axis_data(df, request.start_date, request.end_date)
+            if axis_data.get('has_datetime') and axis_data.get('x_values'):
+                expected_dates = axis_data['x_values']
+                print(f"🔗 Retrieved {len(expected_dates)} expected dates for alignment")
+        
+        # Get time series values with averaging and alignment
         from .service import get_filtered_time_series_values
         series_data = get_filtered_time_series_values(
             df, 
@@ -766,7 +775,8 @@ async def get_time_series_data(file_path: str, request: TimeSeriesRequest):
             request.column2, 
             request.datetime_column,
             request.start_date, 
-            request.end_date
+            request.end_date,
+            expected_dates
         )
         
         print(f"✅ Time series data generated: {series_data['filtered_rows']} rows")

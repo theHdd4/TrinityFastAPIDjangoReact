@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Database, AlertCircle, RefreshCw, Check, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { ChevronDown, ChevronRight, Database, AlertCircle, RefreshCw, Check, Trash2, X } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -40,6 +40,7 @@ interface FileDataPreviewProps {
   initialFilesMetadata?: Record<string, FileMetadata>;
   onMetadataChange?: (metadata: Record<string, FileMetadata>) => void;
   validationResults?: Record<string, string>;
+  validationDetails?: Record<string, any[]>;
   filePathMap?: Record<string, string>;
 }
 
@@ -57,6 +58,7 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
   initialFilesMetadata = {},
   onMetadataChange,
   validationResults = {},
+  validationDetails = {},
   filePathMap = {}
 }) => {
   const [filesMetadata, setFilesMetadata] = useState<Record<string, FileMetadata>>(initialFilesMetadata);
@@ -68,32 +70,117 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
   const [formatDetectionStatus, setFormatDetectionStatus] = useState<Record<string, { detecting: boolean; failed: boolean }>>({});
   const { toast } = useToast();
 
-  // Notify parent component about changes
-  useEffect(() => {
-    onDataChanges?.({ dtypeChanges, missingValueStrategies });
-  }, [dtypeChanges, missingValueStrategies, onDataChanges]);
+  // Refs to track previous values and prevent infinite loops
+  const prevDtypeChangesRef = useRef<string>('');
+  const prevMissingValueStrategiesRef = useRef<string>('');
+  const prevFilesMetadataRef = useRef<string>('');
+  const isSyncingFromPropsRef = useRef(false);
+  const prevInitialDtypeChangesRef = useRef<string>('');
+  const prevInitialMissingValueStrategiesRef = useRef<string>('');
 
-  // Notify parent component about metadata changes
+  // Notify parent component about changes (only when data actually changes)
   useEffect(() => {
-    onMetadataChange?.(filesMetadata);
-  }, [filesMetadata, onMetadataChange]);
+    // Skip if we're currently syncing from props to prevent circular updates
+    if (isSyncingFromPropsRef.current) {
+      return;
+    }
+
+    const currentDtypeStr = JSON.stringify(dtypeChanges);
+    const currentMissingStr = JSON.stringify(missingValueStrategies);
+    
+    // Only call callback if data actually changed
+    if (
+      currentDtypeStr !== prevDtypeChangesRef.current ||
+      currentMissingStr !== prevMissingValueStrategiesRef.current
+    ) {
+      prevDtypeChangesRef.current = currentDtypeStr;
+      prevMissingValueStrategiesRef.current = currentMissingStr;
+      onDataChanges?.({ dtypeChanges, missingValueStrategies });
+    }
+  }, [dtypeChanges, missingValueStrategies]); // Removed onDataChanges from deps
+
+  // Notify parent component about metadata changes (only when data actually changes)
+  useEffect(() => {
+    const currentMetadataStr = JSON.stringify(filesMetadata);
+    
+    // Only call callback if data actually changed
+    if (currentMetadataStr !== prevFilesMetadataRef.current) {
+      prevFilesMetadataRef.current = currentMetadataStr;
+      onMetadataChange?.(filesMetadata);
+    }
+  }, [filesMetadata]); // Removed onMetadataChange from deps
+
+  // Sync metadata when initialFilesMetadata changes (e.g., when cleared for reload)
+  useEffect(() => {
+    // If a file's metadata is cleared in initialFilesMetadata (set to undefined), clear it from local state
+    Object.keys(initialFilesMetadata).forEach(fileName => {
+      if (initialFilesMetadata[fileName] === undefined && filesMetadata[fileName]) {
+        setFilesMetadata(prev => {
+          const updated = { ...prev };
+          delete updated[fileName];
+          return updated;
+        });
+      }
+    });
+  }, [initialFilesMetadata]);
 
   // Sync dtypeChanges and missingValueStrategies when initialDtypeChanges prop changes (e.g., after validation)
   useEffect(() => {
-    if (initialDtypeChanges && Object.keys(initialDtypeChanges).length > 0) {
-      setDtypeChanges(prev => {
-        // Merge with existing changes, but allow new values from initialDtypeChanges to override
-        const merged = { ...prev };
-        Object.keys(initialDtypeChanges).forEach(fileName => {
-          merged[fileName] = {
-            ...(merged[fileName] || {}),
-            ...initialDtypeChanges[fileName],
-          };
+    const currentInitialDtypeStr = JSON.stringify(initialDtypeChanges);
+    const currentInitialMissingStr = JSON.stringify(initialMissingValueStrategies);
+    
+    // Only update if the prop actually changed
+    if (
+      currentInitialDtypeStr !== prevInitialDtypeChangesRef.current ||
+      currentInitialMissingStr !== prevInitialMissingValueStrategiesRef.current
+    ) {
+      prevInitialDtypeChangesRef.current = currentInitialDtypeStr;
+      prevInitialMissingValueStrategiesRef.current = currentInitialMissingStr;
+
+      if (initialDtypeChanges && Object.keys(initialDtypeChanges).length > 0) {
+        isSyncingFromPropsRef.current = true;
+        setDtypeChanges(prev => {
+          // Merge with existing changes, but allow new values from initialDtypeChanges to override
+          const merged = { ...prev };
+          Object.keys(initialDtypeChanges).forEach(fileName => {
+            merged[fileName] = {
+              ...(merged[fileName] || {}),
+              ...initialDtypeChanges[fileName],
+            };
+          });
+          // Only return merged if it's actually different from prev
+          const prevStr = JSON.stringify(prev);
+          const mergedStr = JSON.stringify(merged);
+          return prevStr === mergedStr ? prev : merged;
         });
-        return merged;
-      });
+        // Reset flag after state update completes
+        requestAnimationFrame(() => {
+          isSyncingFromPropsRef.current = false;
+        });
+      }
+
+      if (initialMissingValueStrategies && Object.keys(initialMissingValueStrategies).length > 0) {
+        isSyncingFromPropsRef.current = true;
+        setMissingValueStrategies(prev => {
+          const merged = { ...prev };
+          Object.keys(initialMissingValueStrategies).forEach(fileName => {
+            merged[fileName] = {
+              ...(merged[fileName] || {}),
+              ...initialMissingValueStrategies[fileName],
+            };
+          });
+          // Only return merged if it's actually different from prev
+          const prevStr = JSON.stringify(prev);
+          const mergedStr = JSON.stringify(merged);
+          return prevStr === mergedStr ? prev : merged;
+        });
+        // Reset flag after state update completes
+        requestAnimationFrame(() => {
+          isSyncingFromPropsRef.current = false;
+        });
+      }
     }
-  }, [initialDtypeChanges]);
+  }, [initialDtypeChanges, initialMissingValueStrategies]);
 
   // Don't clear local changes for saved files - allow showing both badges
 
@@ -144,9 +231,19 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
         newSet.delete(fileName);
       } else {
         newSet.add(fileName);
-        // Fetch metadata only when user opens the file
+        // When validation steps are enabled, always fetch fresh metadata when opening
         const file = uploadedFiles.find(f => f.name === fileName);
-        if (file && !filesMetadata[fileName] && !loading[fileName]) {
+        if (file && useMasterFile) {
+          // Clear existing metadata to force fresh fetch
+          setFilesMetadata(prev => {
+            const updated = { ...prev };
+            delete updated[fileName];
+            return updated;
+          });
+          // Always fetch fresh metadata when opening configuration (force reload)
+          fetchFileMetadata(file);
+        } else if (file && !filesMetadata[fileName] && !loading[fileName]) {
+          // Only fetch if we don't have metadata yet (when validation steps disabled)
           fetchFileMetadata(file);
         }
       }
@@ -251,7 +348,7 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
       console.log('❌ Skipping datetime format detection for', fileName, '- path is empty');
       setFormatDetectionStatus(prev => ({
         ...prev,
-        [`${fileName}-${columnName}`]: { detecting: false, failed: true }
+        [`${fileName}-${columnName}`]: { detecting: false, failed: false }
       }));
       return null;
     }
@@ -290,38 +387,27 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
           });
           return data.detected_format;
         } else {
-          toast({
-            title: "Format Detection Failed",
-            description: "Please select the format from the dropdown.",
-            variant: "destructive",
-          });
+          // Format detection failed - silently enable dropdown (no error message)
+          // Don't show toast or set failed status
         }
       } else {
         const errorData = await response.json().catch(() => ({}));
         console.error('Datetime format detection failed:', errorData);
-        toast({
-          title: "Detection Error",
-          description: errorData.detail || "Failed to detect datetime format",
-          variant: "destructive",
-        });
+        // Silently fail - don't show error toast
       }
       
       setFormatDetectionStatus(prev => ({
         ...prev,
-        [`${fileName}-${columnName}`]: { detecting: false, failed: true }
+        [`${fileName}-${columnName}`]: { detecting: false, failed: false }
       }));
       return null;
     } catch (error) {
       console.error('Error detecting datetime format:', error);
+      // Silently fail - don't show error toast
       setFormatDetectionStatus(prev => ({
         ...prev,
-        [`${fileName}-${columnName}`]: { detecting: false, failed: true }
+        [`${fileName}-${columnName}`]: { detecting: false, failed: false }
       }));
-      toast({
-        title: "Detection Error",
-        description: "Failed to connect to detection service",
-        variant: "destructive",
-      });
       return null;
     }
   };
@@ -491,63 +577,61 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
 
         return (
           <Card key={file.name} className="border border-blue-100 hover:border-blue-300 transition-all duration-200 overflow-hidden relative">
-            <Collapsible open={isOpen} onOpenChange={() => toggleFile(file.name)}>
+            <Collapsible open={useMasterFile ? isOpen : false} onOpenChange={useMasterFile ? () => toggleFile(file.name) : undefined}>
               <div className="relative">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteFile?.(file.name);
-                  }}
-                  className="absolute top-2 right-2 z-10 p-1 rounded-md hover:bg-red-50 transition-colors group"
-                  title="Delete file"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-gray-400 group-hover:text-red-600" />
-                </button>
+                {useMasterFile && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteFile?.(file.name);
+                    }}
+                    className="absolute top-2 right-2 z-10 p-1 rounded-md hover:bg-red-50 transition-colors group"
+                    title="Delete file"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-gray-400 group-hover:text-red-600" />
+                  </button>
+                )}
                 
-                <CollapsibleTrigger className="w-full">
-                  <div className="flex items-center justify-between p-2 pr-10 hover:bg-blue-50 transition-colors">
+                <CollapsibleTrigger className="w-full" disabled={!useMasterFile}>
+                  <div className={`flex items-center justify-between p-2 pr-10 transition-colors ${useMasterFile ? 'hover:bg-blue-50 cursor-pointer' : 'cursor-default'}`}>
                     <div className="flex items-center space-x-2 flex-1 min-w-0">
-                      {isOpen ? (
+                      {useMasterFile && (isOpen ? (
                         <ChevronDown className="w-4 h-4 text-blue-600 flex-shrink-0" />
                       ) : (
                         <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      )}
+                      ))}
                       <div className="text-left flex-1 min-w-0">
                         <p className="font-medium text-sm text-gray-900 truncate">{file.name}</p>
-                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                          <p className="text-xs text-gray-500">
-                            {(file.size / 1024 / 1024).toFixed(2)} MB
-                          </p>
-                          {metadata && (
+                        {metadata && (
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <p className="text-xs text-gray-500">
-                              • {metadata.total_rows} rows × {metadata.total_columns} columns
+                              {metadata.total_rows} rows × {metadata.total_columns} columns
                             </p>
-                          )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center space-x-2 flex-shrink-0">
-                      {hasAppliedChanges && (
+                      {/* {hasAppliedChanges && (
                         <Badge className="bg-green-100 text-green-800 border-green-300 text-xs px-2 py-0.5">
                           <Check className="w-3 h-3 mr-1" />
                           Changes Applied
                         </Badge>
-                      )}
-                      {metadata && metadata.columns.some(col => {
-                        // Only show badge if there are unhandled missing values
-                        const hasMissingValues = col.missing_count > 0;
-                        if (!hasMissingValues) return false;
-                        
-                        // Check if user has selected a strategy other than 'none' or 'Keep as Missing'
-                        const strategy = missingValueStrategies[file.name]?.[col.name]?.strategy;
-                        const isUnhandled = !strategy || strategy === 'none';
-                        
-                        return isUnhandled;
-                      }) && (
-                        <Badge className="bg-red-100 text-red-800 border-red-300 text-xs px-2 py-0.5">
-                          <AlertCircle className="w-3 h-3 mr-1" />
-                          Missing Values
-                        </Badge>
+                      )} */}
+                      {useMasterFile && (
+                        <Select
+                          value={fileAssignments[file.name] || ''}
+                          onValueChange={(val) => onAssignmentChange?.(file.name, val)}
+                        >
+                          <SelectTrigger className="w-32 h-7 text-xs">
+                            <SelectValue placeholder="Select file type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {requiredOptions.map(opt => (
+                              <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       )}
                       {isLoading && (
                         <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
@@ -557,42 +641,75 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                 </CollapsibleTrigger>
               </div>
 
-              {/* Master File Assignment - Only show when validation is enabled */}
+              {/* Validation Report - Only show when validation is enabled */}
             {useMasterFile && (
               <div className="px-3 py-2 bg-blue-50 border-b border-blue-100">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-gray-700">
-                    Assign to Master File:
-                  </label>
-                  <Select
-                    value={fileAssignments[file.name] || ''}
-                    onValueChange={(val) => onAssignmentChange?.(file.name, val)}
-                  >
-                    <SelectTrigger className="w-40 h-7 text-xs">
-                      <SelectValue placeholder="Select file type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {requiredOptions.map(opt => (
-                        <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {validationResults[file.name] && (
-                  <p
-                    className={`mt-1 text-xs font-semibold ${
-                      validationResults[file.name].toLowerCase().includes('success')
-                        ? 'text-green-600'
-                        : 'text-red-600'
-                    }`}
-                  >
-                    {validationResults[file.name]}
-                  </p>
+                {/* <label className="text-xs font-medium text-gray-700 block mb-2">
+                  Assign to Master File:
+                </label> */}
+                {validationResults[file.name] ? (
+                  <div className="mt-2">
+                    <p
+                      className={`text-xs font-semibold mb-2 ${
+                        validationResults[file.name].toLowerCase().includes('success')
+                          ? 'text-green-600'
+                          : 'text-red-600'
+                      }`}
+                    >
+                      {validationResults[file.name]}
+                    </p>
+                    {validationResults[file.name].toLowerCase().includes('failure') && (
+                      <div className="space-y-2">
+                        {validationDetails[file.name] && validationDetails[file.name].length > 0 && (
+                          <div className="space-y-1">
+                            <p className="text-xs font-medium text-gray-700">Validation Failures:</p>
+                            {validationDetails[file.name]
+                              .filter((detail: any) => detail.status === 'Failed')
+                              .map((detail: any, idx: number) => (
+                                <div key={idx} className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">
+                                  <div className="font-medium">
+                                    {detail.name} - Column: {detail.column || 'N/A'}
+                                  </div>
+                                  {detail.errorMessage && (
+                                    <div className="mt-1 text-red-600">
+                                      <strong>Error:</strong> {detail.errorMessage}
+                                    </div>
+                                  )}
+                                  {detail.desc && (
+                                    <div className="mt-1 text-gray-600">
+                                      <strong>Expected:</strong> {detail.desc}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                        {/* {dtypeChanges[file.name] && Object.keys(dtypeChanges[file.name]).length > 0 && (
+                          <div className="mt-2">
+                            <p className="text-xs font-medium text-gray-700 mb-1">Required Data Type:</p>
+                            <div className="space-y-1">
+                              {Object.entries(dtypeChanges[file.name]).map(([columnName, dtype]) => {
+                                const dtypeStr = typeof dtype === 'string' ? dtype : (typeof dtype === 'object' && dtype !== null && 'dtype' in dtype ? (dtype as { dtype: string }).dtype : String(dtype));
+                                return (
+                                  <div key={columnName} className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded p-2">
+                                    <span className="font-medium">{columnName}:</span> Should be <span className="font-semibold">{dtypeStr}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )} */}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 mt-1">Click "Validate Files" to see validation report</p>
                 )}
               </div>
             )}
 
-              <CollapsibleContent>
+              {!useMasterFile && (
+                <CollapsibleContent>
                  {metadata ? (
                    <div className="border-t border-blue-100 bg-gradient-to-br from-white to-blue-50/30">
                      <div className="p-2 max-h-64 overflow-y-auto scrollbar-thin scrollbar-thumb-blue-300">
@@ -706,28 +823,35 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                                                      </div>
                                                    )}
                                                    
-                                                   {detectionFailed && !currentFormat && (
-                                                     <div className="text-xs text-orange-600">
-                                                       Format detection failed. Please select:
-                                                     </div>
-                                                   )}
-                                                   
-                                                   <Select
-                                                     value={currentFormat || ''}
-                                                     onValueChange={(val) => handleDatetimeFormatChange(file.name, column.name, val)}
-                                                     disabled={currentFormat && !detectionFailed}
-                                                   >
-                                                     <SelectTrigger className="w-full h-6 text-xs">
-                                                       <SelectValue placeholder="Select format" />
-                                                     </SelectTrigger>
-                                                     <SelectContent>
-                                                       {formatOptions.map(opt => (
-                                                         <SelectItem key={opt.value} value={opt.value}>
-                                                           {opt.label}
-                                                         </SelectItem>
-                                                       ))}
-                                                     </SelectContent>
-                                                   </Select>
+                                                   <div className="flex items-center space-x-1">
+                                                     <Select
+                                                       value={currentFormat || ''}
+                                                       onValueChange={(val) => handleDatetimeFormatChange(file.name, column.name, val)}
+                                                       disabled={currentFormat && !detectionFailed}
+                                                       className="flex-1"
+                                                     >
+                                                       <SelectTrigger className="w-full h-6 text-xs">
+                                                         <SelectValue placeholder="Select format" />
+                                                       </SelectTrigger>
+                                                       <SelectContent>
+                                                         {formatOptions.map(opt => (
+                                                           <SelectItem key={opt.value} value={opt.value}>
+                                                             {opt.label}
+                                                           </SelectItem>
+                                                         ))}
+                                                       </SelectContent>
+                                                     </Select>
+                                                     {currentFormat && !isDetecting && (
+                                                       <button
+                                                         type="button"
+                                                         onClick={() => handleDatetimeFormatChange(file.name, column.name, '')}
+                                                         className="flex-shrink-0 p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 transition-colors"
+                                                         title="Clear format"
+                                                       >
+                                                         <X className="w-3 h-3" />
+                                                       </button>
+                                                     )}
+                                                   </div>
                                                    
                                                    {/* {currentFormat && !isDetecting && (
                                                      <div className="text-xs text-green-600 flex items-center space-x-1">
@@ -831,6 +955,7 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
                   </div>
                 )}
               </CollapsibleContent>
+              )}
             </Collapsible>
           </Card>
         );

@@ -135,7 +135,7 @@ const fetchEnhancedTimeSeriesData = async (
       .map((x: any, index: number) => {
         const v1Raw = seriesData.column1_values[index];
         const v2Raw = seriesData.column2_values[index];
-        if (v1Raw === undefined || v2Raw === undefined) return null;
+        if (v1Raw === undefined || v1Raw === null || v2Raw === undefined || v2Raw === null) return null;
         const v1 = parseFloat(v1Raw);
         const v2 = parseFloat(v2Raw);
         if (!isFinite(v1) || !isFinite(v2)) return null;
@@ -233,16 +233,26 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           }
           
           // Update fileData with categorical columns and column values
+          const numericCols = dataframeInfo.numericColumns || [];
+          // Preserve existing selection if valid, otherwise default to all columns
+          const existingSelection = data.selectedNumericColumnsForMatrix || [];
+          const validSelection = existingSelection.filter(col => numericCols.includes(col));
+          const finalSelection = validSelection.length > 0 && validSelection.length === existingSelection.length 
+            ? validSelection 
+            : numericCols;
+          
           onDataChange({
             fileData: {
               fileName: data.selectedFile,
               rawData: dataframeInfo.sampleData || [],
-              numericColumns: dataframeInfo.numericColumns || [],
+              numericColumns: numericCols,
               dateColumns: [], // Will be detected from sample data
               categoricalColumns: dataframeInfo.categoricalColumns || [],
               columnValues,
               isProcessed: true
-            }
+            },
+            // Preserve existing selection if valid, otherwise default to all selected
+            selectedNumericColumnsForMatrix: finalSelection
           });
           
         } catch (fileError) {
@@ -345,16 +355,26 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           }
         }
         
+        const numericCols = dataframeInfo.numericColumns || [];
+        // Preserve existing selection if valid, otherwise default to all columns
+        const existingSelection = data.selectedNumericColumnsForMatrix || [];
+        const validSelection = existingSelection.filter(col => numericCols.includes(col));
+        const finalSelection = validSelection.length > 0 && validSelection.length === existingSelection.length 
+          ? validSelection 
+          : numericCols;
+        
         onDataChange({
           fileData: {
             fileName: objectName,
             rawData: dataframeInfo.sampleData || [],
-            numericColumns: dataframeInfo.numericColumns || [],
+            numericColumns: numericCols,
             dateColumns: [], // Will be detected from sample data
             categoricalColumns: dataframeInfo.categoricalColumns || [],
             columnValues,
             isProcessed: true
-          }
+          },
+          // Preserve existing selection if valid, otherwise default to all selected
+          selectedNumericColumnsForMatrix: finalSelection
         });
         
         // Auto-run correlation analysis after dataframe loading
@@ -454,6 +474,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         timeSeriesData: [] // No default time series data
       };
 
+      const newNumericCols = filteredVariables;
       onDataChange({
         correlationMatrix: transformedResult.correlationMatrix,
         timeSeriesData: [], // No default time series data
@@ -466,7 +487,7 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           ...(data.fileData || {}),
           fileName: result.filtered_file_path || filePath,
           rawData: result.preview_data || [],
-          numericColumns: filteredVariables, // Use filtered variables for numeric columns
+          numericColumns: newNumericCols, // Use filtered variables for numeric columns
           dateColumns:
             result.date_analysis?.date_columns.map((col) => col.column_name) ||
             data.fileData?.dateColumns || [],
@@ -478,6 +499,11 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           columnValues: data.fileData?.columnValues || {},
           isProcessed: true,
         },
+        // Initialize or update selected numeric columns for matrix (default: all selected)
+        selectedNumericColumnsForMatrix: data.selectedNumericColumnsForMatrix && 
+          data.selectedNumericColumnsForMatrix.every(col => newNumericCols.includes(col))
+          ? data.selectedNumericColumnsForMatrix.filter(col => newNumericCols.includes(col))
+          : newNumericCols
       });
 
     } catch (error) {
@@ -611,29 +637,9 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
               </div>
             )}
           </div>
-          
-
-            {/* Show column information for uploaded file */}
-            {/* {data.fileData?.isProcessed && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <h4 className="text-sm font-medium text-blue-900 mb-2">Available Columns</h4>
-                <div className="space-y-1">
-                  <div>
-                    <span className="text-xs font-medium text-blue-800">({data.fileData?.numericColumns?.length || 0}): </span>
-                    <span className="text-xs text-blue-700">
-                      {data.fileData?.numericColumns?.join(', ') || ''}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )} */}
-          </div>
         </div>
-
-
-
-
       </div>
+    </div>
   );
 };
 

@@ -385,7 +385,8 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
 
       validScopes.forEach(({ scope, setNum, identifierFilters }) => {
         requestBody[`identifier_filters_${setNum}`] = identifierFilters;
-        if (scope.timeframe.from && scope.timeframe.to) {
+        // Only send dates if date range is available and both dates are provided
+        if (dateRange.available && scope.timeframe.from && scope.timeframe.to) {
           requestBody[`start_date_${setNum}`] = scope.timeframe.from;
           requestBody[`end_date_${setNum}`] = scope.timeframe.to;
         }
@@ -541,9 +542,50 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     return a.every((val, index) => val === b[index]);
   };
 
-  // Fetch min/max date whenever the data source changes
+  // Fetch min/max date whenever the data source changes (optional - only if date column exists)
   useEffect(() => {
     if (!data.dataSource) {
+      setDateRange({ min: null, max: null, available: false });
+      return;
+    }
+
+    // Try to detect date column from allColumns
+    const detectDateColumn = (): string | null => {
+      if (!data.allColumns || data.allColumns.length === 0) {
+        return null;
+      }
+      
+      // Priority 1: Look for exact "date" match (case-insensitive)
+      const exactDate = data.allColumns.find(
+        col => col.column && col.column.toLowerCase() === 'date'
+      );
+      if (exactDate) {
+        return exactDate.column;
+      }
+      
+      // Priority 2: Look for datetime data type
+      const datetimeCol = data.allColumns.find(
+        col => col.data_type && col.data_type.toLowerCase().includes('datetime')
+      );
+      if (datetimeCol) {
+        return datetimeCol.column;
+      }
+      
+      // Priority 3: Look for columns with "date" in the name
+      const dateLikeCol = data.allColumns.find(
+        col => col.column && col.column.toLowerCase().includes('date')
+      );
+      if (dateLikeCol) {
+        return dateLikeCol.column;
+      }
+      
+      return null;
+    };
+
+    const dateColumn = detectDateColumn();
+    
+    // If no date column found, mark as unavailable and return
+    if (!dateColumn) {
       setDateRange({ min: null, max: null, available: false });
       return;
     }
@@ -551,7 +593,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     const controller = new AbortController();
     const fetchRange = async () => {
       try {
-        const url = `${SCOPE_SELECTOR_API}/date_range?object_name=${encodeURIComponent(data.dataSource)}&column_name=date`;
+        const url = `${SCOPE_SELECTOR_API}/date_range?object_name=${encodeURIComponent(data.dataSource)}&column_name=${encodeURIComponent(dateColumn)}`;
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) {
           throw new Error(`Status ${res.status}`);
@@ -587,7 +629,7 @@ const ScopeSelectorCanvas: React.FC<ScopeSelectorCanvasProps> = ({ data, onDataC
     fetchRange();
     return () => controller.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.dataSource]);
+  }, [data.dataSource, data.allColumns]);
 
   // Fetch cardinality data when data source changes
   useEffect(() => {

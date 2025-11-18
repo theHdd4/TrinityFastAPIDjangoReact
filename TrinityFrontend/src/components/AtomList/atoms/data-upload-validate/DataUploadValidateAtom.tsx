@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Info, Check, AlertCircle, Upload, Settings, ClipboardCheck, Eye, ChevronDown, Plus, Pencil } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card } from '@/components/ui/card';
@@ -7,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   useLaboratoryStore,
@@ -55,14 +57,25 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   const [renameTarget, setRenameTarget] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [fileAssignments, setFileAssignments] = useState<Record<string, string>>(settings.fileMappings || {});
-  const [validationResults, setValidationResults] = useState<Record<string, string>>({});
-  const [validationDetails, setValidationDetails] = useState<Record<string, any[]>>({});
+  const [validationResults, setValidationResults] = useState<Record<string, string>>(settings.validationResults || {});
+  const [validationDetails, setValidationDetails] = useState<Record<string, any[]>>(settings.validationDetails || {});
   const [openValidatedFile, setOpenValidatedFile] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<Record<string, string>>({});
   const [allFilesSaved, setAllFilesSaved] = useState(false);
   const [isConfigStatusOpen, setIsConfigStatusOpen] = useState(false);
   const [savedDataframes, setSavedDataframes] = useState<Array<{ object_name: string; csv_name: string; arrow_name?: string }>>([]);
   const [isLoadingSavedDataframes, setIsLoadingSavedDataframes] = useState(false);
+  const [hasMultipleSheetsByFile, setHasMultipleSheetsByFile] = useState<Record<string, boolean>>({});
+  const [workbookPathMap, setWorkbookPathMap] = useState<Record<string, string>>({});
+  const [sheetMetadataMap, setSheetMetadataMap] = useState<Record<string, { sheet_names: string[]; selected_sheet: string; original_filename: string }>>({});
+  const [pendingUploadFile, setPendingUploadFile] = useState<{ file: File; sanitizedFileName: string; data: any } | null>(null);
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploadSheetOptions, setUploadSheetOptions] = useState<string[]>([]);
+  const [uploadSelectedSheet, setUploadSelectedSheet] = useState('');
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [filesFromSavedDataframes, setFilesFromSavedDataframes] = useState<Set<string>>(new Set());
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Trigger to force refresh (like SavedDataFramesPanel's reloadToken)
   
   // Use ref to store current data changes without triggering re-renders
   const dataChangesRef = React.useRef<{
@@ -110,8 +123,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         size: settings.fileSizeMap?.[name] || 0,
       }));
       setUploadedFiles(files);
+      
+      // When validation steps are enabled, restore filesFromSavedDataframes from validatedFiles
+      if (settings.bypassMasterUpload && settings.validatedFiles && settings.validatedFiles.length > 0) {
+        setFilesFromSavedDataframes(new Set(settings.validatedFiles));
+      }
     }
-  }, [settings.uploadedFiles, settings.filePathMap, settings.fileSizeMap, uploadedFiles.length]);
+  }, [settings.uploadedFiles, settings.filePathMap, settings.fileSizeMap, settings.bypassMasterUpload, settings.validatedFiles, uploadedFiles.length]);
 
   // Update uploadedFiles paths when filePathMap changes (after save)
   useEffect(() => {
@@ -128,37 +146,133 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     }
   }, [settings.filePathMap]);
 
+  // Function to refresh saved dataframes list
+  // Always fetches from API - no dependency on settings to avoid stale closures
+  const refreshSavedDataframes = React.useCallback(async () => {
+    setIsLoadingSavedDataframes(true);
+    const envStr = localStorage.getItem('env');
+    let query = '';
+    if (envStr) {
+      try {
+        const env = JSON.parse(envStr);
+        query = '?' + new URLSearchParams({
+          client_id: env.CLIENT_ID || '',
+          app_id: env.APP_ID || '',
+          project_id: env.PROJECT_ID || '',
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || ''
+        }).toString();
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      const res = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`, {
+        credentials: 'include',
+      });
+      const d = await res.json();
+      const files = Array.isArray(d.files) ? d.files : [];
+      setSavedDataframes(files);
+      
+      // Check workbook metadata for files to determine if they have multiple sheets
+      const checkWorkbookMetadata = async () => {
+        const metadataChecks: Record<string, boolean> = {};
+        for (const f of files) {
+          // Check if workbook metadata exists (which means it was uploaded from a multi-sheet Excel file)
+          try {
+            const queryParams = new URLSearchParams({ object_name: f.object_name }).toString();
+            const metaRes = await fetch(`${VALIDATE_API}/workbook_metadata?${queryParams}`, {
+              credentials: 'include',
+            });
+            if (metaRes.ok) {
+              const metaData = await metaRes.json();
+              const sheetNames = Array.isArray(metaData.sheet_names) ? metaData.sheet_names : [];
+              // Check if has_multiple_sheets is true, or if sheet_names has more than 1 sheet
+              metadataChecks[f.object_name] = Boolean(
+                metaData.has_multiple_sheets === true || sheetNames.length > 1
+              );
+            } else {
+              metadataChecks[f.object_name] = false;
+            }
+          } catch {
+            metadataChecks[f.object_name] = false;
+          }
+        }
+        setHasMultipleSheetsByFile(metadataChecks);
+      };
+      void checkWorkbookMetadata();
+    } catch {
+      setSavedDataframes([]);
+    } finally {
+      setIsLoadingSavedDataframes(false);
+    }
+  }, []); // No dependencies - always fetches fresh from API
+
   // Fetch saved dataframes when validation steps are enabled
   useEffect(() => {
     if (settings.bypassMasterUpload) {
-      setIsLoadingSavedDataframes(true);
-      const envStr = localStorage.getItem('env');
-      let query = '';
-      if (envStr) {
-        try {
-          const env = JSON.parse(envStr);
-          query = '?' + new URLSearchParams({
-            client_id: env.CLIENT_ID || '',
-            app_id: env.APP_ID || '',
-            project_id: env.PROJECT_ID || '',
-            client_name: env.CLIENT_NAME || '',
-            app_name: env.APP_NAME || '',
-            project_name: env.PROJECT_NAME || ''
-          }).toString();
-        } catch {
-          /* ignore */
-        }
-      }
-      fetch(`${VALIDATE_API}/list_saved_dataframes${query}`)
-        .then(r => r.json())
-        .then(d => {
-          const files = Array.isArray(d.files) ? d.files : [];
-          setSavedDataframes(files);
-        })
-        .catch(() => setSavedDataframes([]))
-        .finally(() => setIsLoadingSavedDataframes(false));
+      void refreshSavedDataframes();
     }
-  }, [settings.bypassMasterUpload]);
+  }, [settings.bypassMasterUpload, refreshSavedDataframes]);
+  
+  // Force refresh when refreshTrigger changes (similar to SavedDataFramesPanel's reloadToken)
+  useEffect(() => {
+    if (settings.bypassMasterUpload && refreshTrigger > 0) {
+      void refreshSavedDataframes();
+    }
+  }, [refreshTrigger, settings.bypassMasterUpload, refreshSavedDataframes]);
+
+  // Track previous bypassMasterUpload value to detect when it changes to true
+  const prevBypassMasterUploadRef = React.useRef<boolean>(settings.bypassMasterUpload || false);
+
+  // Sync validation data from settings when they change (e.g., loaded from MongoDB)
+  useEffect(() => {
+    if (settings.bypassMasterUpload) {
+      if (settings.validationResults) {
+        setValidationResults(settings.validationResults);
+      }
+      if (settings.validationDetails) {
+        setValidationDetails(settings.validationDetails);
+      }
+    }
+  }, [settings.bypassMasterUpload, settings.validationResults, settings.validationDetails]);
+
+  // Clear configurations when validation steps are enabled (only when it changes from false to true)
+  useEffect(() => {
+    const prevValue = prevBypassMasterUploadRef.current;
+    const currentValue = settings.bypassMasterUpload || false;
+    prevBypassMasterUploadRef.current = currentValue;
+
+    if (currentValue && !prevValue) {
+      // Validation steps just got enabled - clear all configurations
+      updateSettings(atomId, {
+        dtypeChanges: {},
+        missingValueStrategies: {},
+        filesMetadata: {},
+        filesWithAppliedChanges: [],
+      });
+      // Clear ref
+      dataChangesRef.current = {
+        dtypeChanges: {},
+        missingValueStrategies: {},
+      };
+      // Clear uploaded files that came from uploads (not from saved dataframes)
+      setUploadedFiles(prev => prev.filter(f => filesFromSavedDataframes.has(f.name)));
+      updateSettings(atomId, {
+        uploadedFiles: (settings.uploadedFiles || []).filter((name: string) => filesFromSavedDataframes.has(name)),
+        fileMappings: Object.fromEntries(
+          Object.entries(settings.fileMappings || {}).filter(([name]) => filesFromSavedDataframes.has(name))
+        ),
+        filePathMap: Object.fromEntries(
+          Object.entries(settings.filePathMap || {}).filter(([name]) => filesFromSavedDataframes.has(name))
+        ),
+        fileSizeMap: Object.fromEntries(
+          Object.entries(settings.fileSizeMap || {}).filter(([name]) => filesFromSavedDataframes.has(name))
+        ),
+      });
+    }
+  }, [settings.bypassMasterUpload, atomId, updateSettings, filesFromSavedDataframes, settings.uploadedFiles, settings.fileMappings, settings.filePathMap, settings.fileSizeMap]);
 
   useEffect(() => {
     return () => {
@@ -194,6 +308,88 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       updateSessionState(user?.id, { envvars: null });
     };
   }, [atomId, updateSettings, user?.id]);
+
+  // Auto-save a single file immediately after upload (like SavedDataFramesPanel)
+  const autoSaveFile = async (filePath: string, fileName: string, workbookPath?: string, sheetMetadata?: { sheet_names: string[]; selected_sheet: string; original_filename: string }) => {
+    try {
+      const form = new FormData();
+      const vidSave = settings.validatorId || 'bypass_upload';
+      form.append('validator_atom_id', vidSave);
+      form.append('file_paths', JSON.stringify([filePath]));
+      
+      // Derive file key from filename (same logic as SavedDataFramesPanel)
+      const deriveFileKey = (name: string) => {
+        const base = name.replace(/\.[^.]+$/, '') || 'dataframe';
+        const sanitized = base.replace(/[^A-Za-z0-9_.-]+/g, '_');
+        return sanitized || 'dataframe';
+      };
+      form.append('file_keys', JSON.stringify([deriveFileKey(fileName)]));
+      form.append('overwrite', 'false');
+      
+      // Include workbook_paths and sheet_metadata if available
+      if (workbookPath) {
+        form.append('workbook_paths', JSON.stringify([workbookPath]));
+        if (sheetMetadata) {
+          form.append('sheet_metadata', JSON.stringify([sheetMetadata]));
+        } else {
+          form.append('sheet_metadata', JSON.stringify([{
+            sheet_names: [],
+            selected_sheet: '',
+            original_filename: fileName,
+          }]));
+        }
+      }
+      
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          form.append('client_id', env.CLIENT_ID || '');
+          form.append('app_id', env.APP_ID || '');
+          form.append('project_id', env.PROJECT_ID || '');
+          form.append('client_name', env.CLIENT_NAME || '');
+          form.append('app_name', env.APP_NAME || '');
+          form.append('project_name', env.PROJECT_NAME || '');
+        } catch {
+          /* ignore */
+        }
+      }
+      if (user?.id) form.append('user_id', String(user.id));
+      if (user?.username) form.append('user_name', user.username);
+      
+      const res = await fetch(`${VALIDATE_API}/save_dataframes`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include'
+      });
+      
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(txt || 'Failed to save dataframe');
+      }
+      
+      const data = await res.json();
+      const fileResults = Array.isArray(data.minio_uploads) ? data.minio_uploads : [];
+      const result = fileResults[0];
+      
+      if (result?.minio_upload?.object_name) {
+        const savedPath = result.minio_upload.object_name;
+        // Update filePathMap with saved path
+        updateSettings(atomId, {
+          filePathMap: {
+            ...(settings.filePathMap || {}),
+            [fileName]: savedPath,
+          },
+        });
+        return savedPath;
+      }
+      return filePath; // Return original path if save didn't return new path
+    } catch (error: any) {
+      console.error('Auto-save failed:', error);
+      // Don't show error toast - just log it, upload was successful
+      return filePath; // Return original path on error
+    }
+  };
 
   const handleFileUpload = async (files: File[]) => {
     // Don't reset allFilesSaved - keep button disabled if already saved
@@ -284,7 +480,51 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           continue;
         }
 
-        uploaded.push({ name: sanitizedFileName, path: filePath, size: file.size });
+        // Store workbook_path and sheet metadata if available
+        const workbookPath = (data as any).workbook_path as string | undefined;
+        const sheetNames = Array.isArray((data as any).sheet_names) ? (data as any).sheet_names : [];
+        const selectedSheet = (data as any).selected_sheet as string | undefined;
+        const hasMultipleSheets = Boolean((data as any).has_multiple_sheets && sheetNames.length > 1);
+        
+        // If file has multiple sheets and no sheet was specified, show modal for sheet selection
+        if (hasMultipleSheets && !form.has('sheet_name')) {
+          setPendingUploadFile({ file: sanitizedFile, sanitizedFileName, data });
+          setUploadSheetOptions(sheetNames.length ? sheetNames : selectedSheet ? [selectedSheet] : []);
+          setUploadSelectedSheet(selectedSheet || sheetNames[0] || '');
+          setUploadError('');
+          setIsUploadModalOpen(true);
+          continue; // Skip adding to uploaded array for now, will be added after sheet selection
+        }
+        
+        // Determine final selected sheet
+        const finalSelectedSheet = form.has('sheet_name') ? (form.get('sheet_name') as string) : selectedSheet;
+        
+        if (workbookPath) {
+          setWorkbookPathMap(prev => ({ ...prev, [sanitizedFileName]: workbookPath }));
+          if (sheetNames.length > 0 && finalSelectedSheet) {
+            setSheetMetadataMap(prev => ({
+              ...prev,
+              [sanitizedFileName]: {
+                sheet_names: sheetNames,
+                selected_sheet: finalSelectedSheet,
+                original_filename: sanitizedFileName,
+              }
+            }));
+          }
+        }
+
+        // Auto-save the file immediately after upload (like SavedDataFramesPanel)
+        const sheetMetadata = workbookPath && sheetNames.length > 0 && finalSelectedSheet ? {
+          sheet_names: sheetNames,
+          selected_sheet: finalSelectedSheet,
+          original_filename: sanitizedFileName,
+        } : undefined;
+        
+        const savedPath = await autoSaveFile(filePath, sanitizedFileName, workbookPath, sheetMetadata);
+        // Use saved path if available, otherwise use original filePath
+        const finalPath = savedPath || filePath;
+
+        uploaded.push({ name: sanitizedFileName, path: finalPath, size: file.size });
 
         if ((data as any).has_data_quality_issues && Array.isArray((data as any).warnings) && (data as any).warnings.length > 0) {
           const warnings = (data as any).warnings as string[];
@@ -320,6 +560,16 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
     if (uploaded.length === 0) return;
 
+    // When validation steps are enabled, mark uploaded files as coming from saved dataframes
+    // This ensures they show in the canvas and are not filtered out
+    if (settings.bypassMasterUpload) {
+      setFilesFromSavedDataframes(prev => {
+        const newSet = new Set(prev);
+        uploaded.forEach(f => newSet.add(f.name));
+        return newSet;
+      });
+    }
+
     setUploadedFiles((prev) => [...prev, ...uploaded]);
     updateSettings(atomId, {
       uploadedFiles: [...(settings.uploadedFiles || []), ...uploaded.map((f) => f.name)],
@@ -350,6 +600,14 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         ])
       ),
     }));
+
+    // Refresh saved dataframes list after upload when validation steps are enabled
+    // Use a delay to ensure backend has processed all saves, then trigger refresh
+    if (settings.bypassMasterUpload && uploaded.length > 0) {
+      setTimeout(() => {
+        setRefreshTrigger(prev => prev + 1);
+      }, 500);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -376,6 +634,154 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       // allow selecting the same file again by resetting the input value
       e.target.value = '';
     }
+  };
+
+  const handleUploadSheetConfirm = async () => {
+    if (!pendingUploadFile || !uploadSelectedSheet) return;
+    
+    setUploadingFile(true);
+    setUploadError('');
+    
+    try {
+      const { file, sanitizedFileName, data: initialData } = pendingUploadFile;
+      
+      // Re-upload with selected sheet
+      const form = new FormData();
+      form.append('file', file);
+      form.append('sheet_name', uploadSelectedSheet);
+      
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        try {
+          const env = JSON.parse(envStr);
+          form.append('client_id', env.CLIENT_ID || '');
+          form.append('app_id', env.APP_ID || '');
+          form.append('project_id', env.PROJECT_ID || '');
+          form.append('client_name', env.CLIENT_NAME || '');
+          form.append('app_name', env.APP_NAME || '');
+          form.append('project_name', env.PROJECT_NAME || '');
+        } catch {
+          /* ignore */
+        }
+      }
+      
+      const res = await fetch(`${VALIDATE_API}/upload-file`, {
+        method: 'POST',
+        body: form,
+        credentials: 'include',
+      });
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const errorMessage = errorData.detail || `Failed to upload ${sanitizedFileName}`;
+        setUploadError(errorMessage);
+        setUploadingFile(false);
+        return;
+      }
+
+      const payload = await res.json();
+      const data = await waitForTaskResult(payload);
+      const filePath = (data as any).file_path as string | undefined;
+      if (!filePath) {
+        setUploadError(`Upload response missing file path for ${sanitizedFileName}`);
+        setUploadingFile(false);
+        return;
+      }
+
+      // Store workbook_path and sheet metadata
+      const workbookPath = (data as any).workbook_path as string | undefined;
+      const sheetNames = Array.isArray((data as any).sheet_names) ? (data as any).sheet_names : [];
+      const selectedSheet = uploadSelectedSheet;
+      
+      if (workbookPath) {
+        setWorkbookPathMap(prev => ({ ...prev, [sanitizedFileName]: workbookPath }));
+        if (sheetNames.length > 0 && selectedSheet) {
+          setSheetMetadataMap(prev => ({
+            ...prev,
+            [sanitizedFileName]: {
+              sheet_names: sheetNames,
+              selected_sheet: selectedSheet,
+              original_filename: sanitizedFileName,
+            }
+          }));
+        }
+      }
+
+      // Auto-save the file immediately after upload (like SavedDataFramesPanel)
+      const sheetMetadata = workbookPath && sheetNames.length > 0 && selectedSheet ? {
+        sheet_names: sheetNames,
+        selected_sheet: selectedSheet,
+        original_filename: sanitizedFileName,
+      } : undefined;
+      
+      const savedPath = await autoSaveFile(filePath, sanitizedFileName, workbookPath, sheetMetadata);
+      // Use saved path if available, otherwise use original filePath
+      const finalPath = savedPath || filePath;
+
+      // Add to uploaded files
+      const newFile: UploadedFileRef = {
+        name: sanitizedFileName,
+        path: finalPath,
+        size: file.size,
+      };
+
+      // When validation steps are enabled, mark uploaded file as coming from saved dataframes
+      // This ensures it shows in the canvas and is not filtered out
+      if (settings.bypassMasterUpload) {
+        setFilesFromSavedDataframes(prev => new Set([...prev, sanitizedFileName]));
+      }
+
+      setUploadedFiles((prev) => [...prev, newFile]);
+      updateSettings(atomId, {
+        uploadedFiles: [...(settings.uploadedFiles || []), sanitizedFileName],
+        fileMappings: {
+          ...fileAssignments,
+          [sanitizedFileName]: !settings.bypassMasterUpload ? sanitizedFileName : settings.requiredFiles?.[0] || '',
+        },
+        filePathMap: {
+          ...(settings.filePathMap || {}),
+          [sanitizedFileName]: finalPath,
+        },
+        fileSizeMap: {
+          ...(settings.fileSizeMap || {}),
+          [sanitizedFileName]: file.size,
+        },
+      });
+      setFileAssignments((prev) => ({
+        ...prev,
+        [sanitizedFileName]: !settings.bypassMasterUpload ? sanitizedFileName : settings.requiredFiles?.[0] || '',
+      }));
+
+      toast({ title: `${sanitizedFileName} uploaded successfully` });
+      
+      // Refresh saved dataframes list after upload when validation steps are enabled
+      // Use a delay to ensure backend has processed the save, then trigger refresh
+      if (settings.bypassMasterUpload) {
+        setTimeout(() => {
+          setRefreshTrigger(prev => prev + 1);
+        }, 500);
+      }
+      
+      // Reset modal state
+      setPendingUploadFile(null);
+      setIsUploadModalOpen(false);
+      setUploadSheetOptions([]);
+      setUploadSelectedSheet('');
+      setUploadError('');
+    } catch (error: any) {
+      setUploadError(error?.message || 'Upload failed');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleUploadSheetCancel = () => {
+    setPendingUploadFile(null);
+    setIsUploadModalOpen(false);
+    setUploadSheetOptions([]);
+    setUploadSelectedSheet('');
+    setUploadError('');
+    setUploadingFile(false);
   };
 
   const toggleSection = (sectionId: string) => {
@@ -452,7 +858,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       size: 0, // Size not available for saved dataframes
     };
 
-    setUploadedFiles((prev) => [...prev, newFile]);
+    // Mark this file as coming from saved dataframes
+    setFilesFromSavedDataframes(prev => new Set([...prev, fileName]));
+
+    // Clear metadata for this file to force reload (avoid caching issues)
     updateSettings(atomId, {
       uploadedFiles: [...(settings.uploadedFiles || []), fileName],
       fileMappings: {
@@ -467,17 +876,37 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         ...(settings.fileSizeMap || {}),
         [fileName]: 0,
       },
+      // Clear metadata for this file to force reload
+      filesMetadata: {
+        ...(settings.filesMetadata || {}),
+        [fileName]: undefined,
+      },
     });
     setFileAssignments((prev) => ({
       ...prev,
       [fileName]: !settings.bypassMasterUpload ? fileName : settings.requiredFiles?.[0] || '',
     }));
 
+    setUploadedFiles((prev) => {
+      const updated = [...prev, newFile];
+      // Auto-open the file when validation steps are enabled
+      if (settings.bypassMasterUpload) {
+        // File will be opened automatically by FileDataPreview when metadata is fetched
+      }
+      return updated;
+    });
+
     toast({ title: `${fileName} selected from saved dataframes` });
   };
 
   const handleDeleteFile = (name: string) => {
     setUploadedFiles(prev => prev.filter(f => f.name !== name));
+    // Remove from filesFromSavedDataframes if it was there
+    setFilesFromSavedDataframes(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(name);
+      return newSet;
+    });
     const newUploads = (settings.uploadedFiles || []).filter(n => n !== name);
     const { [name]: _, ...restAssignments } = fileAssignments;
     const { [name]: __, ...restPaths } = settings.filePathMap || {};
@@ -552,14 +981,31 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
   const handleValidateFiles = async () => {
     if (!settings.validatorId) return;
+    
+    // When validation steps are enabled, only validate files from saved dataframes
+    const filesToValidate = settings.bypassMasterUpload 
+      ? uploadedFiles.filter(f => filesFromSavedDataframes.has(f.name))
+      : uploadedFiles;
+    
+    if (filesToValidate.length === 0) {
+      toast({
+        title: 'No files to validate',
+        description: settings.bypassMasterUpload 
+          ? 'Please select files from "Select from Saved Dataframes" to validate them against their master files.'
+          : 'Please upload files to validate.',
+        variant: 'default',
+      });
+      return;
+    }
+    
     const form = new FormData();
     form.append('validator_atom_id', settings.validatorId);
-    const paths = uploadedFiles.map(f => f.path);
+    const paths = filesToValidate.map(f => f.path);
     form.append('file_paths', JSON.stringify(paths));
     
     // Generate keys ensuring uniqueness
     // First pass: get the assigned keys
-    const initialKeys = uploadedFiles.map(f => {
+    const initialKeys = filesToValidate.map(f => {
       const assigned = fileAssignments[f.name] || '';
       return settings.fileKeyMap?.[assigned] || assigned || f.name;
     });
@@ -575,7 +1021,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       keyCount.set(key, (keyCount.get(key) || 0) + 1);
     });
     
-    const keys = uploadedFiles.map((f, idx) => {
+    const keys = filesToValidate.map((f, idx) => {
       const initialKey = initialKeys[idx];
       // If this key is used by multiple files, make it unique
       if ((keyCount.get(initialKey) || 0) > 1) {
@@ -639,8 +1085,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         return colName.trim().toLowerCase().replace(/(?<!_)\s+(?!_)/g, '');
       };
       
-      // Process each uploaded file - ensure ALL files are processed
-      uploadedFiles.forEach((file, idx) => {
+      // Process each file to validate - ensure ALL files are processed
+      filesToValidate.forEach((file, idx) => {
         const fileName = file.name;
         const key = keys[idx];
         
@@ -729,7 +1175,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       const details: Record<string, any[]> = {};
 
       keys.forEach((k, idx) => {
-        const fileName = uploadedFiles[idx].name;
+        const fileName = filesToValidate[idx].name;
         const fileRes = data.file_validation_results?.[k] || {};
 
         const units = cfg.validations?.[k] || [];
@@ -749,11 +1195,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
               .map(c => c.trim())
               .filter(Boolean)
           : [];
+        const missingErrorMsg = missingCount > 0 ? missingMsg || `Missing mandatory columns: ${missingCols.join(', ')}` : '';
         fileDetails.push({
           name: 'required columns',
           column: missingCols.join(', '),
           desc: 'all mandatory columns present',
-          status: missingCount > 0 ? 'Failed' : 'Passed'
+          status: missingCount > 0 ? 'Failed' : 'Passed',
+          errorMessage: missingErrorMsg
         });
         units.forEach((u: any) => {
           let desc = '';
@@ -770,32 +1218,58 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           if (u.validation_type === 'in_list') desc = `allowed: ${u.value?.join(', ')}`;
 
           let failed = false;
+          let errorMessage = '';
+          
           if (u.validation_type === 'datatype') {
             const col = u.column.toLowerCase();
-            failed =
-              errors.some((e: string) =>
-                e.toLowerCase().includes(`column '${col}'`)
-              ) ||
-              (fileRes.auto_corrections || []).some((c: string) =>
-                c.toLowerCase().includes(`column '${col}'`)
-              );
+            const datatypeError = errors.find((e: string) =>
+              e.toLowerCase().includes(`column '${col}'`)
+            );
+            const datatypeCorrection = (fileRes.auto_corrections || []).find((c: string) =>
+              c.toLowerCase().includes(`column '${col}'`)
+            );
+            failed = !!datatypeError || !!datatypeCorrection;
+            if (failed) {
+              errorMessage = datatypeError || datatypeCorrection || `Column '${u.column}' type mismatch`;
+            }
           } else if (u.validation_type === 'periodicity') {
-            failed = failures.some((f: any) => f.column === u.column && f.operator === 'date_frequency');
+            const periodicityFailure = failures.find((f: any) => f.column === u.column && f.operator === 'date_frequency');
+            failed = !!periodicityFailure;
+            if (failed && periodicityFailure) {
+              errorMessage = periodicityFailure.error_message || `Date frequency validation failed for column '${u.column}' (${periodicityFailure.failed_count} rows failed)`;
+            }
           } else if (u.validation_type === 'range') {
-            failed = failures.some((f: any) => f.column === u.column && f.operator !== 'date_frequency');
+            const rangeFailure = failures.find((f: any) => f.column === u.column && f.operator !== 'date_frequency');
+            failed = !!rangeFailure;
+            if (failed && rangeFailure) {
+              errorMessage = rangeFailure.error_message || `Range validation failed for column '${u.column}' (${rangeFailure.failed_count} rows failed, expected: ${rangeFailure.operator} ${rangeFailure.expected_value})`;
+            }
           } else if (u.validation_type === 'regex') {
-            failed = failures.some((f: any) => f.column === u.column && f.operator === 'regex_match');
+            const regexFailure = failures.find((f: any) => f.column === u.column && f.operator === 'regex_match');
+            failed = !!regexFailure;
+            if (failed && regexFailure) {
+              errorMessage = regexFailure.error_message || `Regex validation failed for column '${u.column}' (${regexFailure.failed_count} rows failed)`;
+            }
           } else if (u.validation_type === 'null_percentage') {
-            failed = failures.some((f: any) => f.column === u.column && f.operator === 'null_percentage');
+            const nullFailure = failures.find((f: any) => f.column === u.column && f.operator === 'null_percentage');
+            failed = !!nullFailure;
+            if (failed && nullFailure) {
+              errorMessage = nullFailure.error_message || `Null percentage validation failed for column '${u.column}' (${nullFailure.failed_count} rows failed, threshold: ${nullFailure.expected_value}%)`;
+            }
           } else if (u.validation_type === 'in_list') {
-            failed = failures.some((f: any) => f.column === u.column && f.operator === 'in_list');
+            const inListFailure = failures.find((f: any) => f.column === u.column && f.operator === 'in_list');
+            failed = !!inListFailure;
+            if (failed && inListFailure) {
+              errorMessage = inListFailure.error_message || `In-list validation failed for column '${u.column}' (${inListFailure.failed_count} rows failed, allowed values: ${Array.isArray(inListFailure.expected_value) ? inListFailure.expected_value.join(', ') : inListFailure.expected_value})`;
+            }
           }
 
           fileDetails.push({
             name: u.validation_type,
             column: u.column,
             desc,
-            status: failed ? 'Failed' : 'Passed'
+            status: failed ? 'Failed' : 'Passed',
+            errorMessage: failed ? errorMessage : undefined
           });
         });
         fileDetails.sort((a, b) => (a.status === 'Failed' && b.status !== 'Failed' ? -1 : b.status === 'Failed' && a.status !== 'Failed' ? 1 : 0));
@@ -807,8 +1281,250 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
 
       setValidationResults(results);
       setValidationDetails(details);
+      
+      // Save validation data to atom settings when validation steps are enabled
+      if (settings.bypassMasterUpload) {
+        const validatedFileNames = filesToValidate.map(f => f.name);
+        updateSettings(atomId, {
+          validationResults: results,
+          validationDetails: details,
+          validatedFiles: validatedFileNames,
+        });
+      }
+      
       logSessionState(user?.id);
-      toast({ title: 'Validation completed successfully' });
+      
+      // Check if all files passed validation
+      const allFilesPassed = Object.values(results).every(result => result.includes('Success'));
+      
+      // Use the files that were validated
+      const validatedFilesForSave = filesToValidate;
+      
+      // Create a save function that uses only validated files
+      // This will be called regardless of validation success/failure to save dtype mapping changes
+      const saveValidatedFiles = async () => {
+          if (!settings.validatorId && settings.bypassMasterUpload) return;
+          
+          // Apply data transformations if any dtype changes were made during validation
+          const currentChanges = dataChangesRef.current;
+          const hasChanges = Object.keys(currentChanges.dtypeChanges).length > 0 || 
+                            Object.keys(currentChanges.missingValueStrategies).length > 0;
+          
+          if (hasChanges) {
+            console.log('🔧 Applying data transformations before auto-save...');
+            const filesWithChangesApplied: string[] = [];
+            
+            for (const file of validatedFilesForSave) {
+              // Use saved MinIO path if available, otherwise use temporary path
+              let filePath = settings.filePathMap?.[file.name];
+              
+              if (filePath && !filePath.includes('/tmp/')) {
+                // Use saved path
+              } else if (file.path && !file.path.includes('/tmp/')) {
+                filePath = file.path;
+              } else {
+                filePath = file.path;
+              }
+              
+              const fileChanges = {
+                file_path: filePath,
+                dtype_changes: currentChanges.dtypeChanges[file.name] || {},
+                missing_value_strategies: currentChanges.missingValueStrategies[file.name] || {},
+              };
+              
+              // Only apply if there are actual changes for this file
+              if (Object.keys(fileChanges.dtype_changes).length > 0 || 
+                  Object.keys(fileChanges.missing_value_strategies).length > 0) {
+                try {
+                  const response = await fetch(`${VALIDATE_API}/apply-data-transformations`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(fileChanges),
+                    credentials: 'include',
+                  });
+                  
+                  if (response.ok) {
+                    console.log(`✅ Transformations applied to ${file.name}`);
+                    filesWithChangesApplied.push(file.name);
+                  } else {
+                    const error = await response.json();
+                    toast({
+                      title: `Failed to apply changes to ${file.name}`,
+                      description: error.detail || 'An error occurred',
+                      variant: 'destructive',
+                    });
+                    return; // Stop saving if transformation fails
+                  }
+                } catch (error) {
+                  toast({
+                    title: `Error transforming ${file.name}`,
+                    description: 'Failed to apply data transformations',
+                    variant: 'destructive',
+                  });
+                  return; // Stop saving if transformation fails
+                }
+              }
+            }
+            
+            // Mark files as having changes applied
+            if (filesWithChangesApplied.length > 0) {
+              const newFilesWithAppliedChanges = Array.from(new Set([
+                ...(settings.filesWithAppliedChanges || []),
+                ...filesWithChangesApplied
+              ]));
+              
+              updateSettings(atomId, {
+                filesWithAppliedChanges: newFilesWithAppliedChanges,
+              });
+            }
+          }
+          
+          const form = new FormData();
+          const vidSave = settings.validatorId || 'bypass_upload';
+          form.append('validator_atom_id', vidSave);
+          
+          // Use saved MinIO paths if available, otherwise use temporary paths
+          const paths = validatedFilesForSave.map(f => {
+            const savedPath = settings.filePathMap?.[f.name];
+            if (savedPath && !savedPath.includes('/tmp/')) {
+              return savedPath;
+            }
+            return f.path;
+          });
+          form.append('file_paths', JSON.stringify(paths));
+          
+          // Generate keys ensuring uniqueness (same logic as handleValidateFiles)
+          const initialKeys = validatedFilesForSave.map(f => {
+            const assigned = fileAssignments[f.name] || '';
+            return settings.fileKeyMap?.[assigned] || assigned || f.name;
+          });
+          
+          const sanitizeKey = (name: string): string => {
+            return name.replace(/[^A-Za-z0-9_.-]/g, '_').replace(/^\.+|\.+$/g, '');
+          };
+          
+          const keyCount = new Map<string, number>();
+          initialKeys.forEach(key => {
+            keyCount.set(key, (keyCount.get(key) || 0) + 1);
+          });
+          
+          const saveKeys = validatedFilesForSave.map((f, idx) => {
+            const initialKey = initialKeys[idx];
+            if ((keyCount.get(initialKey) || 0) > 1) {
+              if (initialKey && initialKey.trim()) {
+                return `${initialKey}_${idx}`;
+              }
+              const sanitized = sanitizeKey(f.name);
+              return sanitized || `file_${idx}`;
+            }
+            if (!initialKey || !initialKey.trim()) {
+              const sanitized = sanitizeKey(f.name);
+              return sanitized || `file_${idx}`;
+            }
+            return initialKey;
+          });
+          
+          form.append('file_keys', JSON.stringify(saveKeys));
+          form.append('overwrite', 'true');
+          
+          // Include workbook_paths and sheet_metadata if available
+          const workbookPathsPayload: string[] = [];
+          const sheetMetadataPayload: Array<{ sheet_names: string[]; selected_sheet: string; original_filename: string }> = [];
+          
+          validatedFilesForSave.forEach((file) => {
+            const workbookPath = workbookPathMap[file.name];
+            const sheetMetadata = sheetMetadataMap[file.name];
+            
+            if (workbookPath) {
+              workbookPathsPayload.push(workbookPath);
+              if (sheetMetadata) {
+                sheetMetadataPayload.push(sheetMetadata);
+              } else {
+                sheetMetadataPayload.push({
+                  sheet_names: [],
+                  selected_sheet: '',
+                  original_filename: file.name,
+                });
+              }
+            }
+          });
+          
+          if (workbookPathsPayload.length > 0) {
+            form.append('workbook_paths', JSON.stringify(workbookPathsPayload));
+          }
+          if (sheetMetadataPayload.length > 0) {
+            form.append('sheet_metadata', JSON.stringify(sheetMetadataPayload));
+          }
+          
+          const envStr = localStorage.getItem('env');
+          if (envStr) {
+            try {
+              const env = JSON.parse(envStr);
+              form.append('client_id', env.CLIENT_ID || '');
+              form.append('app_id', env.APP_ID || '');
+              form.append('project_id', env.PROJECT_ID || '');
+              form.append('client_name', env.CLIENT_NAME || '');
+              form.append('app_name', env.APP_NAME || '');
+              form.append('project_name', env.PROJECT_NAME || '');
+            } catch {
+              /* ignore */
+            }
+          }
+          if (user?.id) form.append('user_id', String(user.id));
+          if (user?.username) form.append('user_name', user.username);
+          
+          try {
+            const saveRes = await fetch(`${VALIDATE_API}/save_dataframes`, {
+              method: 'POST',
+              body: form,
+              credentials: 'include'
+            });
+            
+            if (saveRes.ok) {
+              const saveData = await saveRes.json();
+              const fileResults = Array.isArray(saveData.minio_uploads) ? saveData.minio_uploads : [];
+              
+              const savedPaths: Record<string, string> = {};
+              fileResults.forEach((r: any, idx: number) => {
+                const name = validatedFilesForSave[idx]?.name;
+                if (name && r?.minio_upload?.object_name) {
+                  savedPaths[name] = r.minio_upload.object_name;
+                }
+              });
+              
+              if (Object.keys(savedPaths).length > 0) {
+                updateSettings(atomId, {
+                  filePathMap: { ...(settings.filePathMap || {}), ...savedPaths },
+                });
+              }
+              
+              toast({ title: 'Dataframes saved successfully after validation' });
+            } else {
+              const err = await saveRes.text();
+              console.error('Auto-save after validation failed', saveRes.status, err);
+            }
+          } catch (saveError) {
+            console.error('Error auto-saving after validation:', saveError);
+          }
+        };
+      
+      // Always trigger save to preserve dtype mapping changes, regardless of validation result
+      if (allFilesPassed) {
+        toast({ title: 'Validation completed successfully - Auto-saving dataframes...' });
+      } else {
+        toast({ title: 'Validation completed with failures - Auto-saving dataframes to preserve dtype changes...' });
+      }
+      
+      // Trigger save for validated files (even if validation failed, to save dtype changes)
+      await saveValidatedFiles();
+      
+      // Refresh saved dataframes list after save completes to update the dropdown
+      if (settings.bypassMasterUpload) {
+        // Use a small delay to ensure backend has processed the save, then trigger refresh
+        setTimeout(() => {
+          setRefreshTrigger(prev => prev + 1);
+        }, 500);
+      }
     } catch (error: any) {
       toast({
         title: 'Failed to validate files',
@@ -1368,11 +2084,44 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     
     form.append('file_keys', JSON.stringify(keys));
     form.append('overwrite', 'true'); // Always allow overwrite
+    
+    // Include workbook_paths and sheet_metadata if available
+    const workbookPathsPayload: string[] = [];
+    const sheetMetadataPayload: Array<{ sheet_names: string[]; selected_sheet: string; original_filename: string }> = [];
+    
+    uploadedFiles.forEach((file, idx) => {
+      const workbookPath = workbookPathMap[file.name];
+      const sheetMetadata = sheetMetadataMap[file.name];
+      
+      if (workbookPath) {
+        workbookPathsPayload.push(workbookPath);
+        if (sheetMetadata) {
+          sheetMetadataPayload.push(sheetMetadata);
+        } else {
+          // If we have workbook path but no metadata, create default metadata
+          sheetMetadataPayload.push({
+            sheet_names: [],
+            selected_sheet: '',
+            original_filename: file.name,
+          });
+        }
+      }
+    });
+    
+    if (workbookPathsPayload.length > 0) {
+      form.append('workbook_paths', JSON.stringify(workbookPathsPayload));
+    }
+    if (sheetMetadataPayload.length > 0) {
+      form.append('sheet_metadata', JSON.stringify(sheetMetadataPayload));
+    }
+    
     console.log('Saving dataframes', {
       validator_atom_id: vidSave,
       file_paths: paths,
       file_keys: keys,
       overwrite: true,
+      workbook_paths: workbookPathsPayload,
+      sheet_metadata: sheetMetadataPayload,
     });
     
     const savePromise = fetch(`${VALIDATE_API}/save_dataframes`, {
@@ -1621,6 +2370,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
                 savedDataframes={savedDataframes}
                 isLoadingSavedDataframes={isLoadingSavedDataframes}
                 onSelectSavedDataframe={handleSelectSavedDataframe}
+                filesFromSavedDataframes={filesFromSavedDataframes}
+                onRefreshSavedDataframes={refreshSavedDataframes}
               />
               </div>
 
@@ -1763,6 +2514,56 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         </div>
       </div>
       
+      {isUploadModalOpen && pendingUploadFile && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-96 max-w-[90vw] p-4">
+            <h4 className="text-lg font-semibold text-gray-900 mb-2">Upload DataFrame</h4>
+            <p className="text-sm text-gray-600 truncate">{pendingUploadFile.sanitizedFileName || 'No file selected'}</p>
+            {uploadError && <p className="text-xs text-red-500 mt-2">{uploadError}</p>}
+            {uploadSheetOptions.length > 0 ? (
+              <div className="mt-4">
+                <Label className="text-xs text-gray-600 mb-1 block">Select worksheet</Label>
+                <Select value={uploadSelectedSheet} onValueChange={setUploadSelectedSheet}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select sheet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {uploadSheetOptions.map(sheet => (
+                      <SelectItem key={sheet} value={sheet}>
+                        {sheet}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="mt-4 text-sm text-gray-600">
+                {uploadingFile ? 'Processing file…' : 'Preparing upload…'}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleUploadSheetCancel}
+                disabled={uploadingFile}
+              >
+                Cancel
+              </Button>
+              {uploadSheetOptions.length > 0 && (
+                <Button
+                  size="sm"
+                  onClick={handleUploadSheetConfirm}
+                  disabled={uploadingFile || !uploadSelectedSheet}
+                >
+                  Upload Sheet
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

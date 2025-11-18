@@ -826,9 +826,10 @@ async def create_multi_filtered_scope(
         scopes_collection = scope_db[settings.mongo_scopes_collection]
         
         # base_scope lookup disabled – use a minimal placeholder
+        # time_column is now optional and will be detected dynamically if needed
         base_scope = {
             "validator_id": "scopedata",
-            "time_column": "date"
+            "time_column": None  # Will be detected dynamically from DataFrame if date filtering is used
         }  # scopes_collection.find_one({"scope_id": scope_id})
         if not base_scope:
             raise HTTPException(status_code=404, detail=f"Base scope '{scope_id}' not found")
@@ -904,14 +905,37 @@ async def create_multi_filtered_scope(
         any_time_filter = any(fs['has_time_filter'] for fs in filter_sets)
         
         # Handle time column setup if needed
-        time_column = base_scope.get("time_column")
         actual_time_column = None
         
         if any_time_filter:
+            # Dynamically detect date column from DataFrame instead of using hardcoded "date"
+            time_column = None
+            
+            # Priority 1: Try to get from base_scope if available
+            if base_scope and base_scope.get("time_column"):
+                time_column = base_scope.get("time_column")
+            
+            # Priority 2: Detect date column from DataFrame
+            if not time_column:
+                # Look for exact "date" match (case-insensitive)
+                df_columns_lower = [col.lower() for col in df.columns]
+                if 'date' in df_columns_lower:
+                    time_column = df.columns[df_columns_lower.index('date')]
+                else:
+                    # Look for datetime columns
+                    datetime_cols = [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])]
+                    if datetime_cols:
+                        time_column = datetime_cols[0]
+                    else:
+                        # Look for columns with "date" in the name
+                        date_like_cols = [col for col in df.columns if "date" in str(col).lower()]
+                        if date_like_cols:
+                            time_column = date_like_cols[0]
+            
             if not time_column:
                 raise HTTPException(
                     status_code=400, 
-                    detail="Base scope must have time_column defined for date-based filtering"
+                    detail="No date column found in data. Date filtering requires a date/datetime column."
                 )
             
             # Case-insensitive time column validation

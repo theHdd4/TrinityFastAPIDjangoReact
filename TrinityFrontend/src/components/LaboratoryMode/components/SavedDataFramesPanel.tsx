@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw } from 'lucide-react';
+import { Database, ChevronRight, ChevronDown, ChevronUp, Trash2, Pencil, Loader2, ChevronLeft, Download, Copy, Share2, Upload, Layers, SlidersHorizontal, RefreshCw, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { VALIDATE_API, SESSION_API, CLASSIFIER_API, SHARE_LINKS_API } from '@/lib/api';
+import { waitForTaskResult } from '@/lib/taskQueue';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   DropdownMenu,
@@ -556,11 +557,12 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       body: form,
         credentials: 'include'
       });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data) {
-        const detail = data?.detail || (typeof data === 'string' ? data : '');
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload) {
+        const detail = payload?.detail || (typeof payload === 'string' ? payload : '');
         throw new Error(detail || 'Upload failed');
       }
+      const data = await waitForTaskResult(payload);
       setTempUploadMeta({
         file_path: data.file_path,
         file_name: data.file_name || sanitizedFileName,
@@ -1564,7 +1566,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         <div
           key={node.path}
           style={{ marginLeft: level * 12 }}
-          className="flex items-center justify-between border p-2 rounded hover:bg-gray-50 mt-1"
+          className="flex items-center justify-between border p-2 rounded hover:bg-gray-50 mt-1 overflow-hidden"
         >
           {renameTarget === f.object_name ? (
             <Input
@@ -1577,18 +1579,21 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   commitRename(f.object_name);
                 }
               }}
-              className="h-6 text-xs flex-1 mr-2"
+              className="h-6 text-xs flex-1 mr-2 min-w-0"
             />
           ) : (
-            <button
-              onClick={() => handleOpen(f.object_name)}
-              onContextMenu={(e) => handleContextMenu(e, f)}
-              className="text-sm text-blue-600 hover:underline flex-1 text-left"
-            >
-              {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
-            </button>
+            <div className="flex-1 min-w-0 mr-2">
+              <button
+                onClick={() => handleOpen(f.object_name)}
+                onContextMenu={(e) => handleContextMenu(e, f)}
+                className="text-sm text-blue-600 hover:underline text-left w-full truncate overflow-hidden text-ellipsis whitespace-nowrap"
+                title={f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+              >
+                {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+              </button>
+            </div>
           )}
-          <div className="flex items-center space-x-2 ml-2">
+          <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
             <button
               type="button"
               title="For Classificaition"
@@ -2352,7 +2357,15 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                             return (
                               <tr key={`process-${col.name}-${idx}`}>
                                 <td className="px-3 py-2 align-top">
-                                  <p className="font-medium text-xs text-gray-900">{col.name}</p>
+                                  <div>
+                                    <p className="font-medium text-xs text-gray-900">{col.name}</p>
+                                    {col.sampleValues && col.sampleValues.length > 0 && (
+                                      <p className="text-xs text-gray-500 mt-0.5">
+                                        {col.sampleValues.slice(0, 5).join(', ')}
+                                        {col.sampleValues.length > 5 && '...'}
+                                      </p>
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="px-3 py-2 align-top">
                                   <Input
@@ -2388,35 +2401,49 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                     </Select>
                                     {col.selectedDtype === 'datetime64' && (
                                       <div className="space-y-1">
-                                        <Select
-                                          value={col.datetimeFormat || ''}
-                                          onValueChange={value => updateProcessingColumn(idx, { datetimeFormat: value })}
-                                          disabled={inputsDisabled || (!!col.datetimeFormat && !col.formatFailed)}
-                                        >
-                                          <SelectTrigger className="w-full h-7 text-xs">
-                                            <SelectValue placeholder="Select format" />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {[
-                                              { value: '%Y-%m-%d', label: '%Y-%m-%d (2024-12-31)' },
-                                              { value: '%d/%m/%Y', label: '%d/%m/%Y (31/12/2024)' },
-                                              { value: '%m/%d/%Y', label: '%m/%d/%Y (12/31/2024)' },
-                                              { value: '%d-%m-%Y', label: '%d-%m-%Y (31-12-2024)' },
-                                              { value: '%m-%d-%Y', label: '%m-%d-%Y (12-31-2024)' },
-                                              { value: '%Y/%m/%d', label: '%Y/%m/%d (2024/12/31)' },
-                                              { value: '%d/%m/%y', label: '%d/%m/%y (31/12/24)' },
-                                              { value: '%m/%d/%y', label: '%m/%d/%y (12/31/24)' },
-                                              { value: '%Y-%m-%d %H:%M:%S', label: '%Y-%m-%d %H:%M:%S (2024-12-31 23:59:59)' },
-                                              { value: '%d/%m/%Y %H:%M:%S', label: '%d/%m/%Y %H:%M:%S (31/12/2024 23:59:59)' },
-                                              { value: '%m/%d/%Y %H:%M:%S', label: '%m/%d/%Y %H:%M:%S (12/31/2024 23:59:59)' },
-                                              { value: '%Y-%m-%dT%H:%M:%S', label: '%Y-%m-%dT%H:%M:%S (ISO 8601)' },
-                                            ].map(opt => (
-                                              <SelectItem key={`dt-format-${opt.value}`} value={opt.value}>
-                                                {opt.label}
-                                              </SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
+                                        <div className="flex items-center space-x-1">
+                                          <Select
+                                            value={col.datetimeFormat || ''}
+                                            onValueChange={value => updateProcessingColumn(idx, { datetimeFormat: value })}
+                                            disabled={inputsDisabled || (!!col.datetimeFormat && !col.formatFailed)}
+                                            className="flex-1"
+                                          >
+                                            <SelectTrigger className="w-full h-7 text-xs">
+                                              <SelectValue placeholder="Select format" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                              {[
+                                                { value: '%Y-%m-%d', label: '%Y-%m-%d (2024-12-31)' },
+                                                { value: '%d/%m/%Y', label: '%d/%m/%Y (31/12/2024)' },
+                                                { value: '%m/%d/%Y', label: '%m/%d/%Y (12/31/2024)' },
+                                                { value: '%d-%m-%Y', label: '%d-%m-%Y (31-12-2024)' },
+                                                { value: '%m-%d-%Y', label: '%m-%d-%Y (12-31-2024)' },
+                                                { value: '%Y/%m/%d', label: '%Y/%m/%d (2024/12/31)' },
+                                                { value: '%d/%m/%y', label: '%d/%m/%y (31/12/24)' },
+                                                { value: '%m/%d/%y', label: '%m/%d/%y (12/31/24)' },
+                                                { value: '%Y-%m-%d %H:%M:%S', label: '%Y-%m-%d %H:%M:%S (2024-12-31 23:59:59)' },
+                                                { value: '%d/%m/%Y %H:%M:%S', label: '%d/%m/%Y %H:%M:%S (31/12/2024 23:59:59)' },
+                                                { value: '%m/%d/%Y %H:%M:%S', label: '%m/%d/%Y %H:%M:%S (12/31/2024 23:59:59)' },
+                                                { value: '%Y-%m-%dT%H:%M:%S', label: '%Y-%m-%dT%H:%M:%S (ISO 8601)' },
+                                              ].map(opt => (
+                                                <SelectItem key={`dt-format-${opt.value}`} value={opt.value}>
+                                                  {opt.label}
+                                                </SelectItem>
+                                              ))}
+                                            </SelectContent>
+                                          </Select>
+                                          {col.datetimeFormat && !col.formatDetecting && (
+                                            <button
+                                              type="button"
+                                              onClick={() => updateProcessingColumn(idx, { datetimeFormat: '' })}
+                                              className="flex-shrink-0 p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 transition-colors"
+                                              title="Clear format"
+                                              disabled={inputsDisabled}
+                                            >
+                                              <X className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
                                         {col.formatDetecting && (
                                           <div className="text-xs text-blue-600 flex items-center gap-1">
                                             <RefreshCw className="w-3 h-3 animate-spin" />
