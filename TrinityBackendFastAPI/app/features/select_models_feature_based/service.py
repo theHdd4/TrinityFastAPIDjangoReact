@@ -1167,20 +1167,21 @@ def _calculate_curves_from_coefficients(request: CurveRequestPayload) -> Dict[st
 
 def calculate_yoy(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = CurveRequestPayload(**payload)
+    actual_series: List[float] = []
+    predicted_series: List[float] = []
+    dates: List[str] = []
+
     try:
         models = _models_for_file(request.file_key, request.combination_name)
         record = next((model for model in models if model.model_name == request.model_name), None)
-        if record is None:
-            raise ValueError("Requested model not found")
-        if not record.series.actual or not record.series.predicted:
-            raise ModelDataUnavailableError(
-                f"Series data unavailable for model '{request.model_name}'"
-            )
-
-        actual_series = record.series.actual
-        predicted_series = record.series.predicted
-        dates = list(record.series.dates)
+        if record:
+            actual_series = list(record.series.actual or [])
+            predicted_series = list(record.series.predicted or [])
+            dates = list(record.series.dates)
     except Exception:
+        pass
+
+    if not actual_series or not predicted_series:
         fallback = _calculate_curves_from_coefficients(request)
         actual_series = fallback["actual_values"]
         predicted_series = fallback["predicted_values"]
