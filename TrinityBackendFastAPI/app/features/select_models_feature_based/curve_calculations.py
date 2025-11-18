@@ -51,15 +51,86 @@ def _extract_row(
     return filtered.iloc[0], column_lookup
 
 
-def _extract_betas(row: pd.Series) -> Dict[str, float]:
+def _parse_mapping(value: Any) -> Dict[str, float]:
+    parsed: Dict[str, float] = {}
+    if isinstance(value, dict):
+        source = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return parsed
+        try:
+            maybe = json.loads(text)
+            if isinstance(maybe, dict):
+                source = maybe
+            else:
+                source = {
+                    part.split(":", 1)[0].strip(): part.split(":", 1)[1].strip()
+                    for part in text.split(",")
+                    if ":" in part
+                }
+        except json.JSONDecodeError:
+            source = {
+                part.split(":", 1)[0].strip(): part.split(":", 1)[1].strip()
+                for part in text.split(",")
+                if ":" in part
+            }
+    else:
+        return parsed
+
+    for key, raw in source.items():
+        if key is None:
+            continue
+        try:
+            number = float(raw)
+        except (TypeError, ValueError):
+            continue
+        parsed[str(key).strip().lower()] = number
+    return parsed
+
+
+def _extract_betas(row: pd.Series, lookup: Dict[str, str]) -> Dict[str, float]:
     betas: Dict[str, float] = {}
     for col in row.index:
         name = str(col)
-        if name.lower().endswith("_beta"):
-            value = row[col]
-            if pd.notna(value):
-                betas[name[: -len("_beta")]] = float(value)
+        lower = name.lower()
+        value = row[col]
+        if pd.isna(value):
+            continue
+        if lower.endswith("_beta"):
+            variable = name[: -len("_beta")]
+        elif lower.startswith("beta_"):
+            variable = name[len("beta_") :]
+        elif lower.startswith("weighted_beta_"):
+            variable = name[len("weighted_beta_") :]
+        else:
+            continue
+        variable = variable.strip().lower()
+        if variable:
+            betas[variable] = float(value)
+
+    if betas:
+        return betas
+
+    # Fallback: try variable_impacts / coefficients style mappings
+    for key in ("variable_impacts", "coefficients"):
+        column = lookup.get(key)
+        if column and column in row:
+            mapping = _parse_mapping(row[column])
+            if mapping:
+                return mapping
     return betas
+
+
+def _extract_intercept(row: pd.Series, lookup: Dict[str, str]) -> float:
+    for key in ("intercept", "beta_intercept", "b0", "weighted_b0", "b0 (original)"):
+        column = lookup.get(key)
+        if column and column in row and pd.notna(row[column]):
+            try:
+                return float(row[column])
+            except (TypeError, ValueError):
+                continue
+    return 0.0
 
 
 def _transformation_metadata(row: pd.Series, lookup: Dict[str, str]) -> Dict[str, Any]:
@@ -164,15 +235,19 @@ def _build_prediction_series(
     transformation_metadata: Dict[str, Any],
 ) -> List[float]:
     predictions: List[float] = []
-    has_transformations = bool(transformation_metadata)
+    normalised_transforms = (
+        {str(key).lower(): value for key, value in transformation_metadata.items()}
+        if isinstance(transformation_metadata, dict)
+        else {}
+    )
 
     for _, row in df.iterrows():
         pred = intercept
         for variable, beta in betas.items():
             if variable in df.columns:
                 value = row[variable]
-                if has_transformations and variable in transformation_metadata:
-                    value = _apply_transform(value, transformation_metadata[variable])
+                if variable in normalised_transforms:
+                    value = _apply_transform(value, normalised_transforms[variable])
                 if pd.notna(value):
                     pred += beta * float(value)
         predictions.append(float(pred))
@@ -194,10 +269,10 @@ def actual_vs_predicted_from_source(
     results_df.columns = results_df.columns.str.lower()
 
     row, lookup = _extract_row(results_df, combination_id, model_name)
-    betas = _extract_betas(row)
+    betas = _extract_betas(row, lookup)
     if not betas:
         raise ValueError("No beta coefficients found for the requested model")
-    intercept = float(row[lookup.get("intercept", "intercept")] or 0.0)
+    intercept = _extract_intercept(row, lookup)
     transformation_meta = _transformation_metadata(row, lookup)
 
     source_key = _source_file_key(row, lookup)
@@ -273,10 +348,10 @@ def yoy_growth_from_source(
     results_df.columns = results_df.columns.str.lower()
 
     row, lookup = _extract_row(results_df, combination_id, model_name)
-    betas = _extract_betas(row)
+    betas = _extract_betas(row, lookup)
     if not betas:
         raise ValueError("No beta coefficients found for the requested model")
-    intercept = float(row[lookup.get("intercept", "intercept")] or 0.0)
+    intercept = _extract_intercept(row, lookup)
     transformation_meta = _transformation_metadata(row, lookup)
 
     source_key = _source_file_key(row, lookup)
@@ -308,16 +383,21 @@ def yoy_growth_from_source(
 
     explained_delta = 0.0
     contributions: List[Dict[str, Any]] = []
-    has_transformations = bool(transformation_meta)
+    normalised_transforms = (
+        {str(key).lower(): value for key, value in transformation_meta.items()}
+        if isinstance(transformation_meta, dict)
+        else {}
+    )
+
     for variable, beta in betas.items():
         if variable not in df.columns:
             continue
         first_mean = df_first[variable].mean()
         last_mean = df_last[variable].mean()
 
-        if has_transformations and variable in transformation_meta:
-            first_mean = _apply_transform(first_mean, transformation_meta[variable])
-            last_mean = _apply_transform(last_mean, transformation_meta[variable])
+        if variable in normalised_transforms:
+            first_mean = _apply_transform(first_mean, normalised_transforms[variable])
+            last_mean = _apply_transform(last_mean, normalised_transforms[variable])
 
         delta = float(last_mean - first_mean)
         contribution = float(beta * delta)
