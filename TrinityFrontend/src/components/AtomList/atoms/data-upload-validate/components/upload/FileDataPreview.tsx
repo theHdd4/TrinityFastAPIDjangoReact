@@ -579,11 +579,11 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
           <Card key={file.name} className="border border-blue-100 hover:border-blue-300 transition-all duration-200 overflow-hidden relative">
             <Collapsible open={useMasterFile ? isOpen : false} onOpenChange={useMasterFile ? () => toggleFile(file.name) : undefined}>
               <div className="relative">
-                {useMasterFile && (
+                {onDeleteFile && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDeleteFile?.(file.name);
+                      onDeleteFile(file.name);
                     }}
                     className="absolute top-2 right-2 z-10 p-1 rounded-md hover:bg-red-50 transition-colors group"
                     title="Delete file"

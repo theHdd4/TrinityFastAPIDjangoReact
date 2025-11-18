@@ -711,20 +711,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         });
         return data.detected_format;
       }
-      updateProcessingColumn(index, { formatDetecting: false, formatFailed: true });
-      toast({
-        title: 'Format Detection Failed',
-        description: data?.detail || 'Unable to detect datetime format. Please select manually.',
-        variant: 'destructive',
-      });
+      // Format detection failed - silently enable dropdown (no error message)
+      // Don't show toast or set failed status
+      updateProcessingColumn(index, { formatDetecting: false, formatFailed: false });
       return null;
     } catch (err) {
-      updateProcessingColumn(index, { formatDetecting: false, formatFailed: true });
-      toast({
-        title: 'Detection Error',
-        description: 'Failed to contact detection service',
-        variant: 'destructive',
-      });
+      // Silently fail - don't show error toast
+      updateProcessingColumn(index, { formatDetecting: false, formatFailed: false });
       return null;
     }
   };
