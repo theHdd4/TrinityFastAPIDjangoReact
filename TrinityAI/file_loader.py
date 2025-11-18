@@ -77,36 +77,34 @@ class FileLoader:
             objects = self.minio_client.list_objects(self.minio_bucket, prefix=self.object_prefix, recursive=True)
             
             files_with_columns = {}
+            supported_extensions = (".arrow", ".parquet", ".feather", ".csv")
             
             for obj in objects:
-                # Only load .arrow files like explore agent (for consistency with SavedDataFramesPanel)
-                if not obj.object_name.endswith('.arrow'):
+                # Only load supported file types
+                if not obj.object_name.lower().endswith(supported_extensions):
                     continue
                     
+                response = None
                 try:
                     # Get object data
                     response = self.minio_client.get_object(self.minio_bucket, obj.object_name)
                     data = response.read()
-                    
-                    # Read Arrow file exactly like explore agent
-                    import pyarrow as pa
-                    import pyarrow.ipc as ipc
-                    
-                    with pa.ipc.open_file(pa.BufferReader(data)) as reader:
-                        table = reader.read_all()
-                        columns = table.column_names
+                    columns = self._extract_columns(data, obj.object_name)
+
+                    if columns:
                         files_with_columns[obj.object_name] = {
                             "columns": columns,
                             "file_name": os.path.basename(obj.object_name)
                         }
-                        
-                        # logger.info(f"Loaded file {obj.object_name} with {len(columns)} columns")
+                        logger.debug(f"Loaded file {obj.object_name} with {len(columns)} columns")
+                    else:
+                        logger.warning(f"Could not determine columns for {obj.object_name}")
                     
                 except Exception as e:
                     logger.warning(f"Failed to load file {obj.object_name}: {e}")
                     continue
                 finally:
-                    if 'response' in locals():
+                    if response:
                         response.close()
                         response.release_conn()
             

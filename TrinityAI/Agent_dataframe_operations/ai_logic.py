@@ -26,7 +26,14 @@ except ImportError as e:
 # See: rag/api_endpoints.json and rag/operation_examples.json
 # This makes the AI logic cleaner and easier to maintain
 
-def build_dataframe_operations_prompt(user_prompt: str, available_files_with_columns: dict, context: str, current_df_state: dict = None) -> str:
+def build_dataframe_operations_prompt(
+    user_prompt: str,
+    available_files_with_columns: dict,
+    context: str,
+    current_df_state: dict = None,
+    file_details: Optional[Dict[str, Any]] = None,
+    other_files: Optional[List[str]] = None,
+) -> str:
     """
     Build a concise prompt for the LLM to generate DataFrame operations configurations.
     Optimized for better LLM comprehension with minimal verbosity.
@@ -40,21 +47,45 @@ def build_dataframe_operations_prompt(user_prompt: str, available_files_with_col
         for file_name, file_data in available_files_with_columns.items():
             if isinstance(file_data, dict):
                 columns = file_data.get('columns', [])
+                display_name = file_data.get('display_name') or file_name.split('/')[-1] if isinstance(file_name, str) else file_name
             elif isinstance(file_data, list):
                 columns = file_data
+                display_name = file_name.split('/')[-1] if isinstance(file_name, str) and '/' in file_name else file_name
             else:
                 columns = []
-            display_name = file_name.split('/')[-1] if '/' in file_name else file_name
-            file_list.append(f"{display_name} ({len(columns)} cols)")
+                display_name = file_name
+            file_list.append(f"{display_name} → {file_name} ({len(columns)} cols)")
     file_summary = ", ".join(file_list[:5])  # Only show first 5 files
     if len(file_list) > 5:
         file_summary += f" + {len(file_list) - 5} more"
+
+    # 🔧 OPTIMIZATION: Only include file details if comprehensive details are available
+    # If file_details contains comprehensive info, skip redundant file listings
+    file_details_json = "None"
+    if file_details and isinstance(file_details, dict):
+        # Check if this is comprehensive file details (has file_id, columns, etc.)
+        if "file_id" in file_details or "columns" in file_details:
+            # This is comprehensive details - use it, but don't duplicate file listings
+            file_details_json = json.dumps(file_details, indent=2)
+            # Skip the redundant FILES DETAIL section if we have comprehensive details
+            files_detail_section = ""  # Empty to reduce duplication
+        else:
+            file_details_json = json.dumps(file_details, indent=2)
+            files_detail_section = f"FILES DETAIL: {json.dumps(available_files_with_columns, indent=2)}\n"
+    else:
+        files_detail_section = f"FILES DETAIL: {json.dumps(available_files_with_columns, indent=2)}\n"
+    
+    # Only include other_files if no comprehensive details (to reduce size)
+    other_files_summary = ""
+    if not file_details_json or file_details_json == "None":
+        other_files_summary = f"OTHER AVAILABLE FILES (REFERENCE ONLY): {', '.join(other_files) if other_files else 'None'}\n"
     
     prompt = f"""You are a DataFrame operations assistant. Generate JSON configs for data manipulation tasks.
 
 USER REQUEST: "{user_prompt}"
 AVAILABLE FILES: {file_summary}
-FILES DETAIL: {json.dumps(available_files_with_columns, indent=2)}
+{files_detail_section}FILE METADATA: {file_details_json}
+{other_files_summary}
 
 {f"CONVERSATION: {context[:500]}..." if len(context) > 500 else f"CONVERSATION: {context}" if context else ""}
 
@@ -64,7 +95,13 @@ KEY RULES:
 3. Find file by matching user's words to file keys (e.g., user says "uk beans" → use the FULL KEY containing "UK_Beans")
 4. CRITICAL: object_name parameter MUST be the complete key from FILES DETAIL, NOT just the filename
 5. ONLY generate operations user explicitly requests - NO random filters
-6. Use exact column names from file schema (case-sensitive)
+6. 🔧 CRITICAL FOR COLUMN NAMES: If FILE METADATA contains comprehensive file details with 'columns' list:
+   - ALWAYS use EXACT column names from the 'columns' list (case-sensitive, including spaces and special characters)
+   - For filter operations, verify column names match EXACTLY - check 'unique_values' or 'sample_data' for valid filter values
+   - Column names may contain spaces, underscores, hyphens - use them EXACTLY as shown in 'columns' list
+   - If user mentions a column that doesn't match exactly, find the closest match from 'columns' list
+7. If no comprehensive file details available, use exact column names from file schema (case-sensitive)
+8. REQUIRED JSON KEYS: success, dataframe_config (when success true), execution_plan, and smart_response must ALL be present so the UI always has a friendly response
 
 AVAILABLE OPERATIONS:
 • /load_cached: Load file (params: object_name)
@@ -262,6 +299,50 @@ def call_dataframe_operations_llm(api_url: str, model_name: str, bearer_token: s
         logger.error(f"DataFrame Operations LLM API call failed: {e}")
         raise Exception(f"AI service error: {str(e)}")
 
+def _generate_default_smart_response(available_files_with_columns: dict) -> str:
+    """
+    Build a friendly default smart_response to ensure UI messaging never fails.
+    """
+    file_info = ""
+    if available_files_with_columns:
+        file_info_parts = []
+        for file_name, file_data in available_files_with_columns.items():
+            if isinstance(file_data, dict):
+                columns = file_data.get('columns', [])
+            elif isinstance(file_data, list):
+                columns = file_data
+            else:
+                columns = []
+            display_name = file_name.split('/')[-1] if isinstance(file_name, str) and '/' in file_name else file_name
+            column_list = ', '.join(columns[:8])
+            if len(columns) > 8:
+                column_list += f" ... (+{len(columns) - 8} more)"
+            file_info_parts.append(f"• **{display_name}** ({len(columns)} columns): {column_list}")
+        file_info = '\n'.join(file_info_parts)
+    
+    return f"""I'd be happy to help you with DataFrame operations! Here are your available files and their columns:
+
+📁 **Available Files:**
+{file_info}
+
+I can help you with:
+• **Data Loading**: Load any of these files for processing
+• **Filtering**: Filter rows based on column values (e.g., 'Filter Country column for USA')
+• **Sorting**: Sort data by any column (e.g., 'Sort by Revenue descending')
+• **Column Operations**: Add, delete, rename, or transform columns
+• **Formulas**: Apply calculations using =SUM(), =AVG(), =DIV(), etc.
+• **Data Transformations**: Clean, normalize, or restructure your data
+• **Saving**: Save processed results to new files
+
+💡 **How to use your data:**
+For example, with your files you could ask:
+- 'Load [filename] and show me the first 10 rows'
+- 'Filter [filename] where [column] equals [value]'
+- 'Sort [filename] by [column] in descending order'
+- 'Add a new column to [filename] calculating [formula]'
+
+What specific operations would you like me to perform and which file should I use?"""
+
 def extract_dataframe_operations_json(text: str, available_files_with_columns: dict) -> Optional[Dict[str, Any]]:
     """
     Extract JSON from LLM response with comprehensive validation for DataFrame operations.
@@ -397,46 +478,7 @@ def extract_dataframe_operations_json(text: str, available_files_with_columns: d
     
     # Create helpful fallback with detailed file information
     if not smart_response or smart_response == text.strip():
-        file_info = ""
-        if available_files_with_columns:
-            file_info_parts = []
-            for file_name, file_data in available_files_with_columns.items():
-                if isinstance(file_data, dict):
-                    columns = file_data.get('columns', [])
-                elif isinstance(file_data, list):
-                    columns = file_data
-                else:
-                    columns = []
-                display_name = file_name.split('/')[-1] if '/' in file_name else file_name
-                # Format each file with its columns in a more detailed way
-                column_list = ', '.join(columns[:8])  # Show first 8 columns
-                if len(columns) > 8:
-                    column_list += f" ... (+{len(columns) - 8} more)"
-                file_info_parts.append(f"• **{display_name}** ({len(columns)} columns): {column_list}")
-            file_info = '\n'.join(file_info_parts)
-        
-        smart_response = f"""I'd be happy to help you with DataFrame operations! Here are your available files and their columns:
-
-📁 **Available Files:**
-{file_info}
-
-I can help you with:
-• **Data Loading**: Load any of these files for processing
-• **Filtering**: Filter rows based on column values (e.g., 'Filter Country column for USA')
-• **Sorting**: Sort data by any column (e.g., 'Sort by Revenue descending')
-• **Column Operations**: Add, delete, rename, or transform columns
-• **Formulas**: Apply calculations using =SUM(), =AVG(), =DIV(), etc.
-• **Data Transformations**: Clean, normalize, or restructure your data
-• **Saving**: Save processed results to new files
-
-💡 **How to use your data:**
-For example, with your files you could ask:
-- 'Load [filename] and show me the first 10 rows'
-- 'Filter [filename] where [column] equals [value]'
-- 'Sort [filename] by [column] in descending order'
-- 'Add a new column to [filename] calculating [formula]'
-
-What specific operations would you like me to perform and which file should I use?"""
+        smart_response = _generate_default_smart_response(available_files_with_columns)
     
     logger.info("Using LLM response as smart_response fallback")
     
@@ -473,6 +515,12 @@ def _validate_dataframe_operations_json(result: Dict[str, Any], available_files_
         return None
     
     logger.info(f"✅ JSON is a dictionary with {len(result)} keys: {list(result.keys())}")
+
+    # Guarantee smart_response exists so downstream UI never encounters missing responses
+    smart_response_value = result.get('smart_response')
+    if not isinstance(smart_response_value, str) or not smart_response_value.strip():
+        logger.warning("⚠️ smart_response missing or empty, generating default smart_response")
+        result['smart_response'] = _generate_default_smart_response(available_files_with_columns)
     
     # Check for required fields
     if 'success' not in result:
@@ -557,6 +605,21 @@ def _validate_dataframe_operations_json(result: Dict[str, Any], available_files_
                             logger.warning(f"⚠️ File '{file_path}' not found in available files (continuing anyway)")
                             logger.warning(f"Available files: {list(available_files_with_columns.keys())}")
                             # Don't return None here, just log warning - let frontend handle
+
+    # 🔧 Ensure execution_plan always exists with auto_execute True
+    execution_plan = result.get('execution_plan')
+    if not isinstance(execution_plan, dict):
+        logger.info("⚠️ execution_plan missing or invalid, adding default execution_plan with auto_execute: true")
+        result['execution_plan'] = {
+            "auto_execute": True,
+            "execution_mode": "sequential",
+            "error_handling": "stop_on_error"
+        }
+    elif not execution_plan.get('auto_execute'):
+        logger.info("⚠️ execution_plan.auto_execute is False or missing, setting to True")
+        result['execution_plan']['auto_execute'] = True
+    
+    logger.info(f"✅ execution_plan: {result.get('execution_plan')}")
     
     logger.info("="*100)
     logger.info("✅ DATAFRAME OPERATIONS JSON VALIDATION PASSED")

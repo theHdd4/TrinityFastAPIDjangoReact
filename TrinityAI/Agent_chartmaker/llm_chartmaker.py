@@ -9,6 +9,7 @@ from typing import Dict, Optional, Any, List
 
 from .ai_logic import build_chart_prompt, call_chart_llm, extract_json
 from file_loader import FileLoader
+from file_context_resolver import FileContextResolver, FileContextResult
 
 # Import the file analyzer
 import sys
@@ -36,6 +37,7 @@ class ChartMakerAgent:
         # File context for intelligent chart suggestions (ACTIVE like Merge agent)
         self.files_with_columns: Dict[str, List[str]] = {}
         self.files_metadata: Dict[str, Dict[str, Any]] = {}  # Store column types, row counts, etc.
+        self._raw_files_with_columns: Dict[str, Any] = {}
         self.current_file_id: Optional[str] = None
         
         # MinIO configuration (ACTIVE like Merge agent)
@@ -63,6 +65,13 @@ class ChartMakerAgent:
             prefix=prefix,
             secure=False
         )
+
+        # Centralised resolver for matching prompts to relevant files
+        self.file_context_resolver = FileContextResolver(
+            file_loader=self.file_loader,
+            file_analyzer=self.file_analyzer
+        )
+        self._last_context_selection: Optional[FileContextResult] = None
         
         # Load files on initialization
         self._load_files()
@@ -108,6 +117,7 @@ class ChartMakerAgent:
         try:
             # First load files using the standardized FileLoader
             files_with_columns = self.file_loader.load_files()
+            self._raw_files_with_columns = files_with_columns or {}
             
             # Convert FileLoader results to the format expected by the chart maker
             self.files_with_columns = {}
@@ -144,6 +154,8 @@ class ChartMakerAgent:
                         'numeric_columns': [],
                         'categorical_columns': []
                     }
+                self.file_context_resolver.update_files(self._raw_files_with_columns, self.files_metadata)
+                self._last_context_selection = None
                 return
             
             # Convert file analyzer results to the format expected by the chart maker
@@ -199,12 +211,18 @@ class ChartMakerAgent:
                     self.files_metadata[filename]['numeric_columns'] = numeric_columns
                     self.files_metadata[filename]['categorical_columns'] = categorical_columns
             
+            self.file_context_resolver.update_files(self._raw_files_with_columns, self.files_metadata)
+            self._last_context_selection = None
+
             logger.info(f"Successfully loaded {len(self.files_with_columns)} files using FileLoader and FileAnalyzer")
             
         except Exception as e:
             logger.error(f"Error during file loading: {e}")
             self.files_with_columns = {}
             self.files_metadata = {}
+            self._raw_files_with_columns = {}
+            self.file_context_resolver.update_files({})
+            self._last_context_selection = None
 
     def set_file_context(self, file_id: str, columns: List[str], file_name: str = ""):
         """Set the current file context for chart generation"""
@@ -353,24 +371,35 @@ class ChartMakerAgent:
         if not self.files_with_columns:
             context += "\n\n--- FILE CONTEXT ---\n"
             context += "No files are currently loaded. User needs to upload data first."
+            self._last_context_selection = None
             return context
 
-        # Remove manual file matching - let the LLM handle column selection (like Merge agent)
-        # Simply provide all available files and their columns
-        context += "\n\n--- AVAILABLE FILES AND COLUMNS ---\n"
-        context += "Here are all the files available for charting with their column information:\n"
-        context += json.dumps(self.files_with_columns, indent=2)
-        
-        # Add metadata for better context (like Merge agent)
-        if self.files_metadata:
-            context += "\n\n--- COLUMN METADATA ---\n"
-            for file_name, metadata in self.files_metadata.items():
-                context += f"\n{file_name}:\n"
-                context += f"  Rows: {metadata['row_count']}\n"
-                if metadata['numeric_columns']:
-                    context += f"  Numeric columns: {', '.join(metadata['numeric_columns'][:10])}\n"
-                if metadata['categorical_columns']:
-                    context += f"  Categorical columns: {', '.join(metadata['categorical_columns'][:10])}\n"
+        selection = self.file_context_resolver.resolve(
+            user_prompt=user_prompt,
+            top_k=3,
+            include_metadata=True,
+            fallback_limit=10
+        )
+        self._last_context_selection = selection
+
+        context += "\n\n--- RELEVANT FILES AND COLUMNS ---\n"
+        if selection.relevant_files:
+            context += json.dumps(selection.relevant_files, indent=2)
+        else:
+            context += "No specific files matched the prompt. Showing default suggestions.\n"
+            context += json.dumps(self.files_with_columns, indent=2)
+
+        if selection.file_details:
+            context += "\n\n--- FILE DETAILS ---\n"
+            context += json.dumps(selection.file_details, indent=2)
+
+        if selection.matched_columns:
+            context += "\n\n--- MATCHED COLUMNS ---\n"
+            context += json.dumps(selection.matched_columns, indent=2)
+
+        if selection.other_files:
+            context += "\n\nOther available files (not included above): "
+            context += ", ".join(selection.other_files)
         
         context += "\n\n--- INSTRUCTIONS FOR LLM ---\n"
         context += "1. Analyze the user's request to identify which files they want to chart\n"
@@ -379,6 +408,343 @@ class ChartMakerAgent:
         context += "4. Always verify that the suggested files exist in the available files list\n"
         
         return context
+
+    def _coerce_to_list_of_strings(self, value: Any) -> List[str]:
+        """
+        Normalize filter values into a clean list of non-empty strings.
+        Accepts comma-separated strings, single values, or iterables.
+        """
+        if value is None:
+            return []
+
+        # If already an iterable (list/tuple/set), convert items to strings
+        if isinstance(value, (list, tuple, set)):
+            normalized = [str(item).strip() for item in value if str(item).strip()]
+            return normalized
+
+        # If provided as a comma separated string, split and trim
+        if isinstance(value, str):
+            # Some models return the literal string "[]" – treat as empty list
+            if value.strip() in {"", "[]", "{}"}:
+                return []
+            parts = [part.strip() for part in value.split(",")]
+            return [part for part in parts if part]
+
+        # Fallback: coerce scalar to string
+        value_str = str(value).strip()
+        return [value_str] if value_str else []
+
+    def _normalize_filters(self, raw_filters: Any) -> Dict[str, List[str]]:
+        """
+        Ensure filter payloads are always Dict[str, List[str]].
+        Supports dicts, list[dict], and comma-separated strings.
+        """
+        normalized: Dict[str, List[str]] = {}
+
+        if not raw_filters:
+            return normalized
+
+        if isinstance(raw_filters, dict):
+            iterator = raw_filters.items()
+        elif isinstance(raw_filters, list):
+            # Sometimes models return [{"column": ["A","B"]}]
+            flattened: Dict[str, Any] = {}
+            for item in raw_filters:
+                if isinstance(item, dict):
+                    for key, value in item.items():
+                        flattened.setdefault(key, value)
+            iterator = flattened.items()
+        else:
+            # Unsupported type – best effort conversion
+            return normalized
+
+        for key, value in iterator:
+            key_str = str(key).strip()
+            if not key_str:
+                continue
+            values = self._coerce_to_list_of_strings(value)
+            normalized[key_str] = values
+
+        return normalized
+
+    def _normalize_chart_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalise chart_json so the frontend always receives a predictable structure.
+        Guards against occasional LLM deviations (e.g. dict, stringified JSON, or missing fields).
+        """
+        if not isinstance(result, dict):
+            logger.error("❌ Chart result is not a dict – returning failure payload")
+            return {
+                "success": False,
+                "message": "Invalid chart result format",
+                "chart_json": [],
+                "smart_response": "I could not understand the response. Please try asking for the chart again."
+            }
+
+        raw_chart_json = result.get("chart_json")
+        charts_source: List[Dict[str, Any]] = []
+
+        try:
+            if raw_chart_json is None:
+                charts_source = []
+            elif isinstance(raw_chart_json, list):
+                charts_source = [chart for chart in raw_chart_json if isinstance(chart, dict)]
+            elif isinstance(raw_chart_json, dict):
+                charts_source = [raw_chart_json]
+            elif isinstance(raw_chart_json, str):
+                parsed = json.loads(raw_chart_json)
+                if isinstance(parsed, list):
+                    charts_source = [chart for chart in parsed if isinstance(chart, dict)]
+                elif isinstance(parsed, dict):
+                    charts_source = [parsed]
+                else:
+                    logger.warning("⚠️ Parsed string chart_json but result was not dict/list")
+                    charts_source = []
+            else:
+                logger.warning(f"⚠️ Unsupported chart_json type: {type(raw_chart_json)}")
+        except Exception as exc:
+            logger.error(f"❌ Failed to parse chart_json field: {exc}")
+            charts_source = []
+
+        normalized_charts: List[Dict[str, Any]] = []
+
+        def _pick_field_value(*candidates):
+            """Return the first non-empty string candidate."""
+            for candidate in candidates:
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+            return ""
+
+        for index, chart in enumerate(charts_source):
+            try:
+                chart_id = str(chart.get("chart_id", index + 1))
+                chart_type = chart.get("chart_type") or chart.get("type") or "bar"
+                if isinstance(chart_type, str):
+                    chart_type = chart_type.lower().strip()
+                if chart_type not in {"bar", "line", "area", "pie", "scatter"}:
+                    logger.warning(f"⚠️ Invalid chart_type '{chart_type}' – defaulting to 'bar'")
+                    chart_type = "bar"
+
+                title = chart.get("title") or f"Chart {index + 1}"
+
+                raw_traces = chart.get("traces") or []
+                chart_level_legend = _pick_field_value(
+                    chart.get("legend_field"),
+                    chart.get("legendField"),
+                    chart.get("segregated_field"),
+                    chart.get("segregatedField"),
+                )
+                traces: List[Dict[str, Any]] = []
+
+                if isinstance(raw_traces, dict):
+                    raw_traces = [raw_traces]
+                elif not isinstance(raw_traces, list):
+                    raw_traces = []
+
+                for trace_index, trace in enumerate(raw_traces):
+                    if not isinstance(trace, dict):
+                        continue
+
+                    x_column = trace.get("x_column") or trace.get("xAxis") or trace.get("x_axis") or trace.get("x")
+                    y_column = trace.get("y_column") or trace.get("yAxis") or trace.get("y_axis") or trace.get("y")
+
+                    # Guard against arrays for column names
+                    if isinstance(x_column, list):
+                        x_column = next((str(val).strip() for val in x_column if str(val).strip()), "")
+                    if isinstance(y_column, list):
+                        y_column = next((str(val).strip() for val in y_column if str(val).strip()), "")
+
+                    x_column = str(x_column).strip() if x_column else ""
+                    y_column = str(y_column).strip() if y_column else ""
+
+                    name = trace.get("name") or f"Trace {trace_index + 1}"
+                    aggregation = trace.get("aggregation") or "sum"
+                    trace_chart_type = trace.get("chart_type") or chart_type
+                    if isinstance(trace_chart_type, str):
+                        trace_chart_type = trace_chart_type.lower().strip()
+                    if trace_chart_type not in {"bar", "line", "area", "pie", "scatter"}:
+                        trace_chart_type = chart_type
+
+                    filters = self._normalize_filters(trace.get("filters"))
+                    trace_legend_field = _pick_field_value(
+                        trace.get("legend_field"),
+                        trace.get("legendField"),
+                        trace.get("segregated_field"),
+                        trace.get("segregatedField"),
+                        chart_level_legend
+                    )
+
+                    traces.append({
+                        "id": trace.get("id", f"trace_{trace_index}"),
+                        "x_column": x_column,
+                        "y_column": y_column,
+                        "name": str(name),
+                        "aggregation": aggregation,
+                        "chart_type": trace_chart_type,
+                        "color": trace.get("color"),
+                        "filters": filters,
+                        **({"legend_field": trace_legend_field} if trace_legend_field else {})
+                    })
+
+                normalized_chart = {
+                    "chart_id": chart_id,
+                    "chart_type": chart_type,
+                    "title": str(title),
+                    "traces": traces,
+                    "filters": self._normalize_filters(chart.get("filters"))
+                }
+
+                if chart_level_legend:
+                    normalized_chart["legend_field"] = chart_level_legend
+                    normalized_chart["segregated_field"] = chart_level_legend
+
+                # Preserve optional fields when already in correct format
+                for optional_key in ["description", "insights", "notes"]:
+                    if optional_key in chart:
+                        normalized_chart[optional_key] = chart[optional_key]
+
+                normalized_charts.append(normalized_chart)
+
+            except Exception as chart_exc:
+                logger.error(f"❌ Failed to normalize chart index {index}: {chart_exc}", exc_info=True)
+
+        # Update result payload
+        result["chart_json"] = normalized_charts
+
+        # Validate chart columns/filters against file metadata (ensures exact matches before hitting backend)
+        file_name = result.get("file_name")
+        file_columns = self._get_columns_for_file(file_name)
+        unique_values = self._get_unique_values_for_file(file_name)
+        validation_errors: List[str] = []
+
+        if file_columns:
+            for chart in normalized_charts:
+                validation_errors.extend(
+                    self._validate_chart_against_file(chart, file_columns, unique_values)
+                )
+
+        if validation_errors:
+            logger.warning(f"⚠️ Chart validation failed: {validation_errors}")
+            result["success"] = False
+            result["message"] = "Chart configuration references columns or filter values not present in the selected file."
+            result["smart_response"] = (
+                "I need to use the exact column names and filter values that exist in your file. "
+                f"Please check the requested fields. Issues: {', '.join(validation_errors[:3])}"
+            )
+
+        if result.get("success") and not normalized_charts:
+            # If we expected success but have no charts, downgrade the response
+            logger.warning("⚠️ Response flagged success but no valid chart configurations were produced.")
+            result["success"] = False
+            result["message"] = result.get("message") or "Chart generation failed – no valid chart configuration found."
+            result.setdefault(
+                "smart_response",
+                "I could not create a chart because the configuration looked incomplete. Please specify the file and the columns for the x- and y-axis."
+            )
+
+        # Normalise file_name to plain string (no lists/objects)
+        # 🔧 CRITICAL FIX: Also check for data_source field (LLM sometimes returns this instead)
+        file_name = result.get("file_name") or result.get("data_source")
+        if isinstance(file_name, (list, dict)):
+            result["file_name"] = None
+        elif file_name is not None:
+            result["file_name"] = str(file_name).strip() or None
+        
+        # 🔧 CRITICAL FIX: Ensure data_source is also set for backward compatibility
+        if result.get("file_name") and not result.get("data_source"):
+            result["data_source"] = result["file_name"]
+        elif result.get("data_source") and not result.get("file_name"):
+            result["file_name"] = result["data_source"]
+
+        return result
+
+    def _get_metadata_for_file(self, file_name: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not file_name or not self.files_metadata:
+            return None
+
+        candidates = [file_name]
+        if "/" in file_name:
+            candidates.append(file_name.split("/")[-1])
+
+        for candidate in candidates:
+            if candidate in self.files_metadata:
+                return self.files_metadata[candidate]
+
+        # Fall back to suffix match (handles stored keys with full prefixes)
+        simple = file_name.split("/")[-1]
+        for key, value in self.files_metadata.items():
+            if key.endswith(simple):
+                return value
+        return None
+
+    def _get_columns_for_file(self, file_name: Optional[str]) -> List[str]:
+        metadata = self._get_metadata_for_file(file_name)
+        if metadata:
+            columns = metadata.get("columns", [])
+            if isinstance(columns, dict):
+                columns = list(columns.keys())
+            if isinstance(columns, list):
+                return columns
+
+        if file_name:
+            for candidate in [file_name, file_name.split("/")[-1] if "/" in file_name else file_name]:
+                if candidate in self.files_with_columns:
+                    return self.files_with_columns[candidate]
+        return []
+
+    def _get_unique_values_for_file(self, file_name: Optional[str]) -> Dict[str, List[str]]:
+        metadata = self._get_metadata_for_file(file_name)
+        if not metadata:
+            return {}
+
+        unique_values = metadata.get("unique_values", {})
+        if isinstance(unique_values, dict):
+            cleaned = {}
+            for col, vals in unique_values.items():
+                if isinstance(vals, list):
+                    cleaned[col] = vals
+            return cleaned
+        return {}
+
+    def _validate_chart_against_file(
+        self,
+        chart: Dict[str, Any],
+        file_columns: List[str],
+        unique_values: Dict[str, List[str]]
+    ) -> List[str]:
+        if not chart:
+            return []
+
+        errors: List[str] = []
+        column_set = set(file_columns)
+
+        def _check_column(column_value: Optional[str], context: str):
+            if column_value and column_value not in column_set:
+                errors.append(f"{context} '{column_value}' not found in file")
+
+        segregated_field = chart.get("segregated_field") or chart.get("legend_field")
+        _check_column(segregated_field, "segregated_field")
+
+        for trace in chart.get("traces", []):
+            _check_column(trace.get("x_column"), "x_column")
+            _check_column(trace.get("y_column"), "y_column")
+            _check_column(trace.get("legend_field"), "legend_field")
+
+            for col, values in (trace.get("filters") or {}).items():
+                _check_column(col, "trace filter column")
+                if values and col in unique_values:
+                    missing = [val for val in values if val not in unique_values[col]]
+                    if missing:
+                        errors.append(f"trace filter values {missing} not in '{col}'")
+
+        for col, values in (chart.get("filters") or {}).items():
+            _check_column(col, "chart filter column")
+            if values and col in unique_values:
+                missing = [val for val in values if val not in unique_values[col]]
+                if missing:
+                    errors.append(f"chart filter values {missing} not in '{col}'")
+
+        return errors
 
     def list_available_files(self) -> Dict[str, Any]:
         """🔧 ENHANCED: Get available files from MinIO like Merge agent"""
@@ -768,6 +1134,9 @@ class ChartMakerAgent:
         # Check if MinIO prefix needs an update (and files need reloading) - like Merge agent
         self._maybe_update_prefix()
         
+        # Always refresh file listing so newly created/updated files are available
+        self._load_files()
+        
         # Debug logging for file loading
         logger.info(f"🔍 Files loaded: {len(self.files_with_columns)} files")
         logger.info(f"🔍 File names: {list(self.files_with_columns.keys())}")
@@ -788,11 +1157,17 @@ class ChartMakerAgent:
         context = self._enhance_context_with_columns(context, user_prompt)
         logger.info(f"📁 Enhanced Context Built: {len(context)} characters")
         
-        # 3. Get detailed file analysis data for the LLM
-        file_analysis_data = self.file_analyzer.get_all_analyses()
+        # 3. Resolve relevant files for this prompt (reuse selection from context enhancement when possible)
+        selection = self._last_context_selection or self.file_context_resolver.resolve(
+            user_prompt=user_prompt,
+            top_k=3,
+            include_metadata=True
+        )
+        available_for_prompt = selection.to_object_column_mapping(self._raw_files_with_columns) if selection else self._raw_files_with_columns
+        file_analysis_data = selection.file_details if selection else {}
         
-        # 4. Build the final prompt for the LLM with complete file analysis
-        prompt = build_chart_prompt(user_prompt, self.files_with_columns, context, file_analysis_data)
+        # 4. Build the final prompt for the LLM with condensed file analysis
+        prompt = build_chart_prompt(user_prompt, available_for_prompt, context, file_analysis_data)
         
         # 🔍 COMPREHENSIVE LOGGING: Show what we're sending to LLM
         logger.info("🔍 ===== LLM INPUT - COMPLETE PROMPT =====")
@@ -837,6 +1212,13 @@ class ChartMakerAgent:
             logger.info("🔍 ===== EXTRACTED JSON FROM LLM =====")
             logger.info(f"📊 Extracted JSON:\n{json.dumps(result, indent=2)}")
             logger.info(f"🔍 ===== END EXTRACTED JSON =====")
+
+            # 🔧 Ensure consistent payload before returning to frontend
+            result = self._normalize_chart_result(result)
+
+            logger.info("🔍 ===== NORMALISED CHART JSON =====")
+            logger.info(f"📊 Normalised JSON:\n{json.dumps(result, indent=2)}")
+            logger.info(f"🔍 ===== END NORMALISED JSON =====")
             
             # 🔍 DEBUG: Check if smart_response is present
             if "smart_response" in result:

@@ -209,7 +209,21 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
               disabled={!onFlipHorizontal}
               onSelect={event => {
                 event.preventDefault();
-                onFlipHorizontal?.();
+                event.stopPropagation();
+                console.log('[ImageToolbar] Flip horizontal selected', { hasHandler: !!onFlipHorizontal });
+                if (onFlipHorizontal) {
+                  onFlipHorizontal();
+                }
+              }}
+              onPointerDown={event => {
+                // Prevent pointer events from bubbling to prevent deselection
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onMouseDown={event => {
+                // Prevent mouse events from bubbling
+                event.preventDefault();
+                event.stopPropagation();
               }}
               className="gap-2 text-sm"
             >
@@ -221,7 +235,21 @@ const ImageToolbar: React.FC<ImageToolbarProps> = ({
               disabled={!onFlipVertical}
               onSelect={event => {
                 event.preventDefault();
-                onFlipVertical?.();
+                event.stopPropagation();
+                console.log('[ImageToolbar] Flip vertical selected', { hasHandler: !!onFlipVertical });
+                if (onFlipVertical) {
+                  onFlipVertical();
+                }
+              }}
+              onPointerDown={event => {
+                // Prevent pointer events from bubbling to prevent deselection
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onMouseDown={event => {
+                // Prevent mouse events from bubbling
+                event.preventDefault();
+                event.stopPropagation();
               }}
               className="gap-2 text-sm"
             >
@@ -346,7 +374,7 @@ interface SlideImageObjectProps {
   onRequestPositionPanel?: (objectId: string) => void;
   onOpacityChange?: (objectId: string, opacity: number) => void;
   onCropChange?: (objectId: string, next: ImageCropInsets) => void;
-  onCropCommit?: (objectId: string) => void;
+  onCropCommit?: (objectId: string, finalCrop: ImageCropInsets) => void;
   onResetCrop?: (objectId: string) => void;
   onDelete?: (objectId: string) => void;
 }
@@ -386,8 +414,8 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   const normalizedCropFromProps = useMemo(() => normalizeCropInsets(cropInsets), [cropInsets]);
   const [liveCrop, setLiveCrop] = useState<ImageCropInsets>(normalizedCropFromProps);
   const [localFitMode, setLocalFitMode] = useState<'cover' | 'contain'>(fitMode);
-  const [localFlipHorizontal, setLocalFlipHorizontal] = useState<boolean>(flipHorizontal);
-  const [localFlipVertical, setLocalFlipVertical] = useState<boolean>(flipVertical);
+  const [localFlipHorizontal, setLocalFlipHorizontal] = useState<boolean>(flipHorizontal ?? false);
+  const [localFlipVertical, setLocalFlipVertical] = useState<boolean>(flipVertical ?? false);
   const [localAnimated, setLocalAnimated] = useState<boolean>(isAnimated);
   const [localOpacity, setLocalOpacity] = useState<number>(clampOpacity(opacity));
 
@@ -400,12 +428,18 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   }, [fitMode]);
 
   useEffect(() => {
-    setLocalFlipHorizontal(flipHorizontal);
-  }, [flipHorizontal]);
+    console.log('[SlideImageObject] flipHorizontal prop changed', { id, flipHorizontal, currentLocal: localFlipHorizontal });
+    if (localFlipHorizontal !== flipHorizontal) {
+      setLocalFlipHorizontal(flipHorizontal);
+    }
+  }, [flipHorizontal, id]); // Removed localFlipHorizontal from deps to avoid infinite loops
 
   useEffect(() => {
-    setLocalFlipVertical(flipVertical);
-  }, [flipVertical]);
+    console.log('[SlideImageObject] flipVertical prop changed', { id, flipVertical, currentLocal: localFlipVertical });
+    if (localFlipVertical !== flipVertical) {
+      setLocalFlipVertical(flipVertical);
+    }
+  }, [flipVertical, id]); // Removed localFlipVertical from deps to avoid infinite loops
 
   useEffect(() => {
     setLocalAnimated(isAnimated);
@@ -415,17 +449,17 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
     setLocalOpacity(clampOpacity(opacity));
   }, [opacity]);
 
-  // Handle ESC key to exit crop mode
+  // Handle Enter key to exit crop mode
   useEffect(() => {
     if (!isCropping || !onToggleCrop) {
       return;
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Enter') {
         event.preventDefault();
         event.stopPropagation();
-        cropLog('ESC pressed - exiting crop mode', { id });
+        cropLog('Enter pressed - exiting crop mode', { id });
         onToggleCrop(id);
       }
     };
@@ -528,7 +562,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
   const handleCropCommit = useCallback(
     (finalCrop: ImageCropInsets) => {
       cropLog('Commit crop request', { id, crop: finalCrop });
-      onCropCommit?.(id);
+      onCropCommit?.(id, finalCrop);
     },
     [id, onCropCommit],
   );
@@ -554,21 +588,27 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
 
   const handleFlipHorizontal = useCallback(() => {
     if (!onFlipHorizontal) {
+      console.warn('[SlideImageObject] handleFlipHorizontal: onFlipHorizontal handler not provided', { id });
       return;
     }
-    setLocalFlipHorizontal(previous => !previous);
-    onInteract();
+    console.log('[SlideImageObject] handleFlipHorizontal called', { id, currentFlip: flipHorizontal });
+    // Don't update local state optimistically - let props update drive the state
+    // This prevents race conditions where re-render happens before props update
+    // Note: onInteract() is already called by updateImageProps, so we don't need to call it here
     onFlipHorizontal(id);
-  }, [id, onFlipHorizontal, onInteract]);
+  }, [id, onFlipHorizontal, flipHorizontal]);
 
   const handleFlipVertical = useCallback(() => {
     if (!onFlipVertical) {
+      console.warn('[SlideImageObject] handleFlipVertical: onFlipVertical handler not provided', { id });
       return;
     }
-    setLocalFlipVertical(previous => !previous);
-    onInteract();
+    console.log('[SlideImageObject] handleFlipVertical called', { id, currentFlip: flipVertical });
+    // Don't update local state optimistically - let props update drive the state
+    // This prevents race conditions where re-render happens before props update
+    // Note: onInteract() is already called by updateImageProps, so we don't need to call it here
     onFlipVertical(id);
-  }, [id, onFlipVertical, onInteract]);
+  }, [id, onFlipVertical, flipVertical]);
 
   const handleOpacityChange = useCallback(
     (value: number) => {
@@ -718,10 +758,10 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
       return 'translate3d(0, 0, 0) scale(1, 1)';
     }
 
-    // State 3: Crop finalized - apply transform to show only cropped portion
-    const { translateXPercent, translateYPercent, scaleX, scaleY } = cropRenderMetrics;
-    return `translate3d(-${translateXPercent}%, -${translateYPercent}%, 0) scale(${scaleX}, ${scaleY})`;
-  }, [cropRenderMetrics, hasCrop, isCropping]);
+    // State 3: Crop finalized - container will be resized, so no transform needed
+    // The container dimensions will match the cropped area, so just show image normally
+    return 'translate3d(0, 0, 0) scale(1, 1)';
+  }, [hasCrop, isCropping]);
 
   const cropWrapperStyle = useMemo<React.CSSProperties>(
     () => ({
@@ -764,8 +804,22 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
 
   const imageStyle = useMemo<React.CSSProperties>(
     () => {
-      const scaleX = localFlipHorizontal ? -1 : 1;
-      const scaleY = localFlipVertical ? -1 : 1;
+      // Use props directly instead of local state to ensure immediate updates
+      const flipH = flipHorizontal ?? false;
+      const flipV = flipVertical ?? false;
+      const scaleX = flipH ? -1 : 1;
+      const scaleY = flipV ? -1 : 1;
+
+      console.log('[SlideImageObject] imageStyle computed', { 
+        id, 
+        flipHorizontal: flipH,
+        flipVertical: flipV,
+        localFlipHorizontal, 
+        localFlipVertical, 
+        scaleX, 
+        scaleY,
+        transform: `scaleX(${scaleX}) scaleY(${scaleY})`
+      });
 
       const baseStyle: React.CSSProperties = {
         '--image-flip-scale-x': `${scaleX}`,
@@ -787,7 +841,7 @@ export const SlideImageObject: React.FC<SlideImageObjectProps> = ({
 
       return baseStyle;
     },
-    [localFlipHorizontal, localFlipVertical, localOpacity, hasCrop, isCropping, cropShape, cropBorderRadius],
+    [flipHorizontal, flipVertical, localOpacity, hasCrop, isCropping, cropShape, cropBorderRadius], // Use props directly
   );
 
   return (

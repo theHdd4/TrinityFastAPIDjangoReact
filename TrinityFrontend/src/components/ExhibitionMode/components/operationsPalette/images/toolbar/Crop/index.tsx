@@ -606,7 +606,7 @@ export const ImageCropOverlay: React.FC<ImageCropOverlayProps> = ({
               Reset
             </button>
           )}
-          <span className="text-[10px] text-white/60 ml-1">ESC to exit</span>
+          <span className="text-[10px] text-white/60 ml-1">Enter to exit</span>
         </div>
         {/* Only show handles for rectangle and rounded-rectangle */}
         {cropShape !== 'circle' && (

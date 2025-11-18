@@ -38,6 +38,38 @@ except ImportError as e:
         STREAM_RAG_AVAILABLE = False
         logger.warning(f"⚠️ StreamRAGEngine not available: {e} | {e2}")
 
+# Import atom capabilities JSON
+ATOM_CAPABILITIES = None
+try:
+    capabilities_path = Path(__file__).parent / "rag" / "atom_capabilities.json"
+    if capabilities_path.exists():
+        with open(capabilities_path, 'r', encoding='utf-8') as f:
+            ATOM_CAPABILITIES = json.load(f)
+        logger.info(f"✅ Loaded atom capabilities from {capabilities_path}")
+    else:
+        logger.warning(f"⚠️ Atom capabilities file not found: {capabilities_path}")
+except Exception as e:
+    logger.warning(f"⚠️ Could not load atom capabilities: {e}")
+
+# Common synonym mapping for frequent column intents (helps abbreviations)
+COMMON_COLUMN_SYNONYMS: Dict[str, List[str]] = {
+    "sales": ["sales", "sale", "revenue", "rev", "gmv", "amount", "amt", "value"],
+    "revenue": ["revenue", "rev", "sales", "sale", "gmv"],
+    "region": ["region", "reg", "geo", "geography", "territory", "area", "location"],
+    "market": ["market", "mkt", "channel", "chnl", "trade"],
+    "channel": ["channel", "chn", "market", "trade"],
+    "brand": ["brand", "brd", "label"],
+    "product": ["product", "prod", "sku", "item"],
+    "customer": ["customer", "cust", "client"],
+    "country": ["country", "cntry", "nation"],
+    "date": ["date", "dt", "day"],
+    "month": ["month", "mnth", "mo"],
+    "year": ["year", "yr", "fiscal"],
+    "quantity": ["quantity", "qty", "volume", "vol", "units", "unit"],
+    "volume": ["volume", "vol", "qty", "quantity"],
+    "profit": ["profit", "margin", "mgn"],
+}
+
 # Import atom mapping for endpoint resolution
 try:
     from STREAMAI.atom_mapping import ATOM_MAPPING
@@ -60,6 +92,7 @@ class StreamSequenceGenerator:
         self.api_url = self.config["api_url"]
         self.model_name = self.config["model_name"]
         self.bearer_token = self.config["bearer_token"]
+        self._last_alias_lookup: Dict[str, str] = {}
         
         # Initialize RAG engine
         self.rag_engine = None
@@ -149,9 +182,25 @@ class StreamSequenceGenerator:
             logger.debug(f"Response was: {response[:500]}...")
             return None
     
+    def _build_basic_file_list(self, files_list: List[Dict[str, Any]]) -> str:
+        """Build basic file list when comprehensive details unavailable"""
+        file_context_section = "\n## Available Saved Files (Already in MinIO):\n\n"
+        for file_info in files_list[:10]:
+            file_name = file_info.get("displayName") or file_info.get("name", "unknown")
+            file_context_section += f"- **{file_name}** (already loaded)\n"
+        
+        if len(files_list) > 10:
+            file_context_section += f"\n... and {len(files_list) - 10} more files\n"
+        
+        file_context_section += "\n**IMPORTANT**: These files are already loaded in the system. "
+        file_context_section += "If the user mentions any of these files, **DO NOT** include `data-upload-validate` in the sequence. "
+        file_context_section += "Instead, start directly with the operation atoms (merge, concat, groupby, etc.) that use these existing files.\n"
+        return file_context_section
+    
     def _build_sequence_prompt(self, user_query: str, file_context: Optional[Dict[str, Any]] = None) -> str:
         """
-        Build the LLM prompt for sequence generation.
+        Build the LLM prompt for sequence generation with comprehensive file details.
+        Now uses FileHandler to get detailed file information (same as dataframe operations).
         
         Args:
             user_query: User's query
@@ -168,24 +217,88 @@ class StreamSequenceGenerator:
             except Exception as e:
                 logger.warning(f"⚠️ Could not generate RAG context: {e}")
         
-        # Build file context section
-        file_context_section = ""
+        # 🔧 NEW: Get comprehensive file details using FileHandler (same as dataframe operations)
+        comprehensive_file_details = ""
+        file_details_loaded: Optional[Dict[str, Any]] = None
+        file_details_for_aliases: Dict[str, Any] = {}
         has_existing_files = False
+        mentioned_files = []
+        
         if file_context and file_context.get("files"):
             has_existing_files = True
-            file_context_section = "\n## Available Saved Files (Already in MinIO):\n\n"
             files_list = file_context.get("files", [])
-            for file_info in files_list[:10]:
-                file_name = file_info.get("displayName") or file_info.get("name", "unknown")
-                file_context_section += f"- **{file_name}** (already loaded)\n"
             
-            if len(files_list) > 10:
-                file_context_section += f"\n... and {len(files_list) - 10} more files\n"
-            
-            file_context_section += "\n**IMPORTANT**: These files are already loaded in the system. "
-            file_context_section += "If the user mentions any of these files, **DO NOT** include `data-upload-validate` in the sequence. "
-            file_context_section += "Instead, start directly with the operation atoms (merge, concat, groupby, etc.) that use these existing files.\n"
+            # Try to get comprehensive file details using FileHandler
+            try:
+                from File_handler.available_minio_files import FileHandler, get_file_handler
+                import os
+                
+                # Initialize FileHandler
+                file_handler = get_file_handler(
+                    minio_endpoint=os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                    minio_access_key=os.getenv("MINIO_ACCESS_KEY", "minio"),
+                    minio_secret_key=os.getenv("MINIO_SECRET_KEY", "minio123"),
+                    minio_bucket=os.getenv("MINIO_BUCKET", "trinity"),
+                    object_prefix=""
+                )
+                
+                # Extract file names/paths from file_context
+                file_names = []
+                for file_info in files_list:
+                    file_path = file_info.get("name") or file_info.get("displayName", "")
+                    if file_path:
+                        # Extract filename from path
+                        filename = file_path.split('/')[-1] if '/' in file_path else file_path
+                        file_names.append(filename)
+                        mentioned_files.append(file_path)
+                
+                # Get comprehensive file details for mentioned files
+                if file_names:
+                    logger.info(f"📥 Loading comprehensive file details for {len(file_names)} file(s)")
+                    file_details_dict = file_handler.get_file_context(file_names, use_backend_endpoint=True)
+                    
+                    if file_details_dict:
+                        # Format comprehensive file details for prompt
+                        comprehensive_file_details = file_handler.format_file_context_for_llm(file_details_dict)
+                        file_details_for_aliases = file_details_dict
+                        file_details_loaded = file_details_dict
+                        logger.info(f"✅ Loaded comprehensive file details for {len(file_details_dict)} file(s)")
+                    else:
+                        logger.warning("⚠️ Could not load comprehensive file details, using basic file list")
+                        comprehensive_file_details = self._build_basic_file_list(files_list)
+                else:
+                    comprehensive_file_details = self._build_basic_file_list(files_list)
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ Could not load comprehensive file details: {e}")
+                comprehensive_file_details = self._build_basic_file_list(files_list)
+        else:
+            comprehensive_file_details = ""
         
+        # Build file context section with comprehensive details
+        file_context_section = ""
+        if comprehensive_file_details:
+            file_context_section = comprehensive_file_details
+            file_context_section += "\n**CRITICAL INSTRUCTIONS FOR FILE USAGE:**\n"
+            file_context_section += "1. **Use EXACT column names** from the file details above (case-sensitive, including spaces)\n"
+            file_context_section += "2. **Reference actual data types** when selecting operations (numeric vs categorical)\n"
+            file_context_section += "3. **Use unique values** from categorical columns for filters and groupby operations\n"
+            file_context_section += "4. **Check row counts** to understand data size before operations\n"
+            file_context_section += "5. **If files exist above, DO NOT include `data-upload-validate`** - start directly with operations\n"
+            file_context_section += "6. **Reference files by their exact names** shown in the file details\n"
+            # Add column alias map so LLM can resolve abbreviations/synonyms
+            alias_section = self._build_column_alias_map(file_details_for_aliases or file_details_loaded)
+            if alias_section:
+                file_context_section += alias_section
+                file_context_section += "Always convert user abbreviations/synonyms to the exact column/value names listed above.\n"
+            file_context_section += "\n**COLUMN VALIDATION RULES:**\n"
+            file_context_section += "- BEFORE referencing any column/value, locate it in the file details above and copy the exact spelling (case-sensitive, spaces preserved).\n"
+            file_context_section += "- If the user uses an abbreviation (e.g., 'reg', 'rev', 'qty'), map it to the closest matching column from the alias map above BEFORE building steps.\n"
+            file_context_section += "- If a requested column/value is not found in the metadata, pick the closest match that exists or ask the user to clarify. NEVER invent new columns.\n"
+        
+        column_alias_lookup = self._build_alias_lookup(file_details_for_aliases or file_details_loaded)
+        self._last_alias_lookup = column_alias_lookup
+
         prompt = f"""You are Trinity AI, an intelligent atom sequencing system for data analysis.
 
 **USER QUERY**: "{user_query}"
@@ -196,19 +309,42 @@ class StreamSequenceGenerator:
 
 ## Your Task:
 
-Analyze the user's query and generate a sequence of atoms that will complete the task.
+Analyze the user's query CAREFULLY and generate a logical sequence of atoms that will complete the task.
 Each atom is a data processing step that can be executed in sequence.
 
-**IMPORTANT RULES**:
-1. **Check if files exist in "Available Saved Files" section above**:
-   - If files mentioned in query exist in saved files → **SKIP** `data-upload-validate` and start directly with operations
-   - If files are NOT in saved files or query mentions "load" or "upload" → Include `data-upload-validate` as first step
-2. Atoms execute sequentially - each atom can use results from previous atoms
-3. Keep sequences concise (2-6 atoms typically)
-4. Each atom needs a clear purpose and prompt
-5. Use result references like `{{{{result_name}}}}` in prompts to refer to previous outputs
-6. **chart-maker** should typically be last if visualization is needed
-7. When files exist, reference them by name in the first atom's prompt (e.g., "merge uk_beans.arrow and uk_mayo.arrow")
+**CRITICAL RULES FOR TOOL SELECTION**:
+
+1. **FILE HANDLING**:
+   - ✅ If files exist in file details above → **SKIP** `data-upload-validate`, start with operations
+   - ✅ If files NOT in saved files OR query mentions "load"/"upload" → Include `data-upload-validate` first
+   - ✅ Use EXACT file names from file details (case-sensitive, with extensions)
+
+2. **TOOL SELECTION LOGIC** (Choose the RIGHT tool for each task):
+   - **`merge`**: When user says "merge", "join", "combine by key", "inner join", "outer join" → Use when combining datasets on common columns
+   - **`concat`**: When user says "concatenate", "append", "stack", "combine vertically/horizontally" → Use when combining datasets without key matching
+   - **`groupby-wtg-avg`**: When user says "group by", "aggregate", "summarize", "average by", "count by" → Use for grouping and aggregation
+   - **`dataframe-operations`**: When user says "filter", "sort", "select columns", "remove rows", "edit cells" → Use for row/column operations
+   - **`create-column`**: When user says "add column", "create column", "calculate", "formula" → Use for new calculated columns
+   - **`chart-maker`**: When user says "chart", "graph", "visualize", "plot", "bar chart", "line chart" → Use for visualizations (usually LAST)
+   - **`feature-overview`**: When user says "overview", "summary", "describe", "explore data" → Use for data exploration
+   - **`correlation`**: When user says "correlation", "relationship", "correlate" → Use for correlation analysis
+   - **`explore`**: When user says "explore", "analyze", "investigate" → Use for detailed exploration
+
+3. **SEQUENCE LOGIC**:
+   - ✅ Atoms execute sequentially - each atom can use results from previous atoms
+   - ✅ Keep sequences concise (2-6 atoms typically)
+   - ✅ Each atom needs a clear purpose and detailed prompt
+   - ✅ Use result references like `{{{{result_name}}}}` in prompts to refer to previous outputs
+   - ✅ **chart-maker** should typically be LAST if visualization is needed
+   - ✅ When files exist, reference them by EXACT name in the first atom's prompt
+
+4. **PROMPT QUALITY** (CRITICAL for next steps):
+   - ✅ Include EXACT column names from file details (case-sensitive, with spaces)
+   - ✅ Reference actual data types (numeric vs categorical) from file details
+   - ✅ Use unique values from categorical columns for filters/groupby
+   - ✅ Include specific values/conditions from user query
+   - ✅ Example: "Filter rows where Region = 'North' AND Revenue > 1000" (not "filter data")
+   - ✅ Example: "Group by Product Category and calculate average Sales" (not "group data")
 
 ## Output Format:
 
@@ -276,29 +412,266 @@ Return ONLY a valid JSON object (no other text):
 }}
 ```
 
-**Available Atom IDs with Required Parameters**:
+**Available Atoms and Their Capabilities**:
 
-- `merge` - **Required**: file1, file2 | **Optional**: join_type (inner/outer/left/right), join_columns
-- `concat` - **Required**: file1, file2 | **Optional**: concat_direction (vertical/horizontal)
-- `groupby-wtg-avg` - **Required**: data_source, group_columns (array) | **Optional**: aggregations, weight_column
-- `dataframe-operations` - **Required**: data_source, operation (filter/sort/select) | **Optional**: filter_condition, sort_columns, select_columns
-- `create-column` - **Required**: data_source, new_column_name, formula
-- `chart-maker` - **Required**: data_source, chart_type (bar/line/scatter/pie) | **Optional**: x_column, y_column, title
-- `feature-overview` - **Required**: data_source
-- `correlation` - **Required**: data_source | **Optional**: columns, method (pearson/spearman)
-- `explore` - **Required**: data_source
-- `data-upload-validate` - **Required**: file_path | **Optional**: file_type
+{self._format_atom_capabilities_for_prompt()}
 
-**CRITICAL**: Each atom in the sequence MUST include a "parameters" object with all required parameters filled in. Extract parameter values from the user query.
+**CRITICAL**: Each atom in the sequence MUST include a "parameters" object with all required parameters filled in. Extract parameter values from the user query AND file details.
 
-Example parameter extraction:
+Example parameter extraction (USE EXACT VALUES FROM FILE DETAILS):
 - "merge uk beans and uk mayo" → {{"file1": "D0_KHC_UK_Beans.arrow", "file2": "D0_KHC_UK_Mayo.arrow"}}
-- "filter revenue > 1000" → {{"operation": "filter", "filter_condition": "revenue > 1000"}}
-- "group by region" → {{"group_columns": ["region"]}}
+- "filter revenue > 1000" → {{"operation": "filter", "filter_condition": "Revenue > 1000"}} (use EXACT column name from file details)
+- "group by region" → {{"group_columns": ["Region"]}} (use EXACT column name, check unique values from file details)
+- "filter where Product = 'Widget'" → {{"operation": "filter", "filter_condition": "Product = 'Widget'"}} (use EXACT value from unique_values in file details)
+
+**REMEMBER**: 
+- Use EXACT column names from file details (case-sensitive)
+- Use actual unique values from categorical columns
+- Reference actual data types when choosing operations
+- Include specific conditions/values from user query
+- Make prompts DETAILED and SPECIFIC (not generic)
 
 Generate the sequence now:"""
         
         return prompt
+    
+    def _format_atom_capabilities_for_prompt(self) -> str:
+        """Format atom capabilities JSON for inclusion in prompt"""
+        if not ATOM_CAPABILITIES:
+            return "Atom capabilities not available. Use basic atom IDs: merge, concat, groupby-wtg-avg, dataframe-operations, chart-maker, etc."
+        
+        formatted = ""
+        for atom in ATOM_CAPABILITIES.get("atoms", []):
+            atom_id = atom.get("atom_id", "")
+            name = atom.get("name", "")
+            description = atom.get("description", "")
+            capabilities = atom.get("capabilities", [])
+            use_cases = atom.get("use_cases", [])
+            required_params = atom.get("required_parameters", {})
+            prompt_reqs = atom.get("prompt_requirements", [])
+            
+            formatted += f"\n**{atom_id}** - {name}\n"
+            formatted += f"   Description: {description}\n"
+            formatted += f"   Capabilities: {', '.join(capabilities[:3])}\n"
+            formatted += f"   Use when: {', '.join(use_cases[:2])}\n"
+            formatted += f"   Required Parameters:\n"
+            for param, desc in required_params.items():
+                formatted += f"     - {param}: {desc}\n"
+            if prompt_reqs:
+                formatted += f"   Prompt Requirements:\n"
+                for req in prompt_reqs[:3]:
+                    formatted += f"     - {req}\n"
+            formatted += "\n"
+        
+        # Add workflow rules
+        if ATOM_CAPABILITIES.get("workflow_rules"):
+            formatted += "\n**WORKFLOW RULES:**\n"
+            for rule in ATOM_CAPABILITIES.get("workflow_rules", []):
+                formatted += f"- {rule}\n"
+        
+        return formatted
+
+    def _build_column_alias_map(self, file_details: Optional[Dict[str, Any]]) -> str:
+        """
+        Build a section that maps user abbreviations/synonyms to actual column names.
+        Ensures prompts only use valid column/value names from the files.
+        """
+        if not file_details:
+            return ""
+
+        entries = self._iter_file_detail_entries(file_details)
+        if not entries:
+            return ""
+
+        lines: List[str] = [
+            "\n## Column Alias Map (Use this to match user terms to actual column names):\n",
+            "Always convert user abbreviations to the exact column/value names listed here.\n"
+        ]
+
+        max_files = 2
+        for file_index, (file_name, info) in enumerate(entries):
+            if file_index >= max_files:
+                lines.append("- (Additional files omitted for brevity)\n")
+                break
+
+            columns = info.get("columns") or []
+            if not columns:
+                continue
+            unique_values = info.get("unique_values") or {}
+
+            lines.append(f"**File:** {file_name}")
+            max_columns = min(len(columns), 8)
+            for column_name in columns[:max_columns]:
+                alias_candidates = self._generate_column_aliases(column_name)
+                if not alias_candidates:
+                    continue
+                alias_preview = ", ".join(alias_candidates[:6])
+                lines.append(f"- Column `{column_name}` → Recognize user terms: {alias_preview}")
+
+                value_list = unique_values.get(column_name) or []
+                if value_list:
+                    preview_values = value_list[:3]
+                    for value in preview_values:
+                        value_aliases = self._generate_value_aliases(value)
+                        if value_aliases:
+                            lines.append(f"    • Value `{value}` aliases: {', '.join(value_aliases[:4])}")
+
+            if len(columns) > max_columns:
+                lines.append(f"- ... {len(columns) - max_columns} more columns in {file_name}")
+
+            lines.append("")  # spacing
+
+        return "\n".join(lines)
+
+    def _iter_file_detail_entries(self, details: Dict[str, Any]) -> List[tuple]:
+        """Return iterable list of (file_name, info) pairs containing column metadata."""
+        if not isinstance(details, dict):
+            return []
+
+        if "columns" in details:
+            name = details.get("object_name") or details.get("file_id") or "selected_file"
+            return [(name, details)]
+
+        entries: List[tuple] = []
+        for key, value in details.items():
+            if isinstance(value, dict) and "columns" in value:
+                entries.append((key, value))
+        return entries
+
+    def _generate_column_aliases(self, column_name: str) -> List[str]:
+        """Generate alias candidates for column names (synonyms + abbreviations)."""
+        if not column_name:
+            return []
+
+        normalized = column_name.strip().lower()
+        tokens = [token for token in re.split(r"[\\s_\\-]+", normalized) if token]
+        alias_set = set()
+
+        alias_set.add(normalized)
+        alias_set.add(normalized.replace(" ", ""))
+        alias_set.add(normalized.replace(" ", "_"))
+        alias_set.add(normalized.replace(" ", "").rstrip("s"))
+
+        if tokens:
+            acronym = "".join(token[0] for token in tokens if token)
+            if len(acronym) >= 2:
+                alias_set.add(acronym)
+        if len(normalized) > 3:
+            alias_set.add(normalized[:3])
+            alias_set.add(normalized[:4])
+
+        # Add common synonyms
+        for token in tokens:
+            if token in COMMON_COLUMN_SYNONYMS:
+                alias_set.update(COMMON_COLUMN_SYNONYMS[token])
+
+        for keyword, synonyms in COMMON_COLUMN_SYNONYMS.items():
+            if keyword in normalized:
+                alias_set.update(synonyms)
+
+        alias_set.discard(column_name.lower())
+        alias_set.add(column_name)  # ensure actual name present for clarity
+
+        return [alias for alias in alias_set if alias]
+
+    def _generate_value_aliases(self, value: Any) -> List[str]:
+        """Generate alias candidates for categorical values (handles abbreviations)."""
+        if value is None:
+            return []
+        value_str = str(value).strip()
+        if not value_str:
+            return []
+
+        normalized = value_str.lower()
+        alias_set = {
+            value_str,
+            normalized,
+            normalized.replace(" ", ""),
+            normalized.replace(" ", "_"),
+            normalized[:3] if len(normalized) > 3 else normalized,
+        }
+
+        tokens = [token for token in re.split(r"[\\s_\\-]+", normalized) if token]
+        if tokens:
+            acronym = "".join(token[0] for token in tokens if token)
+            if len(acronym) >= 2:
+                alias_set.add(acronym)
+
+        alias_set.discard("")
+        return [alias for alias in alias_set if alias]
+
+    def _build_alias_lookup(self, file_details: Optional[Dict[str, Any]]) -> Dict[str, str]:
+        """
+        Build lookup of alias -> canonical column/value name based on file metadata.
+        Ensures we can rewrite prompts/params to actual schema names.
+        """
+        lookup: Dict[str, str] = {}
+        if not file_details:
+            return lookup
+
+        for file_name, info in self._iter_file_detail_entries(file_details):
+            columns = info.get("columns") or []
+            unique_values = info.get("unique_values") or {}
+
+            for column_name in columns:
+                canonical = column_name.strip()
+                if not canonical:
+                    continue
+                aliases = self._generate_column_aliases(canonical)
+                for alias in aliases:
+                    alias_key = alias.lower()
+                    if alias_key and alias_key not in lookup:
+                        lookup[alias_key] = canonical
+
+            for column_name, values in unique_values.items():
+                for value in values or []:
+                    aliases = self._generate_value_aliases(value)
+                    for alias in aliases:
+                        alias_key = alias.lower()
+                        if alias_key and alias_key not in lookup:
+                            lookup[alias_key] = str(value)
+
+        return lookup
+
+    def _canonicalize_sequence_aliases(self, sequence_json: Dict[str, Any], alias_lookup: Dict[str, str]) -> Dict[str, Any]:
+        """Rewrite step descriptions/prompts/parameters to use canonical column/value names."""
+        if not alias_lookup:
+            return sequence_json
+
+        sequence = sequence_json.get("sequence") or []
+        for step in sequence:
+            for field in ["description", "prompt"]:
+                value = step.get(field)
+                if isinstance(value, str):
+                    step[field] = self._canonicalize_text(value, alias_lookup)
+
+            params = step.get("parameters")
+            if isinstance(params, dict):
+                step["parameters"] = self._canonicalize_parameters(params, alias_lookup)
+
+        return sequence_json
+
+    def _canonicalize_text(self, text: str, alias_lookup: Dict[str, str]) -> str:
+        if not text:
+            return text
+        result = text
+        for alias in sorted(alias_lookup.keys(), key=len, reverse=True):
+            canonical = alias_lookup[alias]
+            pattern = re.compile(rf"\b{re.escape(alias)}\b", re.IGNORECASE)
+            result = pattern.sub(canonical, result)
+        return result
+
+    def _canonicalize_parameters(self, params: Dict[str, Any], alias_lookup: Dict[str, str]) -> Dict[str, Any]:
+        def transform(value: Any) -> Any:
+            if isinstance(value, str):
+                return self._canonicalize_text(value, alias_lookup)
+            if isinstance(value, list):
+                return [transform(item) for item in value]
+            if isinstance(value, dict):
+                return {key: transform(val) for key, val in value.items()}
+            return value
+
+        return transform(params)
     
     async def generate_sequence(
         self,
@@ -321,6 +694,7 @@ Generate the sequence now:"""
         
         # Build prompt
         prompt = self._build_sequence_prompt(user_query, file_context)
+        column_alias_lookup = getattr(self, "_last_alias_lookup", {}) or {}
         
         # Try to generate sequence with retries
         for attempt in range(max_retries):
@@ -348,6 +722,8 @@ Generate the sequence now:"""
                 
                 # Enhance with endpoints
                 sequence_json = self._enhance_sequence_with_endpoints(sequence_json)
+                if column_alias_lookup:
+                    sequence_json = self._canonicalize_sequence_aliases(sequence_json, column_alias_lookup)
                 
                 logger.info(f"✅ Sequence generated successfully ({len(sequence_json.get('sequence', []))} atoms)")
                 return {

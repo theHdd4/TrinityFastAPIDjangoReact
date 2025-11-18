@@ -1,9 +1,10 @@
 # ai_logic_create_transform.py
 import json
 import re
+import os
 import requests
 import logging
-from typing import Optional, Dict, Union, List
+from typing import Optional, Dict, Union, List, Any
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -14,100 +15,68 @@ def build_prompt_create_transform(
     files_with_columns: dict,
     supported_ops_detailed: str,
     op_format: str,
-    history_string: str
+    history_string: str,
+    file_details: Optional[Dict[str, Any]] = None,
+    other_files: Optional[List[str]] = None,
+    matched_columns: Optional[Dict[str, List[str]]] = None
 ) -> str:
     """
-    Build an intelligent prompt for the create/transform agent with enhanced context awareness.
+    Build a clean, focused prompt for the create/transform agent.
     """
     
-    # Build intelligent suggestions based on available data
-    intelligent_suggestions = _build_intelligent_suggestions(files_with_columns)
+    # Build file information section
+    file_info_section = _build_file_info_section(files_with_columns)
+    file_details_section = _build_file_details_section(file_details)
+    matched_columns_section = ""
+    if matched_columns:
+        matched_columns_section = f"\n## Matched Columns From Prompt:\n{json.dumps(matched_columns, indent=2)}\n"
+    other_files_section = ""
+    if other_files:
+        other_files_section = f"\n## Other Available Files (Reference Only):\n{', '.join(other_files)}\n"
     
-    return f"""
-You are an expert AI data transformation specialist that converts natural language into simple, executable JSON configurations.
+    # Build history context if available
+    history_section = ""
+    if history_string and history_string.strip() != "No history.":
+        history_section = f"\n## Previous Conversation:\n{history_string}\n"
+    
+    return f"""You are a data transformation specialist. Convert the user's request into a JSON configuration for creating or transforming columns in data files.
 
-## 🎯 YOUR ROLE
-- Convert natural language requests into precise data transformation configurations
-- Use the EXACT format specified below
-- Provide helpful suggestions when information is incomplete
-
-## 📋 RESPONSE FORMAT REQUIREMENTS
-
-### SUCCESS RESPONSE (when request is clear and executable):
-```json
-{{
-  "success": true,
-  "json": [
-    {{
-      "bucket_name": "trinity",
-      "object_name": "exact_file_name.extension",
-      "add_0": "column1,column2",
-      "add_0_rename": "new_column_name",
-      "multiply_0": "column3,column4",
-      "multiply_0_rename": "product_column"
-    }}
-  ],
-  "message": "Create/Transform configuration completed successfully",
-  "smart_response": "I've configured the data transformation for you. The specified operations will be applied to create new columns. You can now proceed with the transformation or make adjustments as needed.",
-  "session_id": "{session_id}"
-}}
-```
-
-**⚠️ IMPORTANT: The `object_name` should be just the filename (e.g., "20250813_094555_D0_KHC_UK_Mayo.arrow"). The backend will automatically resolve the full MinIO path.**
-
-### GUIDANCE RESPONSE (when request needs clarification):
-```json
-{{
-  "success": false,
-  "message": "I need more information to complete your request",
-  "smart_response": "I'd be happy to help you with Create/Transform operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you create new columns and transform your data. What specific transformations would you like to perform?",
-  "suggestions": [
-    "Specific suggestion 1",
-    "Specific suggestion 2"
-  ],
-  "session_id": "{session_id}"
-}}
-```
-
-## ⚠️ CRITICAL SUCCESS RULES
-**ONLY return success=true when ALL of these are present and valid:**
-- ✅ `bucket_name`: Must be "trinity"
-- ✅ `object_name`: Must be exact file name from available files (e.g., "20250813_094555_D0_KHC_UK_Mayo.arrow")
-- ✅ At least one operation with format: `{{operation_type}}_{{index}}` and `{{operation_type}}_{{index}}_rename` (use 0-based indexing)
-- ✅ Operation columns must exist in the selected file
-
-**📝 Note: Use only the filename for `object_name`. The backend will automatically resolve the full MinIO path with client/app/project prefix.**
-
-**If ANY required field is missing or invalid, return success=false with specific guidance.**
-
-### FILE DISPLAY RULES:
-When user asks to "show files", "show all files", "show file names", "show columns", or similar:
-- ALWAYS use GUIDANCE RESPONSE format (success: false)
-- Include detailed file information in smart_response
-- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
-- List ALL available files with their column counts and sample columns
-
-## 🔍 SUPPORTED OPERATIONS
+## Available Files and Columns:
+{file_info_section}
+{file_details_section}{matched_columns_section}{other_files_section}
+## Supported Operations:
 {supported_ops_detailed}
 
-## 📚 SESSION HISTORY & CONTEXT
-{history_string}
+{history_section}
+## Session ID:
+{session_id}
 
-## 🎯 CURRENT USER REQUEST
-"{user_prompt}"
+## User Request:
+{user_prompt}
 
-## 💡 INTELLIGENT SUGGESTIONS & CONTEXT
-{intelligent_suggestions}
+## JSON Output Requirements:
+1. Return ONLY JSON (no markdown, no prose).
+2. JSON must contain:
+   - "success": boolean
+   - "message": string
+   - "json": array of operation configs when success=true
+   - "smart_response": human-readable summary of actions taken or next steps
+3. Each operation config MUST follow this schema exactly:
+{op_format}
 
-## 💬 RESPONSE INSTRUCTIONS
-1. **ANALYZE** the user request carefully
-2. **MATCH** files and columns intelligently
-3. **VALIDATE** all components before proceeding
-4. **GENERATE** precise, executable configuration using the EXACT format above
-5. **EXPLAIN** your reasoning clearly
-6. **SUGGEST** alternatives if needed
+## Mandatory Rules:
+1. Include "bucket_name": "trinity" in every operation config.
+2. All column names MUST be lowercase in the final output (normalize them if needed).
+3. When referencing files, use the exact keys from the Available Files section (full path).
+4. Do NOT invent columns or files. Only use what is listed.
+5. Maintain operation_id as strings ("1", "2", etc.) and ensure execute_order matches the order.
+6. For derived columns, include clear descriptions and formulas when applicable.
+7. If comprehensive FILE DETAILS are provided, VALIDATE every referenced column (including rename targets) exists in that file before returning success=true. If any column is missing, return success=false with the list of available columns.
+8. If comprehensive FILE DETAILS are missing, fall back to the Available Files list and still double-check column names EXACTLY (case-sensitive and spacing-preserving) before returning success=true.
+9. If user intent is unclear, return success=false with helpful suggestions in smart_response.
+10. If columns requested are not found, explicitly tell the user which valid columns exist for the chosen file.
 
-Respond ONLY with the JSON object. Be precise, intelligent, and helpful.
+## Respond with JSON only.
 """
 
 def _analyze_files_for_context(files_with_columns: dict) -> str:
@@ -173,53 +142,101 @@ def _build_operation_suggestions(files_with_columns: dict) -> str:
     
     return "\n".join(suggestions)
 
-def _build_intelligent_suggestions(files_with_columns: dict) -> str:
-    """Build intelligent suggestions and context based on available data."""
+def _build_file_info_section(files_with_columns: dict) -> str:
+    """Build a clean file information section for the prompt."""
     if not files_with_columns:
-        return "❌ No files available for analysis."
+        return "No files available."
     
-    suggestions = []
-    suggestions.append("💡 **INTELLIGENT SUGGESTIONS & CONTEXT:**")
-    
-    # File analysis - Use same format as DataFrame Operations
-    suggestions.append(f"\n📁 **Available Files ({len(files_with_columns)}):**")
-    for filename, file_data in files_with_columns.items():
+    file_info = []
+    for file_path, file_data in files_with_columns.items():
+        # Handle both dict and list formats
         if isinstance(file_data, dict):
             columns = file_data.get('columns', [])
+            file_name = file_data.get('file_name', os.path.basename(file_path))
         elif isinstance(file_data, list):
             columns = file_data
+            file_name = os.path.basename(file_path)
         else:
             columns = []
+            file_name = os.path.basename(file_path)
         
-        display_name = filename.split('/')[-1] if '/' in filename else filename
-        column_list = ', '.join(columns[:8])  # Show first 8 columns
-        if len(columns) > 8:
-            column_list += f" ... (+{len(columns) - 8} more)"
-        suggestions.append(f"  • **{display_name}** ({len(columns)} columns): {column_list}")
+        # Use just the filename (not full path)
+        display_name = file_name.split('/')[-1] if '/' in file_name else file_name
+        
+        # Show all columns for better matching
+        column_list = ', '.join(columns)
+        file_info.append(f"- {display_name} ({len(columns)} columns): {column_list}")
     
-    # Operation suggestions
-    suggestions.append(f"\n🚀 **Operation Suggestions:**")
-    for filename, file_data in files_with_columns.items():
-        if isinstance(file_data, dict):
-            columns = file_data.get('columns', [])
-        elif isinstance(file_data, list):
-            columns = file_data
-        else:
-            columns = []
-            
-        numeric_cols = [col for col in columns if _is_numeric_column(col)]
-        if len(numeric_cols) >= 2:
-            display_name = filename.split('/')[-1] if '/' in filename else filename
-            suggestions.append(f"  📊 **{display_name}**: Add {', '.join(numeric_cols[:3])} → 'total_sum'")
-            suggestions.append(f"  📊 **{display_name}**: Multiply {', '.join(numeric_cols[:2])} → 'product'")
-    
-    # Examples
-    suggestions.append(f"\n📝 **Example Requests:**")
-    suggestions.append(f"  • \"Add volume and salesvalue from mayo file\"")
-    suggestions.append(f"  • \"Multiply price and quantity from beans file\"")
-    suggestions.append(f"  • \"Create dummy variables for market column\"")
-    
-    return "\n".join(suggestions)
+    return "\n".join(file_info)
+
+def _build_file_details_section(file_details: Optional[Dict[str, Any]], max_files: int = 2, max_columns: int = 80) -> str:
+    """
+    Build a detailed FILE DETAILS section similar to dataframe ops/chart maker so the LLM
+    sees the exact column names, data types, and sample stats.
+    """
+    entries = _normalize_file_details_entries(file_details)
+    if not entries:
+        return ""
+
+    section_lines = ["## Comprehensive File Details (use exact column names):"]
+    for idx, (label, details) in enumerate(entries):
+        if idx >= max_files:
+            break
+        columns = _extract_columns_from_details(details, max_columns)
+        numeric_cols = details.get("numeric_columns") or details.get("numericColumns") or []
+        categorical_cols = details.get("categorical_columns") or details.get("categoricalColumns") or []
+        section_lines.append(f"\n### {label}")
+        section_lines.append(f"- object_name: {details.get('object_name') or details.get('file_path') or label}")
+        section_lines.append(f"- total_rows: {details.get('row_count') or details.get('total_rows')}")
+        section_lines.append(f"- columns ({len(columns)}): {', '.join(columns)}")
+        if numeric_cols:
+            section_lines.append(f"- numeric_columns: {', '.join(numeric_cols[:20])}")
+        if categorical_cols:
+            section_lines.append(f"- categorical_columns: {', '.join(categorical_cols[:20])}")
+        sample_data = details.get("sample_data")
+        if isinstance(sample_data, list) and sample_data:
+            section_lines.append(f"- sample_data_preview: {json.dumps(sample_data[:1])}")
+
+    section_lines.append("")  # Ensure trailing newline
+    return "\n".join(section_lines)
+
+def _normalize_file_details_entries(file_details: Optional[Dict[str, Any]]) -> List[tuple]:
+    """
+    Normalise file_details into [(label, details_dict), ...] to keep prompts consistent.
+    """
+    if not file_details:
+        return []
+
+    if isinstance(file_details, dict):
+        # Single file format from /load-file-details endpoint
+        if any(key in file_details for key in ("file_id", "columns", "object_name", "file_path")):
+            label = file_details.get("display_name") or file_details.get("object_name") or file_details.get("file_path") or "selected_file"
+            return [(label, file_details)]
+        # Multi-file format {filename: {...}}
+        entries = []
+        for label, details in file_details.items():
+            if isinstance(details, dict):
+                entries.append((label, details))
+        return entries
+
+    if isinstance(file_details, list):
+        entries = []
+        for idx, details in enumerate(file_details):
+            if isinstance(details, dict):
+                label = details.get("display_name") or details.get("object_name") or f"file_{idx+1}"
+                entries.append((label, details))
+        return entries
+
+    return []
+
+def _extract_columns_from_details(details: Dict[str, Any], max_columns: int) -> List[str]:
+    columns = details.get("columns")
+    if isinstance(columns, dict):
+        columns = list(columns.keys())
+    if not isinstance(columns, list):
+        columns = details.get("sample_columns") or []
+    columns = [str(col) for col in columns][:max_columns]
+    return columns
 
 def _categorize_file(filename: str, columns: List[str]) -> str:
     """Categorize file based on name and content."""
@@ -270,7 +287,7 @@ def call_llm_create_transform(
     payload = {
         "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
-        "options": {"temperature": 0.1, "top_p": 0.9},
+        "options": {"temperature": 0.2, "top_p": 0.95},
         "stream": False
     }
     

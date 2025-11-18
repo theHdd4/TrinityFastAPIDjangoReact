@@ -1,5 +1,5 @@
 import { Message, EnvironmentContext } from './types';
-import { MERGE_API, CONCAT_API, GROUPBY_API, CREATECOLUMN_API } from '@/lib/api';
+import { MERGE_API, CONCAT_API, GROUPBY_API, CREATECOLUMN_API, DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
@@ -266,6 +266,39 @@ export const createProgressTracker = (total: number, operation: string) => {
 const sanitizeFileName = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_\-]+/g, '_');
 
+const buildAliasFilename = (alias?: string): string | null => {
+  if (!alias || typeof alias !== 'string') {
+    return null;
+  }
+
+  const trimmed = alias.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const withoutExtension = trimmed.replace(/\.arrow$/i, '');
+  const sanitizedAlias = sanitizeFileName(withoutExtension);
+  if (!sanitizedAlias) {
+    return null;
+  }
+
+  const pad = (value: number): string => value.toString().padStart(2, '0');
+  const now = new Date();
+  const timestampToken = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}_${pad(
+    now.getUTCHours()
+  )}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
+
+  return `${sanitizedAlias}_${timestampToken}.arrow`;
+};
+
+const buildDefaultFilename = (aliasKey: string): string => {
+  const timestamp = Date.now();
+  const baseName = sanitizeFileName(aliasKey || 'stream_step');
+  return baseName.toLowerCase().endsWith('.arrow')
+    ? `${baseName}_${timestamp}`
+    : `${baseName}_${timestamp}.arrow`;
+};
+
 interface AutoSaveParams {
   atomType: string;
   atomId: string;
@@ -288,15 +321,24 @@ export const autoSaveStepResult = async ({
   const store = useLaboratoryStore.getState();
   const currentAtom = store.getAtom(atomId);
   const currentSettings = currentAtom?.settings || {};
-  const aliasKey = stepAlias || `${atomType}_step`;
+  const trimmedAlias = typeof stepAlias === 'string' ? stepAlias.trim() : '';
+  const aliasKey = trimmedAlias || `${atomType}_step`;
+  const aliasFilename = buildAliasFilename(trimmedAlias);
 
   if (currentSettings.lastAutoSavedAlias === aliasKey) {
     return;
   }
 
-  const timestamp = Date.now();
-  const baseName = sanitizeFileName(aliasKey || atomType);
-  const filename = baseName.endsWith('.arrow') ? `${baseName}_${timestamp}` : `${baseName}_${timestamp}.arrow`;
+  const defaultFilename = buildDefaultFilename(aliasKey);
+  const resolveFilename = (override?: string | null): string => {
+    if (typeof override === 'string') {
+      const trimmedOverride = override.trim();
+      if (trimmedOverride) {
+        return trimmedOverride;
+      }
+    }
+    return aliasFilename || defaultFilename;
+  };
 
   const notify = !isStreamMode;
 
@@ -312,6 +354,7 @@ export const autoSaveStepResult = async ({
         return;
       }
 
+      const filename = resolveFilename();
       const response = await fetch(`${MERGE_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -345,6 +388,7 @@ export const autoSaveStepResult = async ({
         return;
       }
 
+      const filename = resolveFilename();
       const response = await fetch(`${CONCAT_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -387,6 +431,7 @@ export const autoSaveStepResult = async ({
         return;
       }
 
+      const filename = resolveFilename();
       const response = await fetch(`${GROUPBY_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -415,18 +460,35 @@ export const autoSaveStepResult = async ({
     }
 
     if (atomType === 'create-column' || atomType === 'create-transform') {
+      // 🔧 CRITICAL FIX: Always save as Arrow file (perform endpoint saves CSV, we need Arrow)
+      // Get CSV data from result or convert from unsaved_data
       let csvData: string | null = null;
 
       if (typeof result?.data === 'string') {
         csvData = result.data;
       } else if (Array.isArray(result?.unsaved_data)) {
         csvData = convertRowsToCsv(result.unsaved_data);
+      } else if (result?.result_file) {
+        // If we have result_file but no CSV data, try to fetch it from cached_dataframe
+        try {
+          const cachedRes = await fetch(`${CREATECOLUMN_API}/cached_dataframe?object_name=${encodeURIComponent(result.result_file)}`);
+          if (cachedRes.ok) {
+            const cachedJson = await cachedRes.json();
+            csvData = cachedJson?.data ?? null;
+            console.log(`✅ Retrieved CSV data from cached_dataframe for auto-save`);
+          }
+        } catch (fetchError) {
+          console.warn(`⚠️ Could not fetch CSV data from cached_dataframe:`, fetchError);
+        }
       }
 
       if (!csvData) {
+        console.warn(`⚠️ Create-transform auto-save: No CSV data available`);
         return;
       }
 
+      // Always save as Arrow file with proper filename in create-data folder
+      const filename = resolveFilename();
       const response = await fetch(`${CREATECOLUMN_API}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -448,10 +510,122 @@ export const autoSaveStepResult = async ({
           result_file: savedPath,
           unsaved_data: null,
         },
+        createResults: {
+          ...(currentSettings.createResults || {}),
+          result_file: savedPath,
+        },
         lastAutoSavedAlias: aliasKey,
       });
 
       sendMessage(`💾 Create Column output saved automatically as ${savedPath}`);
+      return;
+    }
+
+    if (atomType === 'dataframe-operations') {
+      let csvData: string | null = null;
+      const tableData = result?.tableData;
+
+      if (typeof result?.csv_data === 'string') {
+        csvData = result.csv_data;
+      } else if (Array.isArray(result?.rows) && Array.isArray(result?.headers)) {
+        csvData = convertTableDataToCsv(result.headers, result.rows);
+      } else if (tableData?.headers && Array.isArray(tableData?.rows)) {
+        csvData = convertTableDataToCsv(tableData.headers, tableData.rows);
+      } else if (Array.isArray(result?.unsaved_data)) {
+        csvData = convertRowsToCsv(result.unsaved_data);
+      }
+
+      if (!csvData) {
+        console.warn('⚠️ DataFrame Operations auto-save skipped: No CSV data available');
+        return;
+      }
+
+      const inferBaseName = (): string => {
+        const candidates = [
+          result?.baseFileName,
+          result?.selectedFile,
+          currentSettings.selectedFile,
+          currentSettings.tableData?.fileName
+        ];
+        for (const candidate of candidates) {
+          if (typeof candidate === 'string' && candidate.trim().length > 0) {
+            const cleaned = getFilename(candidate).replace(/\.[^/.]+$/, '');
+            if (cleaned) {
+              return sanitizeFileName(cleaned);
+            }
+          }
+        }
+        return 'dataframe';
+      };
+
+      let resolvedFilename = aliasFilename;
+      let dfOpsFilename: string | null = aliasFilename ? aliasFilename.replace(/\.arrow$/i, '') : null;
+
+      if (!resolvedFilename) {
+        const baseName = inferBaseName() || 'dataframe';
+        let nextSerial = 1;
+
+        try {
+          const res = await fetch(`${VALIDATE_API}/list_saved_dataframes`, { credentials: 'include' });
+          if (res.ok) {
+            const data = await res.json();
+            const files = Array.isArray(data?.files) ? data.files : [];
+            const maxSerial = files.reduce((max: number, file: any) => {
+              const match = file?.object_name?.match(/dataframe operations\/DF_OPS_(\d+)_/i);
+              if (match) {
+                const value = parseInt(match[1], 10);
+                if (!Number.isNaN(value)) {
+                  return Math.max(max, value);
+                }
+              }
+              return max;
+            }, 0);
+            nextSerial = maxSerial + 1;
+          }
+        } catch (err) {
+          console.warn('⚠️ list_saved_dataframes failed for DataFrame auto-save:', err);
+        }
+
+        dfOpsFilename = `DF_OPS_${nextSerial}_${baseName}`;
+        resolvedFilename = `${dfOpsFilename}.arrow`;
+      }
+
+      const savePayload = {
+        csv_data: csvData,
+        filename: resolvedFilename
+      };
+
+      const response = await fetch(`${DATAFRAME_OPERATIONS_API}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(savePayload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'DataFrame Operations save failed');
+      }
+
+      const payload = await response.json();
+      const savedPath = payload?.result_file || payload?.object_name || savePayload.filename;
+      const dfIdFromSave = payload?.df_id || result?.dfId || currentSettings.fileId;
+
+      const nextSettings: Record<string, any> = {
+        lastAutoSavedAlias: aliasKey,
+        autoSavedFile: savedPath,
+        fileId: dfIdFromSave,
+        currentDfId: dfIdFromSave
+      };
+
+      if (tableData?.headers && Array.isArray(tableData.rows)) {
+        nextSettings.tableData = {
+          ...tableData,
+          fileName: resolvedFilename
+        };
+      }
+
+      updateAtomSettings(atomId, nextSettings);
+      sendMessage(`💾 DataFrame saved automatically as ${savedPath}`);
       return;
     }
   } catch (error) {
@@ -477,6 +651,30 @@ const convertRowsToCsv = (rows: any[]): string => {
         }
         return value;
       })
+      .join(',')
+  );
+
+  return [headerRow, ...valueRows].join('\n');
+};
+
+const convertTableDataToCsv = (headers: string[], rows: Record<string, any>[]): string => {
+  if (!Array.isArray(headers) || headers.length === 0 || !Array.isArray(rows) || rows.length === 0) {
+    return '';
+  }
+
+  const sanitizeValue = (value: any): string => {
+    if (value === null || value === undefined) return '';
+    const str = String(value);
+    if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const headerRow = headers.join(',');
+  const valueRows = rows.map(row =>
+    headers
+      .map(header => sanitizeValue(row?.[header]))
       .join(',')
   );
 

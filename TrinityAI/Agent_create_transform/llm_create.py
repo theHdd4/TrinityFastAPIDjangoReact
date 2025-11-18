@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
+import requests
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain.memory import ConversationBufferWindowMemory
 
@@ -14,6 +15,8 @@ from .ai_logic import (
     extract_json_from_response
 )
 from file_loader import FileLoader
+from file_analyzer import FileAnalyzer
+from file_context_resolver import FileContextResolver, FileContextResult
 
 logger = logging.getLogger(__name__)
 ALLOWED_KEYS = {"success", "message", "json", "session_id", "suggestions", "reasoning", "used_memory", "next_steps", "error", "processing_time", "smart_response", "file_analysis"}
@@ -52,6 +55,24 @@ class SmartCreateTransformAgent:
             minio_bucket=bucket,
             object_prefix=prefix
         )
+        
+        self.file_analyzer = FileAnalyzer(
+            minio_endpoint=minio_endpoint,
+            access_key=access_key,
+            secret_key=secret_key,
+            bucket=bucket,
+            prefix=prefix,
+            secure=False
+        )
+        self.file_context_resolver = FileContextResolver(
+            file_loader=self.file_loader,
+            file_analyzer=self.file_analyzer
+        )
+
+        self.files_with_columns: Dict[str, Any] = {}
+        self.files_metadata: Dict[str, Dict[str, Any]] = {}
+        self._raw_files_with_columns: Dict[str, Any] = {}
+        self._last_context_selection: Optional[FileContextResult] = None
         
         # Files will be loaded lazily when needed
         self._files_loaded = False
@@ -143,77 +164,23 @@ class SmartCreateTransformAgent:
             logger.error(f"Failed to update prefix: {e}")
 
     def _load_files(self):
-        """Load available files from MinIO with their columns using dynamic paths"""
+        """Load available files using the standardized loader and update resolver."""
         try:
-            try:
-                from minio import Minio
-                from minio.error import S3Error
-                import pyarrow as pa
-                import pyarrow.ipc as ipc
-                import pandas as pd
-                import io
-            except ImportError as ie:
-                logger.error(f"Failed to import required libraries: {ie}")
-                self.files_with_columns = {}
-                return
-            
-            # logger.info(f"Loading files with prefix: {self.prefix}")
-            
-            # Initialize MinIO client
-            minio_client = Minio(
-                self.file_loader.minio_endpoint,
-                access_key=self.file_loader.minio_access_key,
-                secret_key=self.file_loader.minio_secret_key,
-                secure=False
-            )
-            
-            # List objects in bucket with current prefix
-            objects = minio_client.list_objects(self.file_loader.minio_bucket, prefix=self.prefix, recursive=True)
-            
-            files_with_columns = {}
-            
-            for obj in objects:
-                try:
-                    if obj.object_name.endswith('.arrow'):
-                        # Get Arrow file data
-                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
-                        data = response.read()
-                        
-                        # Read Arrow file
-                        with pa.ipc.open_file(pa.BufferReader(data)) as reader:
-                            table = reader.read_all()
-                            columns = table.column_names
-                            files_with_columns[obj.object_name] = {"columns": columns}
-                            
-                        # logger.info(f"Loaded Arrow file {obj.object_name} with {len(columns)} columns")
-                    
-                    elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
-                        # For CSV/Excel files, try to read headers
-                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
-                        data = response.read()
-                        
-                        if obj.object_name.endswith('.csv'):
-                            # Read CSV headers
-                            df_sample = pd.read_csv(io.BytesIO(data), nrows=0)  # Just headers
-                            columns = list(df_sample.columns)
-                        else:
-                            # Read Excel headers
-                            df_sample = pd.read_excel(io.BytesIO(data), nrows=0)  # Just headers
-                            columns = list(df_sample.columns)
-                        
-                        files_with_columns[obj.object_name] = {"columns": columns}
-                        # logger.info(f"Loaded {obj.object_name.split('.')[-1].upper()} file {obj.object_name} with {len(columns)} columns")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to load file {obj.object_name}: {e}")
-                    continue
-            
-            self.files_with_columns = files_with_columns
-            logger.info(f"Loaded {len(files_with_columns)} files from MinIO")
-            
+            self._maybe_update_prefix()
+            files_with_columns = self.file_loader.load_files()
+            self._raw_files_with_columns = files_with_columns or {}
+            self.files_with_columns = self._raw_files_with_columns
+            self.files_metadata = {}
+            self.file_context_resolver.update_files(self._raw_files_with_columns)
+            self._last_context_selection = None
+            logger.info(f"Loaded {len(self.files_with_columns)} files from MinIO")
         except Exception as e:
             logger.error(f"Error loading files from MinIO: {e}")
             self.files_with_columns = {}
+            self._raw_files_with_columns = {}
+            self.files_metadata = {}
+            self.file_context_resolver.update_files({})
+            self._last_context_selection = None
 
     def _build_history_string(self, history_msgs: List[BaseMessage]) -> str:
         if not history_msgs:
@@ -223,6 +190,72 @@ class SmartCreateTransformAgent:
             role = "User" if isinstance(msg, HumanMessage) else "Assistant"
             buf.append(f"\n--- {role} {i} ---\n{msg.content}")
         return "\n".join(buf)
+
+    def _fetch_file_details_from_backend(self, object_name: str) -> Optional[Dict[str, Any]]:
+        """
+        Load comprehensive file metadata via the dataframe operations backend endpoint
+        so the LLM can see the full column list (same approach as dataframe ops & chart maker).
+        """
+        if not object_name:
+            return None
+
+        try:
+            df_ops_api_url = os.getenv("DATAFRAME_OPERATIONS_API_URL", "http://fastapi:8001")
+            if not df_ops_api_url.startswith("http"):
+                df_ops_api_url = f"http://{df_ops_api_url}"
+
+            load_details_url = f"{df_ops_api_url}/api/dataframe-operations/load-file-details"
+            logger.info(f"📥 Loading file details for create/transform from: {load_details_url}")
+            logger.info(f"📥 Object name: {object_name}")
+
+            response = requests.post(
+                load_details_url,
+                json={"object_name": object_name},
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                details = response.json()
+                if details.get("columns"):
+                    logger.info(f"✅ Retrieved {len(details.get('columns', []))} columns for {object_name}")
+                return details
+
+            logger.warning(f"⚠️ Failed to load file details ({response.status_code}): {response.text}")
+        except Exception as exc:
+            logger.warning(f"⚠️ Error loading file details for {object_name}: {exc}")
+        return None
+
+    def _collect_comprehensive_file_details(
+        self,
+        selection: Optional[FileContextResult],
+        max_files: int = 2
+    ) -> Dict[str, Any]:
+        """
+        Collect comprehensive metadata for the top relevant files. This mirrors
+        dataframe operations & chart maker so the LLM gets the exact column names.
+        """
+        if not selection or not selection.relevant_files:
+            return {}
+
+        details: Dict[str, Any] = {}
+        for idx, display_name in enumerate(selection.relevant_files.keys()):
+            if idx >= max_files:
+                break
+
+            cached = self.files_metadata.get(display_name)
+            if cached and cached.get("columns"):
+                details[display_name] = cached
+                continue
+
+            object_candidates = selection.object_mappings.get(display_name) or [display_name]
+            for object_name in object_candidates:
+                backend_details = self._fetch_file_details_from_backend(object_name)
+                if backend_details:
+                    details[display_name] = backend_details
+                    self.files_metadata[display_name] = backend_details
+                    break
+
+        return details
 
     def process_request(self, user_prompt: str, session_id: Optional[str] = None, client_name: str = "", app_name: str = "", project_name: str = "") -> dict:
         # Set environment context for dynamic path resolution (like explore agent)
@@ -259,12 +292,42 @@ class SmartCreateTransformAgent:
         memory: ConversationBufferWindowMemory = self.sessions[session_id]["memory"]
         history_str = self._build_history_string(memory.load_memory_variables({})["history"])
         supported_ops = json.dumps(self.supported_operations, indent=2)
-        prompt = build_prompt_create_transform(user_prompt, session_id, self.files_with_columns, supported_ops, self.operation_format, history_str)
+        
+        selection = self.file_context_resolver.resolve(
+            user_prompt=user_prompt,
+            top_k=3,
+            include_metadata=True
+        )
+        self._last_context_selection = selection
+        prompt_file_details = self._collect_comprehensive_file_details(selection)
+        if not prompt_file_details and selection and selection.file_details:
+            prompt_file_details = selection.file_details
+
+        available_for_prompt = selection.to_object_column_mapping(self._raw_files_with_columns) if selection else self._raw_files_with_columns
+        prompt = build_prompt_create_transform(
+            user_prompt,
+            session_id,
+            available_for_prompt,
+            supported_ops,
+            self.operation_format,
+            history_str,
+            file_details=prompt_file_details,
+            other_files=selection.other_files if selection else [],
+            matched_columns=selection.matched_columns if selection else {}
+        )
 
 
         raw = call_llm_create_transform(self.api_url, self.model_name, self.bearer_token, prompt)
         
+        # 🔧 LOG LLM REQUEST AND RESPONSE
+        logger.info(f"🤖 CREATE/TRANSFORM LLM REQUEST:")
+        logger.info(f"📝 User Prompt: {user_prompt}")
+        logger.info(f"🔧 Session ID: {session_id}")
+        logger.info(f"📁 Available Files: {list(self.files_with_columns.keys())}")
+        logger.info(f"📋 Prompt Length: {len(prompt)} characters")
+        
         if not raw:
+            logger.error("❌ No response from LLM")
             return {
                 "success": False,
                 "message": "LLM returned no response.",
@@ -272,159 +335,93 @@ class SmartCreateTransformAgent:
                 "suggestions": ["Try again later."]
             }
         
+        # 🔧 LOG LLM RESPONSE
+        logger.info(f"🤖 CREATE/TRANSFORM LLM RESPONSE:")
+        logger.info(f"📄 Raw Response Length: {len(raw) if raw else 0} characters")
+        if raw:
+            logger.info(f"📄 FULL RAW LLM RESPONSE:")
+            logger.info("=" * 80)
+            logger.info(raw)
+            logger.info("=" * 80)
+        else:
+            logger.warning("❌ No response from LLM")
+        
         parsed = extract_json_from_response(raw) or {}
         
+        # 🔧 LOG PARSED JSON
+        logger.info(f"🔍 CREATE/TRANSFORM PARSED JSON:")
+        logger.info(f"✅ Success: {parsed.get('success', False)}")
+        logger.info(f"📊 Has json field: {bool(parsed.get('json'))}")
+        logger.info(f"💬 Has smart_response: {bool(parsed.get('smart_response'))}")
+        logger.info(f"📋 Has suggestions: {bool(parsed.get('suggestions'))}")
+        if parsed.get('smart_response'):
+            logger.info(f"💬 Smart Response: {parsed['smart_response'][:200]}...")
+        logger.info(f"🔍 FULL PARSED JSON:")
+        logger.info("=" * 80)
+        logger.info(json.dumps(parsed, indent=2))
+        logger.info("=" * 80)
+        
         result = self._enforce_allowed_keys(parsed, session_id)
+        
+        # 🔧 LOG FINAL RESULT
+        logger.info(f"✅ CREATE/TRANSFORM FINAL RESULT:")
+        logger.info(f"✅ Success: {result.get('success', False)}")
+        logger.info(f"📊 Has json field: {bool(result.get('json'))}")
+        if result.get('json'):
+            json_data = result.get('json')
+            if isinstance(json_data, list):
+                logger.info(f"📊 JSON is array with {len(json_data)} items")
+                if len(json_data) > 0:
+                    logger.info(f"📊 First item keys: {list(json_data[0].keys()) if isinstance(json_data[0], dict) else 'Not a dict'}")
+            elif isinstance(json_data, dict):
+                logger.info(f"📊 JSON is object with keys: {list(json_data.keys())}")
         
         memory.save_context({"input": user_prompt}, {"output": json.dumps(result)})
         return result
 
     def _enforce_allowed_keys(self, result: dict, session_id: str) -> dict:
+        """
+        Process LLM response with minimal intervention.
+        Trust LLM output and only apply essential fixes for backend compatibility.
+        """
         result["session_id"] = session_id
         filtered = {k: v for k, v in result.items() if k in ALLOWED_KEYS}
         
-        # If success and json exists, ensure it has all required fields
+        # Only apply minimal fixes if LLM returned success with JSON
         if filtered.get("success") and "json" in filtered:
             json_data = filtered["json"]
             
-            # Handle both list and single object formats
+            # Normalize to list format for easier processing
+            if isinstance(json_data, dict):
+                json_data = [json_data]
+                filtered["json"] = json_data
+            
+            # Apply minimal fixes for backend compatibility
             if isinstance(json_data, list):
-                # Process each item in the list
                 for config in json_data:
                     if isinstance(config, dict):
-                        # Auto-generate missing required fields for backend compatibility
+                        # Auto-add bucket_name if missing (backend requirement)
                         if "bucket_name" not in config:
                             config["bucket_name"] = "trinity"
-                            
-                        # 🔧 CRITICAL FIX: Convert all column names to lowercase for backend compatibility
-                        # Convert operation columns to lowercase
+                        
+                        # Convert column names to lowercase for backend compatibility
                         for key, value in config.items():
-                            if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5')) and not key.endswith('_rename'):
-                                if isinstance(value, str):
-                                    # Convert comma-separated columns to lowercase
+                            if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5', '_6', '_7', '_8', '_9')) and not key.endswith('_rename'):
+                                if isinstance(value, str) and value.strip():
                                     columns = [col.strip().lower() for col in value.split(',')]
                                     config[key] = ','.join(columns)
-            elif isinstance(json_data, dict):
-                # Handle single object format
-                config = json_data
-                # Auto-generate missing required fields for backend compatibility
-                if "bucket_name" not in config:
-                    config["bucket_name"] = "trinity"
-                    
-                # 🔧 CRITICAL FIX: Convert all column names to lowercase for backend compatibility
-                # Convert operation columns to lowercase
-                for key, value in config.items():
-                    if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5')) and not key.endswith('_rename'):
-                        if isinstance(value, str):
-                            # Convert comma-separated columns to lowercase
-                            columns = [col.strip().lower() for col in value.split(',')]
-                            config[key] = ','.join(columns)
-                
-            # 🔍 STRICT VALIDATION: Only return success=true when ALL required fields are present and valid
-            if isinstance(json_data, list):
-                for config in json_data:
-                    if isinstance(config, dict):
-                        # Check if all required fields are present and valid
-                        required_fields = ["bucket_name", "object_name"]
-                        missing_fields = [field for field in required_fields if field not in config or not config[field]]
-                        
-                        if missing_fields:
-                            logger.warning(f"Missing or empty required fields: {missing_fields}")
-                            # Set success to false if any required field is missing
-                            filtered["success"] = False
-                            filtered["message"] = f"Missing required fields: {', '.join(missing_fields)}"
-                            filtered["suggestions"] = [f"Please provide: {', '.join(missing_fields)}"]
-                            # Remove the incomplete json
-                            filtered.pop("json", None)
-                            return filtered
-                        
-                        # Validate that at least one operation exists
-                        operation_keys = [key for key in config.keys() if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5')) and not key.endswith('_rename')]
-                        if not operation_keys:
-                            logger.warning("No operations found in configuration")
-                            filtered["success"] = False
-                            filtered["message"] = "No operations found in configuration"
-                            filtered["suggestions"] = ["Please specify at least one operation"]
-                            filtered.pop("json", None)
-                            return filtered
-                        
-                        # Validate that each operation has a corresponding rename
-                        for op_key in operation_keys:
-                            rename_key = f"{op_key}_rename"
-                            if rename_key not in config or not config[rename_key]:
-                                logger.warning(f"Missing rename for operation {op_key}")
-                                filtered["success"] = False
-                                filtered["message"] = f"Missing rename for operation {op_key}"
-                                filtered["suggestions"] = [f"Please provide rename for {op_key}"]
-                                filtered.pop("json", None)
-                                return filtered
-                            
-                            # Validate operation columns are not empty
-                            if not config[op_key] or config[op_key].strip() == "":
-                                logger.warning(f"Operation {op_key} has no columns")
-                                filtered["success"] = False
-                                filtered["message"] = f"Operation {op_key} has no columns"
-                                filtered["suggestions"] = [f"Please specify columns for {op_key}"]
-                                filtered.pop("json", None)
-                                return filtered
-                            
-            elif isinstance(json_data, dict):
-                # Handle single object validation
-                config = json_data
-                required_fields = ["bucket_name", "object_name"]
-                missing_fields = [field for field in required_fields if field not in config or not config[field]]
-                
-                if missing_fields:
-                    logger.warning(f"Missing or empty required fields: {missing_fields}")
-                    filtered["success"] = False
-                    filtered["message"] = f"Missing required fields: {', '.join(missing_fields)}"
-                    filtered["suggestions"] = [f"Please provide: {', '.join(missing_fields)}"]
-                    filtered.pop("json", None)
-                    return filtered
-                
-                # Validate that at least one operation exists
-                operation_keys = [key for key in config.keys() if key.endswith(('_0', '_1', '_2', '_3', '_4', '_5')) and not key.endswith('_rename')]
-                if not operation_keys:
-                    logger.warning("No operations found in configuration")
-                    filtered["success"] = False
-                    filtered["message"] = "No operations found in configuration"
-                    filtered["suggestions"] = ["Please specify at least one operation"]
-                    filtered.pop("json", None)
-                    return filtered
-                
-                # Validate that each operation has a corresponding rename
-                for op_key in operation_keys:
-                    rename_key = f"{op_key}_rename"
-                    if rename_key not in config or not config[rename_key]:
-                        logger.warning(f"Missing rename for operation {op_key}")
-                        filtered["success"] = False
-                        filtered["message"] = f"Missing rename for operation {op_key}"
-                        filtered["suggestions"] = [f"Please provide rename for {op_key}"]
-                        filtered.pop("json", None)
-                        return filtered
-                    
-                    # Validate operation columns are not empty
-                    if not config[op_key] or config[op_key].strip() == "":
-                        logger.warning(f"Operation {op_key} has no columns")
-                        filtered["success"] = False
-                        filtered["message"] = f"Operation {op_key} has no columns"
-                        filtered["suggestions"] = ["Please specify columns for {op_key}"]
-                        filtered.pop("json", None)
-                        return filtered
-                
-        elif filtered.get("success") and "json" not in filtered:
-            # If success=true but no json, this is invalid
-            logger.warning("Success=true but no json provided")
+            
+            # Trust LLM's success/failure decision - don't override it
+            logger.info(f"LLM returned success={filtered.get('success')} with JSON configuration")
+        
+        # Ensure required fields exist with defaults
+        if "success" not in filtered:
             filtered["success"] = False
-            filtered["message"] = "Configuration incomplete - missing json"
-            filtered["suggestions"] = ["Please provide complete configuration"]
-            return filtered
-            
-        if not filtered.get("success"):
-            filtered.pop("json", None)
-            
-        for k in ["success", "message", "suggestions"]:
-            filtered.setdefault(k, False if k == "success" else ([] if k == "suggestions" else ""))
+        if "message" not in filtered:
+            filtered["message"] = ""
+        if "suggestions" not in filtered:
+            filtered["suggestions"] = []
+        
         return filtered
 
     def get_session_history(self, session_id):

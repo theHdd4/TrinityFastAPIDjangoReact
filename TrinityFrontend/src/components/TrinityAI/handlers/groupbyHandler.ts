@@ -14,6 +14,23 @@ import {
   autoSaveStepResult
 } from './utils';
 
+const normalizeColumnName = (value: string | undefined | null) => {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
+};
+
+const toBackendAggregation = (agg: string) => {
+  const key = (agg || '').toLowerCase();
+  switch (key) {
+    case 'weighted mean':
+      return 'weighted_mean';
+    case 'rank percentile':
+      return 'rank_pct';
+    default:
+      return key;
+  }
+};
+
 export const groupbyHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId, isStreamMode = false, stepAlias } = context;
@@ -54,7 +71,9 @@ export const groupbyHandler: AtomHandler = {
     });
     
     // 🔧 CRITICAL FIX: Automatically populate GroupBy settings with AI configuration
-    const aiSelectedIdentifiers = cfg.identifiers || [];
+    const aiSelectedIdentifiers = Array.isArray(cfg.identifiers)
+      ? cfg.identifiers.map((id: string) => normalizeColumnName(id)).filter(Boolean)
+      : [];
     const aiSelectedMeasures: any[] = [];
     
     // 🔧 FIX: Ensure we have a single file, not multiple files
@@ -192,26 +211,32 @@ export const groupbyHandler: AtomHandler = {
     // Convert AI aggregations to selectedMeasures format
     if (cfg.aggregations && typeof cfg.aggregations === 'object') {
       Object.entries(cfg.aggregations).forEach(([field, aggConfig]: [string, any]) => {
+        const normalizedField = normalizeColumnName(field);
+        if (!normalizedField) {
+          return;
+        }
+
         if (typeof aggConfig === 'object' && aggConfig !== null) {
           const agg = aggConfig.agg;
           if (agg) {
+            const normalizedWeight = aggConfig.weight_by ? normalizeColumnName(aggConfig.weight_by) : '';
             aiSelectedMeasures.push({
-              field: field,
-              aggregator: agg === 'sum' ? 'Sum' : 
-                          agg === 'mean' ? 'Mean' : 
-                          agg === 'min' ? 'Min' : 
-                          agg === 'max' ? 'Max' : 
-                          agg === 'count' ? 'Count' : 
-                          agg === 'median' ? 'Median' : 
-                          agg === 'weighted_mean' ? 'Weighted Mean' : 
-                          agg === 'rank_pct' ? 'Rank Percentile' : 'Sum',
-              weight_by: aggConfig.weight_by || '',
-              rename_to: aggConfig.rename_to || field
+              field: normalizedField,
+          aggregator: agg === 'sum' ? 'Sum' : 
+                      agg === 'mean' ? 'Mean' : 
+                      agg === 'min' ? 'Min' : 
+                      agg === 'max' ? 'Max' : 
+                      agg === 'count' ? 'Count' : 
+                      agg === 'median' ? 'Median' : 
+                      agg === 'weighted_mean' ? 'Weighted Mean' : 
+                      agg === 'rank_pct' ? 'Rank Percentile' : 'Sum',
+              weight_by: normalizedWeight,
+              rename_to: aggConfig.rename_to || normalizedField
             });
           }
         } else if (typeof aggConfig === 'string') {
           aiSelectedMeasures.push({
-            field: field,
+            field: normalizedField,
             aggregator: aggConfig === 'sum' ? 'Sum' : 
                         aggConfig === 'mean' ? 'Mean' : 
                         aggConfig === 'min' ? 'Min' : 
@@ -221,7 +246,7 @@ export const groupbyHandler: AtomHandler = {
                         aggConfig === 'weighted_mean' ? 'Weighted Mean' : 
                         aggConfig === 'rank_pct' ? 'Rank Percentile' : 'Sum',
             weight_by: '',
-            rename_to: field
+            rename_to: normalizedField
           });
         }
       });
@@ -322,10 +347,14 @@ export const groupbyHandler: AtomHandler = {
           aggregations: JSON.stringify(aiSelectedMeasures.reduce((acc, m) => {
             // 🔧 CRITICAL FIX: Convert to backend-expected format
             // Backend expects: { "field_name": { "agg": "sum", "weight_by": "", "rename_to": "" } }
-            acc[m.field] = {
-              agg: m.aggregator.toLowerCase(),
-              weight_by: m.weight_by || '',
-              rename_to: m.rename_to || m.field
+            const fieldKey = normalizeColumnName(m.field);
+            if (!fieldKey) {
+              return acc;
+            }
+            acc[fieldKey] = {
+              agg: toBackendAggregation(m.aggregator),
+              weight_by: normalizeColumnName(m.weight_by),
+              rename_to: m.rename_to || fieldKey
             };
             return acc;
           }, {})),
@@ -345,8 +374,8 @@ export const groupbyHandler: AtomHandler = {
           identifiers: aiSelectedIdentifiers,
           aggregations: aiSelectedMeasures.reduce((acc, m) => {
             acc[m.field] = {
-              agg: m.aggregator.toLowerCase(),
-              weight_by: m.weight_by || '',
+              agg: toBackendAggregation(m.aggregator),
+              weight_by: normalizeColumnName(m.weight_by),
               rename_to: m.rename_to || m.field
             };
             return acc;
@@ -369,109 +398,151 @@ export const groupbyHandler: AtomHandler = {
             console.log('🔄 Backend operation completed, retrieving results from saved file:', result.data.result_file);
             resultFilePath = result.data.result_file;
           
-            // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
-            try {
-              const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(result.data.result_file)}`);
-              if (cachedRes.ok) {
+            const directRows = Array.isArray(result.data.results) ? result.data.results : null;
+            if (directRows && directRows.length > 0) {
+              console.log('✅ Using direct results returned from backend without pagination');
+              const headers = Object.keys(directRows[0] ?? {});
+              parsedRows = directRows;
+
+              updateAtomSettings(atomId, {
+                selectedIdentifiers: aiSelectedIdentifiers,
+                selectedMeasures: aiSelectedMeasures,
+                selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+                selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+                dataSource: singleFileName || cfg.file_key || '',
+                bucketName: cfg.bucket_name || 'trinity',
+                groupbyResults: {
+                  ...result.data,
+                  unsaved_data: directRows,
+                  result_file: result.data.result_file,
+                  row_count: directRows.length,
+                  columns: headers
+                },
+                operationCompleted: true,
+                lastUpdateTime: Date.now()
+              });
+
+              if (!isStreamMode) {
+                const completionDetails = {
+                  'Result File': result.data.result_file,
+                  'Rows': directRows.length.toLocaleString(),
+                  'Columns': headers.length
+                };
+                const completionMsg = createSuccessMessage('GroupBy operation', completionDetails);
+                completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
+                setMessages(prev => [...prev, completionMsg]);
+              }
+            } else {
+              // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
+              try {
+                const rawRowCount = result.data?.row_count;
+                const hasValidRowCount =
+                  typeof rawRowCount === 'number' && Number.isFinite(rawRowCount) && rawRowCount > 0;
+                const pageSize = hasValidRowCount ? Math.ceil(rawRowCount) : 100000;
+                const cachedUrl = `${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(
+                  result.data.result_file
+                )}&page=1&page_size=${pageSize}`;
+                const cachedRes = await fetch(cachedUrl);
+
+                if (!cachedRes.ok) {
+                  throw new Error(`Failed to fetch cached results: ${cachedRes.status}`);
+                }
+
                 const cachedJson = await cachedRes.json();
                 const csvText = cachedJson?.data ?? '';
                 console.log('📄 Retrieved CSV data from saved file, length:', csvText.length);
                 parsedCsv = csvText;
                 
-                // Parse CSV to get actual results
                 const lines = csvText.split('\n');
-                if (lines.length > 1) {
-                  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-                  const rows = lines.slice(1).filter(line => line.trim()).map(line => {
+                if (lines.length <= 1) {
+                  throw new Error('No data rows found in CSV');
+                }
+
+                const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+                const rows = lines
+                  .slice(1)
+                  .filter(line => line.trim())
+                  .map(line => {
                     const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
-                    const row: any = {};
+                    const row: Record<string, string> = {};
                     headers.forEach((header, index) => {
                       row[header] = values[index] || '';
                     });
                     return row;
                   });
-                  
-                  console.log('✅ Successfully parsed results from saved file:', {
-                    rowCount: rows.length,
-                    columns: headers.length,
-                    sampleData: rows.slice(0, 2)
-                  });
-                  
-                  // ✅ REAL RESULTS AVAILABLE - Update atom settings with actual data
-                  parsedRows = rows;
-
-                  updateAtomSettings(atomId, {
-                    selectedIdentifiers: aiSelectedIdentifiers,
-                    selectedMeasures: aiSelectedMeasures,
-                    selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
-                    selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
-                    dataSource: singleFileName || cfg.file_key || '',
-                    bucketName: cfg.bucket_name || 'trinity',
-                    groupbyResults: {
-                      ...result.data,
-                      // 🔧 CRITICAL: Store the actual grouped data from saved file
-                      unsaved_data: rows,
-                      result_file: result.data.result_file,
-                      row_count: rows.length,
-                      columns: headers
-                    },
-                    operationCompleted: true,
-                    lastUpdateTime: Date.now()
-                  });
-                  
-                  // ✅ SUCCESS MESSAGE WITH REAL DATA FROM SAVED FILE (only in Individual AI mode)
-                  if (!isStreamMode) {
-                    const completionDetails = {
-                      'Result File': result.data.result_file,
-                      'Rows': rows.length.toLocaleString(),
-                      'Columns': headers.length
-                    };
-                    const completionMsg = createSuccessMessage('GroupBy operation', completionDetails);
-                    completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
-                    setMessages(prev => [...prev, completionMsg]);
-                  }
                 
-              } else {
-                throw new Error('No data rows found in CSV');
+                console.log('✅ Successfully parsed results from saved file:', {
+                  rowCount: rows.length,
+                  columns: headers.length,
+                  sampleData: rows.slice(0, 2)
+                });
+                
+                parsedRows = rows;
+
+                updateAtomSettings(atomId, {
+                  selectedIdentifiers: aiSelectedIdentifiers,
+                  selectedMeasures: aiSelectedMeasures,
+                  selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+                  selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+                  dataSource: singleFileName || cfg.file_key || '',
+                  bucketName: cfg.bucket_name || 'trinity',
+                  groupbyResults: {
+                    ...result.data,
+                    unsaved_data: rows,
+                    result_file: result.data.result_file,
+                    row_count: rows.length,
+                    columns: headers
+                  },
+                  operationCompleted: true,
+                  lastUpdateTime: Date.now()
+                });
+                
+                if (!isStreamMode) {
+                  const completionDetails = {
+                    'Result File': result.data.result_file,
+                    'Rows': rows.length.toLocaleString(),
+                    'Columns': headers.length
+                  };
+                  const completionMsg = createSuccessMessage('GroupBy operation', completionDetails);
+                  completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
+                  setMessages(prev => [...prev, completionMsg]);
+                }
+              } catch (fetchError) {
+                console.error('❌ Error fetching results from saved file:', fetchError);
+                
+                updateAtomSettings(atomId, {
+                  selectedIdentifiers: aiSelectedIdentifiers,
+                  selectedMeasures: aiSelectedMeasures,
+                  selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+                  selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
+                  dataSource: singleFileName || cfg.file_key || '',
+                  bucketName: cfg.bucket_name || 'trinity',
+                  groupbyResults: {
+                    ...result.data,
+                    result_file: result.data.result_file,
+                    row_count: result.data.row_count || 0,
+                    columns: result.data.columns || []
+                  },
+                  operationCompleted: true
+                });
+                resultFilePath = result.data.result_file || resultFilePath;
+                
+                if (!isStreamMode) {
+                  const warningDetails = {
+                    'Result File': result.data.result_file,
+                    'Rows': result.data.row_count || 'Unknown',
+                    'Columns': result.data.columns?.length || 'Unknown'
+                  };
+                  const warningMsg = createErrorMessage(
+                    'GroupBy operation completed and file saved, but results display failed',
+                    'Could not retrieve results for display',
+                    Object.entries(warningDetails).map(([k,v]) => `${k}: ${v}`).join(', ')
+                  );
+                  warningMsg.content += '\n\n📁 File has been saved successfully. Please click the Perform button to view the results.';
+                  setMessages(prev => [...prev, warningMsg]);
+                }
               }
-            } else {
-              throw new Error(`Failed to fetch cached results: ${cachedRes.status}`);
             }
-          } catch (fetchError) {
-            console.error('❌ Error fetching results from saved file:', fetchError);
-            
-            updateAtomSettings(atomId, {
-              selectedIdentifiers: aiSelectedIdentifiers,
-              selectedMeasures: aiSelectedMeasures,
-              selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
-              selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
-              dataSource: singleFileName || cfg.file_key || '',
-              bucketName: cfg.bucket_name || 'trinity',
-              groupbyResults: {
-                ...result.data,
-                result_file: result.data.result_file,
-                row_count: result.data.row_count || 0,
-                columns: result.data.columns || []
-              },
-              operationCompleted: true
-            });
-            resultFilePath = result.data.result_file || resultFilePath;
-            
-            if (!isStreamMode) {
-              const warningDetails = {
-                'Result File': result.data.result_file,
-                'Rows': result.data.row_count || 'Unknown',
-                'Columns': result.data.columns?.length || 'Unknown'
-              };
-              const warningMsg = createErrorMessage(
-                'GroupBy operation completed and file saved, but results display failed',
-                'Could not retrieve results for display',
-                Object.entries(warningDetails).map(([k,v]) => `${k}: ${v}`).join(', ')
-              );
-              warningMsg.content += '\n\n📁 File has been saved successfully. Please click the Perform button to view the results.';
-              setMessages(prev => [...prev, warningMsg]);
-            }
-          }
           
           } else {
             // ❌ Backend operation failed

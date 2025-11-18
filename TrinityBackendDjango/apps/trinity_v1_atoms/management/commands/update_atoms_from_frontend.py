@@ -190,12 +190,12 @@ class Command(BaseCommand):
             'pivot-table': {
                 'description': 'Create interactive pivot table summaries',
                 'tags': ['pivot', 'aggregation', 'business'],
-                'color': 'bg-teal-500'
+                'color': 'bg-emerald-500'
             },
             'unpivot': {
                 'description': 'Transform wide datasets into long format by unpivoting columns into rows',
                 'tags': ['unpivot', 'melt', 'reshape', 'data-transformation'],
-                'color': 'bg-cyan-500'
+                'color': 'bg-emerald-500'
             },
             'dataframe-operations': {
                 'description': 'Perform operations on dataframes',

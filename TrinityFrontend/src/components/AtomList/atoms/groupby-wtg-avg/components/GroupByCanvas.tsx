@@ -26,6 +26,11 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 
+const normalizeColumnName = (value: string | undefined | null) => {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
+};
+
 interface GroupByCanvasProps {
   atomId: string;
 }
@@ -466,7 +471,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     setResultsError(null);
     try {
       // Collect identifiers, measures, aggregations, and measure config
-      const identifiers = selectedIdentifiers;
+      const identifiers = selectedIdentifiers.map((id: string) => normalizeColumnName(id)).filter(Boolean);
       // Build aggregations object from measure config
       const aggregations: Record<string, any> = {};
       // Prepare for rename validation
@@ -477,14 +482,24 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
 
     selectedMeasures.forEach((measure: any) => {
         if (typeof measure === 'string') {
+          const normalizedField = normalizeColumnName(measure);
+          if (!normalizedField) {
+            return;
+          }
           // If selectedMeasures is just strings, use default aggregator
-          aggregations[measure] = { agg: (selectedAggregationMethods[0] || 'sum').toLowerCase() };
+          aggregations[normalizedField] = { agg: (selectedAggregationMethods[0] || 'sum').toLowerCase() };
         } else if (measure.field && measure.aggregator) {
           // Map aggregator names to backend-friendly keys
           const aggRaw = (measure.aggregator || '').toLowerCase();
           let aggKey = aggRaw;
           if (aggRaw === 'weighted mean') aggKey = 'weighted_mean';
           if (aggRaw === 'rank percentile') aggKey = 'rank_pct';
+
+          const normalizedField = normalizeColumnName(measure.field);
+          if (!normalizedField) {
+            return;
+          }
+
           const aggObj: any = { agg: aggKey };
           // Validate rename uniqueness
            if (measure.rename_to && measure.rename_to.trim()) {
@@ -502,9 +517,9 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
              aggObj.rename_to = measure.rename_to.trim();
            }
           if (aggKey === 'weighted_mean') {
-            aggObj.weight_by = measure.weight_by || '';
+            aggObj.weight_by = normalizeColumnName(measure.weight_by);
           }
-          aggregations[measure.field] = aggObj;
+          aggregations[normalizedField] = aggObj;
         }
       });
       // Fallback: if no measure config, use all selected measures with default aggregator
@@ -598,7 +613,12 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
           
           // Try to get results from the cached_dataframe endpoint
           try {
-            const cachedRes = await fetch(`${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(data.result_file)}`);
+            const totalRows = typeof data.row_count === 'number' ? data.row_count : 1000;
+            const pageSize = Math.min(Math.max(totalRows, 50), 1000);
+            const cachedUrl = `${GROUPBY_API}/cached_dataframe?object_name=${encodeURIComponent(
+              data.result_file
+            )}&page=1&page_size=${pageSize}`;
+            const cachedRes = await fetch(cachedUrl);
             let cachedPayload: any = {};
             try {
               cachedPayload = await cachedRes.json();
@@ -608,9 +628,15 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               const csvText = String(cachedData?.data ?? '');
               // Parse CSV to get results
               const lines = csvText.split('\n');
-              if (lines.length > 1) {
-                const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-                const rows = lines.slice(1).filter(line => line.trim()).map(line => {
+              if (lines.length <= 1) {
+                throw new Error('No data rows found in CSV');
+              }
+
+              const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+              const rows = lines
+                .slice(1)
+                .filter(line => line.trim())
+                .map(line => {
                   const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
                   const row: any = {};
                   headers.forEach((header, index) => {
@@ -618,30 +644,27 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
                   });
                   return row;
                 });
-                
-                setTotalRows(rows.length);
-                setAllResults(rows);
-                setResults(rows);
-                updateSettings(atomId, { currentPage: 1 }); // Reset to first page when new data is loaded
-                setResultsHeaders(headers);
-                
-                updateSettings(atomId, {
-                  groupbyResults: {
-                    result_file: data.result_file,
-                    result_shape: [rows.length, headers.length],
-                    row_count: data.row_count,
-                    columns: data.columns,
-                    unsaved_data: rows
-                  },
-                });
-                
-                toast({
-                  title: 'Success',
-                  description: `GroupBy completed! ${rows.length} rows processed.`,
-                });
-              } else {
-                throw new Error('No data rows found in CSV');
-              }
+              
+              setTotalRows(rows.length);
+              setAllResults(rows);
+              setResults(rows);
+              updateSettings(atomId, { currentPage: 1 }); // Reset to first page when new data is loaded
+              setResultsHeaders(headers);
+              
+              updateSettings(atomId, {
+                groupbyResults: {
+                  result_file: data.result_file,
+                  result_shape: [rows.length, headers.length],
+                  row_count: data.row_count,
+                  columns: data.columns,
+                  unsaved_data: rows
+                },
+              });
+              
+              toast({
+                title: 'Success',
+                description: `GroupBy completed! ${rows.length} rows processed.`,
+              });
             } else {
               const detail = typeof cachedPayload?.detail === 'string' ? cachedPayload.detail : undefined;
               throw new Error(detail || 'Failed to fetch cached results');

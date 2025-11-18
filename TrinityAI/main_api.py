@@ -388,9 +388,19 @@ from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
 from Agent_dataframe_operations.main_app import router as dataframe_operations_router
+from Agent_insight.main_app import router as workflow_insight_router
 from insight import router as insight_router
 from STREAMAI.main_app import router as streamai_router
 from workflow_mode import workflow_router
+
+# Memory service router - optional, won't crash if unavailable
+try:
+    from memory_service import router as memory_router
+    MEMORY_SERVICE_AVAILABLE = True
+except Exception as e:
+    logger.warning(f"Memory service unavailable: {e}")
+    memory_router = None
+    MEMORY_SERVICE_AVAILABLE = False
 
 def convert_numpy(obj):
     if isinstance(obj, dict):
@@ -587,7 +597,13 @@ api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
 api_router.include_router(dataframe_operations_router)
 api_router.include_router(insight_router)
+api_router.include_router(workflow_insight_router)
 api_router.include_router(workflow_router)
+if memory_router is not None:
+    api_router.include_router(memory_router)
+    logger.info("✅ Memory service router registered")
+else:
+    logger.warning("⚠️ Memory service router not available - chat persistence disabled")
 
 # Enable CORS for browser-based clients
 app.add_middleware(

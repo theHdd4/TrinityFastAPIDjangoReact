@@ -226,7 +226,14 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const [periodPrompt, setPeriodPrompt] = useState<{ opIdx: number, opType: string } | null>(null);
   const [customPeriod, setCustomPeriod] = useState<number>(7);
   const [periodNeeded, setPeriodNeeded] = useState<{ [opId: string]: boolean }>({});
-  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>([]);
+  // 🔧 CRITICAL FIX: Initialize selectedIdentifiers from atom settings (set by AI) or local state
+  const [selectedIdentifiers, setSelectedIdentifiers] = useState<string[]>(() => {
+    // First try to get from atom settings (set by AI handler)
+    if (atom?.settings?.selectedIdentifiers && Array.isArray(atom.settings.selectedIdentifiers)) {
+      return atom.settings.selectedIdentifiers;
+    }
+    return [];
+  });
   const [mongoIdentifiers, setMongoIdentifiers] = useState<string[] | null>(null);
   const [catColumns, setCatColumns] = useState<string[]>([]);
   const [showCatSelector, setShowCatSelector] = useState(false);
@@ -262,6 +269,13 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   React.useEffect(() => {
     setError(null);
   }, [operations]);
+
+  // 🔧 CRITICAL FIX: Sync selectedIdentifiers from atom settings (set by AI handler)
+  React.useEffect(() => {
+    if (atom?.settings?.selectedIdentifiers && Array.isArray(atom.settings.selectedIdentifiers)) {
+      setSelectedIdentifiers(atom.settings.selectedIdentifiers);
+    }
+  }, [atom?.settings?.selectedIdentifiers]);
 
   // Fetch identifiers from MongoDB or fallback to categorical columns after file selection
   useEffect(() => {
@@ -387,6 +401,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       formData.append('bucket_name', 'trinity'); // TODO: use actual bucket if needed
       // Add each operation as a key with columns as value
       // Operations are processed sequentially - each operation can use columns created by previous operations
+      let operationsAdded = 0; // Track how many operations were actually added
       operations.forEach((op, idx) => {
         if (op.columns && op.columns.filter(Boolean).length > 0) {
           let colString = op.columns.filter(Boolean).join(',');
@@ -400,6 +415,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                   formData.append(`${key}_rename`, rename);
                 }
                 formData.append(key, colString);
+                operationsAdded++;
               }
             } else {
               if (op.columns.filter(Boolean).length >= 2) {
@@ -407,6 +423,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                   formData.append(`${key}_rename`, rename);
                 }
                 formData.append(key, colString);
+                operationsAdded++;
               }
             }
           } else if (op.type === "stl_outlier") {
@@ -415,6 +432,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
                 formData.append(`${key}_rename`, rename);
               }
               formData.append(key, colString);
+              operationsAdded++;
             }
           } else if (op.type === 'power') {
             if (op.param) {
@@ -424,6 +442,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
               formData.append(`${key}_rename`, rename);
             }
             formData.append(key, colString);
+            operationsAdded++;
           } else if (op.type === 'logistic') {
             if (op.param) {
               formData.append(`${key}_param`, JSON.stringify(op.param));
@@ -432,6 +451,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
               formData.append(`${key}_rename`, rename);
             }
             formData.append(key, colString);
+            operationsAdded++;
           } else if (op.type === 'datetime') {
             if (op.param) {
               formData.append(`${key}_param`, op.param as string);
@@ -440,12 +460,14 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
               formData.append(`${key}_rename`, rename);
             }
             formData.append(key, colString);
+            operationsAdded++;
           } else {
             // For dummy, rpi, etc., require at least 1 column
             if (rename) {
               formData.append(`${key}_rename`, rename);
             }
             formData.append(key, colString);
+            operationsAdded++;
           }
           // Add period if user supplied for this op
           if (['detrend', 'deseasonalize', 'detrend_deseasonalize'].includes(op.type) && op.param) {
@@ -453,10 +475,51 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
           }
         }
       });
+      
+      // 🔧 CRITICAL FIX: Validate that at least one operation was added
+      if (operationsAdded === 0) {
+        throw new Error('No valid operations to perform. Please ensure all operations have the required columns selected.');
+      }
+      
       // Save operations order - backend will process operations sequentially
-      formData.append('options', operations.map(op => op.type).join(','));
-      // In handleCreate, get the latest identifiers from the ref
-      formData.append('identifiers', selectedIdentifiers.join(','));
+      // Only include operations that were actually added
+      const addedOperationTypes = operations
+        .map((op, idx) => {
+          const key = `${op.type}_${idx}`;
+          // Check if this operation was added by checking if the key exists in formData
+          // We'll use a simpler approach - just use all operations since we validated above
+          return op.type;
+        })
+        .filter((type, idx) => {
+          // Filter to only include operations that passed validation
+          const op = operations[idx];
+          if (!op.columns || op.columns.filter(Boolean).length === 0) return false;
+          
+          if (["add", "subtract", "multiply", "divide", "residual"].includes(op.type)) {
+            return op.columns.filter(Boolean).length >= 2;
+          } else if (op.type === "stl_outlier") {
+            return op.columns.filter(Boolean).length >= 1;
+          }
+          return true; // power, logistic, datetime, dummy, rpi, etc. are always added if they have columns
+        });
+      
+      formData.append('options', addedOperationTypes.join(','));
+      // 🔧 CRITICAL FIX: Get identifiers from atom settings (set by AI) or local state, ensure it's an array
+      const identifiersToUse = atom?.settings?.selectedIdentifiers && Array.isArray(atom.settings.selectedIdentifiers) 
+        ? atom.settings.selectedIdentifiers 
+        : (Array.isArray(selectedIdentifiers) ? selectedIdentifiers : []);
+      formData.append('identifiers', identifiersToUse.join(','));
+      
+      // Debug logging
+      console.log('🔍 Manual Perform - FormData being sent:', {
+        object_names: resolvedDataSource,
+        bucket_name: 'trinity',
+        operations_count: operations.length,
+        operations_types: operations.map(op => op.type),
+        options: operations.map(op => op.type).join(','),
+        identifiers: identifiersToUse,
+        identifiers_count: identifiersToUse.length
+      });
       // Call backend
       const res = await fetch(`${CREATECOLUMN_API}/perform`, {
         method: 'POST',

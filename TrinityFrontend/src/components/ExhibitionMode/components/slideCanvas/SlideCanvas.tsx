@@ -1924,6 +1924,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [activeImageCropId, setActiveImageCropId] = useState<string | null>(null);
+    const [animatingCropResize, setAnimatingCropResize] = useState<Set<string>>(new Set());
     const [activeInteraction, setActiveInteraction] = useState<ActiveInteraction | null>(null);
     const [editingTextState, setEditingTextState] = useState<EditingTextState | null>(null);
     const [activeTextToolbar, setActiveTextToolbar] = useState<{ id: string; node: ReactNode } | null>(null);
@@ -2392,32 +2393,65 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
     const handleFlipImage = useCallback(
       (objectId: string, axis: 'horizontal' | 'vertical') => {
+        console.log('[SlideCanvas] handleFlipImage called', { objectId, axis });
+        
+        // Ensure image remains selected after flip
+        if (!selectedIds.includes(objectId)) {
+          setSelectedIds(prev => [...prev, objectId]);
+        }
+        
         updateImageProps(objectId, props => {
-          const currentFlipX = props.flipX === true || props.flipHorizontal === true;
-          const currentFlipY = props.flipY === true || props.flipVertical === true;
+          // Safely read current flip state, defaulting to false if not set
+          const currentFlipX = Boolean(props.flipX === true || props.flipHorizontal === true);
+          const currentFlipY = Boolean(props.flipY === true || props.flipVertical === true);
+          
+          console.log('[SlideCanvas] handleFlipImage - current state', { 
+            objectId, 
+            axis, 
+            currentFlipX, 
+            currentFlipY,
+            propsFlipX: props.flipX,
+            propsFlipHorizontal: props.flipHorizontal,
+            propsFlipY: props.flipY,
+            propsFlipVertical: props.flipVertical,
+          });
 
           if (axis === 'horizontal') {
             const nextFlipX = !currentFlipX;
-            return {
+            const updatedProps = {
               ...props,
               flipX: nextFlipX,
               flipHorizontal: nextFlipX,
               flipY: currentFlipY,
               flipVertical: currentFlipY,
             };
+            console.log('[SlideCanvas] handleFlipImage - updating horizontal flip', { 
+              objectId, 
+              currentFlipX, 
+              nextFlipX,
+              updatedProps: { flipX: updatedProps.flipX, flipHorizontal: updatedProps.flipHorizontal }
+            });
+            return updatedProps;
           }
 
           const nextFlipY = !currentFlipY;
-          return {
+          const updatedProps = {
             ...props,
             flipX: currentFlipX,
             flipHorizontal: currentFlipX,
             flipY: nextFlipY,
             flipVertical: nextFlipY,
           };
+          console.log('[SlideCanvas] handleFlipImage - updating vertical flip', { 
+            objectId, 
+            currentFlipY, 
+            nextFlipY,
+            updatedProps: { flipY: updatedProps.flipY, flipVertical: updatedProps.flipVertical }
+          });
+          return updatedProps;
         });
       },
-      [updateImageProps],
+      [updateImageProps, selectedIds, setSelectedIds],
     );
 
     const handleFlipImageHorizontal = useCallback(
@@ -2465,6 +2499,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [updateImageProps],
     );
 
+    const handleImageCropCommit = useCallback(
+      (objectId: string, finalCrop: ImageCropInsets) => {
+        // Just save the crop insets - resize will happen when exiting crop mode (Enter)
+        handleSetImageCrop(objectId, finalCrop);
+      },
+      [handleSetImageCrop],
+    );
+
     const handleSetImageCropShape = useCallback(
       (objectId: string, shape: CropShape) => {
         updateImageProps(objectId, props => ({
@@ -2491,16 +2533,129 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
 
         const isCurrentlyCropping = activeImageCropId === objectId;
-        setActiveImageCropId(prev => (prev === objectId ? null : objectId));
-        
-        // Ensure image is selected when entering crop mode
-        if (!isCurrentlyCropping && !selectedIds.includes(objectId)) {
-          setSelectedIds(prev => [...prev, objectId]);
+        const imageProps = object.props as Record<string, unknown> | undefined;
+        const currentCrop = imageProps?.crop as ImageCropInsets | undefined;
+        const hasCrop = currentCrop && (
+          (typeof currentCrop.top === 'number' && currentCrop.top > 0) ||
+          (typeof currentCrop.right === 'number' && currentCrop.right > 0) ||
+          (typeof currentCrop.bottom === 'number' && currentCrop.bottom > 0) ||
+          (typeof currentCrop.left === 'number' && currentCrop.left > 0)
+        );
+
+        if (isCurrentlyCropping) {
+          // Exiting crop mode - apply resize if crop exists
+          if (hasCrop && currentCrop) {
+            // Mark this object as animating resize for smooth transition
+            setAnimatingCropResize(prev => new Set(prev).add(objectId));
+            
+            // Use requestAnimationFrame to ensure transition is applied before resize
+            requestAnimationFrame(() => {
+              const normalizedCrop = sanitizeImageCrop(currentCrop);
+              const cropWidthPercent = 100 - normalizedCrop.left - normalizedCrop.right;
+              const cropHeightPercent = 100 - normalizedCrop.top - normalizedCrop.bottom;
+
+              // Get original dimensions from props, or use current if not stored
+              const originalWidth = (typeof imageProps?.originalWidth === 'number' ? imageProps.originalWidth : object.width);
+              const originalHeight = (typeof imageProps?.originalHeight === 'number' ? imageProps.originalHeight : object.height);
+
+              // Calculate new dimensions based on original dimensions
+              const newWidth = (originalWidth * cropWidthPercent) / 100;
+              const newHeight = (originalHeight * cropHeightPercent) / 100;
+
+              // Calculate position offset based on crop insets
+              const offsetX = (originalWidth * normalizedCrop.left) / 100;
+              const offsetY = (originalHeight * normalizedCrop.top) / 100;
+
+              // Get original position from stored props
+              const originalX = (typeof imageProps?.originalX === 'number' ? imageProps.originalX : object.x);
+              const originalY = (typeof imageProps?.originalY === 'number' ? imageProps.originalY : object.y);
+
+              // Update geometry with new dimensions and adjusted position
+              onBulkUpdate({
+                [objectId]: {
+                  width: newWidth,
+                  height: newHeight,
+                  x: originalX + offsetX,
+                  y: originalY + offsetY,
+                },
+              });
+              
+              // Clear animation flag after transition completes (400ms)
+              setTimeout(() => {
+                setAnimatingCropResize(prev => {
+                  const next = new Set(prev);
+                  next.delete(objectId);
+                  return next;
+                });
+              }, 400);
+            });
+          }
+          setActiveImageCropId(prev => (prev === objectId ? null : objectId));
+        } else {
+          // Entering crop mode - store original dimensions and restore if re-cropping
+          
+          // If this is the first time cropping (no existing crop), store current dimensions as original
+          // If re-cropping (has existing crop), use stored original dimensions
+          let originalWidth: number;
+          let originalHeight: number;
+          let originalX: number;
+          let originalY: number;
+
+          if (!hasCrop) {
+            // First time cropping - store current dimensions as original
+            originalWidth = object.width;
+            originalHeight = object.height;
+            originalX = object.x;
+            originalY = object.y;
+            
+            // Store in props for future re-crops
+            updateImageProps(objectId, props => ({
+              ...props,
+              originalWidth,
+              originalHeight,
+              originalX,
+              originalY,
+            }));
+          } else {
+            // Re-cropping - use stored original dimensions
+            originalWidth = (typeof imageProps?.originalWidth === 'number' ? imageProps.originalWidth : object.width);
+            originalHeight = (typeof imageProps?.originalHeight === 'number' ? imageProps.originalHeight : object.height);
+            originalX = (typeof imageProps?.originalX === 'number' ? imageProps.originalX : object.x);
+            originalY = (typeof imageProps?.originalY === 'number' ? imageProps.originalY : object.y);
+
+            // If original dimensions not stored (shouldn't happen, but fallback), store current as original
+            if (typeof imageProps?.originalWidth !== 'number' || typeof imageProps?.originalHeight !== 'number' ||
+                typeof imageProps?.originalX !== 'number' || typeof imageProps?.originalY !== 'number') {
+              // This shouldn't happen, but if it does, we need to calculate original from current crop
+              // For now, just use current dimensions (fallback)
+              originalWidth = object.width;
+              originalHeight = object.height;
+              originalX = object.x;
+              originalY = object.y;
+            }
+
+            // Restore to original dimensions and position for re-cropping
+            onBulkUpdate({
+              [objectId]: {
+                width: originalWidth,
+                height: originalHeight,
+                x: originalX,
+                y: originalY,
+              },
+            });
+          }
+
+          setActiveImageCropId(prev => (prev === objectId ? null : objectId));
+          
+          // Ensure image is selected when entering crop mode
+          if (!selectedIds.includes(objectId)) {
+            setSelectedIds(prev => [...prev, objectId]);
+          }
         }
         
         onInteract();
       },
-      [objectsMap, onInteract, activeImageCropId, selectedIds],
+      [objectsMap, onInteract, activeImageCropId, selectedIds, onBulkUpdate, updateImageProps],
     );
 
     const handleToggleImageAnimation = useCallback(
@@ -4685,6 +4840,10 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             const shouldShowTitle = !isFeatureOverviewAtom && !isChartMakerAtom && !isEvaluateModelsFeatureAtom;
 
             const renderObject = () => {
+              // Add smooth transition for image objects when animating crop resize
+              // This ensures smooth resize animation when exiting crop mode (Enter pressed)
+              const shouldAnimateResize = isImageObject && animatingCropResize.has(object.id);
+              
               return (
                 <div
                   className="absolute group"
@@ -4694,6 +4853,11 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     width: object.width,
                     height: object.height,
                     zIndex,
+                    // Smooth transition for resize when exiting crop mode (similar to Canva)
+                    // Only apply transition when image has crop and is not being actively cropped
+                    transition: shouldAnimateResize 
+                      ? 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), height 0.4s cubic-bezier(0.4, 0, 0.2, 1), left 0.4s cubic-bezier(0.4, 0, 0.2, 1), top 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+                      : undefined,
                   }}
                   data-exhibition-object-id={object.id}
                   data-exhibition-object-type={object.type}
@@ -4891,6 +5055,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                       onRequestPositionPanel={onRequestPositionPanel}
                       onOpacityChange={handleSetImageOpacity}
                       onCropChange={handleSetImageCrop}
+                      onCropCommit={handleImageCropCommit}
                       onResetCrop={handleResetImageCrop}
                       onDelete={onRemoveObject}
                     />

@@ -100,10 +100,12 @@ def build_chart_prompt(user_prompt: str, available_files_with_columns: dict, con
     Only called when we have sufficient information (file + x/y axes).
     """
     file_info = build_file_info_string(available_files_with_columns)
+    file_details_section = build_file_details_section(file_analysis_data)
     
     return (
         "You are an intelligent chart creation assistant. Generate a chart configuration based on user requirements.\n"
         "Return ONLY valid JSON (no prose, no markdown, no code blocks).\n\n"
+        f"{file_details_section}"
         "🚨 CRITICAL VALIDATION RULES - MUST CHECK BEFORE RETURNING success: true:\n"
         "1. file_name MUST exist in AVAILABLE_FILES_WITH_COLUMNS (exact match)\n"
         "2. chart_json MUST NOT be empty - must contain at least one chart configuration\n"
@@ -132,24 +134,22 @@ def build_chart_prompt(user_prompt: str, available_files_with_columns: dict, con
         "Step 5: For each chart, verify chart_type is valid\n"
         "Step 6: If ALL checks pass → success: true, else → success: false\n\n"
         "COLUMN AND FILE RULES:\n"
-        "- Use ONLY columns from AVAILABLE_FILES_WITH_COLUMNS.\n"
-        "- file_name and data_source MUST be exact paths from AVAILABLE_FILES_WITH_COLUMNS.\n"
-        "- NEVER invent column names or file names\n"
+        "- Use ONLY columns from AVAILABLE_FILES_WITH_COLUMNS or FILE_DETAILS (if provided).\n"
+        "- file_name and data_source MUST be exact paths from AVAILABLE_FILES_WITH_COLUMNS / FILE_DETAILS.\n"
+        "- NEVER invent column names or file names.\n"
         "- x_column and y_column must be STRINGS (column names), not arrays or lists.\n"
-        "- All columns must exist in the selected file\n"
-         "- 🚨 CRITICAL: Use EXACT column names from AVAILABLE_FILES_WITH_COLUMNS (case-sensitive)\n"
-         "- 🚨 CRITICAL: If file has columns ['Brand', 'SalesValue'], use 'Brand' NOT 'brand'\n"
-         "- 🚨 CRITICAL: Column names must match EXACTLY including capitalization\n"
-         "- 🚨 CRITICAL: Different files may have different casing - always check the specific file's columns\n"
-         "- 🚨 CRITICAL: Some files use lowercase ['brand', 'salesvalue'], others use title case ['Brand', 'SalesValue']\n"
-         "- 🚨 CRITICAL: Check the EXACT casing in AVAILABLE_FILES_WITH_COLUMNS for the specific file being used\n"
-         "- Validate each column against the file's column list before returning success: true\n\n"
+        "- All columns must exist in the selected file.\n"
+         "- 🚨 CRITICAL: Use EXACT column names from FILE_DETAILS.columns (case-sensitive). If FILE_DETAILS is missing, fall back to AVAILABLE_FILES_WITH_COLUMNS.\n"
+         "- 🚨 CRITICAL: If file has columns ['Brand', 'SalesValue'], use 'Brand' NOT 'brand'. Different files may use lowercase ['brand'] vs title case ['Brand']; always check the specific file's schema.\n"
+         "- 🚨 CRITICAL: Respect column types from FILE_DETAILS (e.g., don't use numeric columns as categorical filters).\n"
+         "- Validate each x_column, y_column, segregated_field, legend_field, and filter column against the file schema before returning success: true.\n\n"
         "FILTER RULES:\n"
         "- filters is OPTIONAL: include ONLY if the user explicitly asked to filter; otherwise set filters to {}.\n"
         "- NEVER invent or copy example/sample values; only include filter values explicitly present in USER INPUT text.\n"
         "- FILTER LOGIC: If user says 'filter by PPG' (no specific values) → {\"PPG\": []}. If user says 'filter by PPG xl and lg' (with values) → {\"PPG\": [\"xl\", \"lg\"]}.\n"
         "- CRITICAL: Only include filters when user explicitly mentions filtering, sorting, or finding specific things.\n"
-        "- CRITICAL: Do NOT add filters automatically - only when user context clearly indicates filtering is needed.\n\n"
+        "- CRITICAL: Do NOT add filters automatically - only when user context clearly indicates filtering is needed.\n"
+        "- When FILE_DETAILS.unique_values exist, filter values MUST come from that list (discard anything that is not present in the dataset).\n\n"
         "CHART CONFIGURATION RULES:\n"
         "- Each chart MUST include 'chart_type' field with value 'bar', 'line', 'area', 'pie', or 'scatter'.\n"
         "- aggregation must be one of: 'sum', 'mean', 'count', 'min', 'max'.\n"
@@ -247,8 +247,8 @@ def build_chart_prompt(user_prompt: str, available_files_with_columns: dict, con
           "} ],"
           "\"filters\": {} or {\"DifferentColumn\": [\"Value3\", \"Value4\"]}"
         "} ],"
-        "\"file_name\": \"exact_file_path_from_available_files\","
-        "\"data_source\": \"exact_file_path_from_available_files\","
+        "\"file_name\": \"exact_file_path_from_available_files\" (REQUIRED - use this field name),"
+        "\"data_source\": \"exact_file_path_from_available_files\" (OPTIONAL - can be same as file_name for backward compatibility),"
         "\"message\": \"Chart configuration completed successfully\","
         "\"reasoning\": \"Brief explanation of chart choices\","
         "\"used_memory\": true,"
@@ -286,19 +286,66 @@ def build_file_info_string(available_files_with_columns: dict) -> str:
     
     return '; '.join(file_info_parts)
 
+def build_file_details_section(file_analysis_data: Optional[dict], max_files: int = 2, max_columns: int = 40) -> str:
+    """
+    Build a compact FILE_DETAILS blob (columns + unique values) so the LLM can match exact column names and filter values.
+    """
+    if not file_analysis_data:
+        return ""
+
+    trimmed_details = {}
+    for idx, (file_name, details) in enumerate(file_analysis_data.items()):
+        if idx >= max_files:
+            break
+        if not isinstance(details, dict):
+            continue
+
+        columns = details.get("columns", [])
+        if isinstance(columns, dict):
+            columns = list(columns.keys())
+        elif not isinstance(columns, list):
+            columns = []
+        columns = columns[:max_columns]
+
+        unique_values = details.get("unique_values", {})
+        if isinstance(unique_values, dict):
+            trimmed_unique = {
+                col: (vals[:10] if isinstance(vals, list) else vals)
+                for col, vals in unique_values.items()
+                if col in columns
+            }
+        else:
+            trimmed_unique = {}
+
+        trimmed_details[file_name] = {
+            "file_path": details.get("file_path") or details.get("object_name"),
+            "columns": columns,
+            "numeric_columns": [col for col in details.get("numeric_columns", []) if col in columns],
+            "categorical_columns": [col for col in details.get("categorical_columns", []) if col in columns],
+            "unique_values": trimmed_unique,
+            "row_count": details.get("row_count") or details.get("total_rows"),
+            "sample_data": details.get("sample_data", [])[:1],
+        }
+
+    if not trimmed_details:
+        return ""
+
+    return "FILE_DETAILS (USE EXACT COLUMN NAMES & FILTER VALUES):\n" + json.dumps(trimmed_details, indent=2) + "\n"
+
 def build_data_question_prompt(user_prompt: str, available_files_with_columns: dict, context: str, file_analysis_data: dict = None, file_info_section: str = "") -> str:
     """
     Prompt for answering general questions or asking for clarification when information is missing.
     Enhanced to provide smart responses about what's needed for chart creation.
     """
     file_info = build_file_info_string(available_files_with_columns)
+    file_details_section = build_file_details_section(file_analysis_data)
     
     return (
         "You are a helpful chart creation assistant. The user needs to provide complete information to create a chart.\n"
         "Return ONLY valid JSON (no prose, no markdown).\n\n"
         f"USER INPUT: {user_prompt}\n"
         f"AVAILABLE_FILES_WITH_COLUMNS: {json.dumps(available_files_with_columns)}\n"
-        f"FILE_ANALYSIS_DATA: {json.dumps(file_analysis_data)}\n"
+        f"{file_details_section}"
         f"CONTEXT: {context}\n\n"
         "CRITICAL RULES:\n"
         "1. For chart creation, we REQUIRE: file name, x-axis column, and y-axis column\n"
@@ -371,7 +418,10 @@ def call_chart_llm(api_url: str, model_name: str, bearer_token: str, prompt: str
     """
     Call the LLM API to generate chart configuration (JSON-only prompted).
     """
-    import requests
+    try:
+        import requests  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover - requests should be present with the agent
+        raise RuntimeError("The requests library is required to call the Chart LLM API.") from exc
 
     logger.info("Calling Chart LLM...")
     headers = {

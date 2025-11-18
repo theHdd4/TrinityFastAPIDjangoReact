@@ -71,6 +71,7 @@ class FileAnalyzer:
         
         # Storage for analyzed files
         self.analyzed_files: Dict[str, Dict[str, Any]] = {}
+        self.analyzed_files_by_object: Dict[str, Dict[str, Any]] = {}
         
         logger.info(f"FileAnalyzer initialized for bucket '{bucket}' with prefix '{prefix}'")
     
@@ -127,6 +128,7 @@ class FileAnalyzer:
                         
                         # Store in instance for later retrieval
                         self.analyzed_files[filename] = file_analysis
+                        self.analyzed_files_by_object[full_object_path] = file_analysis
                     else:
                         analysis_results["failed_analyses"] += 1
                         logger.warning(f"Failed to analyze file: {filename}")
@@ -144,6 +146,44 @@ class FileAnalyzer:
         except Exception as e:
             logger.error(f"Unexpected error during file analysis: {str(e)}")
             return {"error": f"Unexpected error: {str(e)}"}
+    
+    def analyze_specific_files(self, object_paths: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Analyze a specific list of files and return metadata for each.
+        Only files that successfully analyze will be returned.
+        
+        Args:
+            object_paths: List of MinIO object paths (including prefix)
+        
+        Returns:
+            Dict[filename, analysis_dict]
+        """
+        results: Dict[str, Dict[str, Any]] = {}
+        
+        for object_path in object_paths:
+            if not object_path:
+                continue
+            
+            filename = os.path.basename(object_path)
+            
+            # Return cached analysis if available
+            cached = self.analyzed_files_by_object.get(object_path) or self.analyzed_files.get(filename)
+            if cached:
+                results[filename] = cached
+                continue
+            
+            try:
+                analysis = self._analyze_single_file(object_path, filename)
+                if analysis:
+                    self.analyzed_files[filename] = analysis
+                    self.analyzed_files_by_object[object_path] = analysis
+                    results[filename] = analysis
+                else:
+                    logger.warning(f"Failed to analyze specific file: {object_path}")
+            except Exception as exc:
+                logger.error(f"Error analyzing specific file {object_path}: {exc}")
+        
+        return results
     
     def _analyze_single_file(self, object_path: str, filename: str) -> Optional[Dict[str, Any]]:
         """
@@ -522,7 +562,7 @@ class FileAnalyzer:
         Returns:
             File analysis dictionary or None if not found
         """
-        return self.analyzed_files.get(filename)
+        return self.analyzed_files.get(filename) or self.analyzed_files_by_object.get(filename)
     
     def get_all_analyses(self) -> Dict[str, Dict[str, Any]]:
         """

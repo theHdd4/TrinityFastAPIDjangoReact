@@ -1,0 +1,45 @@
+# Template settings file for the GraphRAG workspace.
+#
+# Copy or symlink this file to `<workspace>/settings.yaml` and customise the
+# provider values for your deployment. The defaults rely on environment
+# variables so sensitive credentials remain outside of source control.
+#
+# For detailed documentation see:
+# https://microsoft.github.io/graphrag/index/overview/
+
+storage:
+  type: disk
+  path: ./storage
+
+chunking:
+  tokenizer: tiktoken:gpt-4o-mini
+  max_chunk_size: 1200
+  overlap: 120
+
+embedding:
+  provider: ${GRAPHRAG_EMBED_PROVIDER:-azure_openai}
+  model: ${GRAPHRAG_EMBED_MODEL:-text-embedding-3-large}
+  deployment: ${GRAPHRAG_EMBED_DEPLOYMENT:-text-embedding-3-large}
+  api_key: ${AZURE_OPENAI_API_KEY:-}
+  api_base: ${AZURE_OPENAI_ENDPOINT:-}
+  api_version: ${AZURE_OPENAI_API_VERSION:-}
+
+completion:
+  provider: ${GRAPHRAG_LLM_PROVIDER:-azure_openai}
+  model: ${GRAPHRAG_LLM_MODEL:-gpt-4o-mini}
+  deployment: ${GRAPHRAG_LLM_DEPLOYMENT:-gpt-4o-mini}
+  api_key: ${AZURE_OPENAI_API_KEY:-}
+  api_base: ${AZURE_OPENAI_ENDPOINT:-}
+  api_version: ${AZURE_OPENAI_API_VERSION:-}
+
+graph:
+  schema_variant: lineage
+  vector_store:
+    type: faiss
+    path: ./storage/vector_store.faiss
+  knowledge_store:
+    type: sqlite
+    path: ./storage/knowledge.db
+
+
+

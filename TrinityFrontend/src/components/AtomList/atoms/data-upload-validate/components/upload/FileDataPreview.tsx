@@ -79,6 +79,15 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
   const prevInitialMissingValueStrategiesRef = useRef<string>('');
 
   // Notify parent component about changes (only when data actually changes)
+  // Refs to track previous values and prevent infinite loops
+  const prevDtypeChangesRef = useRef<string>('');
+  const prevMissingValueStrategiesRef = useRef<string>('');
+  const prevFilesMetadataRef = useRef<string>('');
+  const isSyncingFromPropsRef = useRef(false);
+  const prevInitialDtypeChangesRef = useRef<string>('');
+  const prevInitialMissingValueStrategiesRef = useRef<string>('');
+
+  // Notify parent component about changes (only when data actually changes)
   useEffect(() => {
     // Skip if we're currently syncing from props to prevent circular updates
     if (isSyncingFromPropsRef.current) {
@@ -98,7 +107,26 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
       onDataChanges?.({ dtypeChanges, missingValueStrategies });
     }
   }, [dtypeChanges, missingValueStrategies]); // Removed onDataChanges from deps
+    // Skip if we're currently syncing from props to prevent circular updates
+    if (isSyncingFromPropsRef.current) {
+      return;
+    }
 
+    const currentDtypeStr = JSON.stringify(dtypeChanges);
+    const currentMissingStr = JSON.stringify(missingValueStrategies);
+    
+    // Only call callback if data actually changed
+    if (
+      currentDtypeStr !== prevDtypeChangesRef.current ||
+      currentMissingStr !== prevMissingValueStrategiesRef.current
+    ) {
+      prevDtypeChangesRef.current = currentDtypeStr;
+      prevMissingValueStrategiesRef.current = currentMissingStr;
+      onDataChanges?.({ dtypeChanges, missingValueStrategies });
+    }
+  }, [dtypeChanges, missingValueStrategies]); // Removed onDataChanges from deps
+
+  // Notify parent component about metadata changes (only when data actually changes)
   // Notify parent component about metadata changes (only when data actually changes)
   useEffect(() => {
     const currentMetadataStr = JSON.stringify(filesMetadata);
@@ -126,6 +154,61 @@ const FileDataPreview: React.FC<FileDataPreviewProps> = ({
 
   // Sync dtypeChanges and missingValueStrategies when initialDtypeChanges prop changes (e.g., after validation)
   useEffect(() => {
+    const currentInitialDtypeStr = JSON.stringify(initialDtypeChanges);
+    const currentInitialMissingStr = JSON.stringify(initialMissingValueStrategies);
+    
+    // Only update if the prop actually changed
+    if (
+      currentInitialDtypeStr !== prevInitialDtypeChangesRef.current ||
+      currentInitialMissingStr !== prevInitialMissingValueStrategiesRef.current
+    ) {
+      prevInitialDtypeChangesRef.current = currentInitialDtypeStr;
+      prevInitialMissingValueStrategiesRef.current = currentInitialMissingStr;
+
+      if (initialDtypeChanges && Object.keys(initialDtypeChanges).length > 0) {
+        isSyncingFromPropsRef.current = true;
+        setDtypeChanges(prev => {
+          // Merge with existing changes, but allow new values from initialDtypeChanges to override
+          const merged = { ...prev };
+          Object.keys(initialDtypeChanges).forEach(fileName => {
+            merged[fileName] = {
+              ...(merged[fileName] || {}),
+              ...initialDtypeChanges[fileName],
+            };
+          });
+          // Only return merged if it's actually different from prev
+          const prevStr = JSON.stringify(prev);
+          const mergedStr = JSON.stringify(merged);
+          return prevStr === mergedStr ? prev : merged;
+        });
+        // Reset flag after state update completes
+        requestAnimationFrame(() => {
+          isSyncingFromPropsRef.current = false;
+        });
+      }
+
+      if (initialMissingValueStrategies && Object.keys(initialMissingValueStrategies).length > 0) {
+        isSyncingFromPropsRef.current = true;
+        setMissingValueStrategies(prev => {
+          const merged = { ...prev };
+          Object.keys(initialMissingValueStrategies).forEach(fileName => {
+            merged[fileName] = {
+              ...(merged[fileName] || {}),
+              ...initialMissingValueStrategies[fileName],
+            };
+          });
+          // Only return merged if it's actually different from prev
+          const prevStr = JSON.stringify(prev);
+          const mergedStr = JSON.stringify(merged);
+          return prevStr === mergedStr ? prev : merged;
+        });
+        // Reset flag after state update completes
+        requestAnimationFrame(() => {
+          isSyncingFromPropsRef.current = false;
+        });
+      }
+    }
+  }, [initialDtypeChanges, initialMissingValueStrategies]);
     const currentInitialDtypeStr = JSON.stringify(initialDtypeChanges);
     const currentInitialMissingStr = JSON.stringify(initialMissingValueStrategies);
     

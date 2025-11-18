@@ -3,19 +3,38 @@ import json
 import re
 import requests
 import logging
+from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger("smart.merge.ai_logic")
 
-def build_merge_prompt(user_prompt: str, available_files_with_columns: dict, context: str) -> str:
+def build_merge_prompt(
+    user_prompt: str,
+    available_files_with_columns: dict,
+    context: str,
+    file_details: Optional[Dict[str, Any]] = None,
+    other_files: Optional[List[str]] = None,
+    matched_columns: Optional[Dict[str, List[str]]] = None,
+) -> str:
     """
     Build the LLM prompt for the merge assistant.
     """
+    file_details_json = json.dumps(file_details, indent=2) if file_details else "None"
+    other_files_line = ", ".join(other_files) if other_files else "None"
+    matched_columns_json = json.dumps(matched_columns, indent=2) if matched_columns else "None"
     prompt = f"""You are an intelligent merge assistant with perfect memory access to complete conversation history.
 
 USER INPUT: "{user_prompt}"
 
 AVAILABLE FILES WITH COLUMNS:
 {json.dumps(available_files_with_columns, indent=2)}
+
+RELEVANT FILE METADATA:
+{file_details_json}
+
+MATCHED COLUMNS (based on prompt):
+{matched_columns_json}
+
+OTHER AVAILABLE FILES (REFERENCE ONLY): {other_files_line}
 
 COMPLETE CONVERSATION CONTEXT:
 {context}
@@ -37,9 +56,11 @@ SUCCESS RESPONSE (when you have all required info):
   "reasoning": "Found all required components with context from history",
   "used_memory": true
 }}
+"""
+    prompt += """
 
 GENERAL RESPONSE (for questions, file info, suggestions):
-{{
+{
   "success": false,
   "suggestions": [
     "Here's what I found about your files:",
@@ -52,19 +73,19 @@ GENERAL RESPONSE (for questions, file info, suggestions):
   "message": "Here's what I can help you with",
   "smart_response": "I'd be happy to help you with Merge operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you merge your data files using various join strategies. What files would you like to merge?",
   "reasoning": "Providing helpful information and guidance",
-  "file_analysis": {{
+  "file_analysis": {
     "total_files": "number",
     "recommended_pairs": ["file1 + file2"],
     "common_columns": ["col1", "col2"],
     "merge_tips": ["tip1", "tip2"]
-  }},
+  },
   "next_steps": [
     "Ask about specific files or columns",
     "Request merge suggestions",
     "Specify your merge requirements",
     "Say 'yes' to use my recommendations"
   ]
-}}
+}
 
 INTELLIGENCE RULES:
 
@@ -78,63 +99,7 @@ INTELLIGENCE RULES:
 8. SMART JOIN TYPE: Use "outer" as default if no join type specified, otherwise use user preference
 9. FILE VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section
 
-### FILE DISPLAY RULES:
-When user asks to "show files", "show all files", "show file names", "show columns", or similar:
-- ALWAYS use GENERAL RESPONSE format (success: false)
-- Include detailed file information in smart_response
-- Format: **filename.arrow** (X columns) - column1, column2, column3, etc.
-- List ALL available files with their column counts and sample columns
-
-COLUMN HANDLING INSTRUCTIONS:
-- CRITICAL: Use ONLY the columns provided in the COLUMN ANALYSIS section and join_columns are common columns in files that has been choosen .
-- The system provides you with a clear dictionary showing file names and their columns
-- The dictionary format is: {{"filename.csv": ["column1", "column2", ...]}}
-- Use the RECOMMENDED JOIN COLUMNS that are already identified for you
-- If common columns exist, choose the most appropriate for merge otherwise choose all common columns
-- If no common columns exist, inform the user that merge is not possible
-- NEVER invent or assume columns that aren't in the provided file data
-- The column analysis is already done - use that information directly
-
-JOIN TYPE HANDLING:
-- Default to "outer" if no join type specified
-
-- Use "inner" if user wants only matching records
-- Use "left" or "right" based on user preference for preserving one side
-- Learn from user's previous successful patterns
-
-CONVERSATIONAL HANDLING:
-- "yes" after suggestions → Use the suggested configuration
-- "no" after suggestions → Ask for different preferences
-- "use those files" → Apply to most recent file suggestion
-- "merge them" → Use default outer join with identified files and common columns
-- "on column_name" → Apply to most recent file context
-
-SUGGESTION QUALITY:
-- Always provide specific file names from available files 
-- Use memory to suggest files user has worked with before
-- Explain WHY you're suggesting specific files and columns
-- Provide concrete next steps, not generic advice
-
-EXAMPLES OF SMART BEHAVIOR:
-
-- Always verify file names exist in the AVAILABLE FILES AND COLUMNS before suggesting them
-
-**CRITICAL REMINDER:** 
-Your JSON response MUST include the "smart_response" field. This is the primary message shown to the user.
-Never return JSON without "smart_response" - it's required in both success and failure cases.
-
-Return ONLY the JSON response:"""
-
-    logger.info(f"BUILDING MERGE PROMPT:")
-    logger.info(f"User Prompt: {user_prompt}")
-    logger.info(f"Available Files: {list(available_files_with_columns.keys())}")
-    logger.info(f"Context Length: {len(context)}")
-    logger.info(f"Generated Prompt Length: {len(prompt)}")
-    logger.info(f"🔍 FULL PROMPT TO AI:")
-    logger.info(f"{'='*80}")
-    logger.info(f"{prompt}")
-    logger.info(f"{'='*80}")
-    
+"""
     return prompt
 
 def call_merge_llm(api_url: str, model_name: str, bearer_token: str, prompt: str) -> str:

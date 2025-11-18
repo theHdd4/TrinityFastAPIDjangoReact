@@ -21,3 +21,35 @@ The AI agents read `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY` and
 `MINIO_SECRET_KEY` from the environment to fetch files. The endpoint
 value comes from your `.env` or docker-compose configuration so dev and
 prod agents can target their respective MinIO services.
+
+## Persistent Memory Service
+
+Trinity AI chat history can now be stored in MinIO instead of the
+browser's `localStorage`. The new memory endpoints live under
+`/trinityai/memory/...` and use the following environment variables:
+
+- `TRINITY_AI_MEMORY_PREFIX` – root folder inside the MinIO bucket
+  (defaults to `trinity-ai-memory`).
+- `TRINITY_AI_MEMORY_BUCKET` – bucket that holds chat data. Defaults to
+  the standard `MINIO_BUCKET`.
+- `TRINITY_AI_MEMORY_MAX_MESSAGES` – retention window per chat
+  (defaults to 400 messages).
+- `TRINITY_AI_MEMORY_MAX_BYTES` – hard limit for a single chat payload
+  in bytes (defaults to 2 MB).
+
+Chats are stored under
+`{PREFIX}/{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/chats/{chatId}/messages.json`.
+Session state is persisted alongside the chat transcripts in the same
+project-aware hierarchy: `{PREFIX}/{CLIENT_NAME}/{APP_NAME}/{PROJECT_NAME}/sessions/{sessionId}/context.json`.
+
+The path structure matches the project structure:
+- `trinity/trinity_ai_memory/[CLIENT_NAME]/[APP_NAME]/[PROJECT_NAME]/chats/` - for chat history
+- `trinity/trinity_ai_memory/[CLIENT_NAME]/[APP_NAME]/[PROJECT_NAME]/sessions/` - for session context
+
+Where the path components come from environment variables:
+- `CLIENT_NAME` - from `CLIENT_NAME` environment variable
+- `APP_NAME` - from `APP_NAME` environment variable  
+- `PROJECT_NAME` - from `PROJECT_NAME` environment variable
+
+If any component is missing, it's skipped. If all are missing, defaults to "default".
+Example: `trinity/trinity_ai_memory/Quant_Matrix_AI_Schema/blank/New Custom Project/chats/...`
