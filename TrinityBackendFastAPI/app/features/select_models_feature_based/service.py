@@ -556,6 +556,9 @@ def list_model_results_files(
     if not client_name or not app_name or not project_name:
         raise ValueError("Client, app, and project names are required to list model results")
 
+    if minio_client is None:
+        raise ValueError("MinIO connection is not available.")
+
     cleaned_prefix = _normalise_prefix(prefix or "")
     project_prefix = "/".join(part.strip("/") for part in (client_name, app_name, project_name))
     base_prefix = f"{project_prefix}/"
@@ -579,14 +582,17 @@ def list_model_results_files(
             break
         if getattr(obj, "is_dir", False):
             continue
+
         object_name = getattr(obj, "object_name", "")
-        if not object_name.lower().endswith(".arrow"):
+        lower = object_name.lower()
+        if not lower.endswith((".csv", ".xlsx", ".arrow", ".feather")):
             continue
+
         files.append(
             {
                 "object_name": object_name,
                 "csv_name": object_name,
-                "file_size": getattr(obj, "size", None),
+                "size": getattr(obj, "size", None),
                 "last_modified": (
                     obj.last_modified.isoformat() if getattr(obj, "last_modified", None) else None
                 ),
@@ -1013,10 +1019,12 @@ def calculate_actual_vs_predicted(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _compute_year_over_year(series: Sequence[float]) -> List[float]:
+    if not series:
+        return []
+
     yoy: List[float] = []
-    for index in range(12):
-        previous = series[index - 1] if index > 0 else series[index]
-        current = series[index]
+    for index, current in enumerate(series):
+        previous = series[index - 1] if index > 0 else current
         change = ((current - previous) / previous) * 100 if previous else 0
         yoy.append(round(change, 3))
     return yoy
@@ -1042,12 +1050,18 @@ def calculate_yoy(payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         logger.warning("Failed to build YoY curve from results file", exc_info=True)
 
-    return yoy_growth_from_source(
+    fallback = actual_vs_predicted_from_source(
         results_file_key=request.file_key,
         combination_id=request.combination_name,
         model_name=request.model_name,
         bucket=MINIO_BUCKET,
     )
+    return {
+        "success": True,
+        "dates": fallback.get("dates", []),
+        "actual": _compute_year_over_year(fallback.get("actual_values", [])),
+        "predicted": _compute_year_over_year(fallback.get("predicted_values", [])),
+    }
 
 
 def _ensemble_models(file_key: str, combination_id: str) -> List[ModelRecord]:

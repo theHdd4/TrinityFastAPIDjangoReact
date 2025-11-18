@@ -131,23 +131,32 @@ except Exception as e:
     client, db, scopes_collection, select_configs_collection = None, None, None, None
 
 def get_minio_df(bucket: str, file_key: str) -> pd.DataFrame:
+    """Load a DataFrame from MinIO supporting common modelling artefact formats."""
+
     response = minio_client.get_object(bucket, file_key)
     content = response.read()
-    if file_key.endswith(".csv"):
-        df = pd.read_csv(BytesIO(content))
-    elif file_key.endswith(".xlsx"):
-        df = pd.read_excel(BytesIO(content))
-    elif file_key.endswith(".parquet"):
-        df = pd.read_parquet(BytesIO(content))
-    elif file_key.endswith((".arrow", ".feather")):
-        import pyarrow as pa
-        import pyarrow.ipc as ipc
+    key_lower = file_key.lower()
 
-        reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-        df = reader.read_all().to_pandas()
-    else:
-        raise ValueError("Unsupported file type")
-    return df
+    if key_lower.endswith(".csv"):
+        return pd.read_csv(BytesIO(content))
+    if key_lower.endswith(".xlsx"):
+        return pd.read_excel(BytesIO(content))
+    if key_lower.endswith(".parquet"):
+        return pd.read_parquet(BytesIO(content))
+
+    if key_lower.endswith((".arrow", ".feather")):
+        try:
+            import pyarrow.feather as feather
+
+            return feather.read_feather(BytesIO(content))
+        except Exception:
+            import pyarrow as pa
+            import pyarrow.ipc as ipc
+
+            reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+            return reader.read_all().to_pandas()
+
+    raise ValueError(f"Unsupported file type: {file_key}")
 
 def get_select_configs_collection():
     """Get the select_configs collection dynamically, ensuring connection is established."""
