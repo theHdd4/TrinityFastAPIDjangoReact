@@ -415,6 +415,38 @@ class AgentExecutor:
                     "base": "TrinityAI-Internal"
                 }
             
+            # Handle /trinityai/df-validate endpoint
+            elif endpoint == "/trinityai/df-validate":
+                from Agent_df_validate.main_app import agent as df_validate_agent
+                
+                logger.info("📞 Calling /df-validate agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
+                
+                # Extract client context from session_context
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
+                
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # Call df_validate agent directly
+                result = df_validate_agent.process_request(
+                    user_prompt=prompt, 
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
+                )
+                logger.info(f"✅ INTERNAL /df-validate completed successfully")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "agent": endpoint,
+                    "action": action,
+                    "base": "TrinityAI-Internal"
+                }
+            
             # Handle /trinityai/dataframe-operations endpoint
             elif endpoint == "/trinityai/dataframe-operations":
                 from Agent_dataframe_operations.main_app import agent as df_ops_agent
@@ -450,7 +482,7 @@ class AgentExecutor:
             # Add more agents as needed
             else:
                 logger.error(f"Internal execution not implemented for: {endpoint}")
-                logger.info(f"Available endpoints: /trinityai/chat, /trinityai/merge, /trinityai/concat, /trinityai/chart, /trinityai/chart-maker, /trinityai/explore, /trinityai/create, /trinityai/create-transform, /trinityai/groupby, /trinityai/dataframe-operations")
+                logger.info(f"Available endpoints: /trinityai/chat, /trinityai/merge, /trinityai/concat, /trinityai/chart, /trinityai/chart-maker, /trinityai/explore, /trinityai/create, /trinityai/create-transform, /trinityai/groupby, /trinityai/dataframe-operations, /trinityai/df-validate")
                 return {
                     "success": False,
                     "error": f"Internal execution not implemented for: {endpoint}",

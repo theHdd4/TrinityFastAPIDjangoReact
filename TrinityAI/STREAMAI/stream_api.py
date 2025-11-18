@@ -82,6 +82,67 @@ async def execute_workflow_websocket(websocket: WebSocket):
         chat_id = message.get("chat_id", None)  # Frontend chat ID
         history_summary = message.get("history_summary")
         mentioned_files = message.get("mentioned_files") or []
+        
+        # 🔧 CRITICAL FIX: Extract project context from file paths if not provided or contains 'default' values
+        # Check if project_context is missing, empty, or contains 'default' values
+        has_valid_context = (
+            project_context and 
+            project_context.get("client_name") and 
+            project_context.get("client_name") != "default" and
+            project_context.get("app_name") and 
+            project_context.get("app_name") != "default" and
+            project_context.get("project_name") and 
+            project_context.get("project_name") != "default"
+        )
+        
+        if not has_valid_context:
+            logger.warning("⚠️ No valid project_context provided (missing or contains 'default' values). Attempting to extract from file paths...")
+            # Try to extract from available_files
+            for file_path in available_files:
+                if isinstance(file_path, str) and "/" in file_path:
+                    parts = file_path.split("/")
+                    if len(parts) >= 3:
+                        extracted_client = parts[0]
+                        extracted_app = parts[1]
+                        extracted_project = parts[2]
+                        project_context = {
+                            "client_name": extracted_client,
+                            "app_name": extracted_app,
+                            "project_name": extracted_project
+                        }
+                        logger.info(f"✅ Extracted project context from file path: client={extracted_client}, app={extracted_app}, project={extracted_project}")
+                        break
+            
+            # If still empty or contains 'default', try environment variables
+            # Re-check validity after extraction attempt
+            has_valid_context_after_extraction = (
+                project_context and 
+                project_context.get("client_name") and 
+                project_context.get("client_name") != "default" and
+                project_context.get("app_name") and 
+                project_context.get("app_name") != "default" and
+                project_context.get("project_name") and 
+                project_context.get("project_name") != "default"
+            )
+            
+            if not has_valid_context_after_extraction:
+                import os
+                env_client = os.getenv("CLIENT_NAME", "")
+                env_app = os.getenv("APP_NAME", "")
+                env_project = os.getenv("PROJECT_NAME", "")
+                if env_client or env_app or env_project:
+                    project_context = {
+                        "client_name": env_client,
+                        "app_name": env_app,
+                        "project_name": env_project
+                    }
+                    logger.info(f"✅ Using project context from environment variables: client={env_client}, app={env_app}, project={env_project}")
+                else:
+                    logger.error("❌ Could not determine project context from message, files, or environment variables!")
+                    logger.error(f"📦 Available files: {available_files}")
+                    logger.error(f"📦 Message keys: {list(message.keys())}")
+        
+        logger.info(f"🔧 Final project_context: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
         if isinstance(mentioned_files, str):
             mentioned_files = [mentioned_files]
         elif isinstance(mentioned_files, list):

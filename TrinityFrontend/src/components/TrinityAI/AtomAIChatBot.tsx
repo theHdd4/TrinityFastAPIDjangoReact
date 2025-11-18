@@ -26,6 +26,7 @@ const ENDPOINTS: Record<string, string> = {
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
   'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
+  'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
 };
 
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
@@ -274,7 +275,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                                  (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
                                  (atomType === 'chart-maker' && data.chart_json) ||
                                  (atomType === 'explore' && data.exploration_config) ||
-                                 (atomType === 'dataframe-operations' && data.dataframe_config);
+                                 (atomType === 'dataframe-operations' && data.dataframe_config) ||
+                                 (atomType === 'data-upload-validate' && data.validate_json);
         
         console.log('🔍 ===== HANDLER ROUTING DEBUG =====');
         console.log('🔍 atomType:', atomType);

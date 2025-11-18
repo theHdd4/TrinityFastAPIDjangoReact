@@ -17,9 +17,20 @@ const frontendPort =
   import.meta.env.VITE_FRONTEND_PORT || (isDevStack ? '8081' : '8080');
 let backendOrigin = import.meta.env.VITE_BACKEND_ORIGIN;
 
+// Detect protocol from current page (HTTPS or HTTP)
+const getProtocol = () => {
+  if (typeof window !== 'undefined') {
+    return window.location.protocol === 'https:' ? 'https:' : 'http:';
+  }
+  return 'http:';
+};
+
+const protocol = getProtocol();
+
 if (!backendOrigin) {
   if (hostIp) {
-    backendOrigin = `http://${hostIp}:${djangoPort}`;
+    // Use the same protocol as the current page (HTTPS if page is HTTPS)
+    backendOrigin = `${protocol}//${hostIp}:${djangoPort}`;
   } else if (typeof window !== 'undefined') {
     const regex = new RegExp(`:${frontendPort}$`);
     backendOrigin = window.location.origin.replace(regex, `:${djangoPort}`);

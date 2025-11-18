@@ -290,14 +290,14 @@ class StreamWebSocketOrchestrator:
 CRITICAL FILE INFORMATION:
 - The user mentioned files in their request: {', '.join(prompt_files)}
 - These files ALREADY EXIST in the system: {', '.join([f.split('/')[-1] for f in available_files[:3]])}
-- DO NOT include 'data-upload-validate' steps - files are already uploaded!
+- ALWAYS include 'data-upload-validate' as FIRST step when user mentions files - it loads files from MinIO and optionally applies dtype changes
 - Start directly with the data processing step (merge, concat, etc.)
 """
 
         workflow_rule = (
-            "- ⚠️ CRITICAL: Files mentioned in user request already exist in available_files. DO NOT include 'data-upload-validate' steps. Start directly with data processing!"
+            "- ⚠️ CRITICAL: Files mentioned in user request exist in MinIO. ALWAYS include 'data-upload-validate' as FIRST step to load the file. If user mentions dtype changes, include them in this step. Otherwise, just load the file and proceed."
             if files_exist
-            else "- If files don't exist, include 'data-upload-validate' as the first step"
+            else "- If user mentions files, ALWAYS include 'data-upload-validate' as the first step to load them"
         )
 
         return f"""You are a data analysis workflow planner. Your task is to create a step-by-step workflow to accomplish the user's request.
@@ -407,7 +407,7 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
    - NOTE: Skip this if files already exist in available_files!
 
 WORKFLOW PLANNING RULES:
-- Put data loading (data-upload-validate) FIRST only if files don't exist
+- Put data loading (data-upload-validate) FIRST when user mentions files - it loads from MinIO and optionally applies dtype changes
 - Put data transformations (merge, concat, filter, groupby, dataframe-operations) BEFORE visualization
 - Put chart-maker or visualization atoms LAST
 - Each step should build on previous steps
@@ -666,7 +666,38 @@ WORKFLOW PLANNING RULES:
                     lines.append(f"- {req}")
                 lines.append("")  # Empty line for readability
 
-        if files_used:
+        # Special handling for data-upload-validate
+        if atom_id == "data-upload-validate":
+            if files_used:
+                target_file = files_used[0]
+                file_name = self._display_file_name(target_file)
+                lines.append(f"**CRITICAL: Load this exact file from MinIO:** `{target_file}`")
+                lines.append(f"- Display name: {file_name}")
+                lines.append(f"- Use the exact file path shown above (case-sensitive, with extension)")
+                lines.append(f"- The file exists in MinIO and must be loaded into the data upload atom")
+            elif inputs:
+                target_file = inputs[0]
+                lines.append(f"**CRITICAL: Load this exact file from MinIO:** `{target_file}`")
+                lines.append(f"- Use the exact file path shown above (case-sensitive)")
+            else:
+                lines.append("**CRITICAL: File name required**")
+                lines.append("- Extract the exact file name from the user's request")
+                lines.append("- The file must exist in MinIO (check available files list)")
+                lines.append("- Example: If user says 'load sales.csv', use exactly 'sales.csv'")
+            
+            # Check for dtype changes in description
+            desc_lower = description.lower()
+            if any(kw in desc_lower for kw in ["dtype", "type", "convert", "change", "integer", "int", "float", "datetime"]):
+                lines.append("")
+                lines.append("**Dtype changes detected in request:**")
+                lines.append("- Extract which columns need dtype changes")
+                lines.append("- Extract the target dtype for each column")
+                lines.append("- Format: {'ColumnName': 'int64'} or {'ColumnName': {'dtype': 'datetime64', 'format': 'YYYY-MM-DD'}}")
+            else:
+                lines.append("")
+                lines.append("**No dtype changes requested** - just load the file")
+                lines.append("- Set dtype_changes to empty object {} in your response")
+        elif files_used:
             # Use EXACT file names with full paths
             if len(files_used) == 1:
                 file_name = self._display_file_name(files_used[0])
@@ -979,15 +1010,9 @@ WORKFLOW PLANNING RULES:
                 max_attempts=3
             )
             
-            # Post-process: Remove data-upload-validate if files already exist
-            if files_exist:
-                original_count = len(workflow_steps)
-                workflow_steps = [s for s in workflow_steps if s.get('atom_id') != 'data-upload-validate']
-                if len(workflow_steps) < original_count:
-                    logger.info(f"🔧 Removed {original_count - len(workflow_steps)} data-upload-validate step(s) - files already exist")
-                    # Renumber steps
-                    for i, step in enumerate(workflow_steps, 1):
-                        step['step_number'] = i
+            # Post-process: Keep data-upload-validate if user mentions files (it will load them)
+            # We no longer skip data-upload-validate - it's needed to load files into the atom
+            # The atom can load files without dtype changes if user doesn't request them
             
             logger.info(f"✅ Generated {len(workflow_steps)} steps via LLM")
             for i, step in enumerate(workflow_steps, 1):
@@ -997,65 +1022,17 @@ WORKFLOW PLANNING RULES:
             
         except RetryableJSONGenerationError as e:
             logger.error(f"❌ Workflow generation failed after all retries: {e}")
-            # Fallback to keyword-based
-            logger.info("🔄 Falling back to keyword-based workflow generation")
-            return self._fallback_to_keywords(user_prompt, available_files, priority_files)
+            # Return error instead of manual fallback - all workflow generation must use AI
+            logger.error("❌ Cannot generate workflow - AI generation failed. Please retry or rephrase your request.")
+            return [], [], False
         except Exception as e:
             logger.error(f"❌ LLM workflow generation failed with unexpected error: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback to keyword-based
-            return self._fallback_to_keywords(user_prompt, available_files, priority_files)
+            # Return error instead of manual fallback - all workflow generation must use AI
+            logger.error("❌ Cannot generate workflow - AI generation failed. Please retry or rephrase your request.")
+            return [], [], False
     
-    def _fallback_to_keywords(
-        self,
-        user_prompt: str,
-        available_files: List[str],
-        priority_files: Optional[List[str]] = None,
-    ) -> Tuple[List[Dict[str, Any]], List[str], bool]:
-        """Fallback to simple keyword-based workflow generation"""
-        logger.info("⚠️ Falling back to keyword-based workflow generation")
-        query_lower = user_prompt.lower()
-        steps = []
-        
-        # Extract files from prompt and check if they exist
-        prompt_files = self._extract_file_names_from_prompt(user_prompt)
-        prompt_files = self._merge_file_references(prompt_files, priority_files)
-        files_exist = self._match_files_with_available(prompt_files, available_files) if available_files else False
-        
-        # Skip data-upload-validate if files already exist
-        if not files_exist and not available_files and any(kw in query_lower for kw in ["load", "upload", "file"]):
-            steps.append({"atom_id": "data-upload-validate", "description": "Load and validate data files"})
-        elif files_exist:
-            logger.info("✅ Files exist, skipping data-upload-validate in fallback")
-        
-        if any(kw in query_lower for kw in ["merge", "join", "combine"]):
-            steps.append({"atom_id": "merge", "description": "Merge datasets"})
-        
-        if any(kw in query_lower for kw in ["concat", "append", "stack"]):
-            steps.append({"atom_id": "concat", "description": "Concatenate datasets"})
-        
-        # Expanded keywords for dataframe-operations (Excel-like operations)
-        dataframe_ops_keywords = [
-            "filter", "where", "sort", "order", "select", "drop", "remove", "rename",
-            "formula", "calculate", "compute", "prod", "sum", "div", "if", "average",
-            "transform", "convert", "round", "edit", "insert", "delete", "find", "replace",
-            "split", "excel", "spreadsheet", "manipulate", "clean", "prepare", "column", "row"
-        ]
-        if any(kw in query_lower for kw in dataframe_ops_keywords):
-            steps.append({"atom_id": "dataframe-operations", "description": "Perform DataFrame operations (filter, formula, transform, etc.)"})
-        
-        if any(kw in query_lower for kw in ["group", "aggregate", "sum", "mean"]):
-            steps.append({"atom_id": "groupby-wtg-avg", "description": "Group and aggregate data"})
-        
-        if any(kw in query_lower for kw in ["chart", "plot", "graph", "visualize"]):
-            steps.append({"atom_id": "chart-maker", "description": "Create visualization"})
-        
-        if not steps:
-            # Default to dataframe-operations if no keywords matched
-            steps.append({"atom_id": "dataframe-operations", "description": "Perform general dataframe operations"})
-        
-        return steps, prompt_files, files_exist
     
     async def execute_workflow_with_websocket(
         self,
@@ -1090,6 +1067,7 @@ WORKFLOW PLANNING RULES:
         self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
+        logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
 
         persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
         if persisted_history:
@@ -2901,6 +2879,13 @@ WORKFLOW PLANNING RULES:
                     append_line(f"Source {idx}", source)
             elif inputs:
                 append_line("Primary source", inputs[0])
+        elif atom_id == "data-upload-validate":
+            # For data-upload-validate, show the file to load
+            target_file = files_used[0] if files_used else (inputs[0] if inputs else None)
+            if target_file:
+                append_line("File to load from MinIO", target_file)
+            else:
+                lines.append("- **CRITICAL:** File name must be extracted from user prompt or available files")
         else:
             primary_input = inputs[0] if inputs else (files_used[0] if files_used else None)
             append_line("Input dataset", primary_input)
@@ -2930,6 +2915,8 @@ WORKFLOW PLANNING RULES:
             return self._build_dataframe_operations_section(original_prompt, inputs or files_used)
         if atom_id == "chart-maker":
             return self._build_chart_section(original_prompt, inputs or files_used)
+        if atom_id == "data-upload-validate":
+            return self._build_data_upload_validate_section(original_prompt, files_used, inputs)
         return self._build_generic_section(atom_id, original_prompt)
 
     def _build_available_files_section(self, available_files: List[str]) -> str:
@@ -3202,6 +3189,96 @@ WORKFLOW PLANNING RULES:
             for match in re.findall(pattern, prompt, flags=re.IGNORECASE):
                 clauses.append(match.strip())
         return clauses
+    
+    def _build_data_upload_validate_section(
+        self,
+        original_prompt: str,
+        files_used: List[str],
+        inputs: List[str]
+    ) -> str:
+        """
+        Build detailed instructions for data-upload-validate atom.
+        This atom loads files from MinIO and optionally applies dtype changes.
+        """
+        lines = [
+            "Data Upload & Validate requirements:",
+            "",
+            "**CRITICAL: This atom performs a TWO-STEP process:**",
+            "1. Load the file from MinIO into the data upload atom",
+            "2. Optionally apply dtype changes if the user requests them",
+            "",
+            "**File Loading:**",
+        ]
+        
+        # Add file information
+        target_file = None
+        if files_used:
+            target_file = files_used[0]
+            lines.append(f"- **MUST load this exact file:** `{target_file}`")
+            lines.append(f"- File path: Use the exact path shown above (case-sensitive)")
+        elif inputs:
+            target_file = inputs[0]
+            lines.append(f"- **MUST load this exact file:** `{target_file}`")
+        else:
+            # Extract file name from prompt
+            file_patterns = [
+                r"load\s+([A-Za-z0-9_./-]+\.(?:csv|excel|xlsx|xls|arrow|parquet))",
+                r"upload\s+([A-Za-z0-9_./-]+\.(?:csv|excel|xlsx|xls|arrow|parquet))",
+                r"file\s+([A-Za-z0-9_./-]+\.(?:csv|excel|xlsx|xls|arrow|parquet))",
+                r"([A-Za-z0-9_./-]+\.(?:csv|excel|xlsx|xls|arrow|parquet))"
+            ]
+            for pattern in file_patterns:
+                match = re.search(pattern, original_prompt, re.IGNORECASE)
+                if match:
+                    target_file = match.group(1)
+                    lines.append(f"- **Extracted file name from prompt:** `{target_file}`")
+                    lines.append(f"- **MUST load this exact file** (use exact name, case-sensitive)")
+                    break
+            
+            if not target_file:
+                lines.append("- **CRITICAL:** File name not found in prompt or files_used.")
+                lines.append("- **MUST identify the exact file name** from the user's request or available files.")
+                lines.append("- Example: If user says 'load sales.csv', use exactly 'sales.csv'")
+        
+        lines.append("")
+        lines.append("**Dtype Changes (OPTIONAL):**")
+        
+        # Check if user mentioned dtype changes
+        prompt_lower = original_prompt.lower()
+        dtype_keywords = [
+            "change.*dtype", "convert.*type", "change.*type", "dtype.*to",
+            "integer", "int", "float", "string", "date", "datetime",
+            "change.*to.*int", "convert.*to.*int", "change.*to.*float"
+        ]
+        has_dtype_request = any(re.search(pattern, prompt_lower) for pattern in dtype_keywords)
+        
+        if has_dtype_request:
+            lines.append("- **User requested dtype changes** - extract the specific changes:")
+            lines.append("  * Identify which columns need dtype changes")
+            lines.append("  * Identify the target dtype for each column (int64, float64, datetime64, object, etc.)")
+            lines.append("  * Example: 'change volume to integer' → {'Volume': 'int64'}")
+            lines.append("  * Example: 'convert date column to datetime' → {'Date': {'dtype': 'datetime64', 'format': 'YYYY-MM-DD'}}")
+        else:
+            lines.append("- **No dtype changes requested** - just load the file")
+            lines.append("- Set dtype_changes to empty object {} in your response")
+            lines.append("- The file will be loaded with its current data types")
+        
+        lines.append("")
+        lines.append("**Response Format:**")
+        lines.append("- Return JSON with validate_json containing:")
+        lines.append("  * file_name: Exact file name/path to load (MUST match available files)")
+        lines.append("  * dtype_changes: Object with column names and target dtypes (can be empty {})")
+        lines.append("- If dtype_changes is empty, the atom will just load the file and proceed")
+        lines.append("- If dtype_changes has values, the atom will load the file AND apply the conversions")
+        
+        lines.append("")
+        lines.append("**Important Notes:**")
+        lines.append("- The file MUST exist in MinIO (check available files list)")
+        lines.append("- Use EXACT file name/path (case-sensitive, with extension)")
+        lines.append("- If file name doesn't match exactly, the operation will fail")
+        lines.append("- After loading, the file will be available for downstream operations")
+        
+        return "\n".join(lines)
     
     def _build_generic_section(self, atom_id: str, original_prompt: str) -> str:
         lines = [
@@ -3532,19 +3609,41 @@ WORKFLOW PLANNING RULES:
             "session_id": session_id
         }
         
-        # 🔧 CRITICAL FIX: Include client_name, app_name, project_name for dataframe-operations
+        # 🔧 CRITICAL FIX: Include client_name, app_name, project_name for atoms that need MinIO access
         # These are required for the agent to find files in MinIO using the correct prefix
-        if atom_id == "dataframe-operations":
+        # All atoms that work with data files need this context to access files correctly
+        atoms_needing_context = {
+            "dataframe-operations",
+            "data-upload-validate",
+            "merge",
+            "concat",
+            "groupby-wtg-avg",
+            "groupby",
+            "create-column",
+            "chart-maker"
+        }
+        
+        if atom_id in atoms_needing_context:
             project_context = self._sequence_project_context.get(session_id, {})
             client_name = project_context.get("client_name", "")
             app_name = project_context.get("app_name", "")
             project_name = project_context.get("project_name", "")
             
-            payload["client_name"] = client_name
-            payload["app_name"] = app_name
-            payload["project_name"] = project_name
-            
-            logger.info(f"🔧 Added project context for dataframe-operations: client={client_name}, app={app_name}, project={project_name}")
+            # Only add if we have valid context (not empty strings)
+            if client_name or app_name or project_name:
+                payload["client_name"] = client_name
+                payload["app_name"] = app_name
+                payload["project_name"] = project_name
+                
+                logger.info(f"🔧 Added project context for {atom_id}: client={client_name}, app={app_name}, project={project_name}")
+            else:
+                logger.warning(f"⚠️ No project context available for {atom_id} (session_id={session_id}). Available contexts: {list(self._sequence_project_context.keys())}")
+                # Fallback: try to get from environment variables
+                import os
+                payload["client_name"] = os.getenv("CLIENT_NAME", "")
+                payload["app_name"] = os.getenv("APP_NAME", "")
+                payload["project_name"] = os.getenv("PROJECT_NAME", "")
+                logger.info(f"🔧 Using environment variables for {atom_id}: client={payload['client_name']}, app={payload['app_name']}, project={payload['project_name']}")
         
         logger.info(f"📡 Calling {full_url}")
         logger.info(f"📦 Payload: {payload}")

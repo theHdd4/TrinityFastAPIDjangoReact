@@ -909,7 +909,7 @@ if __name__ == "__main__":
                 "prompt": "Upload sales.csv",
                 "inputs": [],
                 "output_name": "sales_data",
-                "endpoint": "/trinityai/upload"
+                "endpoint": "/trinityai/df-validate"
             }
         ],
         "total_atoms": 1

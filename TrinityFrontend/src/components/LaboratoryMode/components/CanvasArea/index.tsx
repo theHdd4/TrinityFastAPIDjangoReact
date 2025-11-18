@@ -114,6 +114,7 @@ const LLM_MAP: Record<string, string> = {
   'explore': 'Agent Explore',
   'dataframe-operations': 'Agent DataFrame Operations',
   'pivot-table': 'Agent Pivot Table',
+  'data-upload-validate': 'Agent Data Validation',
 };
 
 const hydrateDroppedAtom = (atom: any): DroppedAtom => {

@@ -2395,6 +2395,121 @@ async def download_dataframe(object_name: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/load-saved-dataframe")
+async def load_saved_dataframe(
+    request: Request,
+):
+    """
+    Load a saved dataframe from MinIO into the data upload atom.
+    This endpoint validates the file exists and returns metadata needed for the UI.
+    This works alongside the existing file upload functionality - users can either:
+    1. Upload files from their own source (existing functionality)
+    2. Load files from MinIO using this endpoint (new functionality)
+    
+    Request body:
+    {
+        "object_name": "full/path/to/file.arrow",
+        "client_name": "optional",
+        "app_name": "optional",
+        "project_name": "optional"
+    }
+    """
+    from urllib.parse import unquote
+    
+    # Parse request body
+    try:
+        body = await request.json()
+        object_name = body.get("object_name", "")
+        client_name = body.get("client_name", "")
+        app_name = body.get("app_name", "")
+        project_name = body.get("project_name", "")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {str(e)}")
+    
+    if not object_name:
+        raise HTTPException(status_code=400, detail="object_name is required")
+    
+    # Decode URL-encoded object_name
+    object_name = unquote(object_name)
+    
+    # Set environment context if provided
+    if client_name:
+        os.environ["CLIENT_NAME"] = client_name
+    if app_name:
+        os.environ["APP_NAME"] = app_name
+    if project_name:
+        os.environ["PROJECT_NAME"] = project_name
+    
+    # Get the current prefix to validate object_name
+    prefix = await get_object_prefix()
+    
+    # Validate object_name is within the allowed prefix
+    if not object_name.startswith(prefix):
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid object name: file must be within the current project prefix"
+        )
+    
+    # Check if file exists in MinIO
+    try:
+        # Try to get object metadata
+        stat = minio_client.stat_object(MINIO_BUCKET, object_name)
+        file_size = stat.size if hasattr(stat, 'size') else 0
+        
+        # Extract display name from object_name
+        display_name = Path(object_name).name
+        # Remove .arrow extension if present for display
+        if display_name.endswith('.arrow'):
+            csv_name = display_name[:-6]  # Remove .arrow
+        else:
+            csv_name = display_name
+        
+        # Get file metadata
+        last_modified = None
+        if hasattr(stat, 'last_modified'):
+            try:
+                last_modified = stat.last_modified.isoformat()
+            except Exception:
+                pass
+        
+        logger.info(
+            "data_upload.load_saved_dataframe.success object_name=%s size=%s",
+            object_name,
+            file_size
+        )
+        
+        return {
+            "success": True,
+            "object_name": object_name,
+            "display_name": display_name,
+            "csv_name": csv_name,
+            "size": file_size,
+            "last_modified": last_modified,
+            "message": f"File '{csv_name}' is ready to be loaded into the data upload atom"
+        }
+        
+    except S3Error as e:
+        if getattr(e, "code", "") in {"NoSuchKey", "NoSuchBucket"}:
+            logger.warning(
+                "data_upload.load_saved_dataframe.not_found object_name=%s",
+                object_name
+            )
+            raise HTTPException(status_code=404, detail=f"File not found: {object_name}")
+        logger.error(
+            "data_upload.load_saved_dataframe.error object_name=%s error=%s",
+            object_name,
+            str(e)
+        )
+        raise HTTPException(status_code=500, detail=f"Error accessing file: {str(e)}")
+    except Exception as e:
+        logger.error(
+            "data_upload.load_saved_dataframe.exception object_name=%s error=%s",
+            object_name,
+            str(e)
+        )
+        raise HTTPException(status_code=400, detail=f"Error loading file: {str(e)}")
+
+
 @router.get("/export_csv")
 async def export_csv(object_name: str):
     """Export the saved dataframe as CSV file."""
