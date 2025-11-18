@@ -1,0 +1,13 @@
+Issue: Opening the same project in multiple tabs/users sometimes showed duplicated cards in Laboratory mode. The real-time sync pipeline (frontend hook + FastAPI websocket) accepted any card list it received and appended missing cards without enforcing uniqueness. When two sessions reported the same card at nearly the same time, the backend stored both entries and broadcasted a list that included the duplicate id. The frontend store also trusted incoming arrays as-is, so any duplicated ids were rendered as repeated cards in the UI (as seen in the screenshot).
+
+Evidence:
+- FastAPI websocket handler appended card payloads and saved them directly (see handle_card_update and handle_full_sync) with no id-level deduplication, so overlapping sync messages could accumulate duplicates before broadcasting back to clients.
+- The Laboratory zustand store simply set incoming card arrays without checking for repeated ids, so duplicate entries in the payload or local arrays rendered as twin cards.
+
+Mitigation implemented:
+- Added backend-side card deduplication that keeps the latest instance of each card id before persisting or broadcasting state.
+- Added frontend-side deduplication in the Laboratory store’s setCards to discard repeated card ids before React renders them. This prevents double renders even if a future payload contains duplicates.
+
+Suggested validation:
+- Open the same project in two tabs, create/edit a card, and confirm only one instance remains visible in both tabs.
+- Verify the websocket payloads (Network/WebSocket frames) show a single entry per card id after the changes.

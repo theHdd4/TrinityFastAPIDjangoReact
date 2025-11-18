@@ -1564,7 +1564,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         <div
           key={node.path}
           style={{ marginLeft: level * 12 }}
-          className="flex items-center justify-between border p-2 rounded hover:bg-gray-50 mt-1"
+          className="flex items-center justify-between border p-2 rounded hover:bg-gray-50 mt-1 overflow-hidden"
         >
           {renameTarget === f.object_name ? (
             <Input
@@ -1577,16 +1577,19 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   commitRename(f.object_name);
                 }
               }}
-              className="h-6 text-xs flex-1 mr-2"
+              className="h-6 text-xs flex-1 mr-2 min-w-0"
             />
           ) : (
-            <button
-              onClick={() => handleOpen(f.object_name)}
-              onContextMenu={(e) => handleContextMenu(e, f)}
-              className="text-sm text-blue-600 hover:underline flex-1 text-left"
-            >
-              {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
-            </button>
+            <div className="flex-1 min-w-0 mr-2">
+              <button
+                onClick={() => handleOpen(f.object_name)}
+                onContextMenu={(e) => handleContextMenu(e, f)}
+                className="text-sm text-blue-600 hover:underline text-left w-full truncate overflow-hidden text-ellipsis whitespace-nowrap"
+                title={f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+              >
+                {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
+              </button>
+            </div>
           )}
           <div className="flex items-center space-x-2 ml-2">
             <button

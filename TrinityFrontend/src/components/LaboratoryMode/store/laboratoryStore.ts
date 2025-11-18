@@ -1,6 +1,24 @@
 import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
 
+const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
+  if (!Array.isArray(cards)) return [];
+
+  const seen = new Set<string>();
+  const deduped: LayoutCard[] = [];
+
+  // Keep last occurrence of each id to mirror backend behavior
+  for (let i = cards.length - 1; i >= 0; i--) {
+    const card = cards[i];
+    if (!card?.id) continue;
+    if (seen.has(card.id)) continue;
+    seen.add(card.id);
+    deduped.push(card);
+  }
+
+  return deduped.reverse();
+};
+
 export interface TextBoxSettings {
   format: "quill-delta" | "markdown" | "html" | "plain";
   content: string;
@@ -1877,7 +1895,14 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
       set({ cards: [] });
       return;
     }
-    set({ cards });
+    const uniqueCards = dedupeCards(cards);
+    if (uniqueCards.length !== cards.length) {
+      console.warn('[Laboratory Store] Deduped cards to avoid duplicates', {
+        incoming: cards.length,
+        unique: uniqueCards.length,
+      });
+    }
+    set({ cards: uniqueCards });
   },
   
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => {

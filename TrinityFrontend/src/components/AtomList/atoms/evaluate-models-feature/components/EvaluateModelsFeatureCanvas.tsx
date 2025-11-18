@@ -65,6 +65,7 @@ import { Maximize2, X, MessageSquare, Send, Edit3, Trash2, Filter, ChevronDown, 
 import { EvaluateModelsFeatureData } from '../EvaluateModelsFeatureAtom';
 import { EvaluateModelsFeatureSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { EVALUATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
@@ -204,6 +205,15 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     if (inputFileName && atomId) {
       window.open(`/dataframe?name=${encodeURIComponent(inputFileName)}`, '_blank');
     }
+  };
+
+  const fetchTaskAwareJson = async <T,>(url: string): Promise<T> => {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+    const payload = await response.json();
+    return resolveTaskResponse<T>(payload);
   };
 
   // Comment state management - use data from props instead of local state
@@ -880,25 +890,18 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
-          const response = await fetch(
-            `${EVALUATE_API}/yoy-growth?` + 
+          const url =
+            `${EVALUATE_API}/yoy-growth?` +
             `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
             `&client_name=${encodeURIComponent(clientName)}` +
             `&app_name=${encodeURIComponent(appName)}` +
-            `&project_name=${encodeURIComponent(projectName)}`
-          );
-          
-          if (response.ok) {
-            const result = await response.json();
-            console.log('🔍 DEBUG: YoY Backend response:', result);
-            // Handle array of results for multiple combinations
-            if (result && result.results && Array.isArray(result.results)) {
-              setYoyGrowthData(result.results);
-            } else {
-              setYoyGrowthData([]);
-            }
+            `&project_name=${encodeURIComponent(projectName)}`;
+
+          const result = await fetchTaskAwareJson<any>(url);
+          console.log('🔍 DEBUG: YoY Backend response:', result);
+          if (result && result.results && Array.isArray(result.results)) {
+            setYoyGrowthData(result.results);
           } else {
-            console.warn('Failed to fetch YoY growth data');
             setYoyGrowthData([]);
           }
         } catch (error) {
@@ -933,22 +936,16 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           // Fetch contribution data for each combination
           for (const combination of selectedCombinations) {
             try {
-              const response = await fetch(
-                `${EVALUATE_API}/contribution?` + 
+              const url =
+                `${EVALUATE_API}/contribution?` +
                 `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
                 `&combination_id=${encodeURIComponent(combination)}` +
                 `&client_name=${encodeURIComponent(clientName)}` +
                 `&app_name=${encodeURIComponent(appName)}` +
-                `&project_name=${encodeURIComponent(projectName)}`
-              );
-              
-              if (response.ok) {
-                const result = await response.json();
-                newContributionData[combination] = result.contribution_data || [];
-              } else {
-                console.warn(`Failed to fetch contribution data for combination: ${combination}`);
-                newContributionData[combination] = [];
-              }
+                `&project_name=${encodeURIComponent(projectName)}`;
+
+              const result = await fetchTaskAwareJson<any>(url);
+              newContributionData[combination] = result.contribution_data || [];
             } catch (error) {
               console.error(`Error fetching contribution data for combination ${combination}:`, error);
               newContributionData[combination] = [];
@@ -1274,38 +1271,32 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
-          const response = await fetch(
-            `${EVALUATE_API}/selected/actual-vs-predicted?` + 
+          const url =
+            `${EVALUATE_API}/selected/actual-vs-predicted?` +
             `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
             `&client_name=${encodeURIComponent(clientName)}` +
             `&app_name=${encodeURIComponent(appName)}` +
-            `&project_name=${encodeURIComponent(projectName)}`
-          );
-          
-          if (response.ok) {
-            const result = await response.json();
-            console.log('🔍 DEBUG: Actual vs Predicted Backend response:', result);
-            
-            // Transform the data to be organized by combination
-            if (result && result.items && Array.isArray(result.items)) {
-              console.log('🔍 DEBUG: Backend items:', result.items);
-              const transformedData: {[key: string]: any} = {};
-              result.items.forEach((item: any) => {
-                console.log('🔍 DEBUG: Processing item:', item);
-                console.log('🔍 DEBUG: Item combination_id:', item.combination_id);
-                console.log('🔍 DEBUG: Item actual_values:', item.actual_values);
-                console.log('🔍 DEBUG: Item predicted_values:', item.predicted_values);
-                if (item.combination_id) {
-                  transformedData[item.combination_id] = item;
-                }
-              });
-              console.log('🔍 DEBUG: Transformed data:', transformedData);
-              setActualVsPredictedData(transformedData);
-            } else {
-              setActualVsPredictedData({});
-            }
+            `&project_name=${encodeURIComponent(projectName)}`;
+
+          const result = await fetchTaskAwareJson<any>(url);
+          console.log('🔍 DEBUG: Actual vs Predicted Backend response:', result);
+
+          // Transform the data to be organized by combination
+          if (result && result.items && Array.isArray(result.items)) {
+            console.log('🔍 DEBUG: Backend items:', result.items);
+            const transformedData: {[key: string]: any} = {};
+            result.items.forEach((item: any) => {
+              console.log('🔍 DEBUG: Processing item:', item);
+              console.log('🔍 DEBUG: Item combination_id:', item.combination_id);
+              console.log('🔍 DEBUG: Item actual_values:', item.actual_values);
+              console.log('🔍 DEBUG: Item predicted_values:', item.predicted_values);
+              if (item.combination_id) {
+                transformedData[item.combination_id] = item;
+              }
+            });
+            console.log('🔍 DEBUG: Transformed data:', transformedData);
+            setActualVsPredictedData(transformedData);
           } else {
-            console.warn('Failed to fetch actual vs predicted data');
             setActualVsPredictedData({});
           }
         } catch (error) {
