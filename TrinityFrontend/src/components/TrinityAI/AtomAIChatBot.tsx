@@ -9,6 +9,7 @@ import { TRINITY_AI_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { atomHandlers, hasAtomData, AtomHandlerContext, Message } from './handlers';
 import { cn } from '@/lib/utils';
+import VoiceInputButton from '../StreamAI/VoiceInputButton';
 
 interface AtomAIChatBotProps {
   atomId: string;
@@ -520,6 +521,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         <div className="p-2 border-t border-gray-200 bg-white rounded-b-md">
           <div className="flex space-x-2">
             <Textarea value={inputValue} onChange={e => setInputValue(e.target.value)} onKeyPress={handleKeyPress} placeholder="Ask AI..." className="flex-1 resize-none h-8" />
+            <VoiceInputButton
+              onTranscript={(text) => {
+                setInputValue(prev => prev ? `${prev} ${text}` : text);
+              }}
+              disabled={isLoading}
+              className="h-8 w-8 p-0"
+              size="sm"
+              variant="ghost"
+            />
             <Button onClick={handleSendMessage} disabled={!inputValue.trim() || isLoading} className="h-8 px-2 bg-blue-500 text-white">
               <Send className="w-3 h-3" />
             </Button>

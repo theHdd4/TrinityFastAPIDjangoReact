@@ -15,6 +15,7 @@ import { autoSaveStepResult } from '../TrinityAI/handlers/utils';
 import { listMemoryChats, saveMemoryChat, deleteMemoryChat } from '@/lib/trinityMemory';
 import type { MemoryChatResponse } from '@/lib/trinityMemory';
 import { AgentModeProvider, useAgentMode } from './context/AgentModeContext';
+import VoiceInputButton from './VoiceInputButton';
 
 const BRAND_GREEN = '#50C878';
 const BRAND_PURPLE = '#7C3AED';
@@ -669,6 +670,19 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+  
+  // Auto-resize textarea
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      const scrollHeight = textarea.scrollHeight;
+      const newHeight = Math.min(scrollHeight, 200);
+      // Use setProperty with important to ensure it overrides CSS classes
+      textarea.style.setProperty('height', `${newHeight}px`, 'important');
+    }
+  }, [inputValue]);
   
   // Handle workflow approval
   const handleAcceptWorkflow = () => {
@@ -2108,14 +2122,15 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               </div>
             )}
           </div>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
-            title="Voice Input"
-          >
-            <Mic className="w-4 h-4" />
-          </Button>
+          <VoiceInputButton
+            onTranscript={(text) => {
+              setInputValue(prev => prev ? `${prev} ${text}` : text);
+            }}
+            disabled={isLoading}
+            className="h-10 w-10 p-0 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
+            size="sm"
+            variant="ghost"
+          />
           <Button 
             variant="ghost" 
             size="sm" 
@@ -2130,6 +2145,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         <div className="flex items-end gap-3">
           <div className="relative flex-1">
             <Textarea
+              ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => {

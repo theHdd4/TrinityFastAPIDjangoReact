@@ -29,8 +29,14 @@ const protocol = getProtocol();
 
 if (!backendOrigin) {
   if (hostIp) {
-    // Use the same protocol as the current page (HTTPS if page is HTTPS)
-    backendOrigin = `${protocol}//${hostIp}:${djangoPort}`;
+    // If accessing via localhost, use localhost for backend too (for cookie/session compatibility)
+    if (typeof window !== 'undefined' && 
+        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      backendOrigin = `${protocol}//${window.location.hostname}:${djangoPort}`;
+    } else {
+      // Use the same protocol as the current page (HTTPS if page is HTTPS)
+      backendOrigin = `${protocol}//${hostIp}:${djangoPort}`;
+    }
   } else if (typeof window !== 'undefined') {
     const regex = new RegExp(`:${frontendPort}$`);
     backendOrigin = window.location.origin.replace(regex, `:${djangoPort}`);
@@ -42,6 +48,14 @@ if (!backendOrigin) {
     new RegExp(`:${frontendPort}$`),
     `:${djangoPort}`,
   );
+}
+
+// If accessing via localhost but backendOrigin uses IP, switch to localhost for cookie compatibility
+if (typeof window !== 'undefined' && 
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
+    backendOrigin && !backendOrigin.includes('localhost') && !backendOrigin.includes('127.0.0.1')) {
+  // Replace IP address with localhost to ensure cookies work properly
+  backendOrigin = backendOrigin.replace(/http:\/\/[\d.]+:/, `${protocol}//${window.location.hostname}:`);
 }
 
 

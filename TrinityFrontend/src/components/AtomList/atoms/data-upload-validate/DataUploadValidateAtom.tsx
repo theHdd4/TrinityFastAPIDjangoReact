@@ -121,7 +121,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
     const currentFileNames = new Set(uploadedFiles.map(f => f.name));
     
     // If settings has files that aren't in current uploadedFiles, load them
-    const missingFiles = Array.from(settingsFileNames).filter(name => !currentFileNames.has(name));
+    const missingFiles = Array.from(settingsFileNames).filter((name): name is string => 
+      typeof name === 'string' && !currentFileNames.has(name)
+    );
     
     if (missingFiles.length > 0) {
       const newFiles: UploadedFileRef[] = missingFiles.map(name => ({
@@ -129,18 +131,7 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         path: settings.filePathMap?.[name] || '',
         size: settings.fileSizeMap?.[name] || 0,
       }));
-<<<<<<< HEAD
-      setUploadedFiles(prev => {
-        // Merge with existing files, avoiding duplicates
-        const existingNames = new Set(prev.map(f => f.name));
-        const toAdd = newFiles.filter(f => !existingNames.has(f.name));
-        return [...prev, ...toAdd];
-      });
-      console.log(`✅ Loaded ${missingFiles.length} file(s) from settings:`, missingFiles);
-    }
-  }, [settings.uploadedFiles, settings.filePathMap, settings.fileSizeMap]);
-=======
-      setUploadedFiles(files);
+      setUploadedFiles(prev => [...prev, ...newFiles]);
       
       // When validation steps are enabled, restore filesFromSavedDataframes from validatedFiles
       if (settings.bypassMasterUpload && settings.validatedFiles && settings.validatedFiles.length > 0) {
@@ -148,7 +139,6 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
       }
     }
   }, [settings.uploadedFiles, settings.filePathMap, settings.fileSizeMap, settings.bypassMasterUpload, settings.validatedFiles, uploadedFiles.length]);
->>>>>>> 7649a60616c9f9c11c1a93ef9cc7eca02a386c89
 
   // Update uploadedFiles paths when filePathMap changes (after save)
   useEffect(() => {
