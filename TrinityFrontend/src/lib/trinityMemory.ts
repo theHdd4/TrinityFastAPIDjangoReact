@@ -97,10 +97,14 @@ const safeFetch = async (url: string, options?: RequestInit): Promise<Response> 
 export const listMemoryChats = async (baseUrl: string): Promise<MemoryChatResponse[]> => {
   try {
     const context = getProjectContext();
+    // CRITICAL: Request all messages (use a high limit to get full chat history)
+    // Default message_limit is only 8, which causes chats to appear truncated
     const url = buildUrl(baseUrl, '/memory/chats', {
       client: context.client || '',
       app: context.app || '',
       project: context.project || '',
+      include_messages: 'true',
+      message_limit: '1000', // Request up to 1000 messages per chat to avoid truncation
     });
     const data = await handleResponse<{ chats: MemoryChatRecord[] }>(await safeFetch(url));
     return (data.chats || []).map((chat) => ({
@@ -199,7 +203,11 @@ export const deleteMemoryChat = async (baseUrl: string, chatId: string): Promise
     app: context.app || '',
     project: context.project || '',
   });
-  await safeFetch(url, { method: 'DELETE' });
+  const response = await safeFetch(url, { method: 'DELETE' });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(errorText || `Failed to delete chat: ${response.status} ${response.statusText}`);
+  }
 };
 
 export const saveMemorySession = async (

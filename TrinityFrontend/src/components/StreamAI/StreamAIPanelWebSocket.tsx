@@ -392,8 +392,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     };
   }, []);
 
-  const persistChatToMemory = useCallback(async (chat: Chat) => {
+  const persistChatToMemory = useCallback(async (chat: Chat): Promise<MemoryChatResponse | null> => {
     try {
+      console.log(`💾 Persisting chat ${chat.id} with ${chat.messages.length} messages to memory/Redis`);
       const result = await saveMemoryChat(MEMORY_API_BASE, chat.id, {
         messages: chat.messages.map(toSerializableMessage),
         metadata: {
@@ -401,16 +402,21 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           createdAt: chat.createdAt.toISOString(),
           sessionId: chat.sessionId,
         },
-        append: false,
+        append: false, // Replace all messages to ensure consistency
       });
       if (result === null) {
+        console.warn('⚠️ Memory service returned null for chat:', chat.id);
         setMemoryError('Memory service unavailable - chat not persisted.');
+        return null;
       } else {
+        console.log(`✅ Chat ${chat.id} persisted successfully with ${result.totalMessages} messages`);
         setMemoryError(null);
+        return result;
       }
     } catch (error) {
-      console.error('Failed to sync chat history:', error);
+      console.error('❌ Failed to sync chat history:', error);
       setMemoryError('Unable to sync chat history to server.');
+      throw error; // Re-throw so caller knows it failed
     }
   }, [MEMORY_API_BASE, toSerializableMessage]);
   
@@ -437,18 +443,50 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
 
         if (records.length > 0) {
-          const mappedChats: Chat[] = records.map(record => mapRecordToChat(record));
-          memoryPersistSkipRef.current = true;
-          setChats(mappedChats);
-
-          const activeChat = mappedChats[0];
-          setCurrentChatId(activeChat.id);
-          // Only update messages if the loaded chat has messages
-          if (activeChat.messages && activeChat.messages.length > 0) {
-            setMessages(activeChat.messages);
+          // Filter out incomplete/partial chats - validate each chat
+          const validChats: Chat[] = [];
+          for (const record of records) {
+            try {
+              // Validate chat structure
+              if (!record.chatId || typeof record.chatId !== 'string') {
+                console.warn('Skipping chat with invalid ID:', record);
+                continue;
+              }
+              if (!Array.isArray(record.messages)) {
+                console.warn('Skipping chat with invalid messages:', record.chatId);
+                continue;
+              }
+              const mappedChat = mapRecordToChat(record);
+              // Additional validation: ensure chat has valid structure
+              if (!mappedChat.id || !Array.isArray(mappedChat.messages)) {
+                console.warn('Skipping chat with invalid structure:', record.chatId);
+                continue;
+              }
+              validChats.push(mappedChat);
+            } catch (error) {
+              console.warn('Skipping invalid chat record:', error, record);
+              continue;
+            }
           }
-          setCurrentSessionId(activeChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-          memoryPersistSkipRef.current = true;
+          
+          if (validChats.length > 0) {
+            memoryPersistSkipRef.current = true;
+            setChats(validChats);
+
+            const activeChat = validChats[0];
+            setCurrentChatId(activeChat.id);
+            // Only update messages if the loaded chat has messages
+            if (activeChat.messages && activeChat.messages.length > 0) {
+              setMessages(activeChat.messages);
+            }
+            setCurrentSessionId(activeChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+            memoryPersistSkipRef.current = true;
+          } else {
+            // All chats were invalid, create new one
+            createNewChat().catch(err => {
+              console.error('Failed to create new chat:', err);
+            });
+          }
         } else {
           // Create new chat but don't wait - messages already set above
           createNewChat().catch(err => {
@@ -491,16 +529,46 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   }, [messages, currentChatId, currentSessionId]);
 
   // Sync to MinIO memory (non-blocking, doesn't affect UI)
+  // This is a backup sync - primary persistence happens in handleSendMessage
   useEffect(() => {
     if (!isInitialized || !currentChatId || messages.length === 0) return;
     if (memoryPersistSkipRef.current) {
       memoryPersistSkipRef.current = false;
       return;
     }
+    
+    // Use current messages state directly to avoid stale data
     const chat = chats.find(c => c.id === currentChatId);
-    if (!chat) return;
-    persistChatToMemory(chat);
-  }, [chats, currentChatId, isInitialized, persistChatToMemory]);
+    if (!chat) {
+      // Chat doesn't exist, create it with current messages
+      const newChat: Chat = {
+        id: currentChatId,
+        title: messages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || 'Trinity AI Chat',
+        messages: messages,
+        createdAt: new Date(),
+        sessionId: currentSessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      };
+      setChats(prev => [newChat, ...prev]);
+      persistChatToMemory(newChat).catch(err => 
+        console.error('Failed to persist new chat in sync effect:', err)
+      );
+      return;
+    }
+    
+    // Ensure chat has latest messages
+    const updatedChat: Chat = {
+      ...chat,
+      messages: messages, // Use current messages state
+    };
+    
+    // Only persist if messages have changed
+    if (updatedChat.messages.length !== chat.messages.length || 
+        updatedChat.messages[updatedChat.messages.length - 1]?.id !== chat.messages[chat.messages.length - 1]?.id) {
+      persistChatToMemory(updatedChat).catch(err => 
+        console.error('Failed to persist chat in sync effect:', err)
+      );
+    }
+  }, [messages, currentChatId, isInitialized, persistChatToMemory, chats, currentSessionId]);
   
   // Switch to a different chat
   const switchToChat = (chatId: string) => {
@@ -540,30 +608,58 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     } catch (error) {
       console.error('Failed to delete chat history:', error);
       setMemoryError('Unable to delete chat history from server.');
+      return; // Don't proceed with UI update if deletion failed
     }
 
-    const remainingChats = chats.filter(chat => chat.id !== currentChatId);
-    if (remainingChats.length === 0) {
-      await createNewChat();
-      return;
-    }
+    // Reload chats from server to ensure consistency
+    try {
+      const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+      const mappedChats: Chat[] = records.map(record => mapRecordToChat(record));
+      
+      if (mappedChats.length === 0) {
+        await createNewChat();
+        return;
+      }
 
-    memoryPersistSkipRef.current = true;
-    setChats(remainingChats);
-    const nextChat = remainingChats[0];
-    setCurrentChatId(nextChat.id);
-    // Ensure messages are never empty - use chat messages or fallback to initial message
-    const nextMessages = nextChat.messages && nextChat.messages.length > 0 
-      ? nextChat.messages 
-      : [{
-          id: '1',
-          content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
-          sender: 'ai' as const,
-          timestamp: new Date()
-        }];
-    setMessages(nextMessages);
-    setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-  }, [MEMORY_API_BASE, chats, createNewChat, currentChatId]);
+      memoryPersistSkipRef.current = true;
+      setChats(mappedChats);
+      const nextChat = mappedChats[0];
+      setCurrentChatId(nextChat.id);
+      // Ensure messages are never empty - use chat messages or fallback to initial message
+      const nextMessages = nextChat.messages && nextChat.messages.length > 0 
+        ? nextChat.messages 
+        : [{
+            id: '1',
+            content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+            sender: 'ai' as const,
+            timestamp: new Date()
+          }];
+      setMessages(nextMessages);
+      setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+    } catch (error) {
+      console.error('Failed to reload chats after deletion:', error);
+      // Fallback to local state update
+      const remainingChats = chats.filter(chat => chat.id !== currentChatId);
+      if (remainingChats.length === 0) {
+        await createNewChat();
+        return;
+      }
+      memoryPersistSkipRef.current = true;
+      setChats(remainingChats);
+      const nextChat = remainingChats[0];
+      setCurrentChatId(nextChat.id);
+      const nextMessages = nextChat.messages && nextChat.messages.length > 0 
+        ? nextChat.messages 
+        : [{
+            id: '1',
+            content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+            sender: 'ai' as const,
+            timestamp: new Date()
+          }];
+      setMessages(nextMessages);
+      setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+    }
+  }, [MEMORY_API_BASE, chats, createNewChat, currentChatId, mapRecordToChat]);
 
   const clearAllChats = useCallback(async () => {
     if (chats.length === 0) {
@@ -579,15 +675,37 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       if (failed && failed.status === 'rejected') {
         throw failed.reason;
       }
-      setChats([]);
+      
+      // Reload chats from server to ensure consistency
+      const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+      const mappedChats: Chat[] = records.map(record => mapRecordToChat(record));
+      
+      setChats(mappedChats);
       memoryPersistSkipRef.current = true;
-      await createNewChat();
+      
+      if (mappedChats.length === 0) {
+        await createNewChat();
+      } else {
+        // Switch to first remaining chat
+        const firstChat = mappedChats[0];
+        setCurrentChatId(firstChat.id);
+        const firstMessages = firstChat.messages && firstChat.messages.length > 0 
+          ? firstChat.messages 
+          : [{
+              id: '1',
+              content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+              sender: 'ai' as const,
+              timestamp: new Date()
+            }];
+        setMessages(firstMessages);
+        setCurrentSessionId(firstChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+      }
       setMemoryError(null);
     } catch (error) {
       console.error('Failed to clear chat history:', error);
       setMemoryError('Unable to clear chat history from server.');
     }
-  }, [MEMORY_API_BASE, chats, createNewChat]);
+  }, [MEMORY_API_BASE, chats, createNewChat, mapRecordToChat]);
 
   const handleCopyChatId = useCallback(async () => {
     if (!currentChatId || !navigator?.clipboard?.writeText) return;
@@ -911,6 +1029,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
     
+    // Store input value immediately to prevent loss
+    const messageContent = inputValue.trim();
+    
     // CRITICAL: Close any existing WebSocket before creating new one
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
       console.log('🔌 Closing existing WebSocket before new prompt');
@@ -923,13 +1044,92 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     const userMessage: Message = {
       id: `user-${Date.now()}`,
-      content: inputValue,
+      content: messageContent,
       sender: 'user',
       timestamp: new Date()
     };
     
-    setMessages(prev => [...prev, userMessage]);
+    // CRITICAL: Add message to state IMMEDIATELY before any async operations
+    setMessages(prev => {
+      const updated = [...prev, userMessage];
+      return updated;
+    });
+    
+    // CRITICAL: Clear input immediately to prevent double-sending
     setInputValue('');
+    
+    // CRITICAL: Persist user message to memory IMMEDIATELY before WebSocket connection
+    // This ensures the message is never lost even if connection fails
+    // Use a function to get the latest messages state to avoid stale closures
+    try {
+      // Get the latest messages from state (includes the user message we just added)
+      const latestMessages = [...messages, userMessage];
+      
+      // Get current chat or create one if it doesn't exist
+      let currentChat = chats.find(c => c.id === currentChatId);
+      if (!currentChat) {
+        // Chat doesn't exist, create it
+        const newChatId = currentChatId || `stream_chat_${Date.now()}`;
+        const newSessionId = currentSessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        currentChat = {
+          id: newChatId,
+          title: 'New Trinity AI Chat',
+          messages: latestMessages,
+          createdAt: new Date(),
+          sessionId: newSessionId,
+        };
+        setCurrentChatId(newChatId);
+        setCurrentSessionId(newSessionId);
+        setChats(prev => [currentChat!, ...prev]);
+      }
+      
+      // Build updated chat with latest messages
+      const updatedChat: Chat = {
+        ...currentChat,
+        messages: latestMessages, // Use latest messages including the new user message
+        title: latestMessages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || currentChat.title,
+      };
+      
+      // Update chats state immediately
+      setChats(prev => prev.map(chat => 
+        chat.id === currentChatId ? updatedChat : chat
+      ));
+      
+      // Persist immediately with await to ensure it completes
+      memoryPersistSkipRef.current = false; // Allow persistence
+      const persistResult = await persistChatToMemory(updatedChat);
+      
+      if (persistResult === null) {
+        console.warn('⚠️ Memory service returned null, message may not be persisted');
+      } else {
+        console.log('✅ User message persisted to memory/Redis before WebSocket connection');
+      }
+    } catch (persistError) {
+      console.error('⚠️ Failed to persist user message immediately:', persistError);
+      // CRITICAL: Even if persistence fails, try again with a retry mechanism
+      // Store in a queue for retry
+      setTimeout(async () => {
+        try {
+          const retryChat = chats.find(c => c.id === currentChatId);
+          if (retryChat) {
+            const retryMessages = [...retryChat.messages];
+            if (!retryMessages.some(m => m.id === userMessage.id)) {
+              retryMessages.push(userMessage);
+            }
+            const retryUpdatedChat: Chat = {
+              ...retryChat,
+              messages: retryMessages,
+            };
+            memoryPersistSkipRef.current = false;
+            await persistChatToMemory(retryUpdatedChat);
+            console.log('✅ User message persisted on retry');
+          }
+        } catch (retryError) {
+          console.error('❌ Retry persistence also failed:', retryError);
+        }
+      }, 1000);
+    }
+    
     setIsLoading(true);
     
     // Create progress message
@@ -989,15 +1189,29 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         // Store original prompt for ADD functionality
         setOriginalPrompt(userMessage.content);
         
-        // Send initial message with available files
-        ws.send(JSON.stringify({
-          message: userMessage.content,
-          available_files: fileNames,  // Use freshly loaded files
-          project_context: projectContext,
-          user_id: 'current_user',
-          session_id: currentSessionId,  // Send session ID for chat context
-          chat_id: currentChatId
-        }));
+        try {
+          // Send initial message with available files
+          ws.send(JSON.stringify({
+            message: userMessage.content,
+            available_files: fileNames,  // Use freshly loaded files
+            project_context: projectContext,
+            user_id: 'current_user',
+            session_id: currentSessionId,  // Send session ID for chat context
+            chat_id: currentChatId
+          }));
+          console.log('✅ Message sent to WebSocket');
+        } catch (sendError) {
+          console.error('❌ Failed to send message to WebSocket:', sendError);
+          // Message is already in state and persisted, so user won't lose it
+          const sendErrorMsg: Message = {
+            id: `send-error-${Date.now()}`,
+            content: '❌ Failed to send message. Your message has been saved. Please try again.',
+            sender: 'ai',
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, sendErrorMsg]);
+          setIsLoading(false);
+        }
       };
       
       ws.onmessage = async (event) => {
@@ -1356,15 +1570,46 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             
           case 'workflow_insight':
             console.log('✅ Workflow insight received:', data);
+            const insightContent = data.insight || 'No insight generated';
+            const insightText = `📊 **Workflow Insights**\n\n${insightContent}`;
+            console.log(`📊 Insight message length: ${insightText.length} characters`);
+            
             // Display the insight in a new message
             const insightMessage: Message = {
               id: `insight-${Date.now()}`,
-              content: `📊 **Workflow Insights**\n\n${data.insight || 'No insight generated'}`,
+              content: insightText,
               sender: 'ai',
               timestamp: new Date(),
               type: 'text'
             };
-            setMessages(prev => [...prev, insightMessage]);
+            
+            // CRITICAL: Add insight to messages and persist immediately
+            setMessages(prev => {
+              const updated = [...prev, insightMessage];
+              console.log(`💾 Total messages after insight: ${updated.length}`);
+              
+              // Persist immediately with insight included
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: updated,
+                };
+                memoryPersistSkipRef.current = false;
+                persistChatToMemory(updatedChat).then(result => {
+                  if (result) {
+                    console.log(`✅ Insight persisted successfully. Total messages: ${result.totalMessages}`);
+                  } else {
+                    console.warn('⚠️ Insight persistence returned null');
+                  }
+                }).catch(err => {
+                  console.error('❌ Failed to persist insight:', err);
+                });
+              }
+              
+              return updated;
+            });
+            
             updateProgress('\n\n✅ Insights generated!');
             setIsLoading(false);
             // Now close the connection after insight is received
@@ -1407,20 +1652,100 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       ws.onerror = (error) => {
         console.error('❌ WebSocket error:', error);
         updateProgress('\n\n❌ Connection error');
+        
+        // CRITICAL: Add error message to chat so user knows what happened
+        const errorMsg: Message = {
+          id: `error-${Date.now()}`,
+          content: '❌ Connection error occurred. Your message has been saved. Please try again.',
+          sender: 'ai',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, errorMsg]);
+        
+        // CRITICAL: Ensure user message is persisted even on error
+        try {
+          const currentChat = chats.find(c => c.id === currentChatId);
+          if (currentChat) {
+            const updatedChat: Chat = {
+              ...currentChat,
+              messages: currentChat.messages.some(m => m.id === userMessage.id) 
+                ? currentChat.messages 
+                : [...currentChat.messages, userMessage],
+            };
+            memoryPersistSkipRef.current = false;
+            persistChatToMemory(updatedChat).catch(err => 
+              console.error('Failed to persist on error:', err)
+            );
+          }
+        } catch (persistError) {
+          console.error('Failed to persist message on WebSocket error:', persistError);
+        }
+        
         setIsLoading(false);
         stopAutoRun();
       };
       
-      ws.onclose = () => {
-        console.log('🔌 WebSocket closed');
+      ws.onclose = (event) => {
+        console.log('🔌 WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
         stopAutoRun();
         setWsConnection(null);
+        
+        // CRITICAL: If connection closed unexpectedly (not clean), ensure message is saved
+        if (!event.wasClean && event.code !== 1000) {
+          console.warn('⚠️ WebSocket closed unexpectedly, ensuring message is persisted');
+          try {
+            const currentChat = chats.find(c => c.id === currentChatId);
+            if (currentChat) {
+              const updatedChat: Chat = {
+                ...currentChat,
+                messages: currentChat.messages.some(m => m.id === userMessage.id) 
+                  ? currentChat.messages 
+                  : [...currentChat.messages, userMessage],
+              };
+              memoryPersistSkipRef.current = false;
+              persistChatToMemory(updatedChat).catch(err => 
+                console.error('Failed to persist on close:', err)
+              );
+            }
+          } catch (persistError) {
+            console.error('Failed to persist message on WebSocket close:', persistError);
+          }
+        }
+        
         // 🔧 CRITICAL FIX: Always set loading to false when connection closes
         setIsLoading(false);
       };
       
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ Error in handleSendMessage:', error);
+      
+      // CRITICAL: Ensure user message is persisted even if there's an exception
+      try {
+        const currentChat = chats.find(c => c.id === currentChatId);
+        if (currentChat) {
+          const updatedChat: Chat = {
+            ...currentChat,
+            messages: currentChat.messages.some(m => m.id === userMessage.id) 
+              ? currentChat.messages 
+              : [...currentChat.messages, userMessage],
+          };
+          memoryPersistSkipRef.current = false;
+          await persistChatToMemory(updatedChat);
+          console.log('✅ User message persisted after exception');
+        }
+      } catch (persistError) {
+        console.error('Failed to persist message after exception:', persistError);
+      }
+      
+      // Add error message to chat
+      const errorMsg: Message = {
+        id: `error-${Date.now()}`,
+        content: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}. Your message has been saved.`,
+        sender: 'ai',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMsg]);
+      
       setIsLoading(false);
     }
   };
@@ -1573,14 +1898,78 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Chat History</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowChatHistory(false)}
-                className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
-              >
-                <X className="w-4 h-4" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    if (chats.length === 0) return;
+                    if (confirm(`Are you sure you want to delete all ${chats.length} chats? This cannot be undone.`)) {
+                      try {
+                        setIsMemoryLoading(true);
+                        const results = await Promise.allSettled(
+                          chats.map(chat => deleteMemoryChat(MEMORY_API_BASE, chat.id))
+                        );
+                        const failed = results.filter(result => result.status === 'rejected');
+                        if (failed.length > 0) {
+                          console.error('Some chats failed to delete:', failed);
+                          setMemoryError(`Failed to delete ${failed.length} chat(s). Please try again.`);
+                        } else {
+                          // Reload chats from server to ensure consistency
+                          const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+                          const mappedChats: Chat[] = records
+                            .filter(record => {
+                              if (!record.chatId || typeof record.chatId !== 'string') return false;
+                              if (!Array.isArray(record.messages)) return false;
+                              return true;
+                            })
+                            .map(record => mapRecordToChat(record));
+                          
+                          setChats(mappedChats);
+                          memoryPersistSkipRef.current = true;
+                          
+                          if (mappedChats.length === 0) {
+                            await createNewChat();
+                          } else {
+                            // Switch to first remaining chat
+                            const firstChat = mappedChats[0];
+                            setCurrentChatId(firstChat.id);
+                            const firstMessages = firstChat.messages && firstChat.messages.length > 0 
+                              ? firstChat.messages 
+                              : [{
+                                  id: '1',
+                                  content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+                                  sender: 'ai' as const,
+                                  timestamp: new Date()
+                                }];
+                            setMessages(firstMessages);
+                            setCurrentSessionId(firstChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                          }
+                          setMemoryError(null);
+                        }
+                      } catch (error) {
+                        console.error('Failed to clear all chats:', error);
+                        setMemoryError('Unable to clear all chats from server.');
+                      } finally {
+                        setIsMemoryLoading(false);
+                      }
+                    }
+                  }}
+                  className="h-6 px-2 text-xs hover:bg-red-100 hover:text-red-600 text-gray-600 rounded-lg transition-colors"
+                  disabled={chats.length === 0 || isMemoryLoading}
+                  title="Clear All Chats"
+                >
+                  Clear All
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowChatHistory(false)}
+                  className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           </div>
           
@@ -1608,8 +1997,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 chats.map((chat) => (
                   <div
                     key={chat.id}
-                    onClick={() => switchToChat(chat.id)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all duration-200 border-2 ${
+                    className={`p-3 rounded-xl transition-all duration-200 border-2 ${
                       chat.id === currentChatId
                         ? 'shadow-md'
                         : 'bg-gray-50 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
@@ -1624,7 +2012,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                     }
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => switchToChat(chat.id)}
+                      >
                         <h4 className="font-semibold text-gray-800 font-inter text-sm truncate">
                           {chat.title}
                         </h4>
@@ -1632,12 +2023,79 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                           {new Date(chat.createdAt).toLocaleDateString()} • {chat.messages.length} messages
                         </p>
                       </div>
-                      {chat.id === currentChatId && (
-                        <div
-                          className="w-2 h-2 rounded-full flex-shrink-0 mt-1"
-                          style={{ backgroundColor: BRAND_GREEN }}
-                        />
-                      )}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {chat.id === currentChatId && (
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: BRAND_GREEN }}
+                          />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 hover:bg-red-100 hover:text-red-600 text-gray-400 rounded-lg"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            if (confirm(`Are you sure you want to delete "${chat.title}"? This cannot be undone.`)) {
+                              try {
+                                setIsMemoryLoading(true);
+                                console.log('Deleting chat:', chat.id);
+                                await deleteMemoryChat(MEMORY_API_BASE, chat.id);
+                                console.log('Chat deleted successfully, reloading...');
+                                
+                                // Reload chats from server
+                                const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+                                console.log('Reloaded chats:', records.length);
+                                const mappedChats: Chat[] = records
+                                  .filter(record => {
+                                    // Validate chat structure
+                                    if (!record.chatId || typeof record.chatId !== 'string') return false;
+                                    if (!Array.isArray(record.messages)) return false;
+                                    return true;
+                                  })
+                                  .map(record => mapRecordToChat(record));
+                                
+                                memoryPersistSkipRef.current = true;
+                                setChats(mappedChats);
+                                
+                                // If we deleted the current chat, switch to first available or create new
+                                if (chat.id === currentChatId) {
+                                  if (mappedChats.length === 0) {
+                                    await createNewChat();
+                                  } else {
+                                    const nextChat = mappedChats[0];
+                                    setCurrentChatId(nextChat.id);
+                                    const nextMessages = nextChat.messages && nextChat.messages.length > 0 
+                                      ? nextChat.messages 
+                                      : [{
+                                          id: '1',
+                                          content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+                                          sender: 'ai' as const,
+                                          timestamp: new Date()
+                                        }];
+                                    setMessages(nextMessages);
+                                    setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                                  }
+                                }
+                                setMemoryError(null);
+                                console.log('Chat deletion completed successfully');
+                              } catch (error) {
+                                console.error('Failed to delete chat:', error);
+                                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                                setMemoryError(`Unable to delete chat: ${errorMessage}`);
+                                alert(`Failed to delete chat: ${errorMessage}`);
+                              } finally {
+                                setIsMemoryLoading(false);
+                              }
+                            }
+                          }}
+                          title="Delete Chat"
+                          disabled={isMemoryLoading}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))

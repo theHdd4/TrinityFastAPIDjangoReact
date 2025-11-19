@@ -409,7 +409,8 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
 WORKFLOW PLANNING RULES:
 - Put data loading (data-upload-validate) FIRST when user mentions files - it loads from MinIO and optionally applies dtype changes
 - Put data transformations (merge, concat, filter, groupby, dataframe-operations) BEFORE visualization
-- Put chart-maker or visualization atoms LAST
+- Put chart-maker for visualization and may  use multiple times if required 
+- ALWAYS Put chart-maker atleast once in the workflow for visualization for the user to see the data in a visual way.
 - Each step should build on previous steps
 - For dataframe-operations: Use ONE atom per task for clarity (e.g., one for filtering, one for formulas, one for sorting)
 - Workflows can be long (5-10+ steps) - break complex tasks into individual steps
@@ -417,10 +418,11 @@ WORKFLOW PLANNING RULES:
 - Example long workflow: Load → Filter → Apply Formula → Sort → Group → Visualize
 """
     
-    def _extract_file_names_from_prompt(self, user_prompt: str) -> List[str]:
+    def _extract_file_names_from_prompt(self, user_prompt: str, available_files: Optional[List[str]] = None) -> List[str]:
         """
         Extract file names mentioned in the user prompt.
         Handles formats like: @DO_KHC_UK_Beans.arrow, DO_KHC_UK_Beans.arrow, etc.
+        If available_files is provided, validates extracted names against available files.
         """
         import re
         
@@ -444,6 +446,14 @@ WORKFLOW PLANNING RULES:
             if normalized not in seen:
                 seen.add(normalized)
                 unique_files.append(file_name)
+        
+        # Validate against available files if provided
+        if available_files:
+            validated_files = self._validate_file_names(unique_files, available_files)
+            if len(validated_files) < len(unique_files):
+                logger.warning(f"⚠️ Filtered {len(unique_files) - len(validated_files)} invalid file names. Using only validated: {validated_files}")
+            logger.info(f"📂 Extracted and validated files from prompt: {[f.lower() for f in validated_files]}")
+            return validated_files
         
         logger.info(f"📂 Extracted files from prompt: {[f.lower() for f in unique_files]}")
         return unique_files
@@ -832,6 +842,14 @@ WORKFLOW PLANNING RULES:
 
             files_used_raw = raw_step.get("files_used") or []
             files_used = self._ensure_list_of_strings(files_used_raw)
+            
+            # Validate file names against available files
+            if files_used and available_files:
+                validated_files = self._validate_file_names(files_used, available_files)
+                if len(validated_files) < len(files_used):
+                    logger.warning(f"⚠️ Step {idx}: Filtered {len(files_used) - len(validated_files)} invalid file names. Using only validated: {validated_files}")
+                files_used = validated_files
+            
             files_required = 0
             if atom_id == "data-upload-validate":
                 files_required = 1
@@ -955,7 +973,7 @@ WORKFLOW PLANNING RULES:
             raise RuntimeError("aiohttp is required for LLM workflow generation but is not installed")
         
         # Extract files mentioned in prompt and merge with tracked context
-        prompt_files = self._extract_file_names_from_prompt(user_prompt)
+        prompt_files = self._extract_file_names_from_prompt(user_prompt, available_files)
         prompt_files = self._merge_file_references(prompt_files, priority_files)
         files_exist = self._match_files_with_available(prompt_files, available_files) if available_files else False
         
@@ -1151,7 +1169,7 @@ WORKFLOW PLANNING RULES:
 
         file_focus = self._merge_file_references(chat_file_names, None)
         if history_summary:
-            history_files = self._extract_file_names_from_prompt(history_summary)
+            history_files = self._extract_file_names_from_prompt(history_summary, available_files)
             file_focus = self._merge_file_references(file_focus, history_files)
         if file_focus:
             self._chat_file_mentions[sequence_id] = file_focus
@@ -1279,7 +1297,7 @@ WORKFLOW PLANNING RULES:
 
                         updated_focus = self._merge_file_references(
                             self._chat_file_mentions.get(sequence_id),
-                            self._extract_file_names_from_prompt(additional_info),
+                            self._extract_file_names_from_prompt(additional_info, available_files),
                         )
                         if updated_focus:
                             self._chat_file_mentions[sequence_id] = updated_focus
@@ -1491,7 +1509,7 @@ WORKFLOW PLANNING RULES:
                                     combined_with_history = self._apply_history_context(combined_prompt, history_summary)
                                     updated_focus = self._merge_file_references(
                                         self._chat_file_mentions.get(sequence_id),
-                                        self._extract_file_names_from_prompt(additional_info),
+                                        self._extract_file_names_from_prompt(additional_info, available_files),
                                     )
                                     if updated_focus:
                                         self._chat_file_mentions[sequence_id] = updated_focus
@@ -3075,10 +3093,33 @@ WORKFLOW PLANNING RULES:
 
         lines: List[str] = []
         
+        # Get file metadata to include column names
+        all_file_paths = list(set(files_used + inputs))
+        file_metadata = {}
+        if all_file_paths:
+            file_metadata = self._get_file_metadata(all_file_paths)
+        
         # Add Stream AI mode warning at the top
         if is_stream_workflow:
             lines.append("🚨 USE ONLY THIS FILE - DO NOT USE ANY OTHER FILES")
             lines.append("The file(s) specified below are MANDATORY for this workflow step.")
+            lines.append("")
+        
+        # Add file metadata with column names if available
+        if file_metadata:
+            lines.append("**FILE METADATA (CRITICAL - Use ONLY these column names):**")
+            for file_path in all_file_paths:
+                if file_path in file_metadata:
+                    metadata = file_metadata[file_path]
+                    columns = metadata.get("columns", [])
+                    if columns:
+                        file_display = self._display_file_name(file_path)
+                        lines.append(f"- **File:** `{file_path}` (display: {file_display})")
+                        lines.append(f"  * **Valid columns:** {', '.join(columns[:15])}")
+                        if len(columns) > 15:
+                            lines.append(f"  * ... and {len(columns) - 15} more columns")
+                        lines.append("")
+            lines.append("⚠️ **IMPORTANT:** Use ONLY the column names listed above. Do NOT invent or guess column names.")
             lines.append("")
 
         def append_line(label: str, value: Optional[str]) -> None:
@@ -3204,6 +3245,13 @@ WORKFLOW PLANNING RULES:
         join_type = self._detect_join_type(original_prompt)
         requires_common = "common column" in original_prompt.lower() or "common key" in original_prompt.lower()
 
+        # Validate join columns against actual file metadata
+        validated_join_columns = []
+        if join_columns and files_used:
+            validated_join_columns = self._validate_column_names(join_columns, files_used)
+            if len(validated_join_columns) < len(join_columns):
+                logger.warning(f"⚠️ Filtered {len(join_columns) - len(validated_join_columns)} invalid join columns. Using only validated: {validated_join_columns}")
+
         lines: List[str] = ["Merge requirements:"]
 
         if join_type:
@@ -3211,13 +3259,17 @@ WORKFLOW PLANNING RULES:
         else:
             lines.append("- Join type: Determine the most appropriate join type; default to `inner` if the user did not specify.")
 
-        if join_columns:
+        if validated_join_columns:
+            formatted = ", ".join(validated_join_columns)
+            lines.append(f"- Join columns: {formatted} (VALIDATED - these columns exist in the files)")
+        elif join_columns:
+            # If validation failed, still mention but warn
             formatted = ", ".join(join_columns)
-            lines.append(f"- Join columns: {formatted}")
+            lines.append(f"- Join columns: {formatted} (⚠️ WARNING: Validate these columns exist in the files before using)")
         elif requires_common:
-            lines.append("- Join columns: Automatically detect the overlapping column names shared by both datasets (user requested common columns).")
+            lines.append("- Join columns: Automatically detect the overlapping column names shared by both datasets (user requested common columns). Use ONLY columns that exist in both files.")
         else:
-            lines.append("- Join columns: Inspect both datasets and choose matching identifier columns (e.g., customer_id, order_id) when the user does not specify.")
+            lines.append("- Join columns: Inspect both datasets and choose matching identifier columns (e.g., customer_id, order_id) when the user does not specify. Use ONLY columns that exist in the files.")
 
         if files_used and len(files_used) == 1:
             lines.append("- Secondary dataset: Confirm the second dataset to merge since only one source was resolved.")
@@ -3229,30 +3281,70 @@ WORKFLOW PLANNING RULES:
         group_columns = self._extract_group_columns(original_prompt)
         aggregation_details = self._extract_aggregation_details(original_prompt)
 
+        # Validate group columns and aggregation columns against actual file metadata
+        validated_group_columns = []
+        validated_metrics = []
+        if possible_inputs:
+            if group_columns:
+                validated_group_columns = self._validate_column_names(group_columns, possible_inputs)
+                if len(validated_group_columns) < len(group_columns):
+                    logger.warning(f"⚠️ Filtered {len(group_columns) - len(validated_group_columns)} invalid group columns. Using only validated: {validated_group_columns}")
+            
+            # Validate aggregation column names
+            if aggregation_details.get("metrics"):
+                agg_column_names = [m["column"] for m in aggregation_details["metrics"]]
+                validated_agg_columns = self._validate_column_names(agg_column_names, possible_inputs)
+                # Rebuild metrics with validated columns
+                for i, metric in enumerate(aggregation_details["metrics"]):
+                    if i < len(validated_agg_columns):
+                        validated_metrics.append({
+                            "aggregation": metric["aggregation"],
+                            "column": validated_agg_columns[i]
+                        })
+                if len(validated_metrics) < len(aggregation_details["metrics"]):
+                    logger.warning(f"⚠️ Filtered {len(aggregation_details['metrics']) - len(validated_metrics)} invalid aggregation columns")
+            else:
+                validated_metrics = aggregation_details["metrics"]
+        else:
+            validated_group_columns = group_columns
+            validated_metrics = aggregation_details["metrics"]
+
         lines: List[str] = ["Aggregation requirements:"]
 
-        if group_columns:
-            lines.append(f"- Group columns: {', '.join(group_columns)}")
+        if validated_group_columns:
+            lines.append(f"- Group columns: {', '.join(validated_group_columns)} (VALIDATED - these columns exist in the file)")
+        elif group_columns:
+            lines.append(f"- Group columns: {', '.join(group_columns)} (⚠️ WARNING: Validate these columns exist in the file before using)")
         else:
-            lines.append("- Group columns: Identify the categorical dimensions that best align with the user's request.")
+            lines.append("- Group columns: Identify the categorical dimensions that best align with the user's request. Use ONLY columns that exist in the file.")
 
-        if aggregation_details["metrics"]:
+        if validated_metrics:
             lines.append("- Metrics to compute:")
-            for metric in aggregation_details["metrics"]:
+            for metric in validated_metrics:
                 aggregation = metric["aggregation"]
                 column = metric["column"]
                 detail = f"{aggregation} of {column}"
                 if aggregation == "weighted_avg" and aggregation_details.get("weight_column"):
-                    detail += f" (weight column `{aggregation_details['weight_column']}`)"
-                lines.append(f"  * {detail}")
+                    weight_col = aggregation_details["weight_column"]
+                    # Validate weight column too
+                    validated_weight_cols = self._validate_column_names([weight_col], possible_inputs) if possible_inputs else [weight_col]
+                    if validated_weight_cols:
+                        detail += f" (weight column `{validated_weight_cols[0]}` - VALIDATED)"
+                    else:
+                        detail += f" (weight column `{weight_col}` - ⚠️ WARNING: Validate this column exists)"
+                lines.append(f"  * {detail} (VALIDATED)")
         else:
-            lines.append("- Metrics to compute: Select meaningful numeric measures (sum, average, count) based on dataset profiling when none are specified.")
+            lines.append("- Metrics to compute: Select meaningful numeric measures (sum, average, count) based on dataset profiling when none are specified. Use ONLY columns that exist in the file.")
 
         weight_column = aggregation_details.get("weight_column")
-        if weight_column and all(metric["aggregation"] != "weighted_avg" for metric in aggregation_details["metrics"]):
-            lines.append(f"- Weighting: The user referenced weights; consider `{weight_column}` for weighted averages.")
+        if weight_column and all(metric["aggregation"] != "weighted_avg" for metric in validated_metrics):
+            validated_weight_cols = self._validate_column_names([weight_column], possible_inputs) if possible_inputs else []
+            if validated_weight_cols:
+                lines.append(f"- Weighting: The user referenced weights; consider `{validated_weight_cols[0]}` (VALIDATED) for weighted averages.")
+            else:
+                lines.append(f"- Weighting: The user referenced weights; consider `{weight_column}` (⚠️ WARNING: Validate this column exists) for weighted averages.")
         elif not weight_column and any("weight" in token.lower() for token in original_prompt.split()):
-            lines.append("- Weighting: User mentioned weights; detect the correct weight field before computing weighted metrics.")
+            lines.append("- Weighting: User mentioned weights; detect the correct weight field before computing weighted metrics. Use ONLY columns that exist in the file.")
 
         if possible_inputs:
             lines.append(f"- Use input dataset: `{possible_inputs[0]}`")
@@ -3303,10 +3395,12 @@ WORKFLOW PLANNING RULES:
         if has_formula:
             lines.append("- Formula operations:")
             lines.append("  * Detect formula type: PROD (multiply), SUM (add), DIV (divide), IF (conditional), AVG (average), etc.")
-            lines.append("  * Extract column names from prompt (case-insensitive matching)")
+            lines.append("  * Extract column names from prompt and validate against file metadata (use ONLY columns that exist)")
             lines.append("  * Ensure formulas start with '=' prefix (required by backend)")
-            lines.append("  * Example: 'PROD(Price, Volume)' → '=PROD(Price, Volume)'")
+            lines.append("  * Example: 'PROD(Price, Volume)' → '=PROD(Price, Volume)' (only if Price and Volume exist in file)")
             lines.append("  * Target column: Create new column or overwrite existing based on user intent")
+            if possible_inputs:
+                lines.append("  * ⚠️ CRITICAL: Use ONLY column names from the file metadata section above")
         
         # Filter operations
         if has_filter:
@@ -3391,7 +3485,8 @@ WORKFLOW PLANNING RULES:
         lines.append("")
         lines.append("Rules:")
         lines.append("- Use EXACT column names from dataset metadata (case-sensitive, spaces preserved).")
-        lines.append("- If the user used abbreviations (e.g., 'reg', 'rev'), map them to the canonical column names before filling the JSON.")
+        lines.append("- If the user used abbreviations (e.g., 'reg', 'rev'), map them to the canonical column names from the file metadata section above before filling the JSON.")
+        lines.append("- ⚠️ CRITICAL: Validate all column names against the file metadata. Do NOT use columns that don't exist in the file.")
         lines.append("- Choose chart_type based on user request (default to 'bar' if unspecified).")
         lines.append("- x_column should be a categorical column (e.g., Region, Brand, Month).")
         lines.append("- y_column must be a numeric measure (e.g., Sales, Revenue, Quantity).")
@@ -3719,6 +3814,214 @@ WORKFLOW PLANNING RULES:
         if not text:
             return ""
         return " ".join(text.split())
+    
+    def _get_file_metadata(self, file_paths: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        Retrieve file metadata (including column names) for given file paths.
+        Returns a dictionary mapping file paths to their metadata.
+        """
+        metadata_dict: Dict[str, Dict[str, Any]] = {}
+        
+        if not file_paths:
+            return metadata_dict
+        
+        try:
+            from File_handler.available_minio_files import FileHandler, get_file_handler
+            import os
+            
+            # Initialize FileHandler
+            file_handler = get_file_handler(
+                minio_endpoint=os.getenv("MINIO_ENDPOINT", "minio:9000"),
+                minio_access_key=os.getenv("MINIO_ACCESS_KEY", "minio"),
+                minio_secret_key=os.getenv("MINIO_SECRET_KEY", "minio123"),
+                minio_bucket=os.getenv("MINIO_BUCKET", "trinity"),
+                object_prefix=""
+            )
+            
+            # Extract filenames from paths
+            file_names = []
+            path_to_filename = {}
+            for file_path in file_paths:
+                # Extract filename from path
+                filename = file_path.split('/')[-1] if '/' in file_path else file_path
+                filename = filename.split('\\')[-1] if '\\' in filename else filename
+                file_names.append(filename)
+                path_to_filename[file_path] = filename
+            
+            # Get comprehensive file details
+            if file_names:
+                file_details_dict = file_handler.get_file_context(file_names, use_backend_endpoint=True)
+                
+                if file_details_dict:
+                    # Map back to original file paths
+                    for file_path, filename in path_to_filename.items():
+                        # Try to find matching metadata
+                        for key, metadata in file_details_dict.items():
+                            # Check if key matches filename or file_path
+                            if (key == filename or 
+                                key == file_path or 
+                                filename in key or 
+                                file_path in key or
+                                key in filename or
+                                key in file_path):
+                                metadata_dict[file_path] = metadata
+                                break
+                        
+                        # If not found, try to find by object_name
+                        if file_path not in metadata_dict:
+                            for key, metadata in file_details_dict.items():
+                                obj_name = metadata.get("object_name", "")
+                                if (obj_name == filename or 
+                                    obj_name == file_path or
+                                    filename in obj_name or
+                                    file_path in obj_name):
+                                    metadata_dict[file_path] = metadata
+                                    break
+                    
+                    logger.info(f"✅ Retrieved metadata for {len(metadata_dict)}/{len(file_paths)} files")
+                else:
+                    logger.warning(f"⚠️ Could not retrieve metadata for files: {file_names}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to get file metadata: {e}")
+        
+        return metadata_dict
+    
+    def _validate_column_names(
+        self, 
+        column_names: List[str], 
+        file_paths: List[str],
+        file_metadata: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> List[str]:
+        """
+        Validate column names against actual file metadata.
+        Returns only column names that exist in the files.
+        
+        Args:
+            column_names: List of column names to validate
+            file_paths: List of file paths to check against
+            file_metadata: Optional pre-fetched metadata (if None, will fetch)
+        
+        Returns:
+            List of validated column names that exist in the files
+        """
+        if not column_names or not file_paths:
+            return []
+        
+        # Get metadata if not provided
+        if file_metadata is None:
+            file_metadata = self._get_file_metadata(file_paths)
+        
+        if not file_metadata:
+            logger.warning(f"⚠️ No metadata available to validate columns: {column_names}")
+            return []
+        
+        # Collect all valid column names from all files
+        valid_columns_set: Set[str] = set()
+        for file_path, metadata in file_metadata.items():
+            columns = metadata.get("columns", [])
+            if isinstance(columns, list):
+                valid_columns_set.update(columns)
+        
+        # Validate each column name (case-sensitive and case-insensitive matching)
+        validated_columns: List[str] = []
+        for col_name in column_names:
+            if not col_name or not col_name.strip():
+                continue
+            
+            col_clean = col_name.strip()
+            
+            # First try exact match (case-sensitive)
+            if col_clean in valid_columns_set:
+                validated_columns.append(col_clean)
+                continue
+            
+            # Then try case-insensitive match
+            found_match = False
+            for valid_col in valid_columns_set:
+                if col_clean.lower() == valid_col.lower():
+                    validated_columns.append(valid_col)  # Use the actual column name from metadata
+                    found_match = True
+                    break
+            
+            if not found_match:
+                logger.warning(f"⚠️ Column '{col_clean}' not found in file metadata. Valid columns: {list(valid_columns_set)[:10]}...")
+        
+        if len(validated_columns) < len(column_names):
+            logger.info(f"✅ Validated columns: {len(validated_columns)}/{len(column_names)} passed validation")
+        
+        return validated_columns
+    
+    def _validate_file_names(
+        self, 
+        file_names: List[str], 
+        available_files: List[str]
+    ) -> List[str]:
+        """
+        Validate file names against available files.
+        Returns only file names that exist in available_files.
+        
+        Args:
+            file_names: List of file names/paths to validate
+            available_files: List of available file paths
+        
+        Returns:
+            List of validated file names that exist in available_files
+        """
+        if not file_names or not available_files:
+            return []
+        
+        # Normalize available files for matching
+        available_normalized = {}
+        for af in available_files:
+            # Extract filename from path
+            filename = af.split('/')[-1] if '/' in af else af
+            filename = filename.split('\\')[-1] if '\\' in filename else filename
+            available_normalized[filename.lower()] = af
+            available_normalized[af.lower()] = af
+        
+        validated_files: List[str] = []
+        for file_name in file_names:
+            if not file_name or not file_name.strip():
+                continue
+            
+            file_clean = file_name.strip()
+            filename_only = file_clean.split('/')[-1] if '/' in file_clean else file_clean
+            filename_only = filename_only.split('\\')[-1] if '\\' in filename_only else filename_only
+            
+            # Try exact match first
+            if file_clean in available_files:
+                validated_files.append(file_clean)
+                continue
+            
+            # Try filename-only match
+            if filename_only.lower() in available_normalized:
+                validated_files.append(available_normalized[filename_only.lower()])
+                continue
+            
+            # Try case-insensitive full path match
+            file_clean_lower = file_clean.lower()
+            if file_clean_lower in available_normalized:
+                validated_files.append(available_normalized[file_clean_lower])
+                continue
+            
+            # Try partial match
+            found_match = False
+            for available_file in available_files:
+                if (file_clean in available_file or 
+                    available_file in file_clean or
+                    filename_only.lower() in available_file.lower() or
+                    available_file.lower().endswith(filename_only.lower())):
+                    validated_files.append(available_file)
+                    found_match = True
+                    break
+            
+            if not found_match:
+                logger.warning(f"⚠️ File '{file_clean}' not found in available files")
+        
+        if len(validated_files) < len(file_names):
+            logger.info(f"✅ Validated files: {len(validated_files)}/{len(file_names)} passed validation")
+        
+        return validated_files
     
     async def _execute_atom_with_retry(
         self,

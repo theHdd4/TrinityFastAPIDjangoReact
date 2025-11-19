@@ -2893,9 +2893,9 @@ def _cast_series_dtype(series: pd.Series, dtype: str, datetime_format: str | Non
     if dtype_lower in {"datetime", "timestamp", "datetime64"}:
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
-        # Normalize format string if provided (replace '/' and '.' with '-')
-        normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
-        return pd.to_datetime(normalized_series, format=normalized_format, errors="coerce")
+        # IMPORTANT: Always use auto-detection for datetime64 to avoid null values
+        # Even if format is provided, ignore it and use auto-detection for consistency
+        return pd.to_datetime(normalized_series, errors="coerce")
     if dtype_lower == "date":
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
@@ -3397,15 +3397,15 @@ async def apply_data_transformations(request: Request):
                     # Convert to string first, then normalize separators
                     df[col_name] = df[col_name].astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
                     
-                    # Normalize format string if provided (replace '/' and '.' with '-')
-                    normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
+                    # IMPORTANT: For datetime64, ALWAYS use auto-detection to avoid null values
+                    # Even if format is provided (from AI or manual), ignore it and use auto-detection
+                    # This ensures consistent behavior and prevents null values from format mismatches
+                    logger.info(f"Converting column '{col_name}' to datetime64 with auto-detection (ignoring any provided format to ensure compatibility)")
                     
-                    # Mirror process_saved_dataframe behavior: single-step conversion with optional format
-                    if normalized_format:
-                        df[col_name] = pd.to_datetime(df[col_name], format=normalized_format, errors='coerce')
-                    else:
-                        logger.info(f"Converting column '{col_name}' to datetime64 without specific format")
-                        df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
+                    # Use pd.to_datetime without format parameter to enable auto-detection
+                    # pandas will automatically infer the format from the data, preventing null values
+                    # This works for both AI-sent and manually-sent datetime64 conversions
+                    df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
                 elif new_dtype == "bool":
                     df[col_name] = df[col_name].astype(bool)
             except Exception as e:

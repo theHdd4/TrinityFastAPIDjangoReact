@@ -289,31 +289,22 @@ export const dfValidateHandler: AtomHandler = {
       console.log('🔄 STEP 3: Applying dtype changes...');
       
       // Normalize dtype_changes to ensure date types are properly formatted
-      // The backend expects "datetime64" not "date", and format should be preserved
+      // The backend expects "datetime64" not "date", and will auto-detect format
+      // IMPORTANT: Do NOT send format field - backend auto-detects to avoid null values
       const normalizeDtypeChange = (dtype: any): string | { dtype: string; format?: string } => {
         // Handle object format: { dtype: string, format?: string }
         if (typeof dtype === 'object' && dtype !== null && 'dtype' in dtype) {
           const dtypeObj = dtype as { dtype: string; format?: string };
           const normalizedDtype = dtypeObj.dtype.toLowerCase().trim();
           
-          // Normalize date types: "date" or "datetime" -> "datetime64"
-          // The backend expects "datetime64" specifically (see routes.py line 3395)
-          if (normalizedDtype === 'date' || normalizedDtype === 'datetime') {
-            return {
-              dtype: 'datetime64',
-              format: dtypeObj.format
-            };
+          // Normalize date types: "date" or "datetime" -> "datetime64" (as string, no format)
+          // Backend will auto-detect format to avoid null values from mismatched formats
+          if (normalizedDtype === 'date' || normalizedDtype === 'datetime' || normalizedDtype === 'datetime64') {
+            // Return as string without format - backend will auto-detect
+            return 'datetime64';
           }
           
-          // If it's already "datetime64", ensure it's properly cased
-          if (normalizedDtype === 'datetime64') {
-            return {
-              dtype: 'datetime64',
-              format: dtypeObj.format
-            };
-          }
-          
-          // Return as-is for other types
+          // For non-date types, return as-is (preserve format if needed for other types)
           return dtypeObj;
         }
         
@@ -322,13 +313,8 @@ export const dfValidateHandler: AtomHandler = {
           const normalizedDtype = dtype.toLowerCase().trim();
           
           // Normalize date types: "date" or "datetime" -> "datetime64"
-          // The backend expects "datetime64" specifically (see routes.py line 3395)
-          if (normalizedDtype === 'date' || normalizedDtype === 'datetime') {
-            return 'datetime64';
-          }
-          
-          // If it's already "datetime64", return as-is
-          if (normalizedDtype === 'datetime64') {
+          // Backend will auto-detect format to avoid null values from mismatched formats
+          if (normalizedDtype === 'date' || normalizedDtype === 'datetime' || normalizedDtype === 'datetime64') {
             return 'datetime64';
           }
           
@@ -340,106 +326,203 @@ export const dfValidateHandler: AtomHandler = {
         return String(dtype);
       };
       
-      // Normalize all dtype changes
-      const normalizedDtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
+      // Normalize all dtype changes - match manual flow exactly
+      // Manual flow stores date types as just 'datetime64' string (no format object)
+      // This matches FileDataPreview.tsx line 442 when format detection fails
+      const normalizedDtypeChanges: Record<string, string> = {};
       for (const [colName, dtype] of Object.entries(dtype_changes)) {
-        normalizedDtypeChanges[colName] = normalizeDtypeChange(dtype);
+        const normalized = normalizeDtypeChange(dtype);
+        // Ensure date types are stored as string (not object) to match manual flow
+        if (typeof normalized === 'string') {
+          normalizedDtypeChanges[colName] = normalized;
+        } else if (typeof normalized === 'object' && normalized !== null && 'dtype' in normalized) {
+          // For date types, store as string only (no format) - backend will auto-detect
+          const dtypeObj = normalized as { dtype: string; format?: string };
+          if (dtypeObj.dtype === 'datetime64') {
+            normalizedDtypeChanges[colName] = 'datetime64';
+          } else {
+            // For other types with format, preserve as object
+            normalizedDtypeChanges[colName] = normalized as any;
+          }
+        } else {
+          normalizedDtypeChanges[colName] = String(normalized);
+        }
       }
       
-      console.log('🔧 Normalized dtype changes:', {
+      console.log('🔧 Normalized dtype changes (matching manual flow):', {
         original: dtype_changes,
         normalized: normalizedDtypeChanges
       });
       
       // Update atom settings with normalized dtype changes
-      // The dtype_changes format should match what the backend expects
-      // Format: { [fileName]: { [columnName]: dtype_string | { dtype: string, format?: string } } }
-      const updatedDtypeChanges: Record<string, Record<string, string | { dtype: string; format?: string }>> = {};
+      // Format matches manual flow: { [fileName]: { [columnName]: dtype_string } }
+      // For date types, this will be just 'datetime64' string (no format)
+      const updatedDtypeChanges: Record<string, Record<string, string>> = {};
       updatedDtypeChanges[mappedFileName] = normalizedDtypeChanges;
       
+      // Update settings - this will sync to FileDataPreview via initialDtypeChanges prop
       updateAtomSettings(atomId, { 
         dtypeChanges: updatedDtypeChanges,
         aiConfig: cfg,
         aiMessage: data.message
       });
       
-      console.log('🔧 Atom settings updated with dtype changes:', {
+      console.log('🔧 Atom settings updated with dtype changes (matching manual flow):', {
         atomId,
         file_name: mappedFileName,
         dtype_changes_count: Object.keys(normalizedDtypeChanges).length,
-        note: 'Mapped to object_name value for UI dropdown compatibility'
+        note: 'Stored as strings to match manual flow - date types are just "datetime64"'
       });
       
-      // Automatically call apply-data-transformations endpoint
+      // Wait a bit for UI to sync from settings (like manual changes do)
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Use the EXACT same flow as manual save (handleSaveDataFrames)
+      // This ensures we use the same file path resolution and API call format
       try {
-      const applyEndpoint = `${VALIDATE_API}/apply-data-transformations`;
-      console.log('🚀 Calling apply-data-transformations endpoint with AI config:', { file_path: objectName, dtype_changes: normalizedDtypeChanges });
-      
-      const payload = {
-        file_path: objectName, // Use full object_name path for backend
-        dtype_changes: normalizedDtypeChanges, // Use normalized dtype changes
-        missing_value_strategies: {} // Can be extended later
-      };
-      
-      console.log('📁 Sending dtype changes to backend:', payload);
-      
-      const res2 = await fetch(applyEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      
-      if (res2.ok) {
-        const result = await res2.json();
-        console.log('✅ Apply transformations operation successful:', result);
+        // Get the current settings after sync to ensure we have the latest state
+        const latestSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings || {};
+        const uploadedFiles = latestSettings.uploadedFiles || [];
         
-        // Build insights summary using normalized dtype changes
-        const dtypeSummary = Object.entries(normalizedDtypeChanges).map(([col, dtype]) => {
-          let dtypeStr: string;
-          if (typeof dtype === 'object' && dtype !== null && 'dtype' in dtype) {
-            const dtypeObj = dtype as { dtype: string; format?: string };
-            dtypeStr = dtypeObj.dtype + (dtypeObj.format ? ` (${dtypeObj.format})` : '');
-          } else {
-            dtypeStr = String(dtype);
+        // Find the file in uploadedFiles to get its path (matching manual flow logic)
+        const targetFile = uploadedFiles.find((f: string) => f === mappedFileName);
+        
+        // Use the same file path resolution logic as manual save (DataUploadValidateAtom.tsx lines 1905-1954)
+        let filePath = latestSettings.filePathMap?.[mappedFileName];
+        
+        // If we have a saved path and it's not temporary, use it
+        if (filePath && !filePath.includes('/tmp/')) {
+          // Use saved path
+        } else if (objectName && !objectName.includes('/tmp/')) {
+          // Use the object_name if it's not temporary
+          filePath = objectName;
+        } else {
+          // Try to find in saved dataframes (same logic as manual flow)
+          try {
+            const envStr = localStorage.getItem('env');
+            if (envStr) {
+              try {
+                const env = JSON.parse(envStr);
+                if (env.CLIENT_NAME && env.APP_NAME && env.PROJECT_NAME) {
+                  const query = '?' + new URLSearchParams({
+                    client_name: env.CLIENT_NAME,
+                    app_name: env.APP_NAME,
+                    project_name: env.PROJECT_NAME
+                  }).toString();
+                  const check = await fetch(`${VALIDATE_API}/list_saved_dataframes${query}`);
+                  if (check.ok) {
+                    const data = await check.json();
+                    const fileNameStem = mappedFileName.replace(/\.[^/.]+$/, '').toLowerCase();
+                    const savedFile = Array.isArray(data.files)
+                      ? data.files.find((f: any) => {
+                          const savedStem = (f.csv_name || '').toLowerCase().replace(/\.[^/.]+$/, '');
+                          return savedStem === fileNameStem;
+                        })
+                      : null;
+                    if (savedFile?.object_name) {
+                      filePath = savedFile.object_name;
+                      console.log(`📦 Found saved path for ${mappedFileName}: ${filePath}`);
+                    }
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+          } catch {
+            /* ignore */
           }
-          return `  • ${col}: ${dtypeStr}`;
-        }).join('\n');
+          
+          // Fallback to objectName if we couldn't find a saved path
+          if (!filePath) {
+            filePath = objectName;
+          }
+        }
         
-        // Get current filesWithAppliedChanges to update
-        const currentFilesWithAppliedChanges = currentSettings?.filesWithAppliedChanges || [];
-        const updatedFilesWithAppliedChanges = currentFilesWithAppliedChanges.includes(mappedFileName) 
-          ? currentFilesWithAppliedChanges 
-          : [...currentFilesWithAppliedChanges, mappedFileName];
-        
-        updateAtomSettings(atomId, {
-          dtypeChanges: updatedDtypeChanges,
-          transformationResults: result,
-          operationCompleted: true,
-          // Mark file as having applied changes
-          filesWithAppliedChanges: updatedFilesWithAppliedChanges
-        });
-        
-        console.log('🔧 Final atom settings after successful operation:', {
-          atomId,
-          file_name: mappedFileName,
-          operationCompleted: true
-        });
-        
-        // Show detailed completion message with insights
-        const completionMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          content: `🎉 Data type conversion completed successfully!\n\n📊 **Work Done:**\n✅ File loaded: ${mappedFileName}\n✅ Columns converted: ${Object.keys(normalizedDtypeChanges).length}\n✅ Rows processed: ${result.rows_affected || result.rows || 'N/A'}\n\n📝 **Dtype Changes Applied:**\n${dtypeSummary}\n\n💡 The file has been updated with the new data types and is ready for use in downstream operations.`,
-          sender: 'ai',
-          timestamp: new Date(),
+        // Use the EXACT same format as manual save flow (line 1956-1960)
+        const fileChanges = {
+          file_path: filePath,
+          dtype_changes: normalizedDtypeChanges, // Read from normalized changes (same as manual reads from dataChangesRef)
+          missing_value_strategies: {} // Can be extended later
         };
-        setMessages(prev => [...prev, completionMsg]);
         
-      } else {
-        console.error('❌ Apply transformations operation failed:', res2.status, res2.statusText);
-        const errorText = await res2.text();
+        console.log(`📤 Sending transformations for ${mappedFileName} (using manual flow logic):`, {
+          file_path: filePath,
+          dtype_changes: fileChanges.dtype_changes,
+          missing_value_strategies: fileChanges.missing_value_strategies,
+        });
+        
+        // Only apply if there are actual changes for this file
+        if (Object.keys(fileChanges.dtype_changes).length > 0) {
+          const applyEndpoint = `${VALIDATE_API}/apply-data-transformations`;
+          const res2 = await fetch(applyEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fileChanges),
+            credentials: 'include',
+          });
+          
+          if (res2.ok) {
+            const result = await res2.json();
+            console.log('✅ Apply transformations operation successful:', result);
+            
+            // Build insights summary using normalized dtype changes
+            // Note: normalizedDtypeChanges is now Record<string, string> to match manual flow
+            const dtypeSummary = Object.entries(normalizedDtypeChanges).map(([col, dtype]) => {
+              return `  • ${col}: ${String(dtype)}`;
+            }).join('\n');
+            
+            // Get current filesWithAppliedChanges to update
+            const currentFilesWithAppliedChanges = currentSettings?.filesWithAppliedChanges || [];
+            const updatedFilesWithAppliedChanges = currentFilesWithAppliedChanges.includes(mappedFileName) 
+              ? currentFilesWithAppliedChanges 
+              : [...currentFilesWithAppliedChanges, mappedFileName];
+            
+            updateAtomSettings(atomId, {
+              dtypeChanges: updatedDtypeChanges,
+              transformationResults: result,
+              operationCompleted: true,
+              // Mark file as having applied changes
+              filesWithAppliedChanges: updatedFilesWithAppliedChanges
+            });
+            
+            console.log('🔧 Final atom settings after successful operation:', {
+              atomId,
+              file_name: mappedFileName,
+              operationCompleted: true
+            });
+            
+            // Show detailed completion message with insights
+            const completionMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `🎉 Data type conversion completed successfully!\n\n📊 **Work Done:**\n✅ File loaded: ${mappedFileName}\n✅ Columns converted: ${Object.keys(normalizedDtypeChanges).length}\n✅ Rows processed: ${result.rows_affected || result.rows || 'N/A'}\n\n📝 **Dtype Changes Applied:**\n${dtypeSummary}\n\n💡 The file has been updated with the new data types and is ready for use in downstream operations.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, completionMsg]);
+            
+          } else {
+            console.error('❌ Apply transformations operation failed:', res2.status, res2.statusText);
+            const errorText = await res2.text();
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Operation failed: ${res2.status} ${res2.statusText}\n\n${errorText}`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+            
+            updateAtomSettings(atomId, {
+              dtypeChanges: updatedDtypeChanges,
+              operationCompleted: false
+            });
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error calling apply-data-transformations endpoint:', error);
         const errorMsg: Message = {
           id: (Date.now() + 1).toString(),
-          content: `❌ Operation failed: ${res2.status} ${res2.statusText}\n\n${errorText}`,
+          content: `❌ Error: ${(error as Error).message || 'Unknown error occurred'}`,
           sender: 'ai',
           timestamp: new Date(),
         };
@@ -449,21 +532,6 @@ export const dfValidateHandler: AtomHandler = {
           dtypeChanges: updatedDtypeChanges,
           operationCompleted: false
         });
-      }
-    } catch (error) {
-      console.error('❌ Error calling apply-data-transformations endpoint:', error);
-      const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `❌ Error: ${(error as Error).message || 'Unknown error occurred'}`,
-        sender: 'ai',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, errorMsg]);
-      
-      updateAtomSettings(atomId, {
-        dtypeChanges: updatedDtypeChanges,
-        operationCompleted: false
-      });
       }
     } else {
       // No dtype changes requested - just load the file

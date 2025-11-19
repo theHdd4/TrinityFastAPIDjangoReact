@@ -11,6 +11,23 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from minio import Minio
 from minio.error import S3Error
 
+# Import Redis cache layer
+try:
+    from .cache import (
+        delete_chat_from_cache,
+        get_chat_from_cache,
+        is_redis_available,
+        set_chat_in_cache,
+    )
+except ImportError:
+    # Fallback if cache module not available
+    logger = logging.getLogger("trinity.ai.memory")
+    logger.warning("Redis cache module not available, using MinIO only")
+    is_redis_available = lambda: False
+    get_chat_from_cache = lambda *args, **kwargs: None
+    set_chat_in_cache = lambda *args, **kwargs: False
+    delete_chat_from_cache = lambda *args, **kwargs: False
+
 logger = logging.getLogger("trinity.ai.memory")
 
 try:
@@ -67,8 +84,8 @@ except (ModuleNotFoundError, ImportError):  # pragma: no cover - fallback when F
 
 MEMORY_PREFIX = os.getenv("TRINITY_AI_MEMORY_PREFIX", "trinity_ai_memory")
 MEMORY_BUCKET = os.getenv("TRINITY_AI_MEMORY_BUCKET", DEFAULT_MINIO_BUCKET)
-MAX_MESSAGES_DEFAULT = int(os.getenv("TRINITY_AI_MEMORY_MAX_MESSAGES", "400"))
-MAX_BYTES_DEFAULT = int(os.getenv("TRINITY_AI_MEMORY_MAX_BYTES", str(2 * 1024 * 1024)))
+MAX_MESSAGES_DEFAULT = int(os.getenv("TRINITY_AI_MEMORY_MAX_MESSAGES", "1000"))  # Increased from 400 to 1000
+MAX_BYTES_DEFAULT = int(os.getenv("TRINITY_AI_MEMORY_MAX_BYTES", str(10 * 1024 * 1024)))  # Increased from 2MB to 10MB for large insights
 
 _SAFE_ID_PATTERN = re.compile(r"[^0-9A-Za-z_\-]+")
 
@@ -269,13 +286,42 @@ def load_chat(
     app_name: Optional[str] = None,
     project_name: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
+    """Load chat with Redis cache-aside pattern."""
+    logger.info(f"📥 Loading chat {chat_id} (Redis cache-aside pattern)")
+    
+    # Try Redis cache first
+    if is_redis_available():
+        cached_data = get_chat_from_cache(chat_id, client_name, app_name, project_name)
+        if cached_data:
+            logger.info(f"✅ Loaded chat {chat_id} from Redis cache (FAST)")
+            return cached_data
+        logger.info(f"⏳ Cache miss for chat {chat_id}, loading from MinIO...")
+    else:
+        logger.info(f"🔴 Redis not available, loading chat {chat_id} from MinIO only")
+    
+    # Cache miss or Redis unavailable - load from MinIO
     client = get_client()
     _ensure_bucket(client)
     object_name = _chat_object_name(chat_id, client_name, app_name, project_name)
     payload = _load_json_object(client, object_name)
     if payload is None:
+        logger.warning(f"⚠️ Chat {chat_id} not found in MinIO")
         return None
-    return _build_chat_response(chat_id, payload)
+    
+    # Build response
+    response = _build_chat_response(chat_id, payload)
+    message_count = len(response.get("messages", []))
+    logger.info(f"📦 Loaded chat {chat_id} from MinIO ({message_count} messages)")
+    
+    # Cache in Redis for next time
+    if is_redis_available():
+        cache_success = set_chat_in_cache(chat_id, response, client_name, app_name, project_name)
+        if cache_success:
+            logger.info(f"✅ Chat {chat_id} cached in Redis for future fast access")
+        else:
+            logger.warning(f"⚠️ Failed to cache chat {chat_id} in Redis")
+    
+    return response
 
 
 def save_chat(
@@ -306,11 +352,16 @@ def save_chat(
     else:
         combined_messages = base_messages
 
-    retain_limit = _default_retain_limit(retain_last)
+    # Only apply retain_limit if explicitly requested
+    # Don't truncate by default - preserve all messages including large insights
     truncated = False
-    if retain_limit and len(combined_messages) > retain_limit:
-        truncated = True
-        combined_messages = combined_messages[-retain_limit:]
+    if retain_last is not None and retain_last > 0:
+        retain_limit = retain_last
+        if len(combined_messages) > retain_limit:
+            truncated = True
+            logger.warning(f"⚠️ Truncating chat {chat_id} from {len(combined_messages)} to {retain_limit} messages (retain_last={retain_last})")
+            combined_messages = combined_messages[-retain_limit:]
+    # If retain_last is None, keep all messages (no truncation)
 
     timestamp = datetime.now(timezone.utc)
 
@@ -325,7 +376,21 @@ def save_chat(
     }
 
     _put_json_object(client, object_name, payload, max_bytes=max_bytes)
-    return _build_chat_response(chat_id, payload)
+    response = _build_chat_response(chat_id, payload)
+    message_count = len(response.get("messages", []))
+    logger.info(f"💾 Saved chat {chat_id} to MinIO ({message_count} messages)")
+    
+    # Update Redis cache
+    if is_redis_available():
+        cache_success = set_chat_in_cache(chat_id, response, client_name, app_name, project_name)
+        if cache_success:
+            logger.info(f"✅ Updated Redis cache for chat {chat_id}")
+        else:
+            logger.warning(f"⚠️ Failed to update Redis cache for chat {chat_id}")
+    else:
+        logger.info(f"🔴 Redis not available, chat {chat_id} saved to MinIO only")
+    
+    return response
 
 
 def delete_chat(
@@ -334,10 +399,50 @@ def delete_chat(
     app_name: Optional[str] = None,
     project_name: Optional[str] = None,
 ) -> None:
+    """Delete a chat and all its associated objects from MinIO and Redis cache."""
+    # Delete from Redis cache first
+    if is_redis_available():
+        delete_chat_from_cache(chat_id, client_name, app_name, project_name)
+        logger.debug(f"Deleted chat {chat_id} from Redis cache")
+    
+    # Delete from MinIO
     client = get_client()
     _ensure_bucket(client)
+    
+    # Get the chat directory prefix (everything before messages.json)
     object_name = _chat_object_name(chat_id, client_name, app_name, project_name)
-    _remove_object(client, object_name)
+    # Extract the directory prefix (e.g., "trinity_ai_memory/client/app/project/chats/chat_id/")
+    chat_dir_prefix = "/".join(object_name.split("/")[:-1]) + "/"
+    
+    try:
+        # List all objects in the chat directory
+        objects_to_delete = []
+        try:
+            objects: Iterable = client.list_objects(MEMORY_BUCKET, prefix=chat_dir_prefix, recursive=True)
+            for obj in objects:
+                objects_to_delete.append(obj.object_name)
+        except Exception as exc:
+            logger.warning(f"Failed to list objects for chat {chat_id}: {exc}")
+        
+        # Delete all objects in the chat directory
+        errors = []
+        for obj_name in objects_to_delete:
+            try:
+                _remove_object(client, obj_name)
+            except Exception as exc:
+                errors.append(f"{obj_name}: {exc}")
+                logger.warning(f"Failed to delete object {obj_name}: {exc}")
+        
+        # Also try to delete the main messages.json file (in case it wasn't in the list)
+        try:
+            _remove_object(client, object_name)
+        except Exception:
+            pass  # Already deleted or doesn't exist
+        
+        if errors:
+            logger.warning(f"Some objects failed to delete for chat {chat_id}: {errors}")
+    except Exception as exc:
+        raise MemoryStorageError(f"Failed to delete chat {chat_id}: {exc}") from exc
 
 
 def list_chats(
@@ -345,6 +450,7 @@ def list_chats(
     app_name: Optional[str] = None,
     project_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    """List all chats, using cache when available for faster loading."""
     client = get_client()
     _ensure_bucket(client)
     prefix = f"{_context_prefix(client_name, app_name, project_name)}/chats/"
@@ -357,15 +463,52 @@ def list_chats(
     for item in objects:
         if not getattr(item, "object_name", "").endswith("messages.json"):
             continue
+        
+        # Extract chat_id from object name
+        chat_id = item.object_name.split("/")[-2]
+        
+        # Try to load from cache first
+        cached_data = None
+        if is_redis_available():
+            cached_data = get_chat_from_cache(chat_id, client_name, app_name, project_name)
+        
+        if cached_data:
+            # Use cached data
+            try:
+                if isinstance(cached_data.get("messages"), list):
+                    results.append(cached_data)
+                    continue
+            except Exception:
+                pass  # Fall through to MinIO load
+        
+        # Load from MinIO
         payload = _load_json_object(client, item.object_name)
         if not payload:
             continue
-        chat_id = payload.get("original_chat_id") or payload.get("chat_id")
-        if not chat_id:
-            # Fallback to object name segment
-            chat_id = item.object_name.split("/")[-2]
-        record = _build_chat_response(chat_id, payload)
-        results.append(record)
+        
+        # Validate chat completeness - ensure it has required fields
+        messages = payload.get("messages", [])
+        if not isinstance(messages, list):
+            logger.warning(f"Skipping invalid chat at {item.object_name}: messages is not a list")
+            continue
+        
+        chat_id = payload.get("original_chat_id") or payload.get("chat_id") or chat_id
+        
+        # Only include chats with valid structure
+        try:
+            record = _build_chat_response(chat_id, payload)
+            # Additional validation: ensure chat has valid structure
+            if not isinstance(record.get("messages"), list):
+                logger.warning(f"Skipping chat {chat_id}: invalid messages structure")
+                continue
+            results.append(record)
+            
+            # Cache for next time
+            if is_redis_available():
+                set_chat_in_cache(chat_id, record, client_name, app_name, project_name)
+        except Exception as exc:
+            logger.warning(f"Skipping invalid chat at {item.object_name}: {exc}")
+            continue
 
     results.sort(key=lambda r: r["updated_at"], reverse=True)
     return results
