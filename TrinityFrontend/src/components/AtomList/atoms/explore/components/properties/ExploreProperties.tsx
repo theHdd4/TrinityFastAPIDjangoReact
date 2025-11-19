@@ -26,11 +26,44 @@ const ExploreProperties: React.FC<Props> = ({ atomId }) => {
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const { toast } = useToast();
 
-  const data = (atom?.settings?.data as ExploreData) || { ...DEFAULT_EXPLORE_DATA };
-  const settings = (atom?.settings?.settings as ExploreSettingsType) || {
-    ...DEFAULT_EXPLORE_SETTINGS,
+  // Safely extract settings data to avoid circular reference issues
+  const atomSettings = atom?.settings;
+  const rawData = atomSettings?.data as ExploreData | undefined;
+  const rawSettings = atomSettings?.settings as ExploreSettingsType | undefined;
+  
+  // Extract array values first to avoid multiple property accesses
+  const rawDimensions = rawData?.dimensions;
+  const rawMeasures = rawData?.measures;
+  const rawAllColumns = rawData?.allColumns;
+  const rawNumericalColumns = rawData?.numericalColumns;
+  const rawColumnSummary = rawData?.columnSummary;
+  const rawAvailableDimensions = rawData?.availableDimensions;
+  const rawAvailableMeasures = rawData?.availableMeasures;
+  const rawAvailableIdentifiers = rawData?.availableIdentifiers;
+  const rawFallbackDimensions = rawData?.fallbackDimensions;
+  const rawFallbackMeasures = rawData?.fallbackMeasures;
+  
+  // Ensure all array properties are properly initialized to avoid undefined access errors
+  const data: ExploreData = {
+    ...DEFAULT_EXPLORE_DATA,
+    ...(rawData || {}),
+    dimensions: Array.isArray(rawDimensions) ? rawDimensions : (rawDimensions || DEFAULT_EXPLORE_DATA.dimensions),
+    measures: Array.isArray(rawMeasures) ? rawMeasures : (rawMeasures || DEFAULT_EXPLORE_DATA.measures),
+    allColumns: Array.isArray(rawAllColumns) ? rawAllColumns : (rawAllColumns || []),
+    numericalColumns: Array.isArray(rawNumericalColumns) ? rawNumericalColumns : (rawNumericalColumns || []),
+    columnSummary: Array.isArray(rawColumnSummary) ? rawColumnSummary : (rawColumnSummary || []),
+    availableDimensions: Array.isArray(rawAvailableDimensions) ? rawAvailableDimensions : (rawAvailableDimensions || []),
+    availableMeasures: Array.isArray(rawAvailableMeasures) ? rawAvailableMeasures : (rawAvailableMeasures || []),
+    availableIdentifiers: Array.isArray(rawAvailableIdentifiers) ? rawAvailableIdentifiers : (rawAvailableIdentifiers || []),
+    fallbackDimensions: Array.isArray(rawFallbackDimensions) ? rawFallbackDimensions : (rawFallbackDimensions || []),
+    fallbackMeasures: Array.isArray(rawFallbackMeasures) ? rawFallbackMeasures : (rawFallbackMeasures || []),
   };
-  const chartData = atom?.settings?.chartData;
+  
+  const settings: ExploreSettingsType = {
+    ...DEFAULT_EXPLORE_SETTINGS,
+    ...(rawSettings || {}),
+  };
+  const chartData = atomSettings?.chartData;
 
   const handleDataChange = (newData: Partial<ExploreData>) => {
     updateSettings(atomId, {

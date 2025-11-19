@@ -145,7 +145,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   const mapPersistedToAvailable = useCallback(
     (record: PersistedVariableResponse): AvailableVariable => {
       const sourceCard = cards.find(c => c.id === record.cardId);
-      const fallbackTitle = (Array.isArray(sourceCard?.atoms) && sourceCard.atoms.length > 0) ? sourceCard.atoms[0]?.title : undefined;
+      const atoms = sourceCard?.atoms;
+      const fallbackTitle = (Array.isArray(atoms) && atoms.length > 0) ? atoms[0]?.title : undefined;
       const cardTitle = resolveCardTitle(sourceCard, fallbackTitle ?? record.cardId ?? 'Variable');
 
       return {
@@ -166,7 +167,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
         updatedAt: record.updatedAt,
         cardId: record.cardId ?? card.id,
         cardTitle,
-        atomTitle: (Array.isArray(sourceCard?.atoms) && sourceCard.atoms.length > 0) ? sourceCard.atoms[0]?.title : undefined,
+        atomTitle: (Array.isArray(atoms) && atoms.length > 0) ? atoms[0]?.title : undefined,
       } satisfies AvailableVariable;
     },
     [card.id, cards, resolveCardTitle],

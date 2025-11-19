@@ -21,7 +21,12 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   const [tab, setTab] = useState('settings');
   const atom = useLaboratoryStore(state => state.getAtom(atomId));
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: SettingsType = (atom?.settings as SettingsType) || { ...DEFAULT_CHART_MAKER_SETTINGS };
+  const rawSettings = (atom?.settings as SettingsType) || {} as Partial<SettingsType>;
+  const settings: SettingsType = {
+    ...DEFAULT_CHART_MAKER_SETTINGS,
+    ...rawSettings,
+    charts: Array.isArray(rawSettings.charts) ? rawSettings.charts : (rawSettings.charts || DEFAULT_CHART_MAKER_SETTINGS.charts),
+  };
   const { toast } = useToast();
   
   // Watch for selectedChartIndex changes to auto-switch to visualization tab
@@ -104,7 +109,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
 
       // Update data immediately
       // Only reset charts if NOT preserving them (i.e., this is a new file upload, not a reload)
-      const updatedCharts = preserveCharts ? settings.charts : settings.charts.map(chart => ({
+      const updatedCharts = preserveCharts ? settings.charts : (Array.isArray(settings.charts) ? settings.charts.map(chart => ({
         ...chart,
         xAxis: '',
         yAxis: '',
@@ -113,7 +118,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         chartConfig: undefined,
         filteredData: undefined,
         lastUpdateTime: undefined
-      }));
+      })) : []);
       
       // Don't update settings yet - wait until we have all data including unique values
       // This prevents multiple re-renders and potential filter loss
@@ -205,7 +210,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
   };
 
   const hasRenderedCharts = Array.isArray(settings.charts)
-    ? settings.charts.some(chart => chart.chartRendered || (chart.traces && chart.traces.length > 0) || chart.chartConfig)
+    ? settings.charts.some(chart => chart.chartRendered || (Array.isArray(chart.traces) && chart.traces.length > 0) || chart.chartConfig)
     : false;
   const hasUploadedData = Boolean(settings.uploadedData);
   const hasExistingUpdates = hasRenderedCharts || hasUploadedData;
@@ -259,6 +264,9 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     setLoading({ filtering: true });
     try {
       // Process each chart independently
+      if (!Array.isArray(settings.charts)) {
+        return;
+      }
       const updatedCharts = await Promise.all(
         settings.charts.map(async (chart) => {
           // Migrate legacy chart format

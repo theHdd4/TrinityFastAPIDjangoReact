@@ -2023,9 +2023,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           const allMoleculeAtomIds: string[] = [];
           moleculeCards.forEach(moleculeCard => {
             if (Array.isArray(moleculeCard.atoms)) {
-              moleculeCard.atoms.forEach(atom => {
-                allMoleculeAtomIds.push(atom.atomId);
-              });
+            moleculeCard.atoms.forEach(atom => {
+              allMoleculeAtomIds.push(atom.atomId);
+            });
             }
           });
 
@@ -2041,7 +2041,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               break;
             }
             if (Array.isArray(moleculeCards[i].atoms)) {
-              cardStartIndex += moleculeCards[i].atoms.length;
+            cardStartIndex += moleculeCards[i].atoms.length;
             }
           }
 
@@ -2543,7 +2543,7 @@ const addNewCardWithAtomWorkflow = async (
 
     setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
     if (Array.isArray(newCard.atoms)) {
-      newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+    newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
     }
 
     // Track atom addition for cross-collection sync if card belongs to a molecule
@@ -2632,7 +2632,7 @@ const addNewCardWithAtomWorkflow = async (
 
     setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
     if (Array.isArray(fallbackCard.atoms)) {
-      fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
+    fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
     }
     
     // Automatically open properties panel and select the atom
@@ -2802,7 +2802,7 @@ const addNewCardWithAtom = async (
     ]);
     setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
     if (Array.isArray(newCard.atoms)) {
-      newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+    newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
     }
     
     // Automatically open properties panel and select the atom
@@ -2827,7 +2827,7 @@ const addNewCardWithAtom = async (
     ]);
     setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
     if (Array.isArray(fallbackCard.atoms)) {
-      fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
+    fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
     }
     
     // Automatically open properties panel and select the atom
@@ -3055,9 +3055,9 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         const allMoleculeAtomIds: string[] = [];
         moleculeCards.forEach(moleculeCard => {
           if (Array.isArray(moleculeCard.atoms)) {
-            moleculeCard.atoms.forEach(atom => {
-              allMoleculeAtomIds.push(atom.atomId);
-            });
+          moleculeCard.atoms.forEach(atom => {
+            allMoleculeAtomIds.push(atom.atomId);
+          });
           }
         });
 
@@ -3073,7 +3073,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
             break;
           }
           if (Array.isArray(moleculeCards[i].atoms)) {
-            cardStartIndex += moleculeCards[i].atoms.length;
+          cardStartIndex += moleculeCards[i].atoms.length;
           }
         }
 

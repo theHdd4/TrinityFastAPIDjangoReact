@@ -100,18 +100,18 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
       setUsingColumnClassifier(true);
       
       // Set available dimensions and measures
-      if (data.columnClassifierConfig.dimensions) {
+      if (data.columnClassifierConfig.dimensions && typeof data.columnClassifierConfig.dimensions === 'object') {
         const dims = Object.keys(data.columnClassifierConfig.dimensions);
         setAvailableDimensions(dims);
         setSelectedDimensions(dims); // Auto-select all dimensions
       }
       
       if (data.columnClassifierConfig.measures) {
-        setAvailableMeasures(data.columnClassifierConfig.measures);
+        setAvailableMeasures(Array.isArray(data.columnClassifierConfig.measures) ? data.columnClassifierConfig.measures : []);
       }
       
       if (data.columnClassifierConfig.identifiers) {
-        setAvailableIdentifiers(data.columnClassifierConfig.identifiers);
+        setAvailableIdentifiers(Array.isArray(data.columnClassifierConfig.identifiers) ? data.columnClassifierConfig.identifiers : []);
       }
     } else if (data.dimensions && data.measures) {
       // Fallback to legacy data structure
@@ -129,9 +129,12 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     if (columnClassifierConfig?.dimensions && 
         (!selectedIdentifiers || Object.keys(selectedIdentifiers).length === 0)) {
       const allIdentifiers: { [dimensionId: string]: string[] } = {};
-      Object.keys(columnClassifierConfig.dimensions).forEach(dimensionId => {
-        allIdentifiers[dimensionId] = columnClassifierConfig.dimensions[dimensionId] || [];
-      });
+      if (columnClassifierConfig.dimensions && typeof columnClassifierConfig.dimensions === 'object') {
+        Object.keys(columnClassifierConfig.dimensions).forEach(dimensionId => {
+          const identifiers = columnClassifierConfig.dimensions[dimensionId];
+          allIdentifiers[dimensionId] = Array.isArray(identifiers) ? identifiers : [];
+        });
+      }
       setSelectedIdentifiers(allIdentifiers);
     }
   }, [columnClassifierConfig?.dimensions, selectedIdentifiers]);
@@ -189,8 +192,9 @@ const ExploreSettings = ({ data, settings, onDataChange, onApply }) => {
     }
   };
 
-  const existingDims = Object.values(data.columnClassifierConfig?.dimensions || {})
-    .flat();
+  const existingDims = (data.columnClassifierConfig?.dimensions && typeof data.columnClassifierConfig.dimensions === 'object')
+    ? Object.values(data.columnClassifierConfig.dimensions).flat()
+    : [];
   const categoricalColumns = Array.isArray(data.columnSummary)
     ? data.columnSummary
         .filter((col: any) => !col.is_numerical && !existingDims.includes(col.column))
