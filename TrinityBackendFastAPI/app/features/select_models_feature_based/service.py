@@ -1652,7 +1652,7 @@ def calculate_actual_vs_predicted(payload: Dict[str, Any]) -> Dict[str, Any]:
             # Find date column
             date_column = None
             for col in df.columns:
-                if col.lower() in ['date', 'time', 'timestamp', 'period', 'month', 'year']:
+                if col.lower() in ['date']:
                     date_column = col
                     break
             
@@ -1670,7 +1670,7 @@ def calculate_actual_vs_predicted(payload: Dict[str, Any]) -> Dict[str, Any]:
             if not y_variable or y_variable not in df.columns:
                 # Try to find y_variable by common names
                 for col in df.columns:
-                    if col.lower() in ['target', 'y', 'dependent', 'sales', 'volume', 'value']:
+                    if col.lower() in ['volume']:
                         y_variable = col
                         break
                 
