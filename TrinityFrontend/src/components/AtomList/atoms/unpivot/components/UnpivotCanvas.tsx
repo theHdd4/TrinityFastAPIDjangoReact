@@ -39,7 +39,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { UnpivotSettings } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { GROUPBY_API } from '@/lib/api';
 import Table from '@/templates/tables/table';
-import UnpivotFilterModal from './UnpivotFilterModal';
 
 interface UnpivotCanvasProps {
   data: UnpivotSettings;
@@ -80,7 +79,6 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [filterSelections, setFilterSelections] = useState<Record<string, string[]>>({});
-  const [filterModalField, setFilterModalField] = useState<string | null>(null);
 
   // Cardinality view state
   const [cardinalityData, setCardinalityData] = useState<any[]>([]);
@@ -150,8 +148,9 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
 
 
   const handleFilterSelectionsChange = (column: string, selections: string[]) => {
+    const uniqueValues = getUniqueColumnValuesForFilter(column);
     setFilterSelections((prev) => {
-      if (selections.length === 0 || selections.length === columnFilterOptions[column]?.length) {
+      if (selections.length === 0 || selections.length === uniqueValues.length) {
         // If all or none selected, remove filter
         const newFilters = { ...prev };
         delete newFilters[column];
@@ -208,54 +207,90 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
 
   const TableFilterMenu = ({ column }: { column: string }) => {
     const uniqueValues = getUniqueColumnValuesForFilter(column);
-    const current = filterSelections[column] || [];
-    // Initialize with all values selected if no filter is active
-    const [temp, setTemp] = useState<string[]>(() => {
-      return current.length > 0 ? current : uniqueValues;
-    });
-
-    // Update temp when uniqueValues change (e.g., when other filters change)
-    React.useEffect(() => {
-      if (current.length === 0 && uniqueValues.length > 0) {
-        // If no filter is active, select all values
-        setTemp(uniqueValues);
-      } else if (current.length > 0) {
-        // If filter is active, keep current selection but update if values changed
-        setTemp(current);
-      }
-    }, [uniqueValues.join(','), current.join(',')]);
-
-    const toggleVal = (val: string) => {
-      setTemp(prev => (prev.includes(val) ? prev.filter(v => v !== val) : [...prev, val]));
-    };
-
-    const selectAll = () => {
-      setTemp(temp.length === uniqueValues.length ? [] : uniqueValues);
-    };
-
-    const apply = () => handleFilterSelectionsChange(column, temp);
+    const currentSelections = filterSelections[column] || [];
+    
+    const allSelected = uniqueValues.length > 0 && uniqueValues.every(value => 
+      Array.isArray(currentSelections) && currentSelections.includes(value)
+    );
 
     return (
-      <div className="w-64 max-h-80 overflow-y-auto">
-        <div className="p-2 border-b">
-          <div className="flex items-center space-x-2 mb-2">
-            <Checkbox checked={temp.length === uniqueValues.length && temp.length > 0} onCheckedChange={selectAll} />
-            <span className="text-sm font-medium">Select All</span>
-          </div>
+      <div className="max-h-48 overflow-y-auto space-y-1">
+        {/* Select All / Deselect All */}
+        <div className="border-b border-gray-200 pb-2 mb-2">
+          <label className="flex items-center space-x-2 text-xs cursor-pointer font-medium" style={{userSelect:'none'}} onMouseDown={e => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onMouseDown={e => e.stopPropagation()}
+              onChange={e => {
+                const allValues = uniqueValues || [];
+                if (e.target.checked) {
+                  setFilterSelections(prev => ({
+                    ...prev,
+                    [column]: allValues
+                  }));
+                } else {
+                  setFilterSelections(prev => ({
+                    ...prev,
+                    [column]: []
+                  }));
+                }
+              }}
+              style={{ accentColor: '#222' }}
+            />
+            <span className="truncate font-semibold">
+              {allSelected ? 'Deselect All' : 'Select All'}
+            </span>
+          </label>
         </div>
-        <div className="p-2 space-y-1">
-          {uniqueValues.map((v, i) => (
-            <div key={i} className="flex items-center space-x-2">
-              <Checkbox checked={temp.includes(v)} onCheckedChange={() => toggleVal(v)} />
-              <span className="text-sm">{v}</span>
-            </div>
-          ))}
-        </div>
-        <div className="p-2 border-t flex space-x-2">
-          <Button size="sm" onClick={apply}>Apply</Button>
-          <Button size="sm" variant="outline" onClick={() => setTemp(current.length > 0 ? current : uniqueValues)}>
-            Cancel
-          </Button>
+        
+        {/* Individual filter options */}
+        {uniqueValues.map((value, i) => (
+          <label key={i} className="flex items-center space-x-2 text-xs cursor-pointer" style={{userSelect:'none'}} onMouseDown={e => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={Array.isArray(currentSelections) && currentSelections.includes(value)}
+              onMouseDown={e => e.stopPropagation()}
+              onChange={e => {
+                const newSelections = e.target.checked
+                  ? [...currentSelections, value]
+                  : currentSelections.filter(v => v !== value);
+                // Update local selections without applying
+                setFilterSelections(prev => ({
+                  ...prev,
+                  [column]: newSelections
+                }));
+              }}
+              style={{ accentColor: '#222' }}
+            />
+            <span className="truncate">{value}</span>
+          </label>
+        ))}
+        
+        {/* Action buttons */}
+        <div className="mt-3 flex gap-2">
+          <button
+            className="px-2 py-1 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white flex-1"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              const selections = filterSelections[column] || [];
+              handleFilterSelectionsChange(column, selections);
+            }}
+          >Apply</button>
+          <button
+            className="px-2 py-1 text-xs rounded bg-blue-500 hover:bg-blue-600 text-white flex-1"
+            onClick={e => {
+              e.preventDefault();
+              e.stopPropagation();
+              clearColumnFilter(column);
+              setFilterSelections(prev => {
+                const newFilters = { ...prev };
+                delete newFilters[column];
+                return newFilters;
+              });
+            }}
+          >Clear</button>
         </div>
       </div>
     );
@@ -302,7 +337,7 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
             <ContextMenuSubTrigger className="flex items-center">
               <FilterIcon className="w-4 h-4 mr-2" /> Filter
             </ContextMenuSubTrigger>
-            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-0">
+            <ContextMenuSubContent className="bg-white border border-gray-200 shadow-lg rounded-md p-2">
               <TableFilterMenu column={column} />
             </ContextMenuSubContent>
           </ContextMenuSub>
@@ -922,17 +957,6 @@ const UnpivotCanvas: React.FC<UnpivotCanvasProps> = ({
         </div>
       )}
 
-      {/* Filter Modal */}
-      {filterModalField && (
-        <UnpivotFilterModal
-          open={!!filterModalField}
-          onOpenChange={(open) => !open && setFilterModalField(null)}
-          field={filterModalField}
-          options={columnFilterOptions[filterModalField] || []}
-          selections={filterSelections[filterModalField] || []}
-          onSelectionsChange={(selections) => handleFilterSelectionsChange(filterModalField, selections)}
-        />
-      )}
     </div>
   );
 };

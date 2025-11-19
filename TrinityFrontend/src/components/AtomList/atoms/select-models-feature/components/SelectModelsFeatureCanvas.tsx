@@ -253,18 +253,12 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                 `${variable.toLowerCase()}_roi`,
                 variable
               ];
-              console.log(`🔍 Looking for ROI for variable: ${variable}`);
-              console.log(`🔍 Checking keys:`, roiKeys);
-              console.log(`🔍 Weighted metrics keys:`, Object.keys(ensemble.weighted_metrics || {}));
-              console.log(`🔍 Aliases keys:`, Object.keys(ensemble.aliases || {}));
               
               value = ensemble.weighted_metrics[`${variable}_roi`] || 
                      ensemble.weighted_metrics[`Weighted_ROI_${variable}`] || 
                      ensemble.weighted_metrics[`ROI_${variable}`] ||
                      ensemble.aliases[`${variable.toLowerCase()}_roi`] ||
                      ensemble.weighted_metrics[variable];
-              
-              console.log(`🔍 Final ROI value for ${variable}:`, value);
             }
             
             ensembleData[variable] = value;
@@ -334,12 +328,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
   }, [data.selectedCombinationId, data.selectedModel]);
 
-  // Fetch application type when component mounts
+  // Fetch application type when component mounts and when dataset changes
   useEffect(() => {
     if (atomId) {
       fetchApplicationType();
     }
   }, [atomId]);
+
+  // Also fetch application type when dataset changes (in case project changes)
+  useEffect(() => {
+    if (data.selectedDataset) {
+      fetchApplicationType();
+    }
+  }, [data.selectedDataset]);
 
   // Fetch all data when Ensemble is selected as default
   useEffect(() => {
@@ -689,10 +690,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       
       const result = await fetchAndResolve(url, undefined, 'Failed to fetch overall filters');
       
-      if (result.available_filters) {
-        // Update the model filters with the fetched ranges
+      // Always initialize updatedFilters from current state
         const updatedFilters = { ...data.modelFilters };
         
+      // Update the model filters with the fetched ranges if available
+      if (result.available_filters) {
         Object.keys(result.available_filters).forEach(filterKey => {
           const filterData = result.available_filters[filterKey];
           updatedFilters[filterKey] = {
@@ -702,8 +704,9 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             current_max: filterData.max
           };
         });
+      }
         
-        // Calculate ranges for each selected variable from the backend
+      // Always calculate ranges for each selected variable from the backend (regardless of available_filters)
         if (data.selectedMethod && Array.isArray(data.selectedVariable) && data.selectedVariable.length > 0) {
           try {
             const envStr = localStorage.getItem('env');
@@ -725,29 +728,50 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
             const url = `${baseUrl}?${params.toString()}`;
             
             try {
-              const result = await fetchAndResolve(url, undefined, 'Failed to fetch variable ranges');
+            const variableRangesResult = await fetchAndResolve(url, undefined, 'Failed to fetch variable ranges');
 
-              if (result.variable_ranges) {
-                Object.keys(result.variable_ranges).forEach(variable => {
-                  const rangeData = result.variable_ranges[variable];
-                  const variableFilterKey = `variable_${variable}`;
-                  updatedFilters[variableFilterKey] = {
-                    min: rangeData.min,
-                    max: rangeData.max,
-                    current_min: rangeData.current_min,
-                    current_max: rangeData.current_max
-                  };
-                });
+            if (variableRangesResult.variable_ranges) {
+              Object.keys(variableRangesResult.variable_ranges).forEach(variable => {
+                const rangeData = variableRangesResult.variable_ranges[variable];
+                const variableFilterKey = `variable_${variable}`;
+                const existingFilter = updatedFilters[variableFilterKey];
+                
+                let currentMin = rangeData.current_min; 
+                let currentMax = rangeData.current_max; 
+                
+                if (existingFilter && existingFilter.current_min !== undefined && existingFilter.current_max !== undefined) {
+                  const minSame = Math.abs(existingFilter.min - rangeData.min) < 0.0001;
+                  const maxSame = Math.abs(existingFilter.max - rangeData.max) < 0.0001;
+                  
+                  if (minSame && maxSame) {
+                    currentMin = Math.max(rangeData.min, Math.min(rangeData.max, existingFilter.current_min));
+                    currentMax = Math.min(rangeData.max, Math.max(rangeData.min, existingFilter.current_max));
+                    
+                    // Ensure min <= max
+                    if (currentMin > currentMax) {
+                      currentMin = rangeData.min;
+                      currentMax = rangeData.max;
+                    }
+                  }
+                  // If min/max changed (method or data changed), use backend defaults (min/max)
+                }
+                
+                updatedFilters[variableFilterKey] = {
+                  min: rangeData.min,
+                  max: rangeData.max,
+                  current_min: currentMin,
+                  current_max: currentMax
+                };
+              });
               }
             } catch (error) {
-              /* ignore range errors */
             }
           } catch (error) {
           }
         }
         
+      // Always update state with the final filters
         handleDataChange({ modelFilters: updatedFilters });
-      }
       
     } catch (error) {
     }
@@ -994,8 +1018,9 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       const allModelData: { [modelName: string]: { [variable: string]: number } } = {};
       
       // For each selected variable, fetch filtered data with ALL filters (both model stats and variable filters)
+      // Use /models/filter endpoint to filter from full dataset with model stats filters
       for (const variable of data.selectedVariable) {
-        const elasticityData = await fetchElasticityDataWithVariableFiltersDirect(variable, data.selectedCombinationId, data.selectedDataset, filters);
+        const elasticityData = await fetchElasticityDataWithModelStatsFiltersDirect(variable, data.selectedCombinationId, data.selectedDataset, filters);
         
         // Collect data for multi-variable chart
         if (elasticityData && elasticityData.length > 0) {
@@ -1070,15 +1095,15 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
   };
 
-  // Direct fetch function with filters that returns the data
-  const fetchElasticityDataWithFiltersDirect = async (variable: string, combinationId: string, fileKey: string, filters: any) => {
+  // Direct fetch function with model stats filters that uses /models/filter endpoint
+  const fetchElasticityDataWithModelStatsFiltersDirect = async (variable: string, combinationId: string, fileKey: string, filters: any) => {
     if (!variable || !fileKey) return [];
     
     try {
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
-      const baseUrl = `${SELECT_API}/models/filter-filtered`;
+      const baseUrl = `${SELECT_API}/models/filter`;
       const params = new URLSearchParams({
         file_key: fileKey,
         variable: variable,
@@ -1091,7 +1116,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       });
       const url = `${baseUrl}?${params.toString()}`;
       
-      // Prepare filter values for the request body
+      // Prepare filter values for the request body - include model stats filters
       const filterBody = {
         file_key: fileKey,
         variable: variable,
@@ -1177,6 +1202,8 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
   };
 
+  
+
   // Direct fetch function with per-variable filters that returns the data
   const fetchElasticityDataWithVariableFiltersDirect = async (variable: string, combinationId: string, fileKey: string, filters: any) => {
     if (!variable || !fileKey) return [];
@@ -1201,8 +1228,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       // Prepare per-variable filter values for the request body
       const variableFilters: { [key: string]: { min: number | null, max: number | null } } = {};
       
-      // Extract per-variable filters - only include filters for variables other than the current one
-      // since the current variable is already filtered by the main variable parameter
       Object.keys(filters).forEach(filterKey => {
         if (filterKey.startsWith('variable_')) {
           const variableName = filterKey.replace('variable_', '');
@@ -1432,19 +1457,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       
       if (result && Array.isArray(result.contribution_data)) {
         const chartData = result.contribution_data.map((item: any) => ({
-          name: item.variable_name || item.name || item.variable || 'Variable',
-          value:
-            item.percentage_contribution ??
-            item.contribution_value ??
-            item.relative_contribution ??
-            0,
+          name: item.name || item.variable_name || item.variable || 'Variable',
+          value: item.value ?? item.percentage_contribution ?? item.contribution_value ?? item.relative_contribution ?? 0,
         }));
+        
         handleDataChange({ contributionData: chartData });
       } else {
         handleDataChange({ contributionData: [] });
       }
       
     } catch (error) {
+      handleDataChange({ contributionData: [] });
     }
   };
 
@@ -1564,20 +1587,22 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           return a.actual - b.actual;
         });
         
-        
-        // Use all data points without filtering extreme outliers
-        const chartData = actualVsPredictedData;
+        // Transform data for single y-axis with legend (same format as ensemble version)
+        const transformedData = actualVsPredictedData.flatMap(item => [
+          { date: item.date, value: item.actual, series: 'Actual' },
+          { date: item.date, value: item.predicted, series: 'Predicted' }
+        ]);
         
         handleDataChange({
-          actualVsPredictedData: chartData,  // Use all data points
+          actualVsPredictedData: transformedData,  // Transformed data with value and series fields
           actualVsPredictedMetrics: result.performance_metrics
         });
         
-        // Calculate dynamic domain ranges based on all data
-        const actualMin = Math.min(...chartData.map(d => d.actual));
-        const actualMax = Math.max(...chartData.map(d => d.actual));
-        const predictedMin = Math.min(...chartData.map(d => d.predicted));
-        const predictedMax = Math.max(...chartData.map(d => d.predicted));
+        // Calculate dynamic domain ranges based on all data (use original data structure before transformation)
+        const actualMin = Math.min(...actualVsPredictedData.map(d => d.actual));
+        const actualMax = Math.max(...actualVsPredictedData.map(d => d.actual));
+        const predictedMin = Math.min(...actualVsPredictedData.map(d => d.predicted));
+        const predictedMax = Math.max(...actualVsPredictedData.map(d => d.predicted));
         
         // Add 10% padding to the ranges for better visualization
         const actualPadding = (actualMax - actualMin) * 0.1;
@@ -1594,6 +1619,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
+      // Error handled silently
     }
   };
 
@@ -1629,11 +1655,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         'Failed to fetch YoY data',
       );
       
-      if (result && result.success && result.dates && Array.isArray(result.actual)) {
-        const chartData = result.dates.map((date: string, index: number) => ({
-          name: date,
-          value: result.actual[index] || 0,
-          predicted: result.predicted ? result.predicted[index] || 0 : 0,
+      // Use waterfall data for chart visualization (like evaluate atom)
+      if (result && result.success && result.waterfall && result.waterfall.labels && result.waterfall.values) {
+        const chartData = result.waterfall.labels.map((label: string, index: number) => ({
+          name: label,
+          value: result.waterfall.values[index] || 0,
         }));
         
         handleDataChange({ yoyData: chartData });
@@ -1752,8 +1778,8 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       // Transform the data to match the expected format for pie chart
       if (result.contribution_data && Array.isArray(result.contribution_data)) {
         const transformedData = result.contribution_data.map((item: any) => ({
-          name: item.variable_name || item.name || 'Variable',
-          value: item.percentage_contribution ?? item.value ?? 0,
+          name: item.name || item.variable_name || 'Variable',
+          value: item.value ?? item.percentage_contribution ?? 0,
         }));
         
         handleDataChange({ contributionData: transformedData });
@@ -1793,12 +1819,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       
       const result = await fetchAndResolve(url, undefined, 'Failed to fetch YoY data');
       
-      // Transform the data to match the expected format
-      if (result && result.success && result.dates && Array.isArray(result.actual)) {
-        const chartData = result.dates.map((date: string, index: number) => ({
-          name: date,
-          value: result.actual[index] || 0,
-          predicted: result.predicted ? result.predicted[index] || 0 : 0,
+      // Use waterfall data for chart visualization (like evaluate atom)
+      if (result && result.success && result.waterfall && result.waterfall.labels && result.waterfall.values) {
+        const chartData = result.waterfall.labels.map((label: string, index: number) => ({
+          name: label,
+          value: result.waterfall.values[index] || 0,
         }));
         
         handleDataChange({ yoyData: chartData });
@@ -1862,18 +1887,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           y_pred_at_mean: item.y_pred_at_mean
         }));
         
-        // Debug logging for ROI data
-        console.log('🔍 Ensemble data received:', ensembleData);
-        if (ensembleData[0]?.aliases) {
-          console.log('🔍 Ensemble aliases:', ensembleData[0].aliases);
-          const roiAliases = Object.keys(ensembleData[0].aliases).filter(key => key.includes('roi'));
-          console.log('🔍 ROI aliases found:', roiAliases);
-        }
-        if (ensembleData[0]?.weighted_metrics) {
-          const roiMetrics = Object.keys(ensembleData[0].weighted_metrics).filter(key => key.toLowerCase().includes('roi'));
-          console.log('🔍 ROI metrics found:', roiMetrics);
-        }
-        
         handleDataChange({ weightedEnsembleData: ensembleData });
       } else {
         handleDataChange({ weightedEnsembleData: [] });
@@ -1917,15 +1930,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         'Failed to fetch S-curve data',
       );
       
-      if (result && result.success && result.s_curves) {
+      if (result && result.success && result.s_curves && Object.keys(result.s_curves).length > 0) {
         handleDataChange({ sCurveData: result });
-        console.log('🔍 S-curve data received:', result);
       } else {
-        handleDataChange({ sCurveData: null });
+        // Handle error case - show error message if available
+        if (result && result.error) {
+          // Still set the result so the UI can show the error message
+          handleDataChange({ sCurveData: result });
+        } else {
+          handleDataChange({ sCurveData: null });
+        }
       }
       
     } catch (error) {
-      console.error('Error fetching S-curve data:', error);
       handleDataChange({ sCurveData: null });
     }
   };
@@ -1957,15 +1974,19 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       );
       
       if (result && result.application_type) {
-        setApplicationType(result.application_type);
-        handleDataChange({ applicationType: result.application_type });
-        console.log('🔍 Application type received:', result.application_type);
+        const appType = result.application_type;
+        setApplicationType(appType);
+        handleDataChange({ applicationType: appType });
+      } else {
+        const defaultType = 'general';
+        setApplicationType(defaultType);
+        handleDataChange({ applicationType: defaultType });
       }
       
     } catch (error) {
-      console.error('Error fetching application type:', error);
-      setApplicationType('general');
-      handleDataChange({ applicationType: 'general' });
+      const defaultType = 'general';
+      setApplicationType(defaultType);
+      handleDataChange({ applicationType: defaultType });
     } finally {
       setIsLoadingApplicationType(false);
     }
@@ -1983,11 +2004,9 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     try {
       // Send the full object path to cardinality
       const objectName = data.selectedDataset;
-      console.log('🔍 SelectModelsFeature: Sending to cardinality:', objectName);
       
       // Use GROUPBY_API cardinality endpoint instead of FEATURE_OVERVIEW_API
       const url = `${GROUPBY_API}/cardinality?object_name=${encodeURIComponent(objectName)}`;
-      console.log('🔍 SelectModelsFeature: Cardinality URL:', url);
       const res = await fetch(url);
       const data_result = await res.json();
       
@@ -2035,8 +2054,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         return sortDirection === 'asc' ? aStr.localeCompare(bStr) : bStr.localeCompare(aStr);
       });
     }
-
-    console.log('🔍 SelectModelsFeature: displayedCardinality after filtering:', filtered);
     return filtered;
   }, [cardinalityData, columnFilters, sortColumn, sortDirection]);
 
@@ -2233,7 +2250,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       }
       
     } catch (error) {
-      console.error('Error fetching elasticity data with filters:', error);
+      // Error handled silently
     }
   };
 
@@ -3532,7 +3549,6 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                   });
                   
                   if (value === 'Ensemble') {
-                    console.log('🔄 Fetching Ensemble data for:', value);
                     // Use ensemble data for all calculations
                     if (data.weightedEnsembleData && data.weightedEnsembleData.length > 0) {
                       const ensemble = data.weightedEnsembleData[0];
@@ -3549,37 +3565,26 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                       handleDataChange({ selectedModelPerformance: ensemblePerformance });
                       
                       // Calculate actual vs predicted using ensemble betas but same source file concept
-                      console.log('📊 Fetching Actual vs Predicted Ensemble...');
                       fetchActualVsPredictedEnsemble(data.selectedCombinationId);
                       
                       // Fetch ensemble contribution data
-                      console.log('📊 Fetching Contribution Ensemble...');
                       fetchModelContributionEnsemble(data.selectedCombinationId, data.selectedDataset);
                       
                       // Calculate YoY using ensemble betas but same source file concept
-                      console.log('📊 Fetching YoY Ensemble...');
                       fetchYoYDataEnsemble(data.selectedCombinationId);
                       
                       // Fetch S-curve data for ensemble
-                      console.log('📊 Fetching S-Curve Ensemble...');
                       fetchSCurveData(data.selectedCombinationId, value);
                     }
                   } else {
-                    console.log('🔄 Fetching Individual model data for:', value);
                     // Use individual model data
-                    console.log('📊 Fetching Performance...');
                     fetchModelPerformance(value, data.selectedCombinationId, data.selectedDataset);
-                    console.log('📊 Fetching Actual vs Predicted...');
                     fetchActualVsPredicted(value, data.selectedCombinationId);
-                    console.log('📊 Fetching Contribution...');
                     fetchModelContribution(value, data.selectedCombinationId, data.selectedDataset);
-                    console.log('📊 Fetching YoY...');
                     fetchYoYData(value, data.selectedCombinationId);
-                    console.log('📊 Fetching Weighted Ensemble...');
                     fetchWeightedEnsembleData(data.selectedDataset, data.selectedCombinationId);
                     
                     // Fetch S-curve data for individual model
-                    console.log('📊 Fetching S-Curve...');
                     fetchSCurveData(data.selectedCombinationId, value);
                   }
                 }
@@ -3728,7 +3733,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     xField="name"
                     yField="value"
                     xAxisLabel="Period"
-                    yAxisLabel="Growth Value"
+                    yAxisLabel="Value"
                     theme={yoyChartTheme}
                     enableScroll={false}
                     height={300}
@@ -3759,9 +3764,10 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
           </div>
 
           {/* S-Curve Analysis - Full Width - Only for MMM applications */}
-          {applicationType === 'mmm' && (
+          {(applicationType === 'mmm' || data.applicationType === 'mmm') && (
           <div className="bg-white rounded-lg p-4 shadow-sm border border-orange-100/50 hover:shadow-md transition-all duration-200 mb-6">
-            {data.sCurveData && data.sCurveData.success ? (
+            <h5 className="text-sm font-medium text-orange-800 mb-3">S-Curve Analysis</h5>
+            {data.sCurveData && data.sCurveData.success && data.sCurveData.s_curves && Object.keys(data.sCurveData.s_curves).length > 0 ? (
               <div className="grid grid-cols-2 gap-6">
                 {Object.entries(data.sCurveData.s_curves).slice(0, 2).map(([variable, curveData]: [string, any]) => (
                   <div key={variable} className="border border-gray-200 rounded-lg p-4">
@@ -3787,6 +3793,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                     
                   </div>
                 ))}
+              </div>
+            ) : data.sCurveData && data.sCurveData.error ? (
+              <div className="h-[300px] flex items-center justify-center">
+                <div className="text-center">
+                  <p className="text-sm text-red-600 font-medium mb-2">Error generating S-curve data</p>
+                  <p className="text-xs text-red-500">{data.sCurveData.error}</p>
+                </div>
               </div>
             ) : (
               <div className="h-[300px] flex items-center justify-center">

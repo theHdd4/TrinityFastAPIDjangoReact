@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Response, Body, HTTPException, UploadFile, File
 import base64
 import os
+import logging
 from minio import Minio
 from minio.error import S3Error
 from urllib.parse import unquote
@@ -29,6 +30,7 @@ from app.features.dataframe_operations.service import (
 )
 
 router = APIRouter()
+logger = logging.getLogger("dataframe_operations.apply_formula")
 
 # Self-contained MinIO config (match feature-overview)
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -964,9 +966,9 @@ async def insert_column(
 ):
     df = _get_df(df_id)
     
-    # Validate index
+    # Validate index - default to 0 (left) instead of len(df.columns) (right)
     if index is None:
-        index = len(df.columns)
+        index = 0
     if index < 0:
         index = 0
     elif index > len(df.columns):
@@ -1051,8 +1053,21 @@ async def apply_formula(
             )
 
         result_series = result_series.reset_index(drop=True)
+        
+        # 🔧 FIX: Replace inf, -inf, and nan with None to make JSON-compliant
+        # Convert to list and replace non-finite values
+        result_values = []
+        for val in result_series.to_list():
+            if isinstance(val, float):
+                if math.isnan(val) or math.isinf(val):
+                    result_values.append(None)
+                else:
+                    result_values.append(val)
+            else:
+                result_values.append(val)
+        
         df = df.with_columns(
-            pl.Series(name=target_column, values=result_series.to_list())
+            pl.Series(name=target_column, values=result_values)
         )
     else:
         logger.info(f"📝 [APPLY_FORMULA] No '=' prefix, treating as literal value")

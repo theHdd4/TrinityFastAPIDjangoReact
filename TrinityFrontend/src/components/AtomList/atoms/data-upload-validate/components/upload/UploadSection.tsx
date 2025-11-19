@@ -50,6 +50,8 @@ interface UploadSectionProps {
   isLoadingSavedDataframes?: boolean;
   onSelectSavedDataframe?: (objectName: string) => void;
   filePathMap?: Record<string, string>;
+  filesFromSavedDataframes?: Set<string>;
+  onRefreshSavedDataframes?: () => void;
 }
 
 const UploadSection: React.FC<UploadSectionProps> = ({
@@ -84,15 +86,28 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   savedDataframes = [],
   isLoadingSavedDataframes = false,
   onSelectSavedDataframe,
-  filePathMap = {}
+  filePathMap = {},
+  filesFromSavedDataframes = new Set(),
+  onRefreshSavedDataframes
 }) => {
   const inputId = useId();
   const [selectedSavedDataframe, setSelectedSavedDataframe] = useState<string>('');
+  const [isSelectOpen, setIsSelectOpen] = useState(false);
 
   const handleSavedDataframeChange = (value: string) => {
     if (value && onSelectSavedDataframe) {
       onSelectSavedDataframe(value);
       setSelectedSavedDataframe(''); // Reset after selection
+    }
+  };
+  
+  // Refresh saved dataframes when the Select dropdown is opened
+  // This ensures we always get the latest data from the API
+  const handleSelectOpenChange = (open: boolean) => {
+    setIsSelectOpen(open);
+    // When opening, trigger a refresh to get latest data from API
+    if (open && onRefreshSavedDataframes) {
+      onRefreshSavedDataframes();
     }
   };
 
@@ -128,8 +143,18 @@ const UploadSection: React.FC<UploadSectionProps> = ({
       {useMasterFile && onSelectSavedDataframe && (() => {
         const availableDataframes = savedDataframes.filter((frame) => {
           // Filter out files that are already in the canvas
-          const fileName = frame.csv_name.split('/').pop() || frame.object_name.split('/').pop() || '';
-          return !uploadedFiles.some((f) => f.name === fileName);
+          // Extract filename and normalize (handle spaces converted to underscores)
+          const rawFileName = frame.csv_name.split('/').pop() || frame.object_name.split('/').pop() || '';
+          const normalizedFileName = rawFileName.replace(/\s+/g, '_');
+          
+          // Check if file exists by name or by object_name path
+          return !uploadedFiles.some((f) => {
+            const normalizedUploadedName = f.name.replace(/\s+/g, '_');
+            return f.name === rawFileName || 
+                   f.name === normalizedFileName || 
+                   normalizedUploadedName === normalizedFileName ||
+                   f.path === frame.object_name;
+          });
         });
         
         return (
@@ -148,6 +173,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
               value={selectedSavedDataframe}
               disabled={disabled || isLoadingSavedDataframes}
               onValueChange={handleSavedDataframeChange}
+              onOpenChange={handleSelectOpenChange}
             >
               <SelectTrigger className="bg-white">
                 <SelectValue placeholder={isLoadingSavedDataframes ? 'Loading saved dataframes...' : 'Choose a saved dataframe...'} />
@@ -167,11 +193,12 @@ const UploadSection: React.FC<UploadSectionProps> = ({
       
       {/* Data Preview & Configuration Section */}
       <FileDataPreview 
-        uploadedFiles={uploadedFiles} 
+        uploadedFiles={useMasterFile ? uploadedFiles.filter(f => filesFromSavedDataframes.has(f.name)) : uploadedFiles} 
         onDataChanges={onDataChanges}
         onDeleteFile={onDeleteFile}
         useMasterFile={useMasterFile}
         validationResults={validationResults}
+        validationDetails={validationDetails}
         fileAssignments={fileAssignments}
         onAssignmentChange={onAssignmentChange}
         requiredOptions={requiredOptions}
@@ -186,12 +213,6 @@ const UploadSection: React.FC<UploadSectionProps> = ({
       {uploadedFiles.length > 0 && !disableValidation && (
         <Button className="w-full mt-4" onClick={onValidateFiles}>
           Validate Files
-        </Button>
-      )}
-      
-      {uploadedFiles.length > 0 && (
-        <Button className="w-full mt-2" onClick={onSaveDataFrames} disabled={!saveEnabled}>
-          Save Data Frame
         </Button>
       )}
     </div>

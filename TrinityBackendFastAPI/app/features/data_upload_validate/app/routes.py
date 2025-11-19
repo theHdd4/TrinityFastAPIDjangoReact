@@ -2891,9 +2891,17 @@ def _cast_series_dtype(series: pd.Series, dtype: str, datetime_format: str | Non
     if dtype_lower in {"bool", "boolean"}:
         return series.astype("boolean")
     if dtype_lower in {"datetime", "timestamp", "datetime64"}:
-        return pd.to_datetime(series, format=datetime_format, errors="coerce")
+        # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
+        normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
+        # Normalize format string if provided (replace '/' and '.' with '-')
+        normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
+        return pd.to_datetime(normalized_series, format=normalized_format, errors="coerce")
     if dtype_lower == "date":
-        parsed = pd.to_datetime(series, format=datetime_format, errors="coerce")
+        # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
+        normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
+        # Normalize format string if provided (replace '/' and '.' with '-')
+        normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
+        parsed = pd.to_datetime(normalized_series, format=normalized_format, errors="coerce")
         if datetime_format:
             # When a format was supplied (typically via auto-detect), keep full datetime precision
             return parsed
@@ -3124,7 +3132,7 @@ async def detect_datetime_format(request: Request):
         if column_name not in df.columns:
             raise HTTPException(status_code=400, detail=f"Column '{column_name}' not found")
         
-        # Get non-null sample values
+        # Get non-null values from entire column
         column_data = df[column_name].dropna()
         if len(column_data) == 0:
             return {
@@ -3133,43 +3141,107 @@ async def detect_datetime_format(request: Request):
                 "sample_values": []
             }
         
-        sample_values = column_data.head(5).astype(str).tolist()
+        # Use entire column for detection (not just sample values)
+        all_values = column_data.astype(str).tolist()
+        sample_values = all_values[:5]  # Keep for response display only
+        
+        # Detect which separator the original data uses (check entire column)
+        # Check if data primarily uses '/', '-', or '.' as separator
+        has_slash = any('/' in str(val) for val in all_values)
+        has_dash = any('-' in str(val) and not str(val).startswith('-') for val in all_values)
+        has_dot = any('.' in str(val) and not str(val).endswith('.') for val in all_values)
         
         # Normalize separators for detection (handle mixed / and -)
-        # Convert all / to - for standardization
-        normalized_samples = [str(val).replace('/', '-') for val in sample_values]
+        # Convert all / to - for standardization during testing
+        # Also normalize dots to dashes for consistency
+        normalized_all = [str(val).replace('/', '-').replace('.', '-') for val in all_values]
         
-        # Try common datetime formats (normalized to use -)
-        common_formats = [
-            '%Y-%m-%d',
-            '%d/%m/%Y',
-            '%m/%d/%Y',
-            '%d-%m-%Y',
-            '%m-%d-%Y',
-            '%m/%d/%y',
-            '%d-%m-%y',
-            '%m-%d-%y',
-            '%Y/%m/%d',
-            '%Y-%m-%d %H:%M:%S',
-            '%d/%m/%Y %H:%M:%S',
-            '%m/%d/%Y %H:%M:%S',
-            '%Y-%m-%dT%H:%M:%S',
+        # Try common datetime formats (test with normalized data, but return format matching original separator)
+        # Format pairs: (format_with_dash, format_with_slash)
+        common_format_pairs = [
+            # Date-only formats
+            ('%Y-%m-%d', '%Y/%m/%d'),
+            ('%d-%m-%Y', '%d/%m/%Y'),
+            ('%m-%d-%Y', '%m/%d/%Y'),
+            ('%Y-%m-%d', '%Y.%m.%d'),  # Dot separator
+            ('%d-%m-%Y', '%d.%m.%Y'),
+            ('%m-%d-%Y', '%m.%d.%Y'),
+            # Two-digit year formats
+            ('%d-%m-%y', '%d/%m/%y'),
+            ('%m-%d-%y', '%m/%d/%y'),
+            ('%y-%m-%d', '%y/%m/%d'),
+            ('%d-%m-%y', '%d.%m.%y'),
+            ('%m-%d-%y', '%m.%d.%y'),
+            # Date with time (hours:minutes:seconds)
+            ('%Y-%m-%d %H:%M:%S', '%Y/%m/%d %H:%M:%S'),
+            ('%d-%m-%Y %H:%M:%S', '%d/%m/%Y %H:%M:%S'),
+            ('%m-%d-%Y %H:%M:%S', '%m/%d/%Y %H:%M:%S'),
+            ('%Y-%m-%d %H:%M:%S', '%Y.%m.%d %H:%M:%S'),
+            ('%d-%m-%Y %H:%M:%S', '%d.%m.%Y %H:%M:%S'),
+            # Date with time (hours:minutes only)
+            ('%Y-%m-%d %H:%M', '%Y/%m/%d %H:%M'),
+            ('%d-%m-%Y %H:%M', '%d/%m/%Y %H:%M'),
+            ('%m-%d-%Y %H:%M', '%m/%d/%Y %H:%M'),
+            # ISO 8601 formats
+            ('%Y-%m-%dT%H:%M:%S', '%Y/%m/%dT%H:%M:%S'),
+            ('%Y-%m-%dT%H:%M:%S.%f', '%Y/%m/%dT%H:%M:%S.%f'),  # With microseconds
+            ('%Y-%m-%dT%H:%M:%SZ', '%Y/%m/%dT%H:%M:%SZ'),  # UTC timezone
+            ('%Y-%m-%dT%H:%M:%S%z', '%Y/%m/%dT%H:%M:%S%z'),  # With timezone offset
+            ('%Y-%m-%dT%H:%M:%S.%f%z', '%Y/%m/%dT%H:%M:%S.%f%z'),  # Microseconds + timezone
+            # Compact formats (no separators)
+            ('%Y%m%d', '%Y%m%d'),  # Same for both (no separator to normalize)
+            ('%d%m%Y', '%d%m%Y'),
+            ('%m%d%Y', '%m%d%Y'),
+            ('%Y%m%d %H%M%S', '%Y%m%d %H%M%S'),
+            # Text-based month formats (no separator normalization needed)
+            ('%d %B %Y', '%d %B %Y'),  # "01 January 2021"
+            ('%B %d, %Y', '%B %d, %Y'),  # "January 01, 2021"
+            ('%d %b %Y', '%d %b %Y'),  # "01 Jan 2021"
+            ('%b %d, %Y', '%b %d, %Y'),  # "Jan 01, 2021"
+            ('%d-%B-%Y', '%d-%B-%Y'),  # "01-January-2021"
+            ('%d-%b-%Y', '%d-%b-%Y'),  # "01-Jan-2021"
+            ('%B %d %Y', '%B %d %Y'),  # "January 01 2021"
+            ('%b %d %Y', '%b %d %Y'),  # "Jan 01 2021"
+            # Text formats with time
+            ('%d %B %Y %H:%M:%S', '%d %B %Y %H:%M:%S'),
+            ('%B %d, %Y %H:%M:%S', '%B %d, %Y %H:%M:%S'),
+            ('%d %b %Y %H:%M:%S', '%d %b %Y %H:%M:%S'),
         ]
         
         detected_format = None
-        for fmt in common_formats:
+        for fmt_dash, fmt_slash in common_format_pairs:
             try:
-                # Test with normalized sample values
+                # Test with normalized values from entire column
                 success_count = 0
-                for val in normalized_samples[:5]:
+                for val in normalized_all:
                     try:
-                        pd.to_datetime(val, format=fmt)
+                        pd.to_datetime(val, format=fmt_dash)
                         success_count += 1
                     except:
                         break
                 
-                if success_count >= len(normalized_samples[:5]):
-                    detected_format = fmt
+                if success_count >= len(normalized_all):
+                    # Format matched! Now return the format that matches original data separator
+                    # Check for dot separator first (most specific)
+                    if has_dot and not has_slash and not has_dash:
+                        # Original data uses '.', return format with '.' (convert dash format to dot)
+                        detected_format = fmt_dash.replace('-', '.')
+                    elif has_slash and not has_dash and not has_dot:
+                        # Original data uses '/', return format with '/'
+                        detected_format = fmt_slash
+                    elif has_dash and not has_slash and not has_dot:
+                        # Original data uses '-', return format with '-'
+                        detected_format = fmt_dash
+                    else:
+                        # Mixed or unclear: prefer the format that matches the first value
+                        first_val = str(all_values[0])
+                        if '.' in first_val and '.' not in first_val.split()[0] if ' ' in first_val else True:
+                            # Check if dot is a date separator (not decimal or end of sentence)
+                            detected_format = fmt_dash.replace('-', '.')
+                        elif '/' in first_val:
+                            detected_format = fmt_slash
+                        else:
+                            detected_format = fmt_dash
                     break
             except:
                 continue
@@ -3321,9 +3393,16 @@ async def apply_data_transformations(request: Request):
                 elif new_dtype == "object":
                     df[col_name] = df[col_name].astype(str)
                 elif new_dtype == "datetime64":
+                    # Normalize separators: replace all '/' and '.' with '-' to handle mixed separators
+                    # Convert to string first, then normalize separators
+                    df[col_name] = df[col_name].astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
+                    
+                    # Normalize format string if provided (replace '/' and '.' with '-')
+                    normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
+                    
                     # Mirror process_saved_dataframe behavior: single-step conversion with optional format
-                    if datetime_format:
-                        df[col_name] = pd.to_datetime(df[col_name], format=datetime_format, errors='coerce')
+                    if normalized_format:
+                        df[col_name] = pd.to_datetime(df[col_name], format=normalized_format, errors='coerce')
                     else:
                         logger.info(f"Converting column '{col_name}' to datetime64 without specific format")
                         df[col_name] = pd.to_datetime(df[col_name], errors='coerce')

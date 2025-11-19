@@ -7,7 +7,7 @@ interface Props {
 }
 
 const AuxiliaryMenuLeft: React.FC<Props> = ({ onAtomDragStart }) => {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   if (!open) {
     return (

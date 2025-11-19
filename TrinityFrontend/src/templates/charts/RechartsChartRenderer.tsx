@@ -4789,4 +4789,3 @@ const RechartsChartRenderer: React.FC<Props> = ({
 };
 
 export default RechartsChartRenderer; 
-
