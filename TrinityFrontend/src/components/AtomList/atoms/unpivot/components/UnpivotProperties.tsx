@@ -20,8 +20,18 @@ const UnpivotProperties: React.FC<UnpivotPropertiesProps> = ({ atomId, onApply, 
   const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
   const [tab, setTab] = useState<'inputs' | 'settings'>('inputs');
   const [manualApplyToken, setManualApplyToken] = useState(0);
-  const data: UnpivotSettingsType =
-    (atom?.settings as UnpivotSettingsType) || { ...DEFAULT_UNPIVOT_SETTINGS };
+
+  const rawSettings = atom?.settings as UnpivotSettingsType | undefined;
+  const data: UnpivotSettingsType = {
+    ...DEFAULT_UNPIVOT_SETTINGS,
+    ...(rawSettings || {}),
+    idVars: Array.isArray(rawSettings?.idVars) ? rawSettings!.idVars : [],
+    valueVars: Array.isArray(rawSettings?.valueVars) ? rawSettings!.valueVars : [],
+    dataSourceColumns: Array.isArray(rawSettings?.dataSourceColumns) ? rawSettings!.dataSourceColumns : [],
+    preFilters: Array.isArray(rawSettings?.preFilters) ? rawSettings!.preFilters : [],
+    postFilters: Array.isArray(rawSettings?.postFilters) ? rawSettings!.postFilters : [],
+    unpivotResults: Array.isArray(rawSettings?.unpivotResults) ? rawSettings!.unpivotResults : [],
+  };
   
   // Internal apply handler that triggers manual refresh
   const handleApply = useCallback(() => {

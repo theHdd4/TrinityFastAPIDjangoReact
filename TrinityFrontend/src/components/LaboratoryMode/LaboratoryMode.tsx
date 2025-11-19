@@ -653,13 +653,13 @@ const LaboratoryMode = () => {
         });
       }
       const allAtoms = cards.flatMap(card =>
-        card.atoms.map(atom => ({
+        Array.isArray(card.atoms) ? card.atoms.map(atom => ({
           id: atom.id,
           title: atom.title,
           category: atom.category,
           color: atom.color,
           cardId: card.id,
-        }))
+        })) : []
       );
       addNavigationItem(user?.id, { atom: 'laboratory-save', atoms: allAtoms });
       logSessionState(user?.id);

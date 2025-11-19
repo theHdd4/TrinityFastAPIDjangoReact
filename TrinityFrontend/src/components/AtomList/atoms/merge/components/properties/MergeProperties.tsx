@@ -20,12 +20,14 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
     const { toast } = useToast();
     const atom = useLaboratoryStore(state => state.getAtom(atomId));
     const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-    const settings = (atom?.settings as any) || {
-      file1: '',
-      file2: '',
-      joinColumns: [] as string[],
-      joinType: 'inner',
-      availableColumns: [] as string[],
+    const rawSettings = (atom?.settings as any) || {};
+    const settings = {
+      file1: rawSettings.file1 || '',
+      file2: rawSettings.file2 || '',
+      joinColumns: Array.isArray(rawSettings.joinColumns) ? rawSettings.joinColumns : [],
+      joinType: rawSettings.joinType || 'inner',
+      availableColumns: Array.isArray(rawSettings.availableColumns) ? rawSettings.availableColumns : [],
+      ...rawSettings, // Preserve other settings
     };
 
     const handleChange = (newSettings: any) => {
@@ -60,9 +62,9 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
           .then(d => {
             const newAvailableColumns = Array.isArray(d.common_columns) ? d.common_columns : [];
             // Preserve existing join columns that are still valid in the new available columns
-            const preservedJoinColumns = settings.joinColumns.filter(col => 
-              newAvailableColumns.includes(col)
-            );
+            const preservedJoinColumns = Array.isArray(settings.joinColumns) 
+              ? settings.joinColumns.filter(col => newAvailableColumns.includes(col))
+              : [];
             // If no prior selection, default to all available columns
             const defaultJoinColumns = preservedJoinColumns.length > 0 ? preservedJoinColumns : [...newAvailableColumns];
             handleChange({
@@ -78,7 +80,7 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
             handleChange({
               ...settings,
               availableColumns: [],
-              joinColumns: settings.joinColumns, // Preserve existing join columns even on error
+              joinColumns: Array.isArray(settings.joinColumns) ? settings.joinColumns : [], // Preserve existing join columns even on error
             });
           });
       }
@@ -86,7 +88,7 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
 
     // Helper function to check if all required options are selected
     const isMergeReady = () => {
-      return settings.file1 && settings.file2 && settings.joinColumns.length > 0;
+      return settings.file1 && settings.file2 && Array.isArray(settings.joinColumns) && settings.joinColumns.length > 0;
     };
 
     const handlePerformMerge = async () => {
@@ -106,7 +108,7 @@ const MergeProperties: React.FC<Props> = ({ atomId }) => {
             file1: settings.file1,
             file2: settings.file2,
             bucket_name: 'trinity',
-            join_columns: JSON.stringify(settings.joinColumns),
+            join_columns: JSON.stringify(Array.isArray(settings.joinColumns) ? settings.joinColumns : []),
             join_type: settings.joinType,
           }),
         });

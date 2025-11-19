@@ -132,12 +132,12 @@ const resolveCardTitle = (layoutCard?: LayoutCard): string => {
   }
 
   if (layoutCard.moleculeTitle) {
-    return layoutCard.atoms.length > 0
+    return (Array.isArray(layoutCard.atoms) && layoutCard.atoms.length > 0)
       ? `${layoutCard.moleculeTitle} - ${layoutCard.atoms[0].title}`
       : layoutCard.moleculeTitle;
   }
 
-  return layoutCard.atoms.length > 0 ? layoutCard.atoms[0].title : 'Card';
+  return (Array.isArray(layoutCard.atoms) && layoutCard.atoms.length > 0) ? layoutCard.atoms[0].title : 'Card';
 };
 
 const normalizeCardVariables = (variables: any, fallbackCardId: string): CardVariable[] => {
@@ -638,6 +638,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     if (Array.isArray(layoutCards)) {
       outer: for (let i = (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1; i >= 0; i--) {
         const card = layoutCards[i];
+        if (!card || !Array.isArray(card.atoms)) continue;
         for (let j = card.atoms.length - 1; j >= 0; j--) {
           const a = card.atoms[j];
           if (a.atomId === 'feature-overview' && a.settings?.dataSource) {
@@ -1209,7 +1210,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       // No need for complex assignment - use workflow molecules directly from backend
 
       // Filter out empty molecule containers (molecules with 0 atoms)
-      const validWorkflow = workflow.filter(molecule => molecule.atoms.length > 0);
+      const validWorkflow = workflow.filter(molecule => Array.isArray(molecule.atoms) && molecule.atoms.length > 0);
 
       if (validWorkflow.length !== workflow.length) {
         console.log('[Laboratory API] Removed empty molecule containers:', 
@@ -1970,7 +1971,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
       // Find the card to get its moleculeId and current atom count
       const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
-      if (card && card.atoms.length >= 1) {
+      if (card && Array.isArray(card.atoms) && card.atoms.length >= 1) {
         toast({
           title:
             'Already one atom is present in the card - please remove atom and then try adding an atom.',
@@ -2022,13 +2023,17 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           // Collect ALL atoms from ALL cards in this molecule, maintaining card order
           const allMoleculeAtomIds: string[] = [];
           moleculeCards.forEach(moleculeCard => {
+            if (Array.isArray(moleculeCard.atoms)) {
             moleculeCard.atoms.forEach(atom => {
               allMoleculeAtomIds.push(atom.atomId);
             });
+            }
           });
 
           // Get workflow molecule atom IDs
-          const workflowAtomIds = workflowMolecule.atoms.map(a => typeof a === 'string' ? a : a.atomName);
+          const workflowAtomIds = Array.isArray(workflowMolecule.atoms) 
+            ? workflowMolecule.atoms.map(a => typeof a === 'string' ? a : a.atomName)
+            : [];
 
           // Find where this card's atoms start in the full molecule atom array
           let cardStartIndex = 0;
@@ -2036,7 +2041,9 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             if (moleculeCards[i].id === card.id) {
               break;
             }
+            if (Array.isArray(moleculeCards[i].atoms)) {
             cardStartIndex += moleculeCards[i].atoms.length;
+            }
           }
 
           // Position in full molecule atom array = card start index + atom position in card
@@ -2536,10 +2543,12 @@ const addNewCardWithAtomWorkflow = async (
     }
 
     setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+    if (Array.isArray(newCard.atoms)) {
     newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+    }
 
     // Track atom addition for cross-collection sync if card belongs to a molecule
-    if (moleculeId && newCard.atoms.length > 0) {
+    if (moleculeId && Array.isArray(newCard.atoms) && newCard.atoms.length > 0) {
       setPendingChanges(prev => ({
         ...prev,
         addedAtoms: [...prev.addedAtoms, { 
@@ -2552,10 +2561,10 @@ const addNewCardWithAtomWorkflow = async (
     }
     
     // Automatically open properties panel and select the atom
-    if (newCard.atoms.length > 0 && onAtomSelect) {
+    if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onAtomSelect) {
       onAtomSelect(newCard.atoms[0].id);
     }
-    if (newCard.atoms.length > 0 && onOpenSettingsPanel) {
+    if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onOpenSettingsPanel) {
       onOpenSettingsPanel();
     }
   } catch (err) {
@@ -2623,13 +2632,15 @@ const addNewCardWithAtomWorkflow = async (
     }
 
     setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
+    if (Array.isArray(fallbackCard.atoms)) {
     fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
+    }
     
     // Automatically open properties panel and select the atom
-    if (fallbackCard.atoms.length > 0 && onAtomSelect) {
+    if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onAtomSelect) {
       onAtomSelect(fallbackCard.atoms[0].id);
     }
-    if (fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
+    if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
       onOpenSettingsPanel();
     }
   }
@@ -2791,13 +2802,15 @@ const addNewCardWithAtom = async (
       ...arr.slice(insertIndex),
     ]);
     setCollapsedCards(prev => ({ ...prev, [newCard.id]: false }));
+    if (Array.isArray(newCard.atoms)) {
     newCard.atoms.forEach(atom => prefillAtomIfRequired(newCard.id, atom));
+    }
     
     // Automatically open properties panel and select the atom
-    if (newCard.atoms.length > 0 && onAtomSelect) {
+    if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onAtomSelect) {
       onAtomSelect(newCard.atoms[0].id);
     }
-    if (newCard.atoms.length > 0 && onOpenSettingsPanel) {
+    if (Array.isArray(newCard.atoms) && newCard.atoms.length > 0 && onOpenSettingsPanel) {
       onOpenSettingsPanel();
     }
   } catch (err) {
@@ -2814,13 +2827,15 @@ const addNewCardWithAtom = async (
       ...arr.slice(insertIndex),
     ]);
     setCollapsedCards(prev => ({ ...prev, [fallbackCard.id]: false }));
+    if (Array.isArray(fallbackCard.atoms)) {
     fallbackCard.atoms.forEach(atom => prefillAtomIfRequired(fallbackCard.id, atom));
+    }
     
     // Automatically open properties panel and select the atom
-    if (fallbackCard.atoms.length > 0 && onAtomSelect) {
+    if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onAtomSelect) {
       onAtomSelect(fallbackCard.atoms[0].id);
     }
-    if (fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
+    if (Array.isArray(fallbackCard.atoms) && fallbackCard.atoms.length > 0 && onOpenSettingsPanel) {
       onOpenSettingsPanel();
     }
   }
@@ -3013,7 +3028,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     // Find the card to get its moleculeId and current atom count
     const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
 
-    if (card && card.atoms.length >= 1) {
+    if (card && Array.isArray(card.atoms) && card.atoms.length >= 1) {
       toast({
         title:
           'Already one atom is present in the card - please remove atom and then try adding an atom.',
@@ -3040,13 +3055,17 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         // Collect ALL atoms from ALL cards in this molecule, maintaining card order
         const allMoleculeAtomIds: string[] = [];
         moleculeCards.forEach(moleculeCard => {
+          if (Array.isArray(moleculeCard.atoms)) {
           moleculeCard.atoms.forEach(atom => {
             allMoleculeAtomIds.push(atom.atomId);
           });
+          }
         });
 
         // Get workflow molecule atom IDs
-        const workflowAtomIds = workflowMolecule.atoms.map(a => typeof a === 'string' ? a : a.atomName);
+        const workflowAtomIds = Array.isArray(workflowMolecule.atoms) 
+          ? workflowMolecule.atoms.map(a => typeof a === 'string' ? a : a.atomName)
+          : [];
 
         // Find where this card's atoms start in the full molecule atom array
         let cardStartIndex = 0;
@@ -3054,7 +3073,9 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
           if (moleculeCards[i].id === card.id) {
             break;
           }
+          if (Array.isArray(moleculeCards[i].atoms)) {
           cardStartIndex += moleculeCards[i].atoms.length;
+          }
         }
 
         // Position in full molecule atom array = card start index + atom position in card
@@ -3812,12 +3833,12 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
           const standaloneCardsForWorkflow = Array.isArray(layoutCards)
             ? layoutCards
-                .filter(card => !card.moleculeId && card.atoms.length > 0)
+                .filter(card => !card.moleculeId && Array.isArray(card.atoms) && card.atoms.length > 0)
                 .map(card => {
                   const cardData: any = {
                     id: card.id,
-                    atomId: card.atoms[0]?.atomId || '',
-                    title: card.atoms[0]?.title || 'Atom'
+                    atomId: (Array.isArray(card.atoms) && card.atoms.length > 0) ? card.atoms[0]?.atomId : '',
+                    title: (Array.isArray(card.atoms) && card.atoms.length > 0) ? card.atoms[0]?.title : 'Atom'
                   };
 
                   // FIX: Use references directly from Laboratory Mode cards (they're already correct)
@@ -4267,10 +4288,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         .filter(card => card.moleculeId === molecule.moleculeId)
                         .map((card, index) => {
                         const cardTitle = card.moleculeTitle
-                          ? card.atoms.length > 0
+                          ? (Array.isArray(card.atoms) && card.atoms.length > 0)
                             ? `${card.moleculeTitle} - ${card.atoms[0].title}`
                             : `${card.moleculeTitle} - Card`
-                          : card.atoms.length > 0
+                          : (Array.isArray(card.atoms) && card.atoms.length > 0)
                             ? card.atoms[0].title
                             : 'Card';
                         return (
@@ -4553,10 +4574,10 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 // Render standalone card
                 const card = item.cardData;
                 const cardTitle = card.moleculeTitle
-                  ? card.atoms.length > 0
+                  ? (Array.isArray(card.atoms) && card.atoms.length > 0)
                     ? `${card.moleculeTitle} - ${card.atoms[0].title}`
                     : `${card.moleculeTitle} - Card`
-                  : card.atoms.length > 0
+                  : (Array.isArray(card.atoms) && card.atoms.length > 0)
                     ? card.atoms[0].title
                     : 'Card';
 
@@ -4841,8 +4862,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
                       if (!card) return 'Card';
                       return card.moleculeTitle
-                        ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
-                        : card.atoms.length > 0
+                        ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                        : (Array.isArray(card.atoms) && card.atoms.length > 0)
                           ? card.atoms[0].title
                           : 'Card';
                     })()}
@@ -5015,8 +5036,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       <div className="p-6 space-y-6 w-full">
         {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
           const cardTitle = card.moleculeTitle
-            ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
-            : card.atoms.length > 0
+            ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+            : (Array.isArray(card.atoms) && card.atoms.length > 0)
               ? card.atoms[0].title
               : 'Card';
           
@@ -5096,7 +5117,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 <button
                   onClick={e => {
                     e.stopPropagation();
-                    const cardTitle = card.moleculeTitle || card.atoms[0]?.title || 'Card';
+                    const cardTitle = card.moleculeTitle || (Array.isArray(card.atoms) && card.atoms.length > 0 ? card.atoms[0]?.title : undefined) || 'Card';
                     handleDeleteCardClick(card.id, cardTitle);
                   }}
                   className="p-1 hover:bg-gray-100 rounded"
@@ -5331,8 +5352,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                     const card = Array.isArray(layoutCards) ? layoutCards.find(c => c.id === expandedCard) : undefined;
                     if (!card) return 'Card';
                     return card.moleculeTitle
-                      ? (card.atoms.length > 0 ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
-                      : card.atoms.length > 0
+                      ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
+                      : (Array.isArray(card.atoms) && card.atoms.length > 0)
                         ? card.atoms[0].title
                         : 'Card';
                   })()}
