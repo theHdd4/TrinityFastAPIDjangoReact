@@ -642,11 +642,15 @@ WORKFLOW PLANNING RULES:
         guidance: Dict[str, Any],
         files_used: List[str],
         inputs: List[str],
-        output_alias: str
+        output_alias: str,
+        is_stream_workflow: bool = False
     ) -> str:
         """
         Build a natural language prompt for downstream atom execution.
         Now includes clear file names and detailed instructions based on atom capabilities.
+        
+        Args:
+            is_stream_workflow: If True, add mandatory file usage restrictions for Stream AI workflow mode
         """
         # Get atom capabilities for better prompt generation
         atom_capabilities = self._get_atom_capability_info(atom_id)
@@ -656,6 +660,15 @@ WORKFLOW PLANNING RULES:
             description_text += '.'
 
         lines: List[str] = []
+        
+        # Add Stream AI workflow mode mandatory file usage section at the top
+        if is_stream_workflow:
+            lines.append("🚨 MANDATORY FILE USAGE - STREAM AI WORKFLOW")
+            lines.append("You are being called as part of a Stream AI workflow.")
+            lines.append("You MUST use ONLY the file(s) specified below.")
+            lines.append("DO NOT use any other files from MinIO, even if they exist.")
+            lines.append("Use ONLY the specified file(s).")
+            lines.append("")
         
         # Add atom-specific instructions from capabilities
         if atom_capabilities:
@@ -699,28 +712,63 @@ WORKFLOW PLANNING RULES:
                 lines.append("- Set dtype_changes to empty object {} in your response")
         elif files_used:
             # Use EXACT file names with full paths
-            if len(files_used) == 1:
-                file_name = self._display_file_name(files_used[0])
-                lines.append(f"**PRIMARY INPUT FILE:** Use dataset `{files_used[0]}` (display name: {file_name}) as the primary input.")
-                lines.append(f"**IMPORTANT:** Reference this file by its exact path: `{files_used[0]}`")
+            if is_stream_workflow:
+                if len(files_used) == 1:
+                    file_name = self._display_file_name(files_used[0])
+                    lines.append(f"**🚨 PRIMARY INPUT FILE (MANDATORY):** Use dataset `{files_used[0]}` (display name: {file_name}) as the primary input.")
+                    lines.append(f"**⚠️ CRITICAL:** Reference this file by its exact path: `{files_used[0]}`")
+                    lines.append(f"**⚠️ DO NOT USE ANY OTHER FILES.** This is the ONLY file you should use for this workflow step.")
+                else:
+                    formatted = ', '.join(f"`{name}`" for name in files_used)
+                    display_names = [self._display_file_name(f) for f in files_used]
+                    lines.append(f"**🚨 INPUT FILES (MANDATORY):** Use datasets {formatted} as inputs.")
+                    lines.append(f"**FILE PATHS:** {', '.join(f'`{f}`' for f in files_used)}")
+                    lines.append(f"**DISPLAY NAMES:** {', '.join(display_names)}")
+                    lines.append(f"**⚠️ DO NOT USE ANY OTHER FILES.** These are the ONLY files you should use for this workflow step.")
             else:
-                formatted = ', '.join(f"`{name}`" for name in files_used)
-                display_names = [self._display_file_name(f) for f in files_used]
-                lines.append(f"**INPUT FILES:** Use datasets {formatted} as inputs.")
-                lines.append(f"**FILE PATHS:** {', '.join(f'`{f}`' for f in files_used)}")
-                lines.append(f"**DISPLAY NAMES:** {', '.join(display_names)}")
+                if len(files_used) == 1:
+                    file_name = self._display_file_name(files_used[0])
+                    lines.append(f"**PRIMARY INPUT FILE:** Use dataset `{files_used[0]}` (display name: {file_name}) as the primary input.")
+                    lines.append(f"**IMPORTANT:** Reference this file by its exact path: `{files_used[0]}`")
+                else:
+                    formatted = ', '.join(f"`{name}`" for name in files_used)
+                    display_names = [self._display_file_name(f) for f in files_used]
+                    lines.append(f"**INPUT FILES:** Use datasets {formatted} as inputs.")
+                    lines.append(f"**FILE PATHS:** {', '.join(f'`{f}`' for f in files_used)}")
+                    lines.append(f"**DISPLAY NAMES:** {', '.join(display_names)}")
         elif inputs:
-            if len(inputs) == 1:
-                lines.append(f"**INPUT FROM PREVIOUS STEP:** Use dataset `{inputs[0]}` produced in earlier steps.")
+            if is_stream_workflow:
+                if len(inputs) == 1:
+                    lines.append(f"**🚨 INPUT FROM PREVIOUS STEP (MANDATORY):** Use dataset `{inputs[0]}` produced in earlier steps.")
+                    lines.append(f"**⚠️ DO NOT USE ANY OTHER FILES.** This is the ONLY file you should use for this workflow step.")
+                else:
+                    formatted = ', '.join(f"`{alias}`" for alias in inputs)
+                    lines.append(f"**🚨 INPUTS FROM PREVIOUS STEPS (MANDATORY):** Use datasets {formatted} produced in earlier steps.")
+                    lines.append(f"**⚠️ DO NOT USE ANY OTHER FILES.** These are the ONLY files you should use for this workflow step.")
             else:
-                formatted = ', '.join(f"`{alias}`" for alias in inputs)
-                lines.append(f"**INPUTS FROM PREVIOUS STEPS:** Use datasets {formatted} produced in earlier steps.")
+                if len(inputs) == 1:
+                    lines.append(f"**INPUT FROM PREVIOUS STEP:** Use dataset `{inputs[0]}` produced in earlier steps.")
+                else:
+                    formatted = ', '.join(f"`{alias}`" for alias in inputs)
+                    lines.append(f"**INPUTS FROM PREVIOUS STEPS:** Use datasets {formatted} produced in earlier steps.")
         else:
-            lines.append("**WARNING:** No input dataset specified. Ask the user to provide or confirm the correct dataset before executing this atom.")
+            if is_stream_workflow:
+                lines.append("**⚠️ CRITICAL WARNING:** No input dataset specified. This is REQUIRED for the workflow step.")
+            else:
+                lines.append("**WARNING:** No input dataset specified. Ask the user to provide or confirm the correct dataset before executing this atom.")
 
         lines.append("")
         lines.append(f"**TASK:** {description_text}")
         lines.append("")
+        
+        # Add file validation for Stream AI mode
+        if is_stream_workflow:
+            lines.append("**🚨 FILE USAGE VALIDATION (STREAM AI WORKFLOW):**")
+            lines.append("- The file_name/data_source you use MUST match exactly one of the files specified above.")
+            lines.append("- ERROR PREVENTION: If you use any file not explicitly listed, the workflow will fail.")
+            lines.append("- WORKFLOW CONTEXT: The file(s) specified above were created/selected by previous workflow steps. Use them.")
+            lines.append("")
+        
         lines.append("**COLUMN VALIDATION CHECKLIST:**")
         lines.append("- Use ONLY column names/values that appear in the file metadata & alias map above.")
         lines.append("- If the user uses abbreviations or synonyms, map them to the exact column names before building formulas/filters.")
@@ -844,7 +892,7 @@ WORKFLOW PLANNING RULES:
 
             prompt_text = raw_step.get("prompt")
             if not prompt_text:
-                prompt_text = self._compose_prompt(atom_id, description, guidance, files_used, inputs, output_alias)
+                prompt_text = self._compose_prompt(atom_id, description, guidance, files_used, inputs, output_alias, is_stream_workflow=True)
 
             description_for_step = description or guidance.get("purpose", "")
             display_files = [self._display_file_name(file_path) for file_path in files_used if file_path]
@@ -1646,7 +1694,9 @@ WORKFLOW PLANNING RULES:
                     original_prompt=original_prompt,
                     available_files=available_files,
                     step_prompt=getattr(step, "prompt", None),
-                    workflow_step=step
+                    workflow_step=step,
+                    is_stream_workflow=True,  # This is always a Stream AI workflow call
+                    sequence_id=sequence_id
                 )
             except Exception as parameter_error:
                 logger.exception(
@@ -2887,12 +2937,18 @@ WORKFLOW PLANNING RULES:
         original_prompt: str,
         available_files: List[str],
         step_prompt: Optional[str] = None,
-        workflow_step: Optional[WorkflowStepPlan] = None
+        workflow_step: Optional[WorkflowStepPlan] = None,
+        is_stream_workflow: bool = True,
+        sequence_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate an enriched natural-language prompt for downstream atom execution.
         Ensures we pass explicit dataset references and slot details so the atom LLM
         can produce a precise configuration without re-deriving context.
+        
+        Args:
+            is_stream_workflow: If True, filter available_files to only include workflow-relevant files
+            sequence_id: Workflow sequence ID for tracking files created in previous steps
         """
         files_used: List[str] = []
         inputs: List[str] = []
@@ -2908,36 +2964,102 @@ WORKFLOW PLANNING RULES:
             if not planner_prompt:
                 planner_prompt = workflow_step.prompt
 
+        # Filter available_files for Stream AI workflow mode
+        filtered_available_files = available_files.copy()
+        if is_stream_workflow and sequence_id:
+            # Only include workflow-relevant files:
+            # 1. Files specified in files_used for current step
+            # 2. Output aliases from previous steps (mapped to file paths)
+            # 3. Files created in earlier steps of this workflow
+            workflow_relevant_files: List[str] = []
+            
+            # Add files from files_used
+            workflow_relevant_files.extend(files_used)
+            
+            # Add files from inputs (previous step outputs)
+            workflow_relevant_files.extend(inputs)
+            
+            # Add files created in previous steps of this workflow
+            step_output_files = self._step_output_files.get(sequence_id, {})
+            for step_num, file_path in step_output_files.items():
+                if file_path not in workflow_relevant_files:
+                    workflow_relevant_files.append(file_path)
+            
+            # Add files from output alias registry
+            alias_registry = self._output_alias_registry.get(sequence_id, {})
+            for alias, file_path in alias_registry.items():
+                if file_path not in workflow_relevant_files:
+                    workflow_relevant_files.append(file_path)
+            
+            # Filter to only include files that exist in available_files
+            filtered_available_files = [
+                f for f in workflow_relevant_files 
+                if f in available_files
+            ]
+            
+            # If no workflow-relevant files found, fall back to files_used and inputs
+            if not filtered_available_files:
+                filtered_available_files = list(set(files_used + inputs))
+            
+            logger.info(
+                f"🔧 Stream AI workflow mode: Filtered {len(available_files)} files to {len(filtered_available_files)} "
+                f"workflow-relevant files for step {workflow_step.step_number if workflow_step else 'N/A'}"
+            )
+
         user_summary = self._condense_text(original_prompt)
         description_summary = self._condense_text(step_description)
 
-        header_lines: List[str] = [
+        header_lines: List[str] = []
+        
+        # Add Stream AI workflow mode warning at the top
+        if is_stream_workflow:
+            header_lines.append("🚨 MANDATORY FILE USAGE - STREAM AI WORKFLOW")
+            header_lines.append("You are being called as part of a Stream AI workflow.")
+            header_lines.append("You MUST use ONLY the file(s) specified in the 'Datasets & dependencies' section below.")
+            header_lines.append("DO NOT use any other files from MinIO, even if they exist.")
+            header_lines.append("Use ONLY the specified file(s).")
+            header_lines.append("")
+        
+        header_lines.extend([
             f"Atom: `{atom_id}`",
             f"User goal: {user_summary}"
-        ]
+        ])
         if description_summary:
             header_lines.append(f"Step goal: {description_summary}")
         header_lines.append("Respond with configuration details only – no filler text.")
 
         header_section = "\n".join(header_lines)
-        dataset_section = self._build_dataset_section(atom_id, files_used, inputs, output_alias)
+        dataset_section = self._build_dataset_section(atom_id, files_used, inputs, output_alias, is_stream_workflow)
         atom_section = self._build_atom_instruction_section(atom_id, original_prompt, files_used, inputs)
-        available_section = self._build_available_files_section(available_files)
+        available_section = self._build_available_files_section(filtered_available_files, is_stream_workflow)
         planner_section = self._build_planner_guidance_section(planner_prompt)
+        
+        # Add validation section for Stream AI mode
+        validation_section = ""
+        if is_stream_workflow:
+            validation_lines = [
+                "",
+                "🚨 FILE USAGE VALIDATION:",
+                "- The file_name/data_source you use MUST match exactly one of the files in the 'Datasets & dependencies' section above.",
+                "- ERROR PREVENTION: If you use any file not explicitly listed, the workflow will fail.",
+                "- WORKFLOW CONTEXT: The file(s) specified above were created/selected by previous workflow steps. Use them."
+            ]
+            validation_section = "\n".join(validation_lines)
 
         prompt_sections = [
             header_section,
             dataset_section,
             atom_section,
             available_section,
-            planner_section
+            planner_section,
+            validation_section
         ]
 
         final_prompt = "\n\n".join(section for section in prompt_sections if section and section.strip())
 
         return {
             "prompt": final_prompt,
-            "available_files": available_files
+            "available_files": filtered_available_files if is_stream_workflow else available_files
         }
 
     def _build_dataset_section(
@@ -2945,16 +3067,26 @@ WORKFLOW PLANNING RULES:
         atom_id: str,
         files_used: List[str],
         inputs: List[str],
-        output_alias: Optional[str]
+        output_alias: Optional[str],
+        is_stream_workflow: bool = True
     ) -> str:
         files_used = self._ensure_list_of_strings(files_used)
         inputs = self._ensure_list_of_strings(inputs)
 
         lines: List[str] = []
+        
+        # Add Stream AI mode warning at the top
+        if is_stream_workflow:
+            lines.append("🚨 USE ONLY THIS FILE - DO NOT USE ANY OTHER FILES")
+            lines.append("The file(s) specified below are MANDATORY for this workflow step.")
+            lines.append("")
 
         def append_line(label: str, value: Optional[str]) -> None:
             if value:
-                lines.append(f"- {label}: `{value}`")
+                if is_stream_workflow:
+                    lines.append(f"- {label}: `{value}` ⚠️ MANDATORY - Use this file ONLY")
+                else:
+                    lines.append(f"- {label}: `{value}`")
 
         if atom_id == "merge":
             left = files_used[0] if len(files_used) > 0 else (inputs[0] if inputs else None)
@@ -2962,7 +3094,10 @@ WORKFLOW PLANNING RULES:
             append_line("Left source", left)
             append_line("Right source", right)
             if not left or not right:
-                lines.append("- Source datasets missing: identify both left and right inputs before executing the merge.")
+                if is_stream_workflow:
+                    lines.append("- ⚠️ CRITICAL: Source datasets missing. Both left and right inputs are REQUIRED for this workflow step.")
+                else:
+                    lines.append("- Source datasets missing: identify both left and right inputs before executing the merge.")
         elif atom_id == "concat":
             if files_used:
                 for idx, source in enumerate(files_used, start=1):
@@ -2975,7 +3110,10 @@ WORKFLOW PLANNING RULES:
             if target_file:
                 append_line("File to load from MinIO", target_file)
             else:
-                lines.append("- **CRITICAL:** File name must be extracted from user prompt or available files")
+                if is_stream_workflow:
+                    lines.append("- ⚠️ CRITICAL: File name is REQUIRED for this workflow step. Use the file specified in the workflow plan.")
+                else:
+                    lines.append("- **CRITICAL:** File name must be extracted from user prompt or available files")
         else:
             primary_input = inputs[0] if inputs else (files_used[0] if files_used else None)
             append_line("Input dataset", primary_input)
@@ -2984,9 +3122,17 @@ WORKFLOW PLANNING RULES:
             append_line("Output alias for downstream steps", output_alias)
 
         if not lines:
-            lines.append("- Determine the correct input datasets using the workflow context.")
+            if is_stream_workflow:
+                lines.append("- ⚠️ CRITICAL: No input dataset specified. This is required for the workflow step.")
+            else:
+                lines.append("- Determine the correct input datasets using the workflow context.")
+        
+        if is_stream_workflow and (files_used or inputs):
+            lines.append("")
+            lines.append("⚠️ REMINDER: You MUST use the file(s) listed above. Do not use any other files.")
 
-        return "Datasets & dependencies:\n" + "\n".join(lines)
+        section_title = "🚨 Datasets & dependencies (MANDATORY for Stream AI workflow):" if is_stream_workflow else "Datasets & dependencies:"
+        return section_title + "\n" + "\n".join(lines)
 
     def _build_atom_instruction_section(
         self,
@@ -3009,14 +3155,33 @@ WORKFLOW PLANNING RULES:
             return self._build_data_upload_validate_section(original_prompt, files_used, inputs)
         return self._build_generic_section(atom_id, original_prompt)
 
-    def _build_available_files_section(self, available_files: List[str]) -> str:
+    def _build_available_files_section(self, available_files: List[str], is_stream_workflow: bool = True) -> str:
         if not available_files:
+            if is_stream_workflow:
+                return "🚨 STREAM AI WORKFLOW MODE: No files available. Use ONLY the file(s) specified in the 'Datasets & dependencies' section above."
             return ""
+        
+        lines: List[str] = []
+        
+        if is_stream_workflow:
+            lines.append("🚨 STREAM AI WORKFLOW MODE: You MUST use ONLY the files listed below.")
+            lines.append("Do not use any other files from MinIO.")
+            lines.append("These are the ONLY valid files for this workflow step:")
+            lines.append("")
+        
         max_files = 5
-        lines = [f"- {path}" for path in available_files[:max_files]]
+        file_lines = [f"- {path}" for path in available_files[:max_files]]
         if len(available_files) > max_files:
-            lines.append(f"- (+{len(available_files) - max_files} more)")
-        return "Workspace file inventory:\n" + "\n".join(lines)
+            file_lines.append(f"- (+{len(available_files) - max_files} more)")
+        
+        lines.extend(file_lines)
+        
+        if is_stream_workflow:
+            lines.append("")
+            lines.append("⚠️ REMINDER: Use ONLY these files. Any other file usage will cause workflow failure.")
+        
+        section_title = "🚨 STREAM AI WORKFLOW - Workspace file inventory:" if is_stream_workflow else "Workspace file inventory:"
+        return section_title + "\n" + "\n".join(lines)
 
     def _build_planner_guidance_section(self, planner_prompt: str) -> str:
         if not planner_prompt:

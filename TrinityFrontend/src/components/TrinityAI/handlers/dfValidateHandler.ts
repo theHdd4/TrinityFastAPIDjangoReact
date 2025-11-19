@@ -288,11 +288,74 @@ export const dfValidateHandler: AtomHandler = {
     if (hasDtypeChanges) {
       console.log('🔄 STEP 3: Applying dtype changes...');
       
-      // Update atom settings with dtype changes
+      // Normalize dtype_changes to ensure date types are properly formatted
+      // The backend expects "datetime64" not "date", and format should be preserved
+      const normalizeDtypeChange = (dtype: any): string | { dtype: string; format?: string } => {
+        // Handle object format: { dtype: string, format?: string }
+        if (typeof dtype === 'object' && dtype !== null && 'dtype' in dtype) {
+          const dtypeObj = dtype as { dtype: string; format?: string };
+          const normalizedDtype = dtypeObj.dtype.toLowerCase().trim();
+          
+          // Normalize date types: "date" or "datetime" -> "datetime64"
+          // The backend expects "datetime64" specifically (see routes.py line 3395)
+          if (normalizedDtype === 'date' || normalizedDtype === 'datetime') {
+            return {
+              dtype: 'datetime64',
+              format: dtypeObj.format
+            };
+          }
+          
+          // If it's already "datetime64", ensure it's properly cased
+          if (normalizedDtype === 'datetime64') {
+            return {
+              dtype: 'datetime64',
+              format: dtypeObj.format
+            };
+          }
+          
+          // Return as-is for other types
+          return dtypeObj;
+        }
+        
+        // Handle string format
+        if (typeof dtype === 'string') {
+          const normalizedDtype = dtype.toLowerCase().trim();
+          
+          // Normalize date types: "date" or "datetime" -> "datetime64"
+          // The backend expects "datetime64" specifically (see routes.py line 3395)
+          if (normalizedDtype === 'date' || normalizedDtype === 'datetime') {
+            return 'datetime64';
+          }
+          
+          // If it's already "datetime64", return as-is
+          if (normalizedDtype === 'datetime64') {
+            return 'datetime64';
+          }
+          
+          // Return as-is for other types
+          return dtype;
+        }
+        
+        // Fallback: return as string
+        return String(dtype);
+      };
+      
+      // Normalize all dtype changes
+      const normalizedDtypeChanges: Record<string, string | { dtype: string; format?: string }> = {};
+      for (const [colName, dtype] of Object.entries(dtype_changes)) {
+        normalizedDtypeChanges[colName] = normalizeDtypeChange(dtype);
+      }
+      
+      console.log('🔧 Normalized dtype changes:', {
+        original: dtype_changes,
+        normalized: normalizedDtypeChanges
+      });
+      
+      // Update atom settings with normalized dtype changes
       // The dtype_changes format should match what the backend expects
       // Format: { [fileName]: { [columnName]: dtype_string | { dtype: string, format?: string } } }
       const updatedDtypeChanges: Record<string, Record<string, string | { dtype: string; format?: string }>> = {};
-      updatedDtypeChanges[mappedFileName] = dtype_changes;
+      updatedDtypeChanges[mappedFileName] = normalizedDtypeChanges;
       
       updateAtomSettings(atomId, { 
         dtypeChanges: updatedDtypeChanges,
@@ -303,18 +366,18 @@ export const dfValidateHandler: AtomHandler = {
       console.log('🔧 Atom settings updated with dtype changes:', {
         atomId,
         file_name: mappedFileName,
-        dtype_changes_count: Object.keys(dtype_changes).length,
+        dtype_changes_count: Object.keys(normalizedDtypeChanges).length,
         note: 'Mapped to object_name value for UI dropdown compatibility'
       });
       
       // Automatically call apply-data-transformations endpoint
       try {
       const applyEndpoint = `${VALIDATE_API}/apply-data-transformations`;
-      console.log('🚀 Calling apply-data-transformations endpoint with AI config:', { file_path: objectName, dtype_changes });
+      console.log('🚀 Calling apply-data-transformations endpoint with AI config:', { file_path: objectName, dtype_changes: normalizedDtypeChanges });
       
       const payload = {
         file_path: objectName, // Use full object_name path for backend
-        dtype_changes: dtype_changes,
+        dtype_changes: normalizedDtypeChanges, // Use normalized dtype changes
         missing_value_strategies: {} // Can be extended later
       };
       
@@ -330,8 +393,8 @@ export const dfValidateHandler: AtomHandler = {
         const result = await res2.json();
         console.log('✅ Apply transformations operation successful:', result);
         
-        // Build insights summary
-        const dtypeSummary = Object.entries(dtype_changes).map(([col, dtype]) => {
+        // Build insights summary using normalized dtype changes
+        const dtypeSummary = Object.entries(normalizedDtypeChanges).map(([col, dtype]) => {
           let dtypeStr: string;
           if (typeof dtype === 'object' && dtype !== null && 'dtype' in dtype) {
             const dtypeObj = dtype as { dtype: string; format?: string };
@@ -365,7 +428,7 @@ export const dfValidateHandler: AtomHandler = {
         // Show detailed completion message with insights
         const completionMsg: Message = {
           id: (Date.now() + 1).toString(),
-          content: `🎉 Data type conversion completed successfully!\n\n📊 **Work Done:**\n✅ File loaded: ${mappedFileName}\n✅ Columns converted: ${Object.keys(dtype_changes).length}\n✅ Rows processed: ${result.rows_affected || result.rows || 'N/A'}\n\n📝 **Dtype Changes Applied:**\n${dtypeSummary}\n\n💡 The file has been updated with the new data types and is ready for use in downstream operations.`,
+          content: `🎉 Data type conversion completed successfully!\n\n📊 **Work Done:**\n✅ File loaded: ${mappedFileName}\n✅ Columns converted: ${Object.keys(normalizedDtypeChanges).length}\n✅ Rows processed: ${result.rows_affected || result.rows || 'N/A'}\n\n📝 **Dtype Changes Applied:**\n${dtypeSummary}\n\n💡 The file has been updated with the new data types and is ready for use in downstream operations.`,
           sender: 'ai',
           timestamp: new Date(),
         };

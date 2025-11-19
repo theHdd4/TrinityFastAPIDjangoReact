@@ -116,22 +116,13 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
   // Do NOT re-enable button or remove badge when new changes are made
 
   useEffect(() => {
-    // Load files from settings - check if settings has files that aren't in uploadedFiles
-    const settingsFileNames = new Set(settings.uploadedFiles || []);
-    const currentFileNames = new Set(uploadedFiles.map(f => f.name));
-    
-    // If settings has files that aren't in current uploadedFiles, load them
-    const missingFiles = Array.from(settingsFileNames).filter((name): name is string => 
-      typeof name === 'string' && !currentFileNames.has(name)
-    );
-    
-    if (missingFiles.length > 0) {
-      const newFiles: UploadedFileRef[] = missingFiles.map(name => ({
+    if (uploadedFiles.length === 0 && (settings.uploadedFiles?.length || 0) > 0) {
+      const files: UploadedFileRef[] = (settings.uploadedFiles || []).map(name => ({
         name,
         path: settings.filePathMap?.[name] || '',
         size: settings.fileSizeMap?.[name] || 0,
       }));
-      setUploadedFiles(prev => [...prev, ...newFiles]);
+      setUploadedFiles(files);
       
       // When validation steps are enabled, restore filesFromSavedDataframes from validatedFiles
       if (settings.bypassMasterUpload && settings.validatedFiles && settings.validatedFiles.length > 0) {
