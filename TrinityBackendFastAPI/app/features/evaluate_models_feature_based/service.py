@@ -40,7 +40,6 @@ MINIO_BUCKET = os.getenv("MINIO_BUCKET", settings.minio_bucket_name)
 
 def _read_minio_dataframe(client: Minio, bucket: str, key: str) -> pd.DataFrame:
     """Load a dataframe from MinIO using common parquet/feather/csv formats."""
-
     resp = client.get_object(bucket, key)
     data = resp.read()
     resp.close()
@@ -291,7 +290,168 @@ async def list_selected_models(
     )
     return response.model_dump()
 
+def _run_async_in_sync_context(coro):
+    """
+    Helper to run async coroutine from sync context.
+    Handles both cases: when called from async context (FastAPI) and sync context.
+    """
+    try:
+        # Check if there's already a running loop
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop - safe to use asyncio.run()
+        return asyncio.run(coro)
+    
+    # There's a running loop - we need to run in a thread with a new loop
+    import concurrent.futures
+    
+    def run_in_new_loop():
+        """Run coroutine in a new event loop in a separate thread."""
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        try:
+            return new_loop.run_until_complete(coro)
+        finally:
+            try:
+                # Clean up pending tasks
+                pending = asyncio.all_tasks(new_loop)
+                for task in pending:
+                    task.cancel()
+                # Run the loop until all tasks are cancelled
+                new_loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                # Shutdown async generators
+                new_loop.run_until_complete(new_loop.shutdown_asyncgens())
+                # Shutdown default executor
+                if hasattr(new_loop, 'shutdown_default_executor'):
+                    new_loop.run_until_complete(new_loop.shutdown_default_executor())
+            except Exception as e:
+                logger.warning(f"Error during event loop cleanup: {e}")
+            finally:
+                new_loop.close()
+    
+    # Use ThreadPoolExecutor for better resource management
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(run_in_new_loop)
+        return future.result()
 
+
+
+async def compute_actual_vs_predicted_async(
+    *,
+    results_file_key: str,
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    bucket: str = MINIO_BUCKET,
+    limit_models: int = 1000,
+) -> Dict[str, Any]:
+    """Calculate actual vs predicted values for selected models. Fully async version."""
+    from ..select_models_feature_based.s_curve import apply_transformation_steps
+    
+    # Create MinIO client
+    client = get_minio()
+    results_df = _read_minio_dataframe(client, bucket, results_file_key)
+    results_df.columns = results_df.columns.str.lower()
+    selected_pairs = _collect_selected_rows(results_df)[:limit_models]
+    build_cfg = await get_build_config(client_name, app_name, project_name)
+
+    items: List[Dict[str, Any]] = []
+    for combination_id, model_name in selected_pairs:
+        file_key = _file_key_for_combo(build_cfg, combination_id)
+        src_df = _read_minio_dataframe(client, bucket, file_key)
+        src_df.columns = src_df.columns.str.lower()
+
+        betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
+
+        transformation_metadata: Dict[str, Any] = {}
+        model_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {}).get(model_name, {})
+        transformation_metadata = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
+
+        x_vars = list(betas.keys())
+        y_var = (build_cfg.get("y_variable") or "Volume").lower()
+        if y_var not in src_df.columns:
+            raise ValueError(f"y_variable '{y_var}' not in source for {combination_id}")
+        actual = pd.to_numeric(src_df[y_var], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+
+        date_column = next((c for c in ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"] if c in src_df.columns), None)
+        dates_list: Optional[List[str]] = None
+        if date_column:
+            parsed = pd.to_datetime(src_df[date_column], errors="coerce")
+            dates_list = [d.isoformat() if pd.notna(d) else None for d in parsed]
+
+        has_transformations = bool(transformation_metadata)
+        predicted_values: List[float] = []
+        for _, row in src_df.iterrows():
+            predicted_value = intercept
+            for x_var in x_vars:
+                if x_var in src_df.columns:
+                    x_value = row[x_var]
+                    if has_transformations:
+                        transformation_steps = None
+                        for key in (x_var, x_var.lower(), x_var.upper()):
+                            if key in transformation_metadata and isinstance(transformation_metadata[key], dict):
+                                transformation_steps = transformation_metadata[key].get("transformation_steps")
+                                break
+                        if transformation_steps:
+                            try:
+                                x_value = apply_transformation_steps([x_value], transformation_steps)[0]
+                            except Exception as exc:
+                                logger.warning("Failed to apply transformations for %s: %s", x_var, exc)
+                    predicted_value += betas.get(x_var, 0.0) * x_value
+            predicted_values.append(predicted_value)
+
+        pred = np.array(predicted_values)
+        if len(predicted_values) > 0:
+            predicted_array = np.array(predicted_values)
+            actual_array = np.array(actual)
+            pred_99th = np.percentile(predicted_array, 99)
+            pred_1st = np.percentile(predicted_array, 1)
+            actual_99th = np.percentile(actual_array, 99)
+            actual_1st = np.percentile(actual_array, 1)
+            filtered_data = [
+                (a, p, dates_list[i] if dates_list else None)
+                for i, (a, p) in enumerate(zip(actual, predicted_values))
+                if (pred_1st <= p <= pred_99th and actual_1st <= a <= actual_99th)
+            ]
+            if len(filtered_data) < len(actual):
+                actual = np.array([item[0] for item in filtered_data])
+                pred = np.array([item[1] for item in filtered_data])
+                if dates_list is not None:
+                    dates_list = [item[2] for item in filtered_data]
+
+        if len(pred) and len(actual):
+            p99, p01 = np.percentile(pred, 99), np.percentile(pred, 1)
+            a99, a01 = np.percentile(actual, 99), np.percentile(actual, 1)
+            mask = (pred <= p99) & (pred >= p01) & (actual <= a99) & (actual >= a01)
+            actual = actual[mask]
+            pred = pred[mask]
+            if dates_list is not None:
+                dates_array = np.array(dates_list, dtype=object)
+                dates_list = dates_array[mask].tolist()
+
+        items.append(
+            ActualPredictedItem(
+                combination_id=combination_id,
+                model_name=model_name,
+                file_key=file_key,
+                actual_values=actual.tolist(),
+                predicted_values=pred.tolist(),
+                dates=dates_list,
+                performance_metrics=PerformanceMetrics(**_metrics(actual, pred)),
+                data_points=int(len(actual)),
+            ).model_dump()
+        )
+
+    response = ActualPredictedResponse(
+        results_file_key=results_file_key,
+        bucket=bucket,
+        models_count=len(items),
+        items=[ActualPredictedItem(**i) for i in items],
+    )
+    return response.model_dump()
+
+
+# Keep sync wrapper for backward compatibility if needed
 def compute_actual_vs_predicted(
     *,
     results_file_key: str,
@@ -301,137 +461,18 @@ def compute_actual_vs_predicted(
     bucket: str = MINIO_BUCKET,
     limit_models: int = 1000,
 ) -> Dict[str, Any]:
-    """Calculate actual vs predicted values for selected models. Non-async wrapper for async operations."""
-    from ..select_models_feature_based.s_curve import apply_transformation_steps
-    
-    # Create MinIO client outside thread to avoid endpoint parsing issues
-    minio_client = get_minio()
-    
-    async def _compute():
-        client = minio_client
-        results_df = _read_minio_dataframe(client, bucket, results_file_key)
-        results_df.columns = results_df.columns.str.lower()
-        selected_pairs = _collect_selected_rows(results_df)[:limit_models]
-        build_cfg = await get_build_config(client_name, app_name, project_name)
-
-        items: List[Dict[str, Any]] = []
-        for combination_id, model_name in selected_pairs:
-            file_key = _file_key_for_combo(build_cfg, combination_id)
-            src_df = _read_minio_dataframe(client, bucket, file_key)
-            src_df.columns = src_df.columns.str.lower()
-
-            betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
-
-            transformation_metadata: Dict[str, Any] = {}
-            model_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {}).get(model_name, {})
-            transformation_metadata = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
-
-            x_vars = list(betas.keys())
-            y_var = (build_cfg.get("y_variable") or "Volume").lower()
-            if y_var not in src_df.columns:
-                raise ValueError(f"y_variable '{y_var}' not in source for {combination_id}")
-            actual = pd.to_numeric(src_df[y_var], errors="coerce").fillna(0.0).to_numpy(dtype=float)
-
-            date_column = next((c for c in ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"] if c in src_df.columns), None)
-            dates_list: Optional[List[str]] = None
-            if date_column:
-                parsed = pd.to_datetime(src_df[date_column], errors="coerce")
-                dates_list = [d.isoformat() if pd.notna(d) else None for d in parsed]
-
-            has_transformations = bool(transformation_metadata)
-            predicted_values: List[float] = []
-            for _, row in src_df.iterrows():
-                predicted_value = intercept
-                for x_var in x_vars:
-                    if x_var in src_df.columns:
-                        x_value = row[x_var]
-                        if has_transformations:
-                            transformation_steps = None
-                            for key in (x_var, x_var.lower(), x_var.upper()):
-                                if key in transformation_metadata and isinstance(transformation_metadata[key], dict):
-                                    transformation_steps = transformation_metadata[key].get("transformation_steps")
-                                    break
-                            if transformation_steps:
-                                try:
-                                    x_value = apply_transformation_steps([x_value], transformation_steps)[0]
-                                except Exception as exc:
-                                    logger.warning("Failed to apply transformations for %s: %s", x_var, exc)
-                        predicted_value += betas.get(x_var, 0.0) * x_value
-                predicted_values.append(predicted_value)
-
-            pred = np.array(predicted_values)
-            if len(predicted_values) > 0:
-                predicted_array = np.array(predicted_values)
-                actual_array = np.array(actual)
-                pred_99th = np.percentile(predicted_array, 99)
-                pred_1st = np.percentile(predicted_array, 1)
-                actual_99th = np.percentile(actual_array, 99)
-                actual_1st = np.percentile(actual_array, 1)
-                filtered_data = [
-                    (a, p, dates_list[i] if dates_list else None)
-                    for i, (a, p) in enumerate(zip(actual, predicted_values))
-                    if (pred_1st <= p <= pred_99th and actual_1st <= a <= actual_99th)
-                ]
-                if len(filtered_data) < len(actual):
-                    actual = np.array([item[0] for item in filtered_data])
-                    pred = np.array([item[1] for item in filtered_data])
-                    if dates_list is not None:
-                        dates_list = [item[2] for item in filtered_data]
-
-            if len(pred) and len(actual):
-                p99, p01 = np.percentile(pred, 99), np.percentile(pred, 1)
-                a99, a01 = np.percentile(actual, 99), np.percentile(actual, 1)
-                mask = (pred <= p99) & (pred >= p01) & (actual <= a99) & (actual >= a01)
-                actual = actual[mask]
-                pred = pred[mask]
-                if dates_list is not None:
-                    dates_array = np.array(dates_list, dtype=object)
-                    dates_list = dates_array[mask].tolist()
-
-            items.append(
-                ActualPredictedItem(
-                    combination_id=combination_id,
-                    model_name=model_name,
-                    file_key=file_key,
-                    actual_values=actual.tolist(),
-                    predicted_values=pred.tolist(),
-                    dates=dates_list,
-                    performance_metrics=PerformanceMetrics(**_metrics(actual, pred)),
-                    data_points=int(len(actual)),
-                ).model_dump()
-            )
-
-        response = ActualPredictedResponse(
+    """Sync wrapper - delegates to async version."""
+    return _run_async_in_sync_context(
+        compute_actual_vs_predicted_async(
             results_file_key=results_file_key,
+            client_name=client_name,
+            app_name=app_name,
+            project_name=project_name,
             bucket=bucket,
-            models_count=len(items),
-            items=[ActualPredictedItem(**i) for i in items],
+            limit_models=limit_models,
         )
-        return response.model_dump()
-    
-    # Run async function - always use a new thread with new event loop to avoid conflicts
-    import threading
-    result = None
-    exception = None
-    
-    def run_in_thread():
-        nonlocal result, exception
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            result = new_loop.run_until_complete(_compute())
-        except Exception as e:
-            exception = e
-        finally:
-            new_loop.close()
-    
-    thread = threading.Thread(target=run_in_thread)
-    thread.start()
-    thread.join()
-    
-    if exception:
-        raise exception
-    return result
+    )
+
 
 
 def compute_contributions_yoy(
@@ -444,7 +485,7 @@ def compute_contributions_yoy(
 ) -> Dict[str, Any]:
     """Calculate contributions YoY for selected models. Non-async wrapper for async operations."""
     
-    # Create MinIO client outside thread to avoid endpoint parsing issues
+    # Create MinIO client outside async to avoid endpoint parsing issues
     minio_client = get_minio()
     
     async def _compute():
@@ -509,29 +550,7 @@ def compute_contributions_yoy(
         )
         return response.model_dump()
     
-    # Run async function - always use a new thread with new event loop to avoid conflicts
-    import threading
-    result = None
-    exception = None
-    
-    def run_in_thread():
-        nonlocal result, exception
-        new_loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(new_loop)
-        try:
-            result = new_loop.run_until_complete(_compute())
-        except Exception as e:
-            exception = e
-        finally:
-            new_loop.close()
-    
-    thread = threading.Thread(target=run_in_thread)
-    thread.start()
-    thread.join()
-    
-    if exception:
-        raise exception
-    return result
+    return _run_async_in_sync_context(_compute())
 
 
 def compute_yoy_growth(
@@ -545,7 +564,7 @@ def compute_yoy_growth(
     """Calculate YoY growth for selected models. Non-async wrapper for async operations."""
     from ..select_models_feature_based.s_curve import apply_transformation_steps
     
-    # Create MinIO client outside thread to avoid endpoint parsing issues
+    # Create MinIO client outside async to avoid endpoint parsing issues
     minio_client = get_minio()
     
     async def _compute():
@@ -638,6 +657,18 @@ def compute_yoy_growth(
                         }
                     )
 
+            # Calculate residual
+            residual = float(observed_delta - explained_delta)
+            
+            # Calculate YoY percentage change
+            yoy_percentage = 0.0
+            if y_first_mean != 0:
+                yoy_percentage = (observed_delta / y_first_mean) * 100
+            
+            # Create waterfall data for visualization (same format as select atom)
+            waterfall_labels = [f"Base {year_first}"] + [c["variable"] for c in contributions] + ["Residual", f"Final {year_last}"]
+            waterfall_values = [float(y_first_mean)] + [c["contribution"] for c in contributions] + [residual, float(y_last_mean)]
+            
             yoy_results.append(
                 {
                     "combination_id": combination_id,
@@ -648,13 +679,16 @@ def compute_yoy_growth(
                     "observed_delta": observed_delta,
                     "explained_delta": explained_delta,
                     "contributions": contributions,
+                    "waterfall": {
+                        "labels": waterfall_labels,
+                        "values": waterfall_values
+                    }
                 }
             )
 
         return {"results": yoy_results, "results_file_key": results_file_key, "bucket": bucket}
     
-    # Run async function using asyncio.run() to avoid event loop conflicts
-    return asyncio.run(_compute())
+    return _run_async_in_sync_context(_compute())
 
 
 __all__ = [
