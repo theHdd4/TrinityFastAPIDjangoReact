@@ -10,6 +10,7 @@ plain dictionaries that the task queue can serialise.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -79,13 +80,21 @@ def _collect_selected_rows(results_df: pd.DataFrame) -> List[Tuple[str, str]]:
         missing.append("combination_id")
     if not model_name_col:
         missing.append("model_name")
-    if not selected_models_col:
-        missing.append("selected_models")
+    
     if missing:
         raise ValueError(f"Results file missing required columns: {missing}")
+    
+    # If selected_models column doesn't exist, use all rows (backward compatibility)
+    if not selected_models_col:
+        logger.warning("No selected_models column found in dataset, using all data")
+        return [(str(r[combination_col]), str(r[model_name_col])) for _, r in results_df.iterrows()]
 
     truthy = {"selected", "true", "yes", "1", "y"}
     rows = results_df[results_df[selected_models_col].apply(lambda v: str(v).strip().lower() in truthy)]
+    if rows.empty:
+        logger.warning("No rows marked as selected; falling back to all models in results file")
+        rows = results_df
+
     return [(str(r[combination_col]), str(r[model_name_col])) for _, r in rows.iterrows()]
 
 
@@ -99,15 +108,27 @@ def _extract_betas_from_results_file(results_df: pd.DataFrame, combination_id: s
         if col_lower == "selected_models" or "selected_models" in col_lower:
             selected_models_column = col
 
-    if not combination_id_column or not selected_models_column:
-        raise ValueError("Results file missing combination_id or selected_models columns")
-
-    filtered_df = results_df[
-        (results_df[combination_id_column] == combination_id)
-        & (results_df[selected_models_column].str.lower() == "yes")
-    ]
+    if not combination_id_column:
+        raise ValueError("Results file missing combination_id column")
+    
+    # If selected_models column doesn't exist, filter only by combination_id (backward compatibility)
+    if not selected_models_column:
+        logger.warning("No selected_models column found in dataset, using all data for combination_id")
+        filtered_df = results_df[results_df[combination_id_column] == combination_id]
+    else:
+        filtered_df = results_df[
+            (results_df[combination_id_column] == combination_id)
+            & (results_df[selected_models_column].str.lower() == "yes")
+        ]
+        if filtered_df.empty:
+            logger.warning(
+                "No rows flagged as selected for combination_id=%s; using first available row instead",
+                combination_id,
+            )
+            filtered_df = results_df[results_df[combination_id_column] == combination_id]
+    
     if filtered_df.empty:
-        raise ValueError(f"No selected rows for combination_id={combination_id}")
+        raise ValueError(f"No rows found for combination_id={combination_id}")
 
     combination_row = filtered_df.iloc[0]
 
@@ -271,7 +292,7 @@ async def list_selected_models(
     return response.model_dump()
 
 
-async def compute_actual_vs_predicted(
+def compute_actual_vs_predicted(
     *,
     results_file_key: str,
     client_name: str,
@@ -280,293 +301,360 @@ async def compute_actual_vs_predicted(
     bucket: str = MINIO_BUCKET,
     limit_models: int = 1000,
 ) -> Dict[str, Any]:
+    """Calculate actual vs predicted values for selected models. Non-async wrapper for async operations."""
     from ..select_models_feature_based.s_curve import apply_transformation_steps
+    
+    # Create MinIO client outside thread to avoid endpoint parsing issues
+    minio_client = get_minio()
+    
+    async def _compute():
+        client = minio_client
+        results_df = _read_minio_dataframe(client, bucket, results_file_key)
+        results_df.columns = results_df.columns.str.lower()
+        selected_pairs = _collect_selected_rows(results_df)[:limit_models]
+        build_cfg = await get_build_config(client_name, app_name, project_name)
 
-    client = get_minio()
-    results_df = _read_minio_dataframe(client, bucket, results_file_key)
-    results_df.columns = results_df.columns.str.lower()
-    selected_pairs = _collect_selected_rows(results_df)[:limit_models]
-    build_cfg = await get_build_config(client_name, app_name, project_name)
+        items: List[Dict[str, Any]] = []
+        for combination_id, model_name in selected_pairs:
+            file_key = _file_key_for_combo(build_cfg, combination_id)
+            src_df = _read_minio_dataframe(client, bucket, file_key)
+            src_df.columns = src_df.columns.str.lower()
 
-    items: List[Dict[str, Any]] = []
-    for combination_id, model_name in selected_pairs:
-        file_key = _file_key_for_combo(build_cfg, combination_id)
-        src_df = _read_minio_dataframe(client, bucket, file_key)
-        src_df.columns = src_df.columns.str.lower()
+            betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
 
-        betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
+            transformation_metadata: Dict[str, Any] = {}
+            model_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {}).get(model_name, {})
+            transformation_metadata = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
 
-        transformation_metadata: Dict[str, Any] = {}
-        model_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {}).get(model_name, {})
-        transformation_metadata = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
+            x_vars = list(betas.keys())
+            y_var = (build_cfg.get("y_variable") or "Volume").lower()
+            if y_var not in src_df.columns:
+                raise ValueError(f"y_variable '{y_var}' not in source for {combination_id}")
+            actual = pd.to_numeric(src_df[y_var], errors="coerce").fillna(0.0).to_numpy(dtype=float)
 
-        x_vars = list(betas.keys())
-        y_var = (build_cfg.get("y_variable") or "Volume").lower()
-        if y_var not in src_df.columns:
-            raise ValueError(f"y_variable '{y_var}' not in source for {combination_id}")
-        actual = pd.to_numeric(src_df[y_var], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            date_column = next((c for c in ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"] if c in src_df.columns), None)
+            dates_list: Optional[List[str]] = None
+            if date_column:
+                parsed = pd.to_datetime(src_df[date_column], errors="coerce")
+                dates_list = [d.isoformat() if pd.notna(d) else None for d in parsed]
 
-        date_column = next((c for c in ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"] if c in src_df.columns), None)
-        dates_list: Optional[List[str]] = None
-        if date_column:
-            parsed = pd.to_datetime(src_df[date_column], errors="coerce")
-            dates_list = [d.isoformat() if pd.notna(d) else None for d in parsed]
+            has_transformations = bool(transformation_metadata)
+            predicted_values: List[float] = []
+            for _, row in src_df.iterrows():
+                predicted_value = intercept
+                for x_var in x_vars:
+                    if x_var in src_df.columns:
+                        x_value = row[x_var]
+                        if has_transformations:
+                            transformation_steps = None
+                            for key in (x_var, x_var.lower(), x_var.upper()):
+                                if key in transformation_metadata and isinstance(transformation_metadata[key], dict):
+                                    transformation_steps = transformation_metadata[key].get("transformation_steps")
+                                    break
+                            if transformation_steps:
+                                try:
+                                    x_value = apply_transformation_steps([x_value], transformation_steps)[0]
+                                except Exception as exc:
+                                    logger.warning("Failed to apply transformations for %s: %s", x_var, exc)
+                        predicted_value += betas.get(x_var, 0.0) * x_value
+                predicted_values.append(predicted_value)
 
-        has_transformations = bool(transformation_metadata)
-        predicted_values: List[float] = []
-        for _, row in src_df.iterrows():
-            predicted_value = intercept
-            for x_var in x_vars:
-                if x_var in src_df.columns:
-                    x_value = row[x_var]
-                    if has_transformations:
-                        transformation_steps = None
-                        for key in (x_var, x_var.lower(), x_var.upper()):
-                            if key in transformation_metadata and isinstance(transformation_metadata[key], dict):
-                                transformation_steps = transformation_metadata[key].get("transformation_steps")
-                                break
-                        if transformation_steps:
-                            try:
-                                x_value = apply_transformation_steps([x_value], transformation_steps)[0]
-                            except Exception as exc:
-                                logger.warning("Failed to apply transformations for %s: %s", x_var, exc)
-                    predicted_value += betas.get(x_var, 0.0) * x_value
-            predicted_values.append(predicted_value)
+            pred = np.array(predicted_values)
+            if len(predicted_values) > 0:
+                predicted_array = np.array(predicted_values)
+                actual_array = np.array(actual)
+                pred_99th = np.percentile(predicted_array, 99)
+                pred_1st = np.percentile(predicted_array, 1)
+                actual_99th = np.percentile(actual_array, 99)
+                actual_1st = np.percentile(actual_array, 1)
+                filtered_data = [
+                    (a, p, dates_list[i] if dates_list else None)
+                    for i, (a, p) in enumerate(zip(actual, predicted_values))
+                    if (pred_1st <= p <= pred_99th and actual_1st <= a <= actual_99th)
+                ]
+                if len(filtered_data) < len(actual):
+                    actual = np.array([item[0] for item in filtered_data])
+                    pred = np.array([item[1] for item in filtered_data])
+                    if dates_list is not None:
+                        dates_list = [item[2] for item in filtered_data]
 
-        pred = np.array(predicted_values)
-        if len(predicted_values) > 0:
-            predicted_array = np.array(predicted_values)
-            actual_array = np.array(actual)
-            pred_99th = np.percentile(predicted_array, 99)
-            pred_1st = np.percentile(predicted_array, 1)
-            actual_99th = np.percentile(actual_array, 99)
-            actual_1st = np.percentile(actual_array, 1)
-            filtered_data = [
-                (a, p, dates_list[i] if dates_list else None)
-                for i, (a, p) in enumerate(zip(actual, predicted_values))
-                if (pred_1st <= p <= pred_99th and actual_1st <= a <= actual_99th)
-            ]
-            if len(filtered_data) < len(actual):
-                actual = np.array([item[0] for item in filtered_data])
-                pred = np.array([item[1] for item in filtered_data])
+            if len(pred) and len(actual):
+                p99, p01 = np.percentile(pred, 99), np.percentile(pred, 1)
+                a99, a01 = np.percentile(actual, 99), np.percentile(actual, 1)
+                mask = (pred <= p99) & (pred >= p01) & (actual <= a99) & (actual >= a01)
+                actual = actual[mask]
+                pred = pred[mask]
                 if dates_list is not None:
-                    dates_list = [item[2] for item in filtered_data]
+                    dates_array = np.array(dates_list, dtype=object)
+                    dates_list = dates_array[mask].tolist()
 
-        if len(pred) and len(actual):
-            p99, p01 = np.percentile(pred, 99), np.percentile(pred, 1)
-            a99, a01 = np.percentile(actual, 99), np.percentile(actual, 1)
-            mask = (pred <= p99) & (pred >= p01) & (actual <= a99) & (actual >= a01)
-            actual = actual[mask]
-            pred = pred[mask]
-            if dates_list is not None:
-                dates_array = np.array(dates_list, dtype=object)
-                dates_list = dates_array[mask].tolist()
+            items.append(
+                ActualPredictedItem(
+                    combination_id=combination_id,
+                    model_name=model_name,
+                    file_key=file_key,
+                    actual_values=actual.tolist(),
+                    predicted_values=pred.tolist(),
+                    dates=dates_list,
+                    performance_metrics=PerformanceMetrics(**_metrics(actual, pred)),
+                    data_points=int(len(actual)),
+                ).model_dump()
+            )
 
-        items.append(
-            ActualPredictedItem(
-                combination_id=combination_id,
-                model_name=model_name,
-                file_key=file_key,
-                actual_values=actual.tolist(),
-                predicted_values=pred.tolist(),
-                dates=dates_list,
-                performance_metrics=PerformanceMetrics(**_metrics(actual, pred)),
-                data_points=int(len(actual)),
-            ).model_dump()
+        response = ActualPredictedResponse(
+            results_file_key=results_file_key,
+            bucket=bucket,
+            models_count=len(items),
+            items=[ActualPredictedItem(**i) for i in items],
         )
-
-    response = ActualPredictedResponse(
-        results_file_key=results_file_key,
-        bucket=bucket,
-        models_count=len(items),
-        items=[ActualPredictedItem(**i) for i in items],
-    )
-    return response.model_dump()
-
-
-async def compute_contributions_yoy(
-    *,
-    results_file_key: str,
-    client_name: str,
-    app_name: str,
-    project_name: str,
-    bucket: str = MINIO_BUCKET,
-) -> Dict[str, Any]:
-    client = get_minio()
-    results_df = _read_minio_dataframe(client, bucket, results_file_key)
-    results_df.columns = results_df.columns.str.lower()
-    selected_pairs = _collect_selected_rows(results_df)
-    build_cfg = await get_build_config(client_name, app_name, project_name)
-
-    out_items: List[Dict[str, Any]] = []
-    for combination_id, model_name in selected_pairs:
-        file_key = _file_key_for_combo(build_cfg, combination_id)
-        df = _read_minio_dataframe(client, bucket, file_key)
-
-        betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
-        x_vars = list(betas.keys())
-
-        year_col = _year_col(df)
-        if not year_col:
-            raise ValueError(f"Source for {combination_id} has no Year column")
-
-        contrib_cols: Dict[str, pd.Series] = {}
-        for x in x_vars:
-            if x in df.columns:
-                vec = pd.to_numeric(df[x], errors="coerce").fillna(0.0)
-                contrib_cols[x] = (betas.get(x, 0.0) * vec).astype(float)
-
-        if not contrib_cols:
-            continue
-
-        contrib_df = pd.DataFrame(contrib_cols)
-        contrib_df[year_col] = df[year_col]
-
-        yearly = contrib_df.groupby(year_col).sum(numeric_only=True).sort_index()
-        yoy = yearly.pct_change().replace([np.inf, -np.inf], np.nan) * 100.0
-
-        years_list: List[Any]
-        if np.issubdtype(yearly.index.dtype, np.number):
-            years_list = yearly.index.astype(int).tolist()
-        else:
-            years_list = yearly.index.astype(str).tolist()
-
-        out_items.append(
-            ContributionsItem(
-                combination_id=combination_id,
-                model_name=model_name,
-                file_key=file_key,
-                years=years_list,
-                yearly_contributions={col: yearly[col].round(6).tolist() for col in yearly.columns},
-                yoy_contributions_pct={col: yoy[col].round(4).fillna(0.0).tolist() for col in yearly.columns},
-            ).model_dump()
-        )
-
-    if not out_items:
-        raise ValueError("No selected models (or no contribution variables) found")
-
-    response = ContributionsResponse(
-        results_file_key=results_file_key,
-        bucket=bucket,
-        models_count=len(out_items),
-        items=[ContributionsItem(**i) for i in out_items],
-    )
-    return response.model_dump()
-
-
-async def compute_yoy_growth(
-    *,
-    results_file_key: str,
-    client_name: str,
-    app_name: str,
-    project_name: str,
-    bucket: str = MINIO_BUCKET,
-) -> Dict[str, Any]:
-    from ..select_models_feature_based.s_curve import apply_transformation_steps
-
-    build_cfg = await get_build_config(client_name, app_name, project_name)
-    client = get_minio()
-    results_df = _read_minio_dataframe(client, bucket, results_file_key)
-    selected_pairs = _collect_selected_rows(results_df)
-    if not selected_pairs:
-        raise ValueError("No selected models found in the results file")
-
-    yoy_results: List[Dict[str, Any]] = []
-    for combination_id, model_name in selected_pairs:
-        betas, intercept, transformation_metadata = _extract_betas_from_results_file(results_df, combination_id)
-        x_vars = list(betas.keys())
-        y_var = (build_cfg.get("y_variable") or "Volume").lower()
-
+        return response.model_dump()
+    
+    # Run async function - always use a new thread with new event loop to avoid conflicts
+    import threading
+    result = None
+    exception = None
+    
+    def run_in_thread():
+        nonlocal result, exception
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
         try:
-            combo_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {})
-            model_coeffs = combo_coeffs.get(model_name, {}) if isinstance(combo_coeffs, dict) else {}
-            from_mongo = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
-            if isinstance(from_mongo, str):
-                try:
-                    from_mongo = json.loads(from_mongo)
-                except json.JSONDecodeError:
-                    from_mongo = {}
-            if isinstance(from_mongo, dict):
-                transformation_metadata = from_mongo
-        except Exception as exc:
-            logger.warning("Failed to merge transformation metadata for %s/%s: %s", combination_id, model_name, exc)
+            result = new_loop.run_until_complete(_compute())
+        except Exception as e:
+            exception = e
+        finally:
+            new_loop.close()
+    
+    thread = threading.Thread(target=run_in_thread)
+    thread.start()
+    thread.join()
+    
+    if exception:
+        raise exception
+    return result
 
-        has_transformations = bool(transformation_metadata)
-        file_key = _file_key_for_combo(build_cfg, combination_id)
-        df = _read_minio_dataframe(client, bucket, file_key)
-        df.columns = df.columns.str.lower()
 
-        date_column = next((c for c in ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"] if c in df.columns), None)
-        if not date_column:
-            continue
+def compute_contributions_yoy(
+    *,
+    results_file_key: str,
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    bucket: str = MINIO_BUCKET,
+) -> Dict[str, Any]:
+    """Calculate contributions YoY for selected models. Non-async wrapper for async operations."""
+    
+    # Create MinIO client outside thread to avoid endpoint parsing issues
+    minio_client = get_minio()
+    
+    async def _compute():
+        client = minio_client
+        results_df = _read_minio_dataframe(client, bucket, results_file_key)
+        results_df.columns = results_df.columns.str.lower()
+        selected_pairs = _collect_selected_rows(results_df)
+        build_cfg = await get_build_config(client_name, app_name, project_name)
 
-        df[date_column] = pd.to_datetime(df[date_column], errors="coerce")
-        df = df.dropna(subset=[date_column])
-        years = sorted(df[date_column].dt.year.unique())
-        if len(years) < 2:
-            continue
+        out_items: List[Dict[str, Any]] = []
+        for combination_id, model_name in selected_pairs:
+            file_key = _file_key_for_combo(build_cfg, combination_id)
+            df = _read_minio_dataframe(client, bucket, file_key)
 
-        year_first, year_last = int(years[0]), int(years[-1])
-        df_first_year = df[df[date_column].dt.year == year_first]
-        df_last_year = df[df[date_column].dt.year == year_last]
-        if df_first_year.empty or df_last_year.empty:
-            continue
+            betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
+            x_vars = list(betas.keys())
 
-        y_first_mean = df_first_year[y_var].mean() if y_var in df_first_year.columns else 0
-        y_last_mean = df_last_year[y_var].mean() if y_var in df_last_year.columns else 0
-        observed_delta = float(y_last_mean - y_first_mean)
+            year_col = _year_col(df)
+            if not year_col:
+                raise ValueError(f"Source for {combination_id} has no Year column")
 
-        explained_delta = 0.0
-        contributions: List[Dict[str, Any]] = []
-        for x_var in x_vars:
-            if x_var in betas and x_var in df.columns:
-                beta_value = betas[x_var]
-                x_first = df_first_year[x_var].mean()
-                x_last = df_last_year[x_var].mean()
+            contrib_cols: Dict[str, pd.Series] = {}
+            for x in x_vars:
+                if x in df.columns:
+                    vec = pd.to_numeric(df[x], errors="coerce").fillna(0.0)
+                    contrib_cols[x] = (betas.get(x, 0.0) * vec).astype(float)
 
-                if has_transformations and x_var in transformation_metadata:
-                    var_meta = transformation_metadata[x_var]
-                    if isinstance(var_meta, dict) and "transformation_steps" in var_meta:
-                        var_meta = var_meta["transformation_steps"]
-                    if isinstance(var_meta, str):
-                        try:
-                            parsed = json.loads(var_meta)
-                            if isinstance(parsed, dict) and "transformation_steps" in parsed:
-                                var_meta = parsed["transformation_steps"]
-                        except json.JSONDecodeError:
-                            var_meta = []
-                    try:
-                        x_first = apply_transformation_steps([x_first], var_meta)[0]
-                        x_last = apply_transformation_steps([x_last], var_meta)[0]
-                    except Exception as exc:
-                        logger.warning("Failed to apply YoY transformations for %s: %s", x_var, exc)
+            if not contrib_cols:
+                continue
 
-                delta = float(x_last - x_first)
-                contribution = float(beta_value * delta)
-                explained_delta += contribution
-                contributions.append(
-                    {
-                        "variable": x_var,
-                        "beta": beta_value,
-                        "delta": delta,
-                        "contribution": contribution,
-                    }
-                )
+            contrib_df = pd.DataFrame(contrib_cols)
+            contrib_df[year_col] = df[year_col]
 
-        yoy_results.append(
-            {
-                "combination_id": combination_id,
-                "model_name": model_name,
-                "file_key": file_key,
-                "year_first": year_first,
-                "year_last": year_last,
-                "observed_delta": observed_delta,
-                "explained_delta": explained_delta,
-                "contributions": contributions,
-            }
+            yearly = contrib_df.groupby(year_col).sum(numeric_only=True).sort_index()
+            yoy = yearly.pct_change().replace([np.inf, -np.inf], np.nan) * 100.0
+
+            years_list: List[Any]
+            if np.issubdtype(yearly.index.dtype, np.number):
+                years_list = yearly.index.astype(int).tolist()
+            else:
+                years_list = yearly.index.astype(str).tolist()
+
+            out_items.append(
+                ContributionsItem(
+                    combination_id=combination_id,
+                    model_name=model_name,
+                    file_key=file_key,
+                    years=years_list,
+                    yearly_contributions={col: yearly[col].round(6).tolist() for col in yearly.columns},
+                    yoy_contributions_pct={col: yoy[col].round(4).fillna(0.0).tolist() for col in yearly.columns},
+                ).model_dump()
+            )
+
+        if not out_items:
+            raise ValueError("No selected models (or no contribution variables) found")
+
+        response = ContributionsResponse(
+            results_file_key=results_file_key,
+            bucket=bucket,
+            models_count=len(out_items),
+            items=[ContributionsItem(**i) for i in out_items],
         )
+        return response.model_dump()
+    
+    # Run async function - always use a new thread with new event loop to avoid conflicts
+    import threading
+    result = None
+    exception = None
+    
+    def run_in_thread():
+        nonlocal result, exception
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        try:
+            result = new_loop.run_until_complete(_compute())
+        except Exception as e:
+            exception = e
+        finally:
+            new_loop.close()
+    
+    thread = threading.Thread(target=run_in_thread)
+    thread.start()
+    thread.join()
+    
+    if exception:
+        raise exception
+    return result
 
-    return {"results": yoy_results, "results_file_key": results_file_key, "bucket": bucket}
+
+def compute_yoy_growth(
+    *,
+    results_file_key: str,
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    bucket: str = MINIO_BUCKET,
+) -> Dict[str, Any]:
+    """Calculate YoY growth for selected models. Non-async wrapper for async operations."""
+    from ..select_models_feature_based.s_curve import apply_transformation_steps
+    
+    # Create MinIO client outside thread to avoid endpoint parsing issues
+    minio_client = get_minio()
+    
+    async def _compute():
+        build_cfg = await get_build_config(client_name, app_name, project_name)
+        client = minio_client
+        results_df = _read_minio_dataframe(client, bucket, results_file_key)
+        selected_pairs = _collect_selected_rows(results_df)
+        if not selected_pairs:
+            raise ValueError("No selected models found in the results file")
+
+        yoy_results: List[Dict[str, Any]] = []
+        for combination_id, model_name in selected_pairs:
+            betas, intercept, transformation_metadata = _extract_betas_from_results_file(results_df, combination_id)
+            x_vars = list(betas.keys())
+            y_var = (build_cfg.get("y_variable") or "Volume").lower()
+
+            try:
+                combo_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {})
+                model_coeffs = combo_coeffs.get(model_name, {}) if isinstance(combo_coeffs, dict) else {}
+                from_mongo = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
+                if isinstance(from_mongo, str):
+                    try:
+                        from_mongo = json.loads(from_mongo)
+                    except json.JSONDecodeError:
+                        from_mongo = {}
+                if isinstance(from_mongo, dict):
+                    transformation_metadata = from_mongo
+            except Exception as exc:
+                logger.warning("Failed to merge transformation metadata for %s/%s: %s", combination_id, model_name, exc)
+
+            has_transformations = bool(transformation_metadata)
+            file_key = _file_key_for_combo(build_cfg, combination_id)
+            df = _read_minio_dataframe(client, bucket, file_key)
+            df.columns = df.columns.str.lower()
+
+            date_column = next((c for c in ["date", "invoice_date", "bill_date", "order_date", "month", "period", "year"] if c in df.columns), None)
+            if not date_column:
+                continue
+
+            df[date_column] = pd.to_datetime(df[date_column], errors="coerce")
+            df = df.dropna(subset=[date_column])
+            years = sorted(df[date_column].dt.year.unique())
+            if len(years) < 2:
+                continue
+
+            year_first, year_last = int(years[0]), int(years[-1])
+            df_first_year = df[df[date_column].dt.year == year_first]
+            df_last_year = df[df[date_column].dt.year == year_last]
+            if df_first_year.empty or df_last_year.empty:
+                continue
+
+            y_first_mean = df_first_year[y_var].mean() if y_var in df_first_year.columns else 0
+            y_last_mean = df_last_year[y_var].mean() if y_var in df_last_year.columns else 0
+            observed_delta = float(y_last_mean - y_first_mean)
+
+            explained_delta = 0.0
+            contributions: List[Dict[str, Any]] = []
+            for x_var in x_vars:
+                if x_var in betas and x_var in df.columns:
+                    beta_value = betas[x_var]
+                    x_first = df_first_year[x_var].mean()
+                    x_last = df_last_year[x_var].mean()
+
+                    if has_transformations and x_var in transformation_metadata:
+                        var_meta = transformation_metadata[x_var]
+                        if isinstance(var_meta, dict) and "transformation_steps" in var_meta:
+                            var_meta = var_meta["transformation_steps"]
+                        if isinstance(var_meta, str):
+                            try:
+                                parsed = json.loads(var_meta)
+                                if isinstance(parsed, dict) and "transformation_steps" in parsed:
+                                    var_meta = parsed["transformation_steps"]
+                            except json.JSONDecodeError:
+                                var_meta = []
+                        try:
+                            x_first = apply_transformation_steps([x_first], var_meta)[0]
+                            x_last = apply_transformation_steps([x_last], var_meta)[0]
+                        except Exception as exc:
+                            logger.warning("Failed to apply YoY transformations for %s: %s", x_var, exc)
+
+                    delta = float(x_last - x_first)
+                    contribution = float(beta_value * delta)
+                    explained_delta += contribution
+                    contributions.append(
+                        {
+                            "variable": x_var,
+                            "beta": beta_value,
+                            "delta": delta,
+                            "contribution": contribution,
+                        }
+                    )
+
+            yoy_results.append(
+                {
+                    "combination_id": combination_id,
+                    "model_name": model_name,
+                    "file_key": file_key,
+                    "year_first": year_first,
+                    "year_last": year_last,
+                    "observed_delta": observed_delta,
+                    "explained_delta": explained_delta,
+                    "contributions": contributions,
+                }
+            )
+
+        return {"results": yoy_results, "results_file_key": results_file_key, "bucket": bucket}
+    
+    # Run async function using asyncio.run() to avoid event loop conflicts
+    return asyncio.run(_compute())
 
 
 __all__ = [

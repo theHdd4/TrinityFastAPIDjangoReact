@@ -86,6 +86,7 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
   useEffect(() => {
     const key = data.selectedDataframe;
     if (!key) {
+      console.log('EVALUATE FEATURE BASED: Skipping combinations fetch - no dataframe selected');
       setCombinationOptions([]);
       return;
     }
@@ -103,16 +104,27 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
       }
     }
     
+    console.log('EVALUATE FEATURE BASED: Fetching combinations from settings component');
+    console.log('EVALUATE FEATURE BASED: Combinations URL:', url);
+    console.log('EVALUATE FEATURE BASED: Identifier values:', data.selectedIdentifierValues);
+    
     fetch(url)
-      .then(res => res.json())
+      .then(res => {
+        console.log('EVALUATE FEATURE BASED: Combinations response status:', res.status);
+        return res.json();
+      })
       .then(data => {
+        console.log('EVALUATE FEATURE BASED: Combinations response:', data);
         if (data.combinations && Array.isArray(data.combinations)) {
+          console.log('EVALUATE FEATURE BASED: Found', data.combinations.length, 'combinations');
           setCombinationOptions(data.combinations);
         } else {
+          console.warn('EVALUATE FEATURE BASED: No combinations array in response');
           setCombinationOptions([]);
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error('EVALUATE FEATURE BASED: Error fetching combinations:', error);
         setCombinationOptions([]);
       });
   }, [data.selectedDataframe, data.selectedIdentifierValues]);

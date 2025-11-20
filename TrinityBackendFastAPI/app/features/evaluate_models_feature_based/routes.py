@@ -276,19 +276,22 @@ def _collect_selected_rows(results_df: pd.DataFrame) -> List[Tuple[str, str]]:
         elif col_lower == 'selected_models':
             selected_models_col = col
     
-    if not combination_col or not model_name_col or not selected_models_col:
-        missing_cols = []
-        if not combination_col:
-            missing_cols.append('combination_id')
-        if not model_name_col:
-            missing_cols.append('model_name')
-        if not selected_models_col:
-            missing_cols.append('selected_models')
-        
+    missing_cols = []
+    if not combination_col:
+        missing_cols.append('combination_id')
+    if not model_name_col:
+        missing_cols.append('model_name')
+    
+    if missing_cols:
         raise HTTPException(
             status_code=400,
             detail=f"Results file missing required columns: {missing_cols}. Available columns: {list(results_df.columns)}",
         )
+    
+    # If selected_models column doesn't exist, use all rows (backward compatibility)
+    if not selected_models_col:
+        logger.warning("No selected_models column found in dataset, using all data")
+        return [(str(r[combination_col]), str(r[model_name_col])) for _, r in results_df.iterrows()]
     
     rows = results_df[results_df[selected_models_col].apply(_truthy_selected)]
     
@@ -704,9 +707,10 @@ async def get_combinations_from_dataset(
         
         # Filter combinations where selected_models = 'yes'
         if selected_models_column is not None:
-            # Filter rows where selected_models column has value 'yes' (case-insensitive)
             filtered_df = df[df[selected_models_column].astype(str).str.lower() == 'yes']
-            # logger.info(f"Filtered to {len(filtered_df)} rows where selected_models = 'yes'")
+            if filtered_df.empty:
+                logger.warning("selected_models column present but no rows selected; using all rows instead")
+                filtered_df = df
         else:
             # If no selected_models column, use all data (fallback)
             filtered_df = df
@@ -842,11 +846,11 @@ async def get_identifiers_from_dataset(
         
         # Filter data to only include rows where selected_models = 'yes'
         if 'selected_models' in df.columns:
-            # Filter rows where selected_models column has value 'yes' (case-insensitive)
             df_filtered = df[df['selected_models'].astype(str).str.lower() == 'yes']
-            # logger.info(f"Filtered dataset from {len(df)} to {len(df_filtered)} rows where selected_models = 'yes'")
-            # logger.info(f"Available combination_ids in filtered data: {df_filtered['combination_id'].unique().tolist() if 'combination_id' in df_filtered.columns else 'No combination_id column'}")
-            df = df_filtered
+            if df_filtered.empty:
+                logger.warning("selected_models column present but no rows marked 'yes'; using all data instead")
+            else:
+                df = df_filtered
         else:
             logger.warning("No selected_models column found in dataset, using all data")
         
@@ -1001,7 +1005,10 @@ async def get_contribution_data(
         ]
         
         if filtered_df.empty:
-            raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id} with selected_models = 'yes'")
+            logger.warning("No rows marked selected for combination %s; falling back to first available row", combination_id)
+            filtered_df = df[df[combination_id_column] == combination_id]
+            if filtered_df.empty:
+                raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id}")
         
         # logger.info(f"Found {len(filtered_df)} rows for combination_id: {combination_id} with selected_models = 'yes'")
         
@@ -1116,7 +1123,10 @@ async def get_roi_data(
         ]
         
         if filtered_df.empty:
-            raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id} with selected_models = 'yes'")
+            logger.warning("No ROI rows marked selected for combination %s; using all rows for this combination", combination_id)
+            filtered_df = df[df[combination_id_column] == combination_id]
+            if filtered_df.empty:
+                raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id}")
         
         # Get the first row (should be only one for a specific combination)
         combination_row = filtered_df.iloc[0]
@@ -1231,7 +1241,10 @@ async def get_beta_data(
         ]
         
         if filtered_df.empty:
-            raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id} with selected_models = 'yes'")
+            logger.warning("No beta rows marked selected for combination %s; using all rows for this combination", combination_id)
+            filtered_df = df[df[combination_id_column] == combination_id]
+            if filtered_df.empty:
+                raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id}")
         
         # logger.info(f"Found {len(filtered_df)} rows for combination_id: {combination_id} with selected_models = 'yes'")
         
@@ -1461,7 +1474,10 @@ async def get_elasticity_data(
         ]
         
         if filtered_df.empty:
-            raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id} with selected_models = 'yes'")
+            logger.warning("No elasticity rows marked selected for combination %s; using all rows for this combination", combination_id)
+            filtered_df = df[df[combination_id_column] == combination_id]
+            if filtered_df.empty:
+                raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id}")
         
         # logger.info(f"Found {len(filtered_df)} rows for combination_id: {combination_id} with selected_models = 'yes'")
         
@@ -1588,7 +1604,10 @@ async def get_averages_data(
         ]
         
         if filtered_df.empty:
-            raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id} with selected_models = 'yes'")
+            logger.warning("No average rows marked selected for combination %s; using all rows for this combination", combination_id)
+            filtered_df = df[df[combination_id_column] == combination_id]
+            if filtered_df.empty:
+                raise HTTPException(status_code=404, detail=f"No data found for combination_id: {combination_id}")
         
         # logger.info(f"Found {len(filtered_df)} rows for combination_id: {combination_id} with selected_models = 'yes'")
         
@@ -1757,3 +1776,39 @@ async def save_comments(
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Error saving comments: {str(e)}")
+
+
+@router.get("/selected/actual-vs-predicted", tags=["Evaluate"])
+async def get_actual_vs_predicted_for_selected(
+    results_file_key: str = Query(..., description="MinIO key of the results file with selected_models flags"),
+    client_name: str = Query(...),
+    app_name: str = Query(...),
+    project_name: str = Query(...),
+    bucket: str = Query(default=MINIO_BUCKET),
+    limit_models: int = Query(default=1000, ge=1, le=10000),
+):
+    """
+    Calculate actual vs predicted values for all selected models.
+    Returns actual vs predicted data for each (combination_id, model_name) pair where selected_models = 'yes'.
+    """
+    submission = celery_task_client.submit_callable(
+        name="evaluate.actual_vs_predicted",
+        dotted_path="app.features.evaluate_models_feature_based.service.compute_actual_vs_predicted",
+        kwargs={
+            "results_file_key": results_file_key,
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "bucket": bucket,
+            "limit_models": limit_models,
+        },
+        metadata={
+            "feature": "evaluate_models_feature_based",
+            "operation": "actual_vs_predicted",
+            "results_file_key": results_file_key,
+            "bucket": bucket,
+        },
+    )
+    if submission.status == "failure":
+        raise HTTPException(status_code=500, detail=submission.detail or "Failed to calculate actual vs predicted")
+    return format_task_response(submission, embed_result=True)

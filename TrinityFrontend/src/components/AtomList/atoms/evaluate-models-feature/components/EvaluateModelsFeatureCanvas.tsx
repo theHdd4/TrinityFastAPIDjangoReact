@@ -273,6 +273,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }
   };
 
+  const deleteComment = async (chartId: string, commentId: string) => {
+    try {
+      // Extract combination name and graph type from chartId
+      const [graphType, combinationName] = chartId.split('-', 2);
+      
+      // Get environment variables
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      
+      // Remove the comment from the local array
+      const updatedComments = (comments[chartId] || []).filter(c => c.id !== commentId);
+      
+      const formData = new FormData();
+      formData.append('client_name', env.CLIENT_NAME || '');
+      formData.append('app_name', env.APP_NAME || '');
+      formData.append('project_name', env.PROJECT_NAME || '');
+      formData.append('combination_id', combinationName);
+      formData.append('graph_type', graphType);
+      formData.append('comments', JSON.stringify(updatedComments));
+      
+      const response = await fetch(`${EVALUATE_API}/save-comments`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (response.ok) {
+        onDataChange({
+          comments: {
+            ...comments,
+            [chartId]: updatedComments
+          }
+        });
+      } else {
+        console.error('Failed to delete comment');
+      }
+    } catch (error) {
+      console.error('Error deleting comment:', error);
+    }
+  };
+
   const renderCommentSection = (chartId: string) => {
     const newComment = newComments[chartId] || '';
     const chartComments = comments[chartId] || [];
@@ -385,6 +425,14 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const columnFilters = data.columnFilters || {};
   
   const selectedCombinations = data.selectedCombinations || [];
+  
+  // Debug log for selectedCombinations
+  console.log('EVALUATE FEATURE BASED: Component render - selectedCombinations:', {
+    count: selectedCombinations.length,
+    combinations: selectedCombinations,
+    hasDataframe: !!data.selectedDataframe,
+    dataframe: data.selectedDataframe
+  });
   
   // Get scope from the 'scope' column in the dataset
   const [currentScope, setCurrentScope] = useState<string>('');
@@ -879,8 +927,17 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
 
   // Fetch YoY growth data when dataset and combinations are selected
   useEffect(() => {
+    console.log('EVALUATE FEATURE BASED: ⚡ useEffect for YoY growth is RUNNING', {
+      hasDataframe: !!data.selectedDataframe,
+      dataframe: data.selectedDataframe,
+      combinationsCount: selectedCombinations.length,
+      combinations: selectedCombinations,
+      willFetch: !!(data.selectedDataframe && selectedCombinations.length > 0)
+    });
+    
     const fetchYoyGrowthData = async () => {
-      if (data.selectedDataframe && selectedCombinations.length > 0) {
+      const combos = data.selectedCombinations || [];
+      if (data.selectedDataframe && combos.length > 0) {
         setIsLoadingYoyData(true);
         try {
           // Get environment variables like column classifier
@@ -890,33 +947,90 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
-          const url =
-            `${EVALUATE_API}/yoy-growth?` +
+          const url = `${EVALUATE_API}/yoy-growth?` + 
             `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
             `&client_name=${encodeURIComponent(clientName)}` +
             `&app_name=${encodeURIComponent(appName)}` +
             `&project_name=${encodeURIComponent(projectName)}`;
-
-          const result = await fetchTaskAwareJson<any>(url);
-          console.log('🔍 DEBUG: YoY Backend response:', result);
-          if (result && result.results && Array.isArray(result.results)) {
-            setYoyGrowthData(result.results);
+          
+          console.log('EVALUATE FEATURE BASED: Fetching YoY growth data');
+          console.log('EVALUATE FEATURE BASED: YoY growth URL:', url);
+          console.log('EVALUATE FEATURE BASED: YoY growth params:', {
+            results_file_key: data.selectedDataframe,
+            client_name: clientName,
+            app_name: appName,
+            project_name: projectName,
+            selectedCombinations: selectedCombinations
+          });
+          
+          const response = await fetch(url);
+          
+          console.log('EVALUATE FEATURE BASED: YoY growth response status:', response.status, response.statusText);
+          
+          if (response.ok) {
+            const payload = await response.json();
+            console.log('EVALUATE FEATURE BASED: YoY growth raw payload:', payload);
+            console.log('EVALUATE FEATURE BASED: YoY growth payload type:', typeof payload);
+            console.log('EVALUATE FEATURE BASED: YoY growth payload keys:', Object.keys(payload));
+            console.log('EVALUATE FEATURE BASED: YoY growth task_id:', payload.task_id);
+            console.log('EVALUATE FEATURE BASED: YoY growth task_status:', payload.task_status || payload.status);
+            const result = await resolveTaskResponse<any>(payload);
+            console.log('EVALUATE FEATURE BASED: YoY growth resolved result:', result);
+            console.log('EVALUATE FEATURE BASED: YoY growth resolved result type:', typeof result);
+            console.log('EVALUATE FEATURE BASED: YoY growth resolved result keys:', result ? Object.keys(result) : 'null/undefined');
+            // Handle array of results for multiple combinations
+            if (result && result.results && Array.isArray(result.results)) {
+              console.log('EVALUATE FEATURE BASED: YoY growth - setting data with', result.results.length, 'results');
+              console.log('EVALUATE FEATURE BASED: YoY growth - combination_ids in results:', result.results.map((r: any) => r.combination_id));
+              console.log('EVALUATE FEATURE BASED: YoY growth - selectedCombinations:', selectedCombinations);
+              setYoyGrowthData(result.results);
+            } else {
+              console.warn('EVALUATE FEATURE BASED: YoY growth - no results array found, setting empty array');
+              console.warn('EVALUATE FEATURE BASED: YoY growth - result structure:', result);
+              setYoyGrowthData([]);
+            }
           } else {
+            let errorText = '';
+            try {
+              errorText = await response.text();
+              const errorJson = JSON.parse(errorText);
+              console.error('EVALUATE FEATURE BASED: YoY growth request failed:', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorJson.detail || errorJson.error || errorText,
+                fullError: errorJson
+              });
+            } catch (e) {
+              errorText = await response.text();
+              console.error('EVALUATE FEATURE BASED: YoY growth request failed (non-JSON):', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorText
+              });
+            }
             setYoyGrowthData([]);
           }
         } catch (error) {
-          console.error('Error fetching YoY growth data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching YoY growth data:', {
+            error: error,
+            message: error instanceof Error ? error.message : String(error),
+            stack: error instanceof Error ? error.stack : undefined
+          });
           setYoyGrowthData([]);
         } finally {
           setIsLoadingYoyData(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping YoY growth fetch - missing dataframe or combinations', {
+          hasDataframe: !!data.selectedDataframe,
+          combinationsCount: selectedCombinations.length
+        });
         setYoyGrowthData([]);
       }
     };
     
     fetchYoyGrowthData();
-  }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+  }, [data.selectedDataframe, data.selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
 
   // Fetch contribution data when dataset and combinations are selected
   useEffect(() => {
@@ -931,35 +1045,54 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
+          console.log('EVALUATE FEATURE BASED: Fetching contribution data for', selectedCombinations.length, 'combinations');
+          
           const newContributionData: {[key: string]: any[]} = {};
           
           // Fetch contribution data for each combination
           for (const combination of selectedCombinations) {
             try {
-              const url =
-                `${EVALUATE_API}/contribution?` +
+              const url = `${EVALUATE_API}/contribution?` + 
                 `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
                 `&combination_id=${encodeURIComponent(combination)}` +
                 `&client_name=${encodeURIComponent(clientName)}` +
                 `&app_name=${encodeURIComponent(appName)}` +
                 `&project_name=${encodeURIComponent(projectName)}`;
-
-              const result = await fetchTaskAwareJson<any>(url);
-              newContributionData[combination] = result.contribution_data || [];
+              
+              console.log('EVALUATE FEATURE BASED: Contribution fetch for combination:', combination);
+              console.log('EVALUATE FEATURE BASED: Contribution URL:', url);
+              
+              const response = await fetch(url);
+              
+              console.log('EVALUATE FEATURE BASED: Contribution response status for', combination, ':', response.status);
+              
+              if (response.ok) {
+                const payload = await response.json();
+                const result = await resolveTaskResponse<any>(payload);
+                console.log('EVALUATE FEATURE BASED: Contribution data for', combination, ':', result);
+                newContributionData[combination] = result.contribution_data || [];
+                console.log('EVALUATE FEATURE BASED: Contribution entries for', combination, ':', newContributionData[combination].length);
+              } else {
+                const errorText = await response.text();
+                console.error(`EVALUATE FEATURE BASED: Failed to fetch contribution data for combination ${combination}:`, response.status, errorText);
+                newContributionData[combination] = [];
+              }
             } catch (error) {
-              console.error(`Error fetching contribution data for combination ${combination}:`, error);
+              console.error(`EVALUATE FEATURE BASED: Error fetching contribution data for combination ${combination}:`, error);
               newContributionData[combination] = [];
             }
           }
           
+          console.log('EVALUATE FEATURE BASED: Contribution data collected for', Object.keys(newContributionData).length, 'combinations');
           setContributionData(newContributionData);
         } catch (error) {
-          console.error('Error fetching contribution data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching contribution data:', error);
           setContributionData({});
         } finally {
           setIsLoadingContributionData(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping contribution fetch - missing dataframe or combinations');
         setContributionData({});
       }
     };
@@ -980,35 +1113,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
+          console.log('EVALUATE FEATURE BASED: Fetching beta data for', selectedCombinations.length, 'combinations');
+          
           const betaDataMap: {[key: string]: any} = {};
           
           for (const combination of selectedCombinations) {
-            const response = await fetch(
-              `${EVALUATE_API}/beta?` + 
+            const url = `${EVALUATE_API}/beta?` + 
               `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
               `&combination_id=${encodeURIComponent(combination)}` +
               `&client_name=${encodeURIComponent(clientName)}` +
               `&app_name=${encodeURIComponent(appName)}` +
-              `&project_name=${encodeURIComponent(projectName)}`
-            );
+              `&project_name=${encodeURIComponent(projectName)}`;
+            
+            console.log('EVALUATE FEATURE BASED: Beta fetch for combination:', combination);
+            console.log('EVALUATE FEATURE BASED: Beta URL:', url);
+            
+            const response = await fetch(url);
+            
+            console.log('EVALUATE FEATURE BASED: Beta response status for', combination, ':', response.status);
             
             if (response.ok) {
               const result = await response.json();
+              console.log('EVALUATE FEATURE BASED: Beta data for', combination, ':', result);
               betaDataMap[combination] = result;
             } else {
-              console.warn(`Failed to fetch beta data for combination: ${combination}`);
+              const errorText = await response.text();
+              console.error(`EVALUATE FEATURE BASED: Failed to fetch beta data for combination ${combination}:`, response.status, errorText);
               betaDataMap[combination] = { beta_data: [] };
             }
           }
           
+          console.log('EVALUATE FEATURE BASED: Beta data collected for', Object.keys(betaDataMap).length, 'combinations');
           setBetaData(betaDataMap);
         } catch (error) {
-          console.error('Error fetching beta data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching beta data:', error);
           setBetaData({});
         } finally {
           setIsLoadingBetaData(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping beta fetch - missing dataframe or combinations');
         setBetaData({});
       }
     };
@@ -1029,35 +1173,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
+          console.log('EVALUATE FEATURE BASED: Fetching elasticity data for', selectedCombinations.length, 'combinations');
+          
           const elasticityDataMap: {[key: string]: any} = {};
           
           for (const combination of selectedCombinations) {
-            const response = await fetch(
-              `${EVALUATE_API}/elasticity?` + 
+            const url = `${EVALUATE_API}/elasticity?` + 
               `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
               `&combination_id=${encodeURIComponent(combination)}` +
               `&client_name=${encodeURIComponent(clientName)}` +
               `&app_name=${encodeURIComponent(appName)}` +
-              `&project_name=${encodeURIComponent(projectName)}`
-            );
+              `&project_name=${encodeURIComponent(projectName)}`;
+            
+            console.log('EVALUATE FEATURE BASED: Elasticity fetch for combination:', combination);
+            console.log('EVALUATE FEATURE BASED: Elasticity URL:', url);
+            
+            const response = await fetch(url);
+            
+            console.log('EVALUATE FEATURE BASED: Elasticity response status for', combination, ':', response.status);
             
             if (response.ok) {
               const result = await response.json();
+              console.log('EVALUATE FEATURE BASED: Elasticity data for', combination, ':', result);
               elasticityDataMap[combination] = result;
             } else {
-              console.warn(`Failed to fetch elasticity data for combination: ${combination}`);
+              const errorText = await response.text();
+              console.error(`EVALUATE FEATURE BASED: Failed to fetch elasticity data for combination ${combination}:`, response.status, errorText);
               elasticityDataMap[combination] = { elasticity_data: [] };
             }
           }
           
+          console.log('EVALUATE FEATURE BASED: Elasticity data collected for', Object.keys(elasticityDataMap).length, 'combinations');
           setElasticityData(elasticityDataMap);
         } catch (error) {
-          console.error('Error fetching elasticity data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching elasticity data:', error);
           setElasticityData({});
         } finally {
           setIsLoadingElasticityData(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping elasticity fetch - missing dataframe or combinations');
         setElasticityData({});
       }
     };
@@ -1078,35 +1233,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
+          console.log('EVALUATE FEATURE BASED: Fetching ROI data for', selectedCombinations.length, 'combinations');
+          
           const roiDataMap: {[key: string]: any} = {};
           
           for (const combination of selectedCombinations) {
-            const response = await fetch(
-              `${EVALUATE_API}/roi?` + 
+            const url = `${EVALUATE_API}/roi?` + 
               `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
               `&combination_id=${encodeURIComponent(combination)}` +
               `&client_name=${encodeURIComponent(clientName)}` +
               `&app_name=${encodeURIComponent(appName)}` +
-              `&project_name=${encodeURIComponent(projectName)}`
-            );
+              `&project_name=${encodeURIComponent(projectName)}`;
+            
+            console.log('EVALUATE FEATURE BASED: ROI fetch for combination:', combination);
+            console.log('EVALUATE FEATURE BASED: ROI URL:', url);
+            
+            const response = await fetch(url);
+            
+            console.log('EVALUATE FEATURE BASED: ROI response status for', combination, ':', response.status);
             
             if (response.ok) {
               const result = await response.json();
+              console.log('EVALUATE FEATURE BASED: ROI data for', combination, ':', result);
               roiDataMap[combination] = result;
             } else {
-              console.warn(`Failed to fetch ROI data for combination: ${combination}`);
+              const errorText = await response.text();
+              console.error(`EVALUATE FEATURE BASED: Failed to fetch ROI data for combination ${combination}:`, response.status, errorText);
               roiDataMap[combination] = { roi_data: [] };
             }
           }
           
+          console.log('EVALUATE FEATURE BASED: ROI data collected for', Object.keys(roiDataMap).length, 'combinations');
           setRoiData(roiDataMap);
         } catch (error) {
-          console.error('Error fetching ROI data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching ROI data:', error);
           setRoiData({});
         } finally {
           setIsLoadingRoiData(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping ROI fetch - missing dataframe or combinations');
         setRoiData({});
       }
     };
@@ -1116,8 +1282,17 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
 
   // Fetch S-curve data when dataset and combinations are selected
   useEffect(() => {
+    console.log('EVALUATE FEATURE BASED: ⚡ useEffect for S-curve is RUNNING', {
+      hasDataframe: !!data.selectedDataframe,
+      dataframe: data.selectedDataframe,
+      combinationsCount: selectedCombinations.length,
+      combinations: selectedCombinations,
+      willFetch: !!(data.selectedDataframe && selectedCombinations.length > 0)
+    });
+    
     const fetchSCurveData = async () => {
-      if (data.selectedDataframe && selectedCombinations.length > 0) {
+      const combos = data.selectedCombinations || [];
+      if (data.selectedDataframe && combos.length > 0) {
         setIsLoadingSCurveData(true);
         try {
           // Get environment variables like column classifier
@@ -1127,36 +1302,77 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
-          const response = await fetch(
-            `${EVALUATE_API}/s-curve?` + 
+          const url = `${EVALUATE_API}/s-curve?` + 
             `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
             `&client_name=${encodeURIComponent(clientName)}` +
             `&app_name=${encodeURIComponent(appName)}` +
-            `&project_name=${encodeURIComponent(projectName)}`
-          );
+            `&project_name=${encodeURIComponent(projectName)}`;
+          
+          console.log('EVALUATE FEATURE BASED: Fetching S-curve data');
+          console.log('EVALUATE FEATURE BASED: S-curve URL:', url);
+          console.log('EVALUATE FEATURE BASED: S-curve params:', {
+            results_file_key: data.selectedDataframe,
+            client_name: clientName,
+            app_name: appName,
+            project_name: projectName,
+            selectedCombinations: selectedCombinations
+          });
+          
+          const response = await fetch(url);
+          
+          console.log('EVALUATE FEATURE BASED: S-curve response status:', response.status, response.statusText);
           
           if (response.ok) {
             const result = await response.json();
-            console.log('🔍 S-curve data received:', result);
-            console.log('🔍 S-curve keys:', result.s_curves ? Object.keys(result.s_curves) : 'No s_curves');
+            console.log('EVALUATE FEATURE BASED: S-curve data received:', result);
+            console.log('EVALUATE FEATURE BASED: S-curve result type:', typeof result);
+            console.log('EVALUATE FEATURE BASED: S-curve result keys:', Object.keys(result));
+            console.log('EVALUATE FEATURE BASED: S-curve success:', result.success);
+            console.log('EVALUATE FEATURE BASED: S-curve error:', result.error);
+            console.log('EVALUATE FEATURE BASED: S-curve keys:', result.s_curves ? Object.keys(result.s_curves) : 'No s_curves');
+            if (result.s_curves) {
+              console.log('EVALUATE FEATURE BASED: S-curve count:', Object.keys(result.s_curves).length);
+              console.log('EVALUATE FEATURE BASED: S-curve combination keys:', Object.keys(result.s_curves));
+            }
+            if (result.errors && result.errors.length > 0) {
+              console.error('EVALUATE FEATURE BASED: S-curve errors:', result.errors);
+            }
             setSCurveData(result);
           } else {
-            console.warn('Failed to fetch S-curve data');
+            let errorText = '';
+            try {
+              errorText = await response.text();
+              const errorJson = JSON.parse(errorText);
+              console.error('EVALUATE FEATURE BASED: S-curve request failed:', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorJson.detail || errorJson.error || errorText,
+                fullError: errorJson
+              });
+            } catch (e) {
+              errorText = await response.text();
+              console.error('EVALUATE FEATURE BASED: S-curve request failed (non-JSON):', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorText
+              });
+            }
             setSCurveData({});
           }
         } catch (error) {
-          console.error('Error fetching S-curve data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching S-curve data:', error);
           setSCurveData({});
         } finally {
           setIsLoadingSCurveData(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping S-curve fetch - missing dataframe or combinations');
         setSCurveData({});
       }
     };
     
     fetchSCurveData();
-  }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+  }, [data.selectedDataframe, data.selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
 
   // Function to fetch application type
   const fetchApplicationType = async () => {
@@ -1222,35 +1438,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
+          console.log('EVALUATE FEATURE BASED: Fetching averages data for', selectedCombinations.length, 'combinations');
+          
           const averagesDataMap: {[key: string]: any} = {};
           
           for (const combination of selectedCombinations) {
-            const response = await fetch(
-              `${EVALUATE_API}/averages?` + 
+            const url = `${EVALUATE_API}/averages?` + 
               `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
               `&combination_id=${encodeURIComponent(combination)}` +
               `&client_name=${encodeURIComponent(clientName)}` +
               `&app_name=${encodeURIComponent(appName)}` +
-              `&project_name=${encodeURIComponent(projectName)}`
-            );
+              `&project_name=${encodeURIComponent(projectName)}`;
+            
+            console.log('EVALUATE FEATURE BASED: Averages fetch for combination:', combination);
+            console.log('EVALUATE FEATURE BASED: Averages URL:', url);
+            
+            const response = await fetch(url);
+            
+            console.log('EVALUATE FEATURE BASED: Averages response status for', combination, ':', response.status);
             
             if (response.ok) {
               const result = await response.json();
+              console.log('EVALUATE FEATURE BASED: Averages data for', combination, ':', result);
               averagesDataMap[combination] = result;
             } else {
-              console.warn(`Failed to fetch averages data for combination: ${combination}`);
+              const errorText = await response.text();
+              console.error(`EVALUATE FEATURE BASED: Failed to fetch averages data for combination ${combination}:`, response.status, errorText);
               averagesDataMap[combination] = { averages_data: [] };
             }
           }
           
+          console.log('EVALUATE FEATURE BASED: Averages data collected for', Object.keys(averagesDataMap).length, 'combinations');
           setAveragesData(averagesDataMap);
         } catch (error) {
-          console.error('Error fetching averages data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching averages data:', error);
           setAveragesData({});
         } finally {
           setIsLoadingAveragesData(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping averages fetch - missing dataframe or combinations');
         setAveragesData({});
       }
     };
@@ -1260,8 +1487,25 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
 
   // Fetch actual vs predicted data when dataset and combinations are selected
   useEffect(() => {
+    console.log('EVALUATE FEATURE BASED: ⚡ useEffect for actual vs predicted is RUNNING', {
+      hasDataframe: !!data.selectedDataframe,
+      dataframe: data.selectedDataframe,
+      combinationsCount: selectedCombinations.length,
+      combinations: selectedCombinations,
+      willFetch: !!(data.selectedDataframe && selectedCombinations.length > 0)
+    });
+    
     const fetchActualVsPredictedData = async () => {
-      if (data.selectedDataframe && selectedCombinations.length > 0) {
+      const combos = data.selectedCombinations || [];
+      console.log('EVALUATE FEATURE BASED: fetchActualVsPredictedData useEffect triggered', {
+        hasDataframe: !!data.selectedDataframe,
+        dataframe: data.selectedDataframe,
+        combinationsCount: combos.length,
+        combinations: combos
+      });
+      
+      if (data.selectedDataframe && combos.length > 0) {
+        console.log('EVALUATE FEATURE BASED: Starting actual vs predicted fetch');
         setIsLoadingActualVsPredictedData(true);
         try {
           // Get environment variables like column classifier
@@ -1271,47 +1515,108 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
-          const url =
-            `${EVALUATE_API}/selected/actual-vs-predicted?` +
+          const url = `${EVALUATE_API}/selected/actual-vs-predicted?` + 
             `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
             `&client_name=${encodeURIComponent(clientName)}` +
             `&app_name=${encodeURIComponent(appName)}` +
             `&project_name=${encodeURIComponent(projectName)}`;
-
-          const result = await fetchTaskAwareJson<any>(url);
-          console.log('🔍 DEBUG: Actual vs Predicted Backend response:', result);
-
-          // Transform the data to be organized by combination
-          if (result && result.items && Array.isArray(result.items)) {
-            console.log('🔍 DEBUG: Backend items:', result.items);
-            const transformedData: {[key: string]: any} = {};
-            result.items.forEach((item: any) => {
-              console.log('🔍 DEBUG: Processing item:', item);
-              console.log('🔍 DEBUG: Item combination_id:', item.combination_id);
-              console.log('🔍 DEBUG: Item actual_values:', item.actual_values);
-              console.log('🔍 DEBUG: Item predicted_values:', item.predicted_values);
-              if (item.combination_id) {
-                transformedData[item.combination_id] = item;
-              }
-            });
-            console.log('🔍 DEBUG: Transformed data:', transformedData);
-            setActualVsPredictedData(transformedData);
+          
+          console.log('EVALUATE FEATURE BASED: Fetching actual vs predicted data');
+          console.log('EVALUATE FEATURE BASED: Actual vs predicted URL:', url);
+          console.log('EVALUATE FEATURE BASED: Actual vs predicted params:', {
+            results_file_key: data.selectedDataframe,
+            client_name: clientName,
+            app_name: appName,
+            project_name: projectName,
+            selectedCombinations: selectedCombinations
+          });
+          
+          const response = await fetch(url);
+          
+          console.log('EVALUATE FEATURE BASED: Actual vs predicted response status:', response.status, response.statusText);
+          
+          if (response.ok) {
+            const payload = await response.json();
+            console.log('EVALUATE FEATURE BASED: Actual vs predicted raw payload:', payload);
+            console.log('EVALUATE FEATURE BASED: Actual vs predicted payload type:', typeof payload);
+            console.log('EVALUATE FEATURE BASED: Actual vs predicted payload keys:', Object.keys(payload));
+            console.log('EVALUATE FEATURE BASED: Actual vs predicted task_id:', payload.task_id);
+            console.log('EVALUATE FEATURE BASED: Actual vs predicted task_status:', payload.task_status || payload.status);
+            const result = await resolveTaskResponse<any>(payload);
+            console.log('EVALUATE FEATURE BASED: Actual vs predicted resolved result:', result);
+            console.log('EVALUATE FEATURE BASED: Actual vs predicted resolved result type:', typeof result);
+            console.log('EVALUATE FEATURE BASED: Actual vs predicted resolved result keys:', result ? Object.keys(result) : 'null/undefined');
+            
+            // Transform the data to be organized by combination
+            if (result && result.items && Array.isArray(result.items)) {
+              console.log('EVALUATE FEATURE BASED: Actual vs predicted items count:', result.items.length);
+              console.log('EVALUATE FEATURE BASED: Actual vs predicted - selectedCombinations:', combos);
+              const transformedData: {[key: string]: any} = {};
+              result.items.forEach((item: any) => {
+                console.log('EVALUATE FEATURE BASED: Processing item:', {
+                  combination_id: item.combination_id,
+                  has_actual_values: !!item.actual_values,
+                  has_predicted_values: !!item.predicted_values,
+                  actual_count: item.actual_values?.length || 0,
+                  predicted_count: item.predicted_values?.length || 0
+                });
+                if (item.combination_id) {
+                  transformedData[item.combination_id] = item;
+                } else {
+                  console.warn('EVALUATE FEATURE BASED: Item missing combination_id:', item);
+                }
+              });
+              console.log('EVALUATE FEATURE BASED: Actual vs predicted transformed data keys:', Object.keys(transformedData));
+              console.log('EVALUATE FEATURE BASED: Actual vs predicted - checking match with selectedCombinations');
+              combos.forEach((combo: string) => {
+                console.log(`EVALUATE FEATURE BASED: Looking for combo "${combo}" in transformedData:`, combo in transformedData, transformedData[combo] ? 'FOUND' : 'NOT FOUND');
+              });
+              setActualVsPredictedData(transformedData);
+            } else {
+              console.warn('EVALUATE FEATURE BASED: Actual vs predicted - no items array found');
+              console.warn('EVALUATE FEATURE BASED: Actual vs predicted - result structure:', result);
+              setActualVsPredictedData({});
+            }
           } else {
+            let errorText = '';
+            try {
+              errorText = await response.text();
+              const errorJson = JSON.parse(errorText);
+              console.error('EVALUATE FEATURE BASED: Actual vs predicted request failed:', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorJson.detail || errorJson.error || errorText,
+                fullError: errorJson
+              });
+            } catch (e) {
+              errorText = await response.text();
+              console.error('EVALUATE FEATURE BASED: Actual vs predicted request failed (non-JSON):', {
+                status: response.status,
+                statusText: response.statusText,
+                error: errorText
+              });
+            }
             setActualVsPredictedData({});
           }
         } catch (error) {
-          console.error('Error fetching actual vs predicted data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching actual vs predicted data:', error);
           setActualVsPredictedData({});
         } finally {
           setIsLoadingActualVsPredictedData(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping actual vs predicted fetch - missing dataframe or combinations', {
+          hasDataframe: !!data.selectedDataframe,
+          dataframe: data.selectedDataframe,
+          combinationsCount: selectedCombinations.length,
+          combinations: selectedCombinations
+        });
         setActualVsPredictedData({});
       }
     };
     
     fetchActualVsPredictedData();
-  }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+  }, [data.selectedDataframe, data.selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
 
   // Fetch identifiers when dataset is selected
   useEffect(() => {
@@ -1322,30 +1627,41 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const url = `${EVALUATE_API}/get-identifiers?` + 
             `object_name=${encodeURIComponent(data.selectedDataframe)}` +
             `&bucket=${encodeURIComponent('trinity')}`;
-          console.log('🔍 DEBUG: Fetching identifiers from URL:', url);
-          console.log('🔍 DEBUG: EVALUATE_API value:', EVALUATE_API);
+          
+          console.log('EVALUATE FEATURE BASED: Fetching identifiers');
+          console.log('EVALUATE FEATURE BASED: Identifiers URL:', url);
+          console.log('EVALUATE FEATURE BASED: Identifiers params:', {
+            object_name: data.selectedDataframe,
+            bucket: 'trinity'
+          });
           
           const response = await fetch(url);
           
+          console.log('EVALUATE FEATURE BASED: Identifiers response status:', response.status, response.statusText);
+          
           if (response.ok) {
             const result = await response.json();
-            console.log('🔍 DEBUG: Identifiers Backend response:', result);
+            console.log('EVALUATE FEATURE BASED: Identifiers response:', result);
             if (result && result.identifiers) {
+              console.log('EVALUATE FEATURE BASED: Identifiers count:', Object.keys(result.identifiers).length);
               setIdentifiersData(result.identifiers);
             } else {
+              console.warn('EVALUATE FEATURE BASED: No identifiers in response');
               setIdentifiersData({});
             }
           } else {
-            console.warn('Failed to fetch identifiers data');
+            const errorText = await response.text();
+            console.error('EVALUATE FEATURE BASED: Identifiers request failed:', response.status, errorText);
             setIdentifiersData({});
           }
         } catch (error) {
-          console.error('Error fetching identifiers data:', error);
+          console.error('EVALUATE FEATURE BASED: Error fetching identifiers data:', error);
           setIdentifiersData({});
         } finally {
           setIsLoadingIdentifiers(false);
         }
       } else {
+        console.log('EVALUATE FEATURE BASED: Skipping identifiers fetch - no dataframe selected');
         setIdentifiersData({});
       }
     };
@@ -1366,17 +1682,26 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
         url += `&identifier_values=${encodeURIComponent(JSON.stringify(selectedIdentifierValues))}`;
       }
       
+      console.log('EVALUATE FEATURE BASED: Re-fetching combinations based on identifier filters');
+      console.log('EVALUATE FEATURE BASED: Combinations URL:', url);
+      console.log('EVALUATE FEATURE BASED: Identifier values:', selectedIdentifierValues);
+      
       try {
         const response = await fetch(url);
+        console.log('EVALUATE FEATURE BASED: Combinations response status:', response.status);
+        
         const result = await response.json();
+        console.log('EVALUATE FEATURE BASED: Combinations response:', result);
         
         if (result.combinations && Array.isArray(result.combinations)) {
-          console.log('🔍 Re-fetched combinations based on identifier filters:', result.combinations);
+          console.log('EVALUATE FEATURE BASED: Re-fetched combinations count:', result.combinations.length);
           // Update the selected combinations to match the filtered ones
           onDataChange({ selectedCombinations: result.combinations });
+        } else {
+          console.warn('EVALUATE FEATURE BASED: No combinations array in response');
         }
       } catch (error) {
-        console.error('Error fetching filtered combinations:', error);
+        console.error('EVALUATE FEATURE BASED: Error fetching filtered combinations:', error);
       }
     };
     
@@ -2048,14 +2373,6 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     });
   };
 
-  const deleteComment = (chartId: string, commentId: string) => {
-    onDataChange({
-      comments: {
-        ...comments,
-        [chartId]: comments[chartId]?.filter(comment => comment.id !== commentId) || []
-      }
-    });
-  };
 
 
 
@@ -2065,7 +2382,11 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     // Find YoY data for this specific combination
     const yoyData = yoyGrowthData.find(item => item.combination_id === combinationName);
     
-    console.log('🔍 DEBUG: YoY data for', combinationName, ':', yoyData);
+    console.log('EVALUATE FEATURE BASED: renderWaterfallChart for combination:', combinationName);
+    console.log('EVALUATE FEATURE BASED: YoY data array length:', yoyGrowthData.length);
+    console.log('EVALUATE FEATURE BASED: YoY data combination_ids:', yoyGrowthData.map(item => item.combination_id));
+    console.log('EVALUATE FEATURE BASED: Looking for combination:', combinationName);
+    console.log('EVALUATE FEATURE BASED: YoY data found:', yoyData ? 'YES' : 'NO', yoyData);
     
     if (isLoadingYoyData) {
       return (
@@ -2416,9 +2737,31 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     // Get actual vs predicted data for this combination
     const combinationData = actualVsPredictedData[combinationName];
     
-    console.log('🔍 DEBUG: renderActualVsPredictedChart called for:', combinationName);
-    console.log('🔍 DEBUG: combinationData:', combinationData);
-    console.log('🔍 DEBUG: actualVsPredictedData keys:', Object.keys(actualVsPredictedData));
+    console.log('EVALUATE FEATURE BASED: renderActualVsPredictedChart called for:', combinationName);
+    console.log('EVALUATE FEATURE BASED: actualVsPredictedData state:', {
+      keys: Object.keys(actualVsPredictedData),
+      isEmpty: Object.keys(actualVsPredictedData).length === 0,
+      isLoading: isLoadingActualVsPredictedData,
+      fullData: actualVsPredictedData
+    });
+    console.log('EVALUATE FEATURE BASED: Looking for combination:', combinationName);
+    console.log('EVALUATE FEATURE BASED: combinationData found:', combinationData ? 'YES' : 'NO');
+    if (combinationData) {
+      console.log('EVALUATE FEATURE BASED: combinationData structure:', {
+        has_actual_values: !!combinationData.actual_values,
+        has_predicted_values: !!combinationData.predicted_values,
+        actual_count: combinationData.actual_values?.length || 0,
+        predicted_count: combinationData.predicted_values?.length || 0
+      });
+    } else {
+      console.log('EVALUATE FEATURE BASED: Available keys in actualVsPredictedData:', Object.keys(actualVsPredictedData));
+      console.log('EVALUATE FEATURE BASED: Checking if combination name matches any key (case-insensitive)...');
+      const matchingKey = Object.keys(actualVsPredictedData).find(key => 
+        key.toLowerCase() === combinationName.toLowerCase() || 
+        key === combinationName
+      );
+      console.log('EVALUATE FEATURE BASED: Matching key found:', matchingKey || 'NONE');
+    }
     
     if (isLoadingActualVsPredictedData) {
       return (

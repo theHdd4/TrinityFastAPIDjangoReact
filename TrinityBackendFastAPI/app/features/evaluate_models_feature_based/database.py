@@ -16,8 +16,25 @@ logger = logging.getLogger(__name__)
 
 
 def _endpoint(url: str) -> str:
+    """
+    Parse MinIO endpoint URL.
+    Handles both 'http://host:port' and 'host:port' formats.
+    Returns 'host:port' format required by Minio client.
+    """
+    if not url:
+        return url
+    
+    # If it already looks like host:port (no scheme), return as-is
+    if "://" not in url:
+        return url
+    
+    # If it has a scheme, parse it
     p = urlparse(url)
-    return p.netloc or p.path or url
+    if p.netloc:
+        return p.netloc
+    if p.path:
+        return p.path
+    return url
 
 
 @lru_cache()
@@ -30,8 +47,13 @@ def get_minio() -> Minio:
         secure = secure_env.lower() == "true"
     else:
         secure = bool(settings.minio_secure)
+    
+    # Parse endpoint - if it doesn't have a scheme, use it directly
+    parsed_endpoint = _endpoint(endpoint)
+    logger.info(f"MinIO endpoint: original={endpoint}, parsed={parsed_endpoint}")
+    
     return Minio(
-        _endpoint(endpoint),
+        parsed_endpoint,
         access_key=access_key,
         secret_key=secret_key,
         secure=secure,
