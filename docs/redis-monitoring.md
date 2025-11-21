@@ -16,11 +16,15 @@ production-like and local environments.
    and scan operations (including TTL lookups and deletes) so the **Redis Cache Activity
    Logs** panel in Grafana provides a complete picture of how applications interact with
    the cache.
-4. **Grafana** is provisioned with the *Redis Cache Overview* dashboard that visualises
+4. **Celery exporter** (`danihodovic/celery-exporter:0.12.2`) exposes Celery task metrics
+   on port `9808` using the same broker URL as your Celery workers
+   (`CELERY_BROKER_URL`/`REDIS_URL`). It is part of the `cache-monitoring` profile so you
+   can scrape Celery metrics alongside Redis statistics when needed.
+5. **Grafana** is provisioned with the *Redis Cache Overview* dashboard that visualises
    the key metrics required by support and engineering teams (hit rate, latency,
    fragmentation, memory usage, connection counts) and now includes a live Redis activity
    log panel sourced from Loki.
-5. **Alertmanager** receives critical alerts (connection exhaustion and high memory
+6. **Alertmanager** receives critical alerts (connection exhaustion and high memory
    pressure) so downstream notification channels can be configured per environment.
 
 All services are available in both the production `docker-compose.example.yml` and the
