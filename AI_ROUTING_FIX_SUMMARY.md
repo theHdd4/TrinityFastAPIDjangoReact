@@ -80,7 +80,7 @@ frontend:
 ```yaml
 trinity-ai:
   environment:
-    OLLAMA_IP: ${OLLAMA_IP:-10.2.4.48}
+    OLLAMA_IP: ${OLLAMA_IP:-10.2.1.170}
     HOST_IP: ${HOST_IP:-10.2.2.131}          # ✅ Added HOST_IP
     MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
     CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"

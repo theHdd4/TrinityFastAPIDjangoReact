@@ -344,17 +344,17 @@ const handleRenderWorkflow = useCallback(() => {
 
 ```bash
 # API Configuration
-VITE_HOST_IP=10.2.4.48
+VITE_HOST_IP=10.2.1.170
 VITE_DJANGO_PORT=8000
 VITE_FASTAPI_PORT=8001
 VITE_AI_PORT=8002
 VITE_FRONTEND_PORT=8080
 
 # Backend Origins
-VITE_BACKEND_ORIGIN=http://10.2.4.48:8000
-VITE_MOLECULES_API=http://10.2.4.48:8001/api/molecules
-VITE_WORKFLOWS_API=http://10.2.4.48:8000/api/workflows
-VITE_CUSTOM_MOLECULES_API=http://10.2.4.48:8000/api/custom-molecules
+VITE_BACKEND_ORIGIN=http://10.2.1.170:8000
+VITE_MOLECULES_API=http://10.2.1.170:8001/api/molecules
+VITE_WORKFLOWS_API=http://10.2.1.170:8000/api/workflows
+VITE_CUSTOM_MOLECULES_API=http://10.2.1.170:8000/api/custom-molecules
 ```
 
 ### Database Configuration
