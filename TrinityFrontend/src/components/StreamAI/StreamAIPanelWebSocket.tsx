@@ -128,6 +128,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [panelHeight, setPanelHeight] = useState(500); // Default height for horizontal mode
   const [isPanelFrozen, setIsPanelFrozen] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [autoSize, setAutoSize] = useState(false); // Auto-size horizontal panel based on canvas area
+  const [canvasAreaWidth, setCanvasAreaWidth] = useState<number | null>(null); // Canvas area width for auto-sizing
+  const [canvasAreaLeft, setCanvasAreaLeft] = useState<number | null>(null); // Canvas area left position for auto-sizing
   // Layout preference: 'vertical' (default) or 'horizontal'
   const [preferredLayout, setPreferredLayout] = useState<'vertical' | 'horizontal'>(() => {
     const saved = localStorage.getItem('trinity_ai_layout_preference');
@@ -783,6 +786,90 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizing, layout]);
+
+  // Auto-size: Observe canvas area width and position changes for horizontal layout
+  useEffect(() => {
+    if (layout !== 'horizontal' || !autoSize) {
+      setCanvasAreaWidth(null);
+      setCanvasAreaLeft(null);
+      return;
+    }
+
+    const updateCanvasDimensions = () => {
+      // First, try to find an actual card element to measure its real width
+      const firstCard = document.querySelector('[data-card-id]');
+      if (firstCard) {
+        const cardRect = firstCard.getBoundingClientRect();
+        // Use the actual card width (includes border, matches visual appearance)
+        setCanvasAreaWidth(cardRect.width);
+        setCanvasAreaLeft(cardRect.left);
+        return;
+      }
+
+      // Fallback: measure cards container and calculate card width
+      const cardsContainer = document.querySelector('[data-lab-cards-container="true"]');
+      if (cardsContainer) {
+        const containerRect = cardsContainer.getBoundingClientRect();
+        // Cards are w-full within container, so they match container width
+        // Container already has p-6 padding, so this is the actual card width
+        setCanvasAreaWidth(containerRect.width);
+        setCanvasAreaLeft(containerRect.left);
+        return;
+      }
+
+      // Final fallback: canvas area with padding adjustment
+      const canvasElement = document.querySelector('[data-lab-canvas="true"]');
+      if (!canvasElement) return;
+
+      const rect = canvasElement.getBoundingClientRect();
+      // Account for padding (p-6 = 24px on each side)
+      const padding = 48; // 24px left + 24px right
+      setCanvasAreaWidth(rect.width - padding);
+      setCanvasAreaLeft(rect.left + 24); // Add left padding
+    };
+
+    // Try to find a card element first (most accurate measurement)
+    let targetElement = document.querySelector('[data-card-id]');
+    
+    // Fallback to cards container if no card found
+    if (!targetElement) {
+      targetElement = document.querySelector('[data-lab-cards-container="true"]');
+    }
+    
+    // Final fallback to canvas element
+    if (!targetElement) {
+      targetElement = document.querySelector('[data-lab-canvas="true"]');
+    }
+
+    if (!targetElement) {
+      // Retry after a short delay if element not found
+      const timeoutId = setTimeout(() => {
+        updateCanvasDimensions();
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+
+    // Initial measurement
+    updateCanvasDimensions();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateCanvasDimensions();
+    });
+
+    // Also listen to window resize and scroll to update position
+    const handleResize = () => updateCanvasDimensions();
+    const handleScroll = () => updateCanvasDimensions();
+
+    resizeObserver.observe(targetElement);
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleScroll, true);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [layout, autoSize]);
   
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isPanelFrozen) return;
@@ -1957,6 +2044,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         }}
         isAutoRunning={isAutoRunning}
         parseMarkdown={parseMarkdown}
+        autoSize={autoSize}
+        canvasAreaWidth={canvasAreaWidth}
+        canvasAreaLeft={canvasAreaLeft}
       />
       
       {/* Settings Panel for Horizontal Layout */}
@@ -2018,6 +2108,29 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                       </div>
                     </div>
                   </div>
+                  
+                  {/* Auto Size Toggle - Only for horizontal layout */}
+                  {preferredLayout === 'horizontal' && (
+                    <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>Auto Size</h5>
+                          <p className="text-gray-600 font-inter text-xs">Automatically adjust panel width based on canvas area</p>
+                        </div>
+                        <button
+                          onClick={() => setAutoSize(!autoSize)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            autoSize ? '' : 'bg-gray-300'
+                          }`}
+                          style={autoSize ? { backgroundColor: BRAND_GREEN } : undefined}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            autoSize ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   
                   {/* Freeze Panel Toggle */}
                   <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
@@ -2127,6 +2240,29 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                     </div>
                   </div>
                 </div>
+                
+                {/* Auto Size Toggle - Only for horizontal layout */}
+                {preferredLayout === 'horizontal' && (
+                  <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>Auto Size</h5>
+                        <p className="text-gray-600 font-inter text-xs">Automatically adjust panel width based on canvas area</p>
+                      </div>
+                      <button
+                        onClick={() => setAutoSize(!autoSize)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          autoSize ? '' : 'bg-gray-300'
+                        }`}
+                        style={autoSize ? { backgroundColor: BRAND_GREEN } : undefined}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          autoSize ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Freeze Panel Toggle */}
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">

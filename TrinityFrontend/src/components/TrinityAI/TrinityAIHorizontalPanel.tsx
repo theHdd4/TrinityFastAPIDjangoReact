@@ -264,3 +264,4 @@ const TrinityAIHorizontalPanel: React.FC<TrinityAIHorizontalPanelProps> = ({
 
 export default TrinityAIHorizontalPanel;
 
+

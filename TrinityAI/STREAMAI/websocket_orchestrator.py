@@ -618,102 +618,6 @@ WORKFLOW PLANNING:
             lookup.setdefault(key, []).append(file_path)
         return display_names, lookup
 
-    def _validate_step_prerequisites(
-        self,
-        next_step: WorkflowStepPlan,
-        execution_history: List[Dict[str, Any]],
-        available_files: List[str]
-    ) -> Optional[str]:
-        """
-        Validate that prerequisite steps are completed before executing the next step.
-        Returns a warning message if prerequisites are missing, None otherwise.
-        """
-        atom_id = next_step.atom_id
-        description_lower = (next_step.description or "").lower()
-        
-        # Check for groupby without Year/date column preparation
-        if atom_id == "groupby-wtg-avg":
-            # Check if Year or date column exists in available files
-            has_year_or_date_prep = False
-            for hist in execution_history:
-                hist_desc = (hist.get("description", "") or "").lower()
-                hist_atom = hist.get("atom_id", "")
-                # Check if Year column was created or date was converted
-                if ("year" in hist_desc and "create" in hist_desc) or \
-                   ("date" in hist_desc and ("convert" in hist_desc or "datetime" in hist_desc)) or \
-                   (hist_atom == "dataframe-operations" and "year" in hist_desc):
-                    has_year_or_date_prep = True
-                    break
-            
-            # Check if groupby mentions Year but Year column wasn't prepared
-            if ("year" in description_lower or "annual" in description_lower) and not has_year_or_date_prep:
-                # Check if Year column might exist in files
-                year_column_exists = False
-                if available_files:
-                    file_metadata = self._get_file_metadata(available_files[:1])  # Check first file
-                    for file_path, metadata in file_metadata.items():
-                        columns = metadata.get("columns", [])
-                        if any("year" in str(col).lower() for col in columns):
-                            year_column_exists = True
-                            break
-                
-                if not year_column_exists:
-                    return "Planning groupby with Year but Year column doesn't exist. You MUST first check for Year/date column and create it if needed (see Example 1, Steps 1-3)."
-        
-        # Check for market share calculation without category sales
-        if atom_id == "dataframe-operations" and "market share" in description_lower:
-            # Check if category sales was calculated first
-            has_category_sales = False
-            for hist in execution_history:
-                hist_desc = (hist.get("description", "") or "").lower()
-                hist_atom = hist.get("atom_id", "")
-                if ("category sales" in hist_desc or "category_sales" in hist_desc) and \
-                   hist_atom == "groupby-wtg-avg":
-                    has_category_sales = True
-                    break
-            
-            if not has_category_sales:
-                return "Planning to calculate Market Share but Category Sales hasn't been calculated. You MUST first calculate Category Sales using groupby (see Example 2, Step 4a)."
-        
-        # Check for merge without preparing both dataframes
-        if atom_id == "merge":
-            # Check if both dataframes are prepared (at least one should be from previous step)
-            if len(next_step.files_used or []) < 2:
-                # Check if one file is from previous step
-                has_previous_step_file = False
-                for hist in execution_history:
-                    result = hist.get("result", {})
-                    saved_path = None
-                    hist_atom = hist.get("atom_id", "")
-                    if hist_atom == "groupby-wtg-avg" and result.get("output_file"):
-                        saved_path = result.get("output_file")
-                    elif result.get("saved_path"):
-                        saved_path = result.get("saved_path")
-                    
-                    if saved_path and saved_path in (next_step.files_used or []):
-                        has_previous_step_file = True
-                        break
-                
-                if not has_previous_step_file and len(execution_history) > 0:
-                    return "Planning merge but one dataframe should come from previous workflow step (e.g., Category Sales from groupby). See Example 2, Step 4b."
-        
-        # Check for chart-maker without data preparation
-        if atom_id == "chart-maker":
-            # Check if data was aggregated/prepared first
-            has_data_prep = False
-            for hist in execution_history:
-                hist_atom = hist.get("atom_id", "")
-                if hist_atom in ["groupby-wtg-avg", "merge", "dataframe-operations", "create-column", "create-transform"]:
-                    result = hist.get("result", {})
-                    if result.get("success", True):
-                        has_data_prep = True
-                        break
-            
-            if not has_data_prep and len(execution_history) == 0:
-                return "Planning chart-maker but no data preparation steps completed. You MUST first prepare/aggregate data (see examples, Steps 1-4) before visualizing."
-        
-        return None  # No prerequisite issues detected
-    
     @staticmethod
     def _display_file_name(path: str) -> str:
         """Return a user-friendly file name from a stored path."""
@@ -1711,31 +1615,6 @@ WORKFLOW PLANNING:
         
         lines.append("You are a ReAct-style agent planning the next step in a data workflow.")
         lines.append("")
-        lines.append("## 🚨 CRITICAL: FOLLOW EXAMPLES STEP-BY-STEP - DO NOT SKIP STEPS")
-        lines.append("")
-        lines.append("⚠️ **MOST IMPORTANT RULE**: Atoms are NOT powerful enough to skip prerequisite steps!")
-        lines.append("⚠️ **You MUST follow the step-by-step process shown in the examples below**")
-        lines.append("⚠️ **DO NOT try to do everything in one step - it will FAIL**")
-        lines.append("")
-        lines.append("**Common Mistakes (DO NOT DO THESE):**")
-        lines.append("- ❌ Trying to do groupby without first checking/creating Year column → WILL FAIL")
-        lines.append("- ❌ Trying to calculate market share without first calculating category sales → WILL FAIL")
-        lines.append("- ❌ Trying to merge without first preparing both dataframes → WILL FAIL")
-        lines.append("- ❌ Trying to create chart without first aggregating/preparing data → WILL FAIL")
-        lines.append("- ❌ Skipping data type conversion (object → datetime) → WILL FAIL")
-        lines.append("- ❌ Skipping column creation (Year, Market Share, etc.) → WILL FAIL")
-        lines.append("")
-        lines.append("**Correct Approach (FOLLOW EXAMPLES):**")
-        lines.append("- ✅ Check for required columns FIRST (Step 1 in examples)")
-        lines.append("- ✅ Handle data types if needed (Step 2 in examples)")
-        lines.append("- ✅ Create derived columns if needed (Step 3 in examples)")
-        lines.append("- ✅ Then do aggregations/groupby (Step 4 in examples)")
-        lines.append("- ✅ Then merge/combine if needed (Step 4b in examples)")
-        lines.append("- ✅ Then calculate ratios/formulas if needed (Step 4c in examples)")
-        lines.append("- ✅ Finally visualize (Step 5 in examples)")
-        lines.append("")
-        lines.append("**⚠️ REFER TO EXAMPLES BELOW - They show the CORRECT step-by-step process**")
-        lines.append("")
         lines.append("## ⚠️ CRITICAL: ALWAYS HONOR USER REQUESTS")
         lines.append("**MOST IMPORTANT RULE**: If the user asks for something, you MUST do it. Never refuse, never say 'no need', never ignore user requests.")
         lines.append("- If user asks for 'chart' → Generate a chart (even if one exists, user may want different type)")
@@ -1896,25 +1775,16 @@ WORKFLOW PLANNING:
         lines.append("## YOUR TASK")
         lines.append("Analyze the current state and plan the NEXT SINGLE STEP.")
         lines.append("")
-        lines.append("⚠️ **BEFORE PLANNING - CHECK EXAMPLES BELOW:**")
-        lines.append("- Review the workflow examples to understand the step-by-step process")
-        lines.append("- Identify which step in the examples matches your current situation")
-        lines.append("- Plan the NEXT step according to the examples (do NOT skip steps)")
-        lines.append("- Ensure all prerequisite steps are completed before moving to the next step")
-        lines.append("")
         lines.append("Follow this structure:")
         lines.append("")
         lines.append("**THOUGHT (REQUIRED - Be detailed and explicit):**")
         lines.append("1. **Review EXECUTION HISTORY**: What steps have been completed? What files were created?")
         lines.append("2. **Review USER REQUEST**: What did the user ask for? What still needs to be done?")
-        lines.append("3. **Review EXAMPLES**: Which example matches the user's request? Which step should come next?")
-        lines.append("4. **Check PREREQUISITES**: Are all prerequisite steps completed? (e.g., Year column exists before groupby)")
-        lines.append("5. **Review AVAILABLE FILES**: Which files are available? Which is the most recent output?")
-        lines.append("6. **Determine NEXT ACTION**: What specific operation needs to be done next? (Follow examples step-by-step)")
-        lines.append("7. **Check CHART REQUIREMENT**: Has chart-maker been used? If not, plan to use it (usually at the end)")
-        lines.append("8. **Select APPROPRIATE TOOL**: Which atom_id matches the next action? (One atom per step)")
-        lines.append("9. **Verify FILE SELECTION**: Which file(s) should be used? Use the most recent output file if available.")
-        lines.append("10. **Verify NO STEP SKIPPING**: Are you trying to skip any prerequisite steps? If yes, plan the prerequisite first.")
+        lines.append("3. **Review AVAILABLE FILES**: Which files are available? Which is the most recent output?")
+        lines.append("4. **Determine NEXT ACTION**: What specific operation needs to be done next?")
+        lines.append("5. **Check CHART REQUIREMENT**: Has chart-maker been used? If not, plan to use it (usually at the end)")
+        lines.append("6. **Select APPROPRIATE TOOL**: Which atom_id matches the next action?")
+        lines.append("7. **Verify FILE SELECTION**: Which file(s) should be used? Use the most recent output file if available.")
         lines.append("")
         lines.append("**ACTION (REQUIRED - Be specific):**")
         lines.append("- Select the next tool (atom_id) - must match one of the available atoms")
@@ -1934,33 +1804,16 @@ WORKFLOW PLANNING:
         lines.append("}")
         lines.append("")
         lines.append("## CRITICAL RULES (MUST FOLLOW):")
-        lines.append("1. ⚠️ **FOLLOW EXAMPLES STEP-BY-STEP** - Do NOT skip prerequisite steps (refer to examples below)")
-        lines.append("2. ⚠️ **ATOMS ARE NOT POWERFUL** - Each atom does ONE thing. You need MULTIPLE steps for complex operations")
-        lines.append("3. ⚠️ **CHECK PREREQUISITES FIRST** - Before planning a step, ensure all prerequisite steps are done")
-        lines.append("4. ⚠️ **ALWAYS LISTEN TO THE USER** - If the user asks for something, you MUST do it. Never refuse or say 'no need'")
-        lines.append("5. ⚠️ **DO NOT repeat any step** that has already been executed (check EXECUTION HISTORY above)")
-        lines.append("6. ⚠️ **If a previous step created a file, USE THAT FILE** in the next step - do NOT recreate it")
-        lines.append("7. ⚠️ **Only set goal_achieved: true if the user's request is COMPLETELY done AND user is not asking for more**")
-        lines.append("8. ⚠️ **If user asks for something NEW (chart, redo, modify, etc.), set goal_achieved: false** and continue")
-        lines.append("9. ⚠️ **Only plan ONE step at a time** - do not plan multiple steps, do not combine steps")
-        lines.append("10. ⚠️ **Choose a DIFFERENT tool/operation** than what was already done (unless user explicitly asks to redo)")
-        lines.append("11. ⚠️ **Use files marked with ⭐** (recently created) when possible")
-        lines.append("12. ⚠️ **Use ONLY column names** shown in FILE METADATA above - do NOT invent column names")
-        lines.append("13. ⚠️ **User requests take priority** - If user asks for chart, redo, or any operation, you MUST execute it")
-        lines.append("")
-        lines.append("## ⚠️ STEP SKIPPING PREVENTION (CRITICAL):")
-        lines.append("**DO NOT skip these prerequisite steps:**")
-        lines.append("- ❌ DO NOT do groupby without checking/creating Year column first")
-        lines.append("- ❌ DO NOT calculate market share without calculating category sales first")
-        lines.append("- ❌ DO NOT merge without preparing both dataframes first")
-        lines.append("- ❌ DO NOT create chart without aggregating/preparing data first")
-        lines.append("- ❌ DO NOT skip data type conversion (object → datetime) if needed")
-        lines.append("- ❌ DO NOT skip column creation (Year, Market Share, etc.) if needed")
-        lines.append("")
-        lines.append("**If you're unsure which step to plan next:**")
-        lines.append("- Refer to the examples below")
-        lines.append("- Find the step that matches your current situation")
-        lines.append("- Plan that step (do NOT skip to later steps)")
+        lines.append("1. ⚠️ **ALWAYS LISTEN TO THE USER** - If the user asks for something, you MUST do it. Never refuse or say 'no need'")
+        lines.append("2. ⚠️ **DO NOT repeat any step** that has already been executed (check EXECUTION HISTORY above)")
+        lines.append("3. ⚠️ **If a previous step created a file, USE THAT FILE** in the next step - do NOT recreate it")
+        lines.append("4. ⚠️ **Only set goal_achieved: true if the user's request is COMPLETELY done AND user is not asking for more**")
+        lines.append("5. ⚠️ **If user asks for something NEW (chart, redo, modify, etc.), set goal_achieved: false** and continue")
+        lines.append("6. ⚠️ **Only plan ONE step at a time** - do not plan multiple steps")
+        lines.append("7. ⚠️ **Choose a DIFFERENT tool/operation** than what was already done (unless user explicitly asks to redo)")
+        lines.append("8. ⚠️ **Use files marked with ⭐** (recently created) when possible")
+        lines.append("9. ⚠️ **Use ONLY column names** shown in FILE METADATA above - do NOT invent column names")
+        lines.append("10. ⚠️ **User requests take priority** - If user asks for chart, redo, or any operation, you MUST execute it")
         lines.append("")
         lines.append("## ⚠️ CRITICAL: CHART-MAKER MUST ALWAYS BE INCLUDED")
         lines.append("**MANDATORY RULE**: Chart-maker MUST be used in EVERY workflow:")
@@ -2008,150 +1861,89 @@ WORKFLOW PLANNING:
         lines.append("- ❌ BAD: Step 1: merge files [A, B] → Step 2: merge files [A, B] (REPEATED)")
         lines.append("- ✅ GOOD: Step 1: merge files [A, B] → Step 2: groupby on merged_output (USES OUTPUT)")
         lines.append("")
-        lines.append("## 📚 DETAILED WORKFLOW EXAMPLES (FOLLOW THESE STEP-BY-STEP - MANDATORY):")
-        lines.append("")
-        lines.append("⚠️ **CRITICAL**: These examples show the CORRECT step-by-step process.")
-        lines.append("⚠️ **You MUST follow these examples** - Do NOT skip steps, do NOT combine steps.")
-        lines.append("⚠️ **Each step is a PREREQUISITE for the next step** - Skipping will cause errors.")
+        lines.append("## 📚 DETAILED WORKFLOW EXAMPLES (Learn from these):")
         lines.append("")
         lines.append("### Example 1: Compute Annual Sales of Product/Brand/SKU Over Years Across Markets")
         lines.append("")
         lines.append("**User Request**: 'How to compute annual sales of a particular product or SKU or brand over the last few years across markets or regions?'")
         lines.append("")
-        lines.append("**Step-by-Step Workflow (FOLLOW IN ORDER - DO NOT SKIP):**")
-        lines.append("")
-        lines.append("**Step 1: Check Date/Year Column** (MANDATORY FIRST STEP)")
-        lines.append("- Check if 'Year' column exists. If not, check if 'date' column exists.")
-        lines.append("- ⚠️ DO NOT skip this step - you need to know what columns exist")
-        lines.append("- ⚠️ DO NOT proceed to groupby without checking for Year/date column")
-        lines.append("")
-        lines.append("**Step 2: Handle Date DataType** (IF NEEDED - DO NOT SKIP IF DATE IS OBJECT)")
-        lines.append("- If 'date' exists but is in object form, you MUST convert it:")
-        lines.append("  - Use data-upload-validate atom to load the file")
-        lines.append("  - Change datatype of 'date' column to 'datetime' using dtype_changes")
-        lines.append("  - Save the dataframe")
-        lines.append("- ⚠️ DO NOT skip this step if date is object - groupby will fail without datetime")
-        lines.append("- ⚠️ This step is PREREQUISITE for Step 3")
-        lines.append("")
-        lines.append("**Step 3: Create Year Column** (IF NEEDED - DO NOT SKIP IF YEAR DOESN'T EXIST)")
-        lines.append("- If 'Year' column doesn't exist, you MUST create it:")
-        lines.append("  - Use dataframe-operations atom")
-        lines.append("  - Create a new column called 'Year' using the formula 'Year' (extracts year from date column)")
-        lines.append("  - Save the dataframe")
-        lines.append("- ⚠️ DO NOT skip this step if Year doesn't exist - groupby needs Year column")
-        lines.append("- ⚠️ This step is PREREQUISITE for Step 4")
-        lines.append("")
-        lines.append("**Step 4: Group and Aggregate Sales** (CANNOT DO THIS WITHOUT STEPS 1-3)")
-        lines.append("- Use groupby-wtg-avg atom")
-        lines.append("- Group by: product/brand/SKU, market/region, Year")
-        lines.append("- For volume and value sales: aggregate using 'sum'")
-        lines.append("- For price and distribution: aggregate using 'weighted_avg' (weighted mean of volume)")
-        lines.append("- Save this new dataframe")
-        lines.append("- ⚠️ DO NOT try to do this step without completing Steps 1-3 first")
-        lines.append("- ⚠️ This step is PREREQUISITE for Step 5")
-        lines.append("")
-        lines.append("**Step 5: Visualize Results** (FINAL STEP - USE OUTPUT FROM STEP 4)")
-        lines.append("- Use chart-maker atom")
-        lines.append("- Chart type: bar chart")
-        lines.append("- X-axis: 'Year'")
-        lines.append("- Y-axis: 'Annual sales' (or aggregated sales column)")
-        lines.append("- Use the output file from step 4 (NOT original file)")
-        lines.append("- ⚠️ DO NOT use original input file - use the aggregated file from Step 4")
+        lines.append("**Step-by-Step Workflow:**")
+        lines.append("1. **Check Date/Year Column**: Check if 'Year' column exists. If not, check if 'date' column exists.")
+        lines.append("2. **Handle Date DataType** (if needed): If 'date' exists but is in object form:")
+        lines.append("   - Use data-upload-validate atom to load the file")
+        lines.append("   - Change datatype of 'date' column to 'datetime' using dtype_changes")
+        lines.append("   - Save the dataframe")
+        lines.append("3. **Create Year Column** (if needed):")
+        lines.append("   - Use dataframe-operations atom")
+        lines.append("   - Create a new column called 'Year' using the formula 'Year' (extracts year from date column)")
+        lines.append("   - Save the dataframe")
+        lines.append("4. **Group and Aggregate Sales**:")
+        lines.append("   - Use groupby-wtg-avg atom")
+        lines.append("   - Group by: product/brand/SKU, market/region, Year")
+        lines.append("   - For volume and value sales: aggregate using 'sum'")
+        lines.append("   - For price and distribution: aggregate using 'weighted_avg' (weighted mean of volume)")
+        lines.append("   - Save this new dataframe")
+        lines.append("5. **Visualize Results**:")
+        lines.append("   - Use chart-maker atom")
+        lines.append("   - Chart type: bar chart")
+        lines.append("   - X-axis: 'Year'")
+        lines.append("   - Y-axis: 'Annual sales' (or aggregated sales column)")
+        lines.append("   - Use the output file from step 4")
         lines.append("")
         lines.append("### Example 2: Compute Market Share of Products Across Markets for Specific Time")
         lines.append("")
         lines.append("**User Request**: 'How will you compute market share of different products across markets for a specific time?'")
         lines.append("")
-        lines.append("**Step-by-Step Workflow (FOLLOW IN ORDER - DO NOT SKIP):**")
+        lines.append("**Step-by-Step Workflow:**")
+        lines.append("1. **Check Date/Year Column**: Check if 'Year' column exists. If not, check if 'date' column exists.")
+        lines.append("2. **Handle Date DataType** (if needed): If 'date' exists but is in object form:")
+        lines.append("   - Use data-upload-validate atom to load the file")
+        lines.append("   - Change datatype of 'date' column to 'datetime' using dtype_changes")
+        lines.append("   - Save the dataframe")
+        lines.append("3. **Create Time Period Column**:")
+        lines.append("   - Use dataframe-operations atom")
+        lines.append("   - Create a new column for the specific time period (Year, Month, or Quarter)")
+        lines.append("   - Use formula 'Year', 'Month', or 'Quarter' as appropriate")
+        lines.append("   - Save the dataframe")
+        lines.append("4. **Check for Market Share Column**:")
+        lines.append("   - If 'Market Share' column already exists:")
+        lines.append("     → Go to Step 5 (Visualize)")
+        lines.append("   - If 'Market Share' column does NOT exist:")
+        lines.append("     → Continue to Step 4a")
+        lines.append("4a. **Calculate Category Sales**:")
+        lines.append("   - Use groupby-wtg-avg atom")
+        lines.append("   - Group by: market, date (or time period column)")
+        lines.append("   - For volume and value sales: aggregate using 'sum'")
+        lines.append("   - For price and distribution: aggregate using 'weighted_avg'")
+        lines.append("   - Rename aggregated column to 'Category Sales'")
+        lines.append("   - Save this dataframe as 'Category Sales'")
+        lines.append("4b. **Merge with Original Data**:")
+        lines.append("   - Use merge atom")
+        lines.append("   - Left join: original dataframe with 'Category Sales' dataframe")
+        lines.append("   - Join on: 'Market' and 'date' (or time period column)")
+        lines.append("   - Save merged dataframe as 'Merged_Brand_Cat'")
+        lines.append("4c. **Calculate Market Share**:")
+        lines.append("   - Use dataframe-operations atom")
+        lines.append("   - Select 'Merged_Brand_Cat' file")
+        lines.append("   - Create new column called 'Market Share'")
+        lines.append("   - Formula: Sales value / Category Sales (DIV operation)")
+        lines.append("   - Save the dataframe")
+        lines.append("5. **Visualize Market Share**:")
+        lines.append("   - Use chart-maker atom")
+        lines.append("   - Chart type: pie chart")
+        lines.append("   - X-axis: 'brand' or 'product'")
+        lines.append("   - Y-axis: 'Market Share'")
+        lines.append("   - Filters: Add 'market' and time period as filters")
+        lines.append("   - Use the output file from step 4c (or step 3 if market share already existed)")
         lines.append("")
-        lines.append("**Step 1: Check Date/Year Column** (MANDATORY FIRST STEP)")
-        lines.append("- Check if 'Year' column exists. If not, check if 'date' column exists.")
-        lines.append("- ⚠️ DO NOT skip this step")
-        lines.append("")
-        lines.append("**Step 2: Handle Date DataType** (IF NEEDED - DO NOT SKIP IF DATE IS OBJECT)")
-        lines.append("- If 'date' exists but is in object form, you MUST convert it:")
-        lines.append("  - Use data-upload-validate atom to load the file")
-        lines.append("  - Change datatype of 'date' column to 'datetime' using dtype_changes")
-        lines.append("  - Save the dataframe")
-        lines.append("- ⚠️ DO NOT skip this step if date is object")
-        lines.append("- ⚠️ This step is PREREQUISITE for Step 3")
-        lines.append("")
-        lines.append("**Step 3: Create Time Period Column** (IF NEEDED - DO NOT SKIP)")
-        lines.append("- Use dataframe-operations atom")
-        lines.append("- Create a new column for the specific time period (Year, Month, or Quarter)")
-        lines.append("- Use formula 'Year', 'Month', or 'Quarter' as appropriate")
-        lines.append("- Save the dataframe")
-        lines.append("- ⚠️ DO NOT skip this step if time period column doesn't exist")
-        lines.append("- ⚠️ This step is PREREQUISITE for Step 4")
-        lines.append("")
-        lines.append("**Step 4: Check for Market Share Column** (MANDATORY CHECK)")
-        lines.append("- If 'Market Share' column already exists:")
-        lines.append("  → Go to Step 5 (Visualize)")
-        lines.append("- If 'Market Share' column does NOT exist:")
-        lines.append("  → Continue to Step 4a (DO NOT SKIP)")
-        lines.append("")
-        lines.append("**Step 4a: Calculate Category Sales** (PREREQUISITE FOR MARKET SHARE - DO NOT SKIP)")
-        lines.append("- Use groupby-wtg-avg atom")
-        lines.append("- Group by: market, date (or time period column)")
-        lines.append("- For volume and value sales: aggregate using 'sum'")
-        lines.append("- For price and distribution: aggregate using 'weighted_avg'")
-        lines.append("- Rename aggregated column to 'Category Sales'")
-        lines.append("- Save this dataframe as 'Category Sales'")
-        lines.append("- ⚠️ DO NOT try to calculate market share without this step")
-        lines.append("- ⚠️ This step is PREREQUISITE for Step 4b")
-        lines.append("")
-        lines.append("**Step 4b: Merge with Original Data** (PREREQUISITE FOR MARKET SHARE - DO NOT SKIP)")
-        lines.append("- Use merge atom")
-        lines.append("- Left join: original dataframe with 'Category Sales' dataframe")
-        lines.append("- Join on: 'Market' and 'date' (or time period column)")
-        lines.append("- Save merged dataframe as 'Merged_Brand_Cat'")
-        lines.append("- ⚠️ DO NOT try to calculate market share without this step")
-        lines.append("- ⚠️ This step is PREREQUISITE for Step 4c")
-        lines.append("")
-        lines.append("**Step 4c: Calculate Market Share** (CANNOT DO WITHOUT STEPS 4a-4b)")
-        lines.append("- Use dataframe-operations atom")
-        lines.append("- Select 'Merged_Brand_Cat' file (from Step 4b)")
-        lines.append("- Create new column called 'Market Share'")
-        lines.append("- Formula: Sales value / Category Sales (DIV operation)")
-        lines.append("- Save the dataframe")
-        lines.append("- ⚠️ DO NOT try to do this step without completing Steps 4a-4b first")
-        lines.append("- ⚠️ This step is PREREQUISITE for Step 5")
-        lines.append("")
-        lines.append("**Step 5: Visualize Market Share** (FINAL STEP - USE OUTPUT FROM STEP 4c)")
-        lines.append("- Use chart-maker atom")
-        lines.append("- Chart type: pie chart")
-        lines.append("- X-axis: 'brand' or 'product'")
-        lines.append("- Y-axis: 'Market Share'")
-        lines.append("- Filters: Add 'market' and time period as filters")
-        lines.append("- Use the output file from step 4c (NOT original file)")
-        lines.append("- ⚠️ DO NOT use original input file - use the file with Market Share from Step 4c")
-        lines.append("")
-        lines.append("**Key Learnings from Examples (FOLLOW THESE RULES):**")
-        lines.append("")
-        lines.append("⚠️ **CRITICAL RULES:**")
-        lines.append("1. **NEVER skip prerequisite steps** - Each step depends on the previous step")
-        lines.append("2. **Always check for required columns FIRST** - Don't assume they exist")
-        lines.append("3. **Handle data types properly** - Object → datetime conversion is MANDATORY if needed")
-        lines.append("4. **Create derived columns when needed** - Year, Market Share, etc. must be created before use")
-        lines.append("5. **Use groupby for aggregations** - Sum for sales, weighted_avg for price/distribution")
-        lines.append("6. **Use merge to combine dataframes** - When calculating ratios (market share = brand sales / category sales)")
-        lines.append("7. **Always end with chart-maker** - To visualize results")
-        lines.append("8. **Use output files from previous steps** - NOT original files")
-        lines.append("")
-        lines.append("⚠️ **STEP DEPENDENCIES (DO NOT BREAK THESE):**")
-        lines.append("- Step 2 depends on Step 1 (need to check columns first)")
-        lines.append("- Step 3 depends on Step 2 (need datetime before extracting Year)")
-        lines.append("- Step 4 depends on Step 3 (need Year column before groupby)")
-        lines.append("- Step 4b depends on Step 4a (need Category Sales before merge)")
-        lines.append("- Step 4c depends on Step 4b (need merged data before calculating Market Share)")
-        lines.append("- Step 5 depends on Step 4/4c (need aggregated/calculated data before visualization)")
-        lines.append("")
-        lines.append("⚠️ **ATOMS ARE NOT POWERFUL ENOUGH TO SKIP STEPS:**")
-        lines.append("- groupby-wtg-avg CANNOT create Year column - you need dataframe-operations first")
-        lines.append("- dataframe-operations CANNOT do groupby - you need groupby-wtg-avg for that")
-        lines.append("- chart-maker CANNOT aggregate data - you need groupby-wtg-avg first")
-        lines.append("- merge CANNOT calculate ratios - you need dataframe-operations after merge")
-        lines.append("- Each atom does ONE thing - you need MULTIPLE steps for complex operations")
+        lines.append("**Key Learnings from Examples:**")
+        lines.append("- Always check for required columns (Year, date, Market Share) before using them")
+        lines.append("- Handle data types properly (object → datetime conversion)")
+        lines.append("- Create derived columns when needed (Year, Market Share)")
+        lines.append("- Use groupby for aggregations (sum for sales, weighted_avg for price/distribution)")
+        lines.append("- Use merge to combine dataframes when calculating ratios (market share = brand sales / category sales)")
+        lines.append("- Always end with chart-maker to visualize results")
+        lines.append("- Use output files from previous steps, not original files")
         lines.append("")
         
         return "\n".join(lines)
@@ -2666,17 +2458,6 @@ WORKFLOW PLANNING:
                 # Update step number from generated step
                 next_step.step_number = current_step_number
                 
-                # STEP SKIPPING VALIDATION: Check if prerequisite steps are being skipped
-                skipped_step_warning = self._validate_step_prerequisites(
-                    next_step, execution_history, current_available_files
-                )
-                if skipped_step_warning:
-                    logger.warning(f"⚠️ ReAct: STEP SKIPPING DETECTED: {skipped_step_warning}")
-                    logger.warning(f"   Current step: {next_step.atom_id} - {next_step.description}")
-                    logger.warning(f"   ⚠️ This step may fail because prerequisite steps are missing!")
-                    # Add warning to user prompt for next iteration
-                    effective_user_prompt = f"{effective_user_prompt}\n\n⚠️ WARNING: {skipped_step_warning}. You MUST complete prerequisite steps first. Refer to the examples for the correct step-by-step process."
-                
                 # ENHANCED LOOP DETECTION: Check if we're repeating the same atom with same files
                 if execution_history:
                     last_step = execution_history[-1]
@@ -2794,12 +2575,12 @@ WORKFLOW PLANNING:
                 
                 # Send observation event (with error handling)
                 try:
-                                        await self._send_event(
-                                            websocket,
-                                            WebSocketEvent(
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
                             "react_observation",
-                                                {
-                                                    "sequence_id": sequence_id,
+                            {
+                                "sequence_id": sequence_id,
                                 "step_number": current_step_number,
                                 "message": "Evaluating execution result..."
                             }
@@ -2978,12 +2759,12 @@ WORKFLOW PLANNING:
                     
                     # Send correction event (with error handling)
                     try:
-                                    await self._send_event(
-                                        websocket,
-                                        WebSocketEvent(
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
                                 "react_correction",
-                                            {
-                                                "sequence_id": sequence_id,
+                                {
+                                    "sequence_id": sequence_id,
                                     "step_number": current_step_number,
                                     "reasoning": evaluation.reasoning,
                                     "corrected_prompt": evaluation.corrected_prompt,
@@ -3027,9 +2808,9 @@ WORKFLOW PLANNING:
             
             # Send final progress update
             try:
-                                await self._send_event(
-                                    websocket,
-                                    WebSocketEvent(
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
                         "workflow_progress",
                         {
                             "sequence_id": sequence_id,
@@ -3297,7 +3078,7 @@ WORKFLOW PLANNING:
                 logger.warning(f"⚠️ Groupby atom result missing 'groupby_json' key. Available keys: {list(execution_result.keys())}")
             elif atom_id == "chart-maker" and "chart_json" not in execution_result:
                 logger.warning(f"⚠️ Chart-maker atom result missing 'chart_json' key. Available keys: {list(execution_result.keys())}")
-            
+
             execution_success = bool(execution_result.get("success", True))
             insight_text = await self._generate_step_insight(
                 step=step,
@@ -4578,35 +4359,19 @@ WORKFLOW PLANNING:
         
         # Add Stream AI workflow mode warning at the top
         if is_stream_workflow:
-            header_lines.append("🚨🚨🚨 CRITICAL: STREAM AI WORKFLOW MODE - STRICT INSTRUCTIONS 🚨🚨🚨")
-            header_lines.append("")
-            header_lines.append("You are being called as part of a Stream AI workflow chain.")
-            header_lines.append("This is NOT a standalone operation - it is a CONNECTED STEP in a workflow.")
-            header_lines.append("")
-            header_lines.append("⚠️ MANDATORY RULES:")
-            header_lines.append("1. You MUST use ONLY the file(s) specified in the 'Datasets & dependencies' section below.")
-            header_lines.append("2. DO NOT use any other files from MinIO, even if they exist or seem relevant.")
-            header_lines.append("3. DO NOT change the task - perform EXACTLY what is described in 'Step goal' below.")
-            header_lines.append("4. DO NOT use a different dataset - use the file(s) from previous workflow steps.")
-            header_lines.append("5. Follow the workflow chain - this step builds on previous steps' outputs.")
-            header_lines.append("6. The file(s) specified below were created/modified by previous workflow steps.")
-            header_lines.append("7. Your output will be used by the NEXT step in the workflow.")
-            header_lines.append("")
-            header_lines.append("❌ COMMON MISTAKES TO AVOID:")
-            header_lines.append("- Using a different file than specified (even if it seems better)")
-            header_lines.append("- Performing a different operation than described in 'Step goal'")
-            header_lines.append("- Using original input files instead of workflow-generated files")
-            header_lines.append("- Ignoring the workflow context and doing standalone analysis")
+            header_lines.append("🚨 MANDATORY FILE USAGE - STREAM AI WORKFLOW")
+            header_lines.append("You are being called as part of a Stream AI workflow.")
+            header_lines.append("You MUST use ONLY the file(s) specified in the 'Datasets & dependencies' section below.")
+            header_lines.append("DO NOT use any other files from MinIO, even if they exist.")
+            header_lines.append("Use ONLY the specified file(s).")
             header_lines.append("")
         
         header_lines.extend([
-            f"**Atom:** `{atom_id}`",
-            f"**User's Overall Goal:** {user_summary}"
+            f"Atom: `{atom_id}`",
+            f"User goal: {user_summary}"
         ])
         if description_summary:
-            header_lines.append(f"**THIS STEP'S SPECIFIC GOAL:** {description_summary}")
-            header_lines.append("⚠️ You MUST perform this EXACT operation. Do NOT deviate or do something different.")
-        header_lines.append("")
+            header_lines.append(f"Step goal: {description_summary}")
         header_lines.append("Respond with configuration details only – no filler text.")
 
         header_section = "\n".join(header_lines)
@@ -4626,36 +4391,10 @@ WORKFLOW PLANNING:
         if is_stream_workflow:
             validation_lines = [
                 "",
-                "🚨🚨🚨 FINAL VALIDATION CHECKLIST (MANDATORY) 🚨🚨🚨",
-                "",
-                "Before you respond, verify:",
-                "",
-                "1. **FILE USAGE:**",
-                "   - The file_name/data_source you use MUST match EXACTLY one of the files in the 'Datasets & dependencies' section above.",
-                "   - You are using the file from previous workflow steps (NOT original input files).",
-                "   - You are NOT using any other file from MinIO.",
-                "",
-                "2. **OPERATION:**",
-                "   - You are performing the EXACT operation described in 'THIS STEP'S SPECIFIC GOAL' above.",
-                "   - You are NOT doing a different task or analysis.",
-                "   - You are following the workflow chain, not doing standalone work.",
-                "",
-                "3. **WORKFLOW CONTINUITY:**",
-                "   - Your output will be used by the NEXT step in the workflow.",
-                "   - You are building on previous steps' results.",
-                "   - You are maintaining the workflow chain.",
-                "",
-                "❌ **IF YOU VIOLATE ANY OF THESE RULES, THE WORKFLOW WILL FAIL:**",
-                "- Using a different file than specified",
-                "- Performing a different operation than described",
-                "- Breaking the workflow chain",
-                "- Using original input files instead of workflow-generated files",
-                "",
-                "✅ **CORRECT BEHAVIOR:**",
-                "- Use ONLY the specified file(s) from 'Datasets & dependencies'",
-                "- Perform EXACTLY the operation in 'THIS STEP'S SPECIFIC GOAL'",
-                "- Follow the workflow chain and build on previous steps",
-                "- Your output will be the input for the next step"
+                "🚨 FILE USAGE VALIDATION:",
+                "- The file_name/data_source you use MUST match exactly one of the files in the 'Datasets & dependencies' section above.",
+                "- ERROR PREVENTION: If you use any file not explicitly listed, the workflow will fail.",
+                "- WORKFLOW CONTEXT: The file(s) specified above were created/selected by previous workflow steps. Use them."
             ]
             validation_section = "\n".join(validation_lines)
 
@@ -4697,14 +4436,10 @@ WORKFLOW PLANNING:
         
         # Add Stream AI mode warning at the top
         if is_stream_workflow:
-            lines.append("🚨🚨🚨 MANDATORY FILE USAGE - WORKFLOW CHAIN 🚨🚨🚨")
+            lines.append("🚨 USE ONLY THIS FILE - DO NOT USE ANY OTHER FILES")
+            lines.append("The file(s) specified below are MANDATORY for this workflow step.")
             lines.append("")
-            lines.append("⚠️ **CRITICAL:** The file(s) specified below are MANDATORY for this workflow step.")
-            lines.append("⚠️ **DO NOT** use any other files, even if they exist in MinIO.")
-            lines.append("⚠️ **DO NOT** use original input files - use the workflow-generated file(s) from previous steps.")
-            lines.append("⚠️ **This file was created by a previous step** - it contains the data you need to work with.")
-            lines.append("")
-        
+
         # Add comprehensive file metadata with column names, data types, and row counts
         if file_metadata:
             lines.append("**📊 COMPREHENSIVE FILE METADATA (CRITICAL - Use ONLY these details):**")
@@ -4752,7 +4487,7 @@ WORKFLOW PLANNING:
                         else:
                             # Show columns without types
                             lines.append(f"  {', '.join([f'`{col}`' for col in columns[:15]])}")
-                            if len(columns) > 15:
+                        if len(columns) > 15:
                                 lines.append(f"  ... and {len(columns) - 15} more columns: {', '.join([f'`{col}`' for col in columns[15:25]])}")
                                 if len(columns) > 25:
                                     lines.append(f"  ... and {len(columns) - 25} more columns")
@@ -4818,7 +4553,7 @@ WORKFLOW PLANNING:
 
         section_title = "🚨 Datasets & dependencies (MANDATORY for Stream AI workflow):" if is_stream_workflow else "Datasets & dependencies:"
         return section_title + "\n" + "\n".join(lines)
-    
+
     def _build_workflow_context_section(
         self,
         sequence_id: str,
@@ -4843,11 +4578,9 @@ WORKFLOW PLANNING:
         if not execution_history or len(execution_history) == 0:
             return ""  # No previous steps, no context needed
         
-        lines.append("## 🔄 WORKFLOW CHAIN CONTEXT (CRITICAL - READ CAREFULLY):")
+        lines.append("## 🔄 WORKFLOW CONTEXT (What Previous Steps Created):")
         lines.append("")
-        lines.append("⚠️ **YOU ARE PART OF A WORKFLOW CHAIN** - This is NOT a standalone operation!")
-        lines.append("")
-        lines.append("**Previous Steps in This Workflow:**")
+        lines.append("The following steps were executed before this step. Use their output files:")
         lines.append("")
         
         # Show last 3 steps for context
@@ -4859,7 +4592,7 @@ WORKFLOW PLANNING:
             result = hist.get("result", {})
             
             lines.append(f"**Step {step_num}: {hist_atom}**")
-            lines.append(f"  - What it did: {description}")
+            lines.append(f"  - Description: {description}")
             
             # Extract output file
             saved_path = None
@@ -4876,71 +4609,23 @@ WORKFLOW PLANNING:
             
             if saved_path:
                 file_display = self._display_file_name(saved_path)
-                lines.append(f"  - 📄 **Output File:** `{saved_path}` (display: {file_display})")
+                lines.append(f"  - 📄 **Output File Created:** `{saved_path}` (display: {file_display})")
                 
                 # Check if this file is being used in current step
                 if saved_path in files_used or saved_path in inputs:
-                    lines.append(f"  - ✅ **YOU MUST USE THIS FILE in your current step**")
-                    lines.append(f"  - ⚠️ **DO NOT use any other file - this is the workflow chain file**")
+                    lines.append(f"  - ✅ **This file is being used in the current step**")
             
             lines.append("")
         
-        # Add explicit workflow chain instructions
-        lines.append("## 🔗 WORKFLOW CHAIN INSTRUCTIONS (MANDATORY):")
-        lines.append("")
-        if files_used or inputs:
-            target_files = files_used if files_used else inputs
-            if target_files:
-                file_display = self._display_file_name(target_files[0])
-                lines.append(f"**FILE TO USE:** `{target_files[0]}` (display: {file_display})")
-                lines.append("")
-                lines.append("⚠️ **CRITICAL FILE USAGE RULES:**")
-                lines.append(f"1. You MUST use the file: `{target_files[0]}`")
-                lines.append("2. This file was created/modified by a previous workflow step (see above)")
-                lines.append("3. DO NOT use any other file, even if it seems more relevant")
-                lines.append("4. DO NOT use original input files - use the workflow-generated file")
-                lines.append("5. This file contains the results from previous steps - build on it")
-                lines.append("")
-        
-        lines.append("**WORKFLOW CONTINUITY:**")
-        lines.append("- Your operation is part of a larger workflow")
-        lines.append("- Previous steps prepared/modified the data for YOUR step")
-        lines.append("- Your output will be used by the NEXT step in the workflow")
-        lines.append("- Maintain workflow continuity - don't break the chain")
-        lines.append("")
-        
         # Special emphasis for chart-maker
         if atom_id == "chart-maker":
-            lines.append("⚠️ **CRITICAL FOR CHART-MAKER - READ CAREFULLY:**")
+            lines.append("⚠️ **CRITICAL FOR CHART-MAKER:**")
+            if files_used:
+                file_display = self._display_file_name(files_used[0])
+                lines.append(f"- You MUST use the file: `{files_used[0]}` (display: {file_display})")
+                lines.append(f"- This file was created by a previous workflow step (see above)")
+                lines.append(f"- Use this file's columns and data structure for the chart")
             lines.append("")
-            if files_used or inputs:
-                target_file = files_used[0] if files_used else inputs[0]
-                file_display = self._display_file_name(target_file)
-                lines.append(f"**MANDATORY FILE TO USE:** `{target_file}` (display: {file_display})")
-                lines.append("")
-                lines.append("**Why this file?**")
-                lines.append("- This file contains the FINAL, PROCESSED results from previous workflow steps")
-                lines.append("- Previous steps (groupby, merge, create-column, etc.) prepared this data specifically for visualization")
-                lines.append("- This file has the aggregated/transformed data that the user wants to see")
-                lines.append("")
-                lines.append("**What to do:**")
-                lines.append(f"1. Use `{target_file}` as your `data_source` in the JSON response")
-                lines.append("2. Use ONLY columns from this file (check file metadata section above)")
-                lines.append("3. Apply filters to show ONLY what user requested (not all data)")
-                lines.append("4. Group/segregate values smartly based on user's request")
-                lines.append("5. DO NOT use original input files - use this workflow-generated file")
-                lines.append("")
-                lines.append("**Common mistakes to avoid:**")
-                lines.append("- ❌ Using original input files instead of this processed file")
-                lines.append("- ❌ Showing all data without applying filters")
-                lines.append("- ❌ Not grouping/segregating values as user requested")
-                lines.append("- ❌ Using columns that don't exist in this file")
-                lines.append("")
-            else:
-                lines.append("- Use the file specified in 'Datasets & dependencies' section above")
-                lines.append("- This should be the output file from previous workflow steps")
-                lines.append("- Check the workflow context above to see which file was created")
-                lines.append("")
         
         return "\n".join(lines)
     
@@ -5025,17 +4710,7 @@ WORKFLOW PLANNING:
             if len(validated_join_columns) < len(join_columns):
                 logger.warning(f"⚠️ Filtered {len(join_columns) - len(validated_join_columns)} invalid join columns. Using only validated: {validated_join_columns}")
 
-        lines: List[str] = []
-        
-        # Add workflow continuity warning
-        if files_used:
-            lines.append("⚠️ **WORKFLOW CHAIN - CRITICAL:**")
-            lines.append(f"- You MUST use the file(s) specified: {', '.join([f'`{f}`' for f in files_used[:2]])}")
-            lines.append("- These files are from previous workflow steps - DO NOT use any other files")
-            lines.append("- Perform the merge operation on THESE files to continue the workflow chain")
-            lines.append("")
-        
-        lines.append("Merge requirements:")
+        lines: List[str] = ["Merge requirements:"]
 
         if join_type:
             lines.append(f"- Join type: {join_type}")
@@ -5092,17 +4767,7 @@ WORKFLOW PLANNING:
             validated_group_columns = group_columns
             validated_metrics = aggregation_details["metrics"]
 
-        lines: List[str] = []
-        
-        # Add workflow continuity warning
-        if possible_inputs:
-            lines.append("⚠️ **WORKFLOW CHAIN - CRITICAL:**")
-            lines.append(f"- You MUST use the file: `{possible_inputs[0]}` (from previous workflow step)")
-            lines.append("- This file contains data prepared by previous steps - DO NOT use any other file")
-            lines.append("- Perform the aggregation operation on THIS file to continue the workflow chain")
-            lines.append("")
-        
-        lines.append("Aggregation requirements:")
+        lines: List[str] = ["Aggregation requirements:"]
 
         if validated_group_columns:
             lines.append(f"- Group columns: {', '.join(validated_group_columns)} (VALIDATED - these columns exist in the file)")
@@ -5173,18 +4838,7 @@ WORKFLOW PLANNING:
         This atom supports Excel-like operations: formulas, filters, sorts, transformations, etc.
         """
         prompt_lower = original_prompt.lower()
-        lines: List[str] = []
-        
-        # Add workflow continuity warning
-        if possible_inputs:
-            lines.append("⚠️ **WORKFLOW CHAIN - CRITICAL:**")
-            lines.append(f"- You MUST use the file: `{possible_inputs[0]}` (from previous workflow step)")
-            lines.append("- This file contains data prepared by previous steps - DO NOT use any other file")
-            lines.append("- Perform the DataFrame operation on THIS file to continue the workflow chain")
-            lines.append("- DO NOT use original input files - use the workflow-generated file")
-            lines.append("")
-        
-        lines.append("DataFrame operations requirements (Excel-like capabilities):")
+        lines: List[str] = ["DataFrame operations requirements (Excel-like capabilities):"]
         
         # Detect operation types from prompt
         has_formula = any(kw in prompt_lower for kw in ["formula", "calculate", "compute", "prod", "sum", "div", "if", "average", "multiply", "divide"])
@@ -5256,8 +4910,6 @@ WORKFLOW PLANNING:
         # Input dataset
         if possible_inputs:
             lines.append(f"- Use input dataset: `{possible_inputs[0]}`")
-            lines.append("  ⚠️ **MANDATORY:** This is the file from previous workflow step - use it, not any other file")
-            lines.append("  ⚠️ **DO NOT** use original input files - use the workflow-generated file")
         
         # Output guidance
         lines.append("- Output format:")
@@ -5265,8 +4917,6 @@ WORKFLOW PLANNING:
         lines.append("  * Each operation should have: operation_name, api_endpoint, method, parameters")
         lines.append("  * Use 'auto_from_previous' for df_id to chain operations")
         lines.append("  * Ensure operations are ordered correctly (load first, then transformations)")
-        lines.append("")
-        lines.append("⚠️ **WORKFLOW CONTINUITY:** Your output will be used by the NEXT step in the workflow.")
         
         return "\n".join(lines)
 
@@ -5280,34 +4930,7 @@ WORKFLOW PLANNING:
         focus_columns = self._extract_focus_entities(prompt_lower)
         filters = self._extract_filter_clauses(original_prompt)
 
-        lines: List[str] = []
-        
-        # Add user request analysis section at the top
-        lines.append("## 🎯 USER REQUEST ANALYSIS (Start Here):")
-        lines.append("")
-        lines.append(f"**User's Request:** {original_prompt}")
-        lines.append("")
-        lines.append("**Your Task:** Analyze this request and create a chart that shows EXACTLY what the user wants to see.")
-        lines.append("")
-        lines.append("**Key Questions to Answer:**")
-        lines.append("1. What metric does the user want to see? (Sales, Revenue, Market Share, Quantity, etc.)")
-        lines.append("2. What dimension should be on X-axis? (Brand, Region, Year, Product, Market, etc.)")
-        lines.append("3. What filters should be applied? (Specific brand, region, time period, etc.)")
-        lines.append("4. What breakdowns/groupings are needed? (By region, by brand, by market, etc.)")
-        lines.append("5. What chart type best visualizes this? (bar, line, pie, etc.)")
-        lines.append("")
-        if focus_columns:
-            lines.append(f"**Detected Focus Entities:** {', '.join(focus_columns)} - Use these to identify columns")
-            lines.append("")
-        if filters:
-            lines.append(f"**Detected Filter Hints:** {', '.join(filters[:5])} - Convert these to filter objects")
-            lines.append("")
-        if chart_type:
-            lines.append(f"**Detected Chart Type:** {chart_type} - Consider using this chart type")
-            lines.append("")
-        lines.append("---")
-        lines.append("")
-        lines.append("## 📊 CHART CONFIGURATION (return JSON only):")
+        lines: List[str] = ["## 📊 CHART CONFIGURATION (return JSON only):"]
         lines.append("")
         lines.append("**JSON Format:**")
         lines.append("{")
@@ -5340,8 +4963,6 @@ WORKFLOW PLANNING:
             lines.append(f"- **⚠️ CRITICAL:** You MUST use this EXACT file path as `data_source` in your JSON response")
             lines.append(f"- **⚠️ CRITICAL:** This file was created/processed by previous workflow steps")
             lines.append(f"- **⚠️ CRITICAL:** Do NOT use any other file - use ONLY `{file_path}`")
-            lines.append(f"- **⚠️ WORKFLOW CHAIN:** This file contains the FINAL results from previous steps - visualize THIS data")
-            lines.append(f"- **⚠️ WORKFLOW CHAIN:** Do NOT use original input files - use the workflow-generated file")
             lines.append("")
             
             if columns:
@@ -5403,131 +5024,27 @@ WORKFLOW PLANNING:
             lines.append("- This should be the output file from previous workflow steps")
             lines.append("- Do NOT use original input files if processed files exist")
             lines.append("- Check the FILE METADATA section above for available columns")
-            lines.append("")
-        lines.append("## 🎯 SMART CHART CONFIGURATION RULES:")
         lines.append("")
-        lines.append("### 1. FILE USAGE (MANDATORY):")
-        if possible_inputs:
-            lines.append(f"- **MUST use this file:** `{possible_inputs[0]}`")
-            lines.append(f"- This file contains the processed data from previous workflow steps")
-            lines.append(f"- DO NOT use any other file - this is the workflow-generated file")
-            lines.append(f"- Use this file's EXACT path as `data_source` in your JSON")
-        else:
-            lines.append("- Use the file specified in 'Datasets & dependencies' section above")
-        lines.append("")
-        
-        lines.append("### 2. COLUMN SELECTION (CRITICAL):")
-        lines.append("- Use EXACT column names from the file metadata above (case-sensitive, spaces preserved)")
-        lines.append("- If user used abbreviations (e.g., 'reg', 'rev'), map them to actual column names from the file")
-        lines.append("- ⚠️ CRITICAL: Validate ALL column names against the file metadata - DO NOT use columns that don't exist")
-        lines.append("- x_column: Must be a categorical column (e.g., Region, Brand, Month, Product, Market)")
-        lines.append("- y_column: Must be a numeric measure (e.g., Sales, Revenue, Quantity, Market Share)")
-        lines.append("- breakdown_columns: Use for multi-dimensional analysis (e.g., [\"Brand\", \"Region\"] for brand breakdown by region)")
-        lines.append("")
-        
-        lines.append("### 3. FILTERS (MANDATORY - Apply Smart Filtering):")
-        lines.append("⚠️ **CRITICAL:** You MUST apply filters to show ONLY what the user requested")
-        lines.append("")
-        lines.append("**Filter Rules:**")
-        lines.append("- If user mentions specific values (brand, region, market, time period), ADD filters for them")
-        lines.append("- Examples:")
-        lines.append("  * User says 'Brand GERC' → Add filter: {\"column\": \"Brand\", \"operator\": \"==\", \"value\": \"GERC\"}")
-        lines.append("  * User says 'in Rajasthan' → Add filter: {\"column\": \"Region\", \"operator\": \"==\", \"value\": \"Rajasthan\"}")
-        lines.append("  * User says 'last 3 years' → Add filter: {\"column\": \"Year\", \"operator\": \">=\", \"value\": \"2021\"}")
-        lines.append("  * User says 'Q1 2024' → Add filter: {\"column\": \"Quarter\", \"operator\": \"==\", \"value\": \"Q1\"} AND {\"column\": \"Year\", \"operator\": \"==\", \"value\": \"2024\"}")
-        lines.append("- Use '==' for exact matches, '>' or '<' for ranges, 'contains' for partial matches")
-        lines.append("- Apply MULTIPLE filters if user mentions multiple conditions")
-        lines.append("- ⚠️ DO NOT show all data - filter to show ONLY what user requested")
-        lines.append("")
-        
-        lines.append("### 4. SMART GROUPING/SEGREGATION (CRITICAL):")
-        lines.append("⚠️ **CRITICAL:** Group and segregate values intelligently to show what user wants")
-        lines.append("")
-        lines.append("**Grouping Rules:**")
-        lines.append("- If user asks for 'by brand', 'by region', 'by market' → Use that column as x_column")
-        lines.append("- If user asks for 'across markets', 'across regions' → Use that column as x_column")
-        lines.append("- If user asks for 'over time', 'by year', 'by month' → Use time column as x_column")
-        lines.append("- If user asks for 'breakdown by X and Y' → Use X as x_column and Y in breakdown_columns")
-        lines.append("- If user asks for 'market share by brand' → Use Brand as x_column, Market Share as y_column")
-        lines.append("- If user asks for 'sales by product and region' → Use Product as x_column, Region in breakdown_columns, Sales as y_column")
-        lines.append("")
-        lines.append("**Segregation Rules:**")
-        lines.append("- If data has multiple categories, use breakdown_columns to show them separately")
-        lines.append("- Example: 'Sales by Brand across Regions' → x_column: Brand, breakdown_columns: [\"Region\"], y_column: Sales")
-        lines.append("- Example: 'Market Share by Product in each Market' → x_column: Product, breakdown_columns: [\"Market\"], y_column: Market Share")
-        lines.append("- Use breakdown_columns to create grouped/stacked visualizations")
-        lines.append("")
-        
-        lines.append("### 5. CHART TYPE SELECTION:")
-        lines.append("- Choose chart_type based on user request and data structure")
-        lines.append("- 'bar': For comparing categories (default if unspecified)")
-        lines.append("- 'line': For trends over time")
-        lines.append("- 'pie': For showing proportions/shares")
-        lines.append("- 'scatter': For correlations/relationships")
-        lines.append("- 'area': For cumulative trends")
-        lines.append("- 'combo': For mixed visualizations")
+        lines.append("Rules:")
+        lines.append("- Use EXACT column names from dataset metadata (case-sensitive, spaces preserved).")
+        lines.append("- If the user used abbreviations (e.g., 'reg', 'rev'), map them to the canonical column names from the file metadata section above before filling the JSON.")
+        lines.append("- ⚠️ CRITICAL: Validate all column names against the file metadata. Do NOT use columns that don't exist in the file.")
+        lines.append("- Choose chart_type based on user request (default to 'bar' if unspecified).")
+        lines.append("- x_column should be a categorical column (e.g., Region, Brand, Month).")
+        lines.append("- y_column must be a numeric measure (e.g., Sales, Revenue, Quantity).")
+        lines.append("- Filters: capture regions/brands/time ranges mentioned by the user; use equality comparisons unless a range is specified.")
+        lines.append("- Title: Summarize the chart purpose (e.g., 'Sales of Brand GERC in Rajasthan').")
+
         if chart_type:
-            lines.append(f"- Detected chart type hint: {chart_type} (use this if appropriate)")
-        lines.append("")
-        
-        lines.append("### 6. TITLE GENERATION:")
-        lines.append("- Create a clear, descriptive title that summarizes what the chart shows")
-        lines.append("- Include key filters and dimensions (e.g., 'Sales of Brand GERC in Rajasthan by Year')")
-        lines.append("- Make it human-friendly and informative")
-        lines.append("")
-        
-        lines.append("### 7. DATA ANALYSIS (Before Creating Chart):")
-        lines.append("⚠️ **CRITICAL:** Analyze what the user wants to see:")
-        lines.append("1. What is the MAIN metric? (Sales, Revenue, Market Share, etc.) → This is y_column")
-        lines.append("2. What is the MAIN dimension? (Brand, Region, Year, etc.) → This is x_column")
-        lines.append("3. What are the FILTERS? (Specific brand, region, time period, etc.) → Add to filters array")
-        lines.append("4. What are the BREAKDOWNS? (Additional dimensions to segregate) → Add to breakdown_columns")
-        lines.append("5. What CHART TYPE best shows this? → Choose appropriate chart_type")
-        lines.append("")
-        
+            lines.append(f"- Detected chart type hint: {chart_type}")
         if focus_columns:
-            lines.append("### 8. DETECTED ENTITIES FROM USER REQUEST:")
-            lines.append(f"- Entities mentioned: {', '.join(focus_columns)}")
-            lines.append("- Map these to actual column names from the file metadata above")
-            lines.append("- Use them in x_column, breakdown_columns, or filters as appropriate")
-            lines.append("")
-        
+            lines.append(f"- Entities mentioned by user: {', '.join(focus_columns)} (ensure these map to actual columns)")
         if filters:
-            lines.append("### 9. DETECTED FILTER HINTS:")
+            lines.append("- Filter hints from prompt:")
             for flt in filters:
-                lines.append(f"- {flt}")
-            lines.append("- Convert these to proper filter objects in the JSON")
-            lines.append("")
-        
-        lines.append("### 10. FINAL VALIDATION CHECKLIST:")
-        lines.append("Before responding, verify:")
-        lines.append("✅ data_source matches the file path from 'Datasets & dependencies' section")
-        lines.append("✅ x_column exists in the file and is categorical")
-        lines.append("✅ y_column exists in the file and is numeric")
-        lines.append("✅ All filter columns exist in the file")
-        lines.append("✅ All breakdown_columns exist in the file")
-        lines.append("✅ Filters are applied to show ONLY what user requested (not all data)")
-        lines.append("✅ Chart type is appropriate for the data and user request")
-        lines.append("✅ Title clearly describes what the chart shows")
-        lines.append("")
-        
-        lines.append("### 11. OUTPUT FORMAT:")
-        lines.append("- Output must be pure JSON (no prose, no markdown, no explanations)")
-        lines.append("- Return ONLY the JSON object with chart configuration")
-        lines.append("- Example valid output:")
-        lines.append('```json')
-        lines.append('{')
-        lines.append('  "chart_type": "bar",')
-        lines.append(f'  "data_source": "{possible_inputs[0] if possible_inputs else "<file_path>"}",')
-        lines.append('  "x_column": "Brand",')
-        lines.append('  "y_column": "Sales",')
-        lines.append('  "breakdown_columns": ["Region"],')
-        lines.append('  "filters": [{"column": "Year", "operator": ">=", "value": "2021"}],')
-        lines.append('  "title": "Sales by Brand across Regions (2021-2024)"')
-        lines.append('}')
-        lines.append('```')
-        lines.append("")
-        
+                lines.append(f"  * {flt}")
+
+        lines.append("- Output must be pure JSON (no prose).")
         return "\n".join(lines)
 
     def _detect_chart_type(self, prompt_lower: str) -> Optional[str]:
@@ -5551,48 +5068,16 @@ WORKFLOW PLANNING:
         return list(dict.fromkeys(entities))
 
     def _extract_filter_clauses(self, prompt: str) -> List[str]:
-        """
-        Extract filter clauses from user prompt more comprehensively.
-        Looks for specific values, regions, brands, markets, time periods, etc.
-        """
         clauses = []
-        prompt_lower = prompt.lower()
-        
-        # Pattern-based extraction
         patterns = [
-            r"in\s+(?:the\s+)?([A-Za-z0-9_\s]+?)(?:\s|$|,|\.)",
-            r"for\s+(?:the\s+)?([A-Za-z0-9_\s]+?)(?:\s|$|,|\.)",
-            r"where\s+([A-Za-z0-9_\s><=]+?)(?:\s|$|,|\.)",
-            r"of\s+([A-Z][A-Za-z0-9_\s]+?)(?:\s|$|,|\.)",  # "Sales of Brand X"
-            r"brand\s+([A-Z][A-Za-z0-9_\s]+?)(?:\s|$|,|\.)",  # "Brand GERC"
-            r"region\s+([A-Z][A-Za-z0-9_\s]+?)(?:\s|$|,|\.)",  # "Region Rajasthan"
-            r"market\s+([A-Z][A-Za-z0-9_\s]+?)(?:\s|$|,|\.)",  # "Market India"
-            r"product\s+([A-Z][A-Za-z0-9_\s]+?)(?:\s|$|,|\.)",  # "Product ABC"
-            r"year\s+(\d{4})",  # "Year 2024"
-            r"(\d{4})",  # "2024" standalone
-            r"q[1-4]\s+(\d{4})",  # "Q1 2024"
-            r"last\s+(\d+)\s+years?",  # "last 3 years"
-            r"last\s+(\d+)\s+months?",  # "last 6 months"
+            r"in\s+(?:the\s+)?([A-Za-z0-9_\s]+)",
+            r"for\s+(?:the\s+)?([A-Za-z0-9_\s]+)",
+            r"where\s+([A-Za-z0-9_\s><=]+)"
         ]
         for pattern in patterns:
             for match in re.findall(pattern, prompt, flags=re.IGNORECASE):
-                if match and match.strip():
-                    clauses.append(match.strip())
-        
-        # Extract specific values mentioned (capitalized words that might be brands/regions)
-        # Look for patterns like "Brand GERC", "in Rajasthan", etc.
-        capitalized_entities = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', prompt)
-        for entity in capitalized_entities:
-            # Filter out common words and add meaningful entities
-            if len(entity) > 2 and entity.lower() not in ['the', 'and', 'for', 'with', 'from', 'this', 'that']:
-                # Check if it's near filter keywords
-                entity_lower = entity.lower()
-                context_words = ['brand', 'region', 'market', 'product', 'country', 'state', 'city']
-                if any(ctx in prompt_lower[max(0, prompt_lower.find(entity_lower)-20):prompt_lower.find(entity_lower)+20] for ctx in context_words):
-                    if entity not in clauses:
-                        clauses.append(entity)
-        
-        return list(dict.fromkeys(clauses))  # Remove duplicates while preserving order
+                clauses.append(match.strip())
+        return clauses
     
     def _build_data_upload_validate_section(
         self,
@@ -6191,7 +5676,7 @@ WORKFLOW PLANNING:
                     file_details_dict = file_handler.get_file_context(file_names, use_backend_endpoint=True)
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to get file context with statistics: {e}, trying without statistics")
-                    file_details_dict = file_handler.get_file_context(file_names, use_backend_endpoint=True)
+                file_details_dict = file_handler.get_file_context(file_names, use_backend_endpoint=True)
                 
                 if file_details_dict:
                     # Map back to original file paths

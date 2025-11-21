@@ -35,6 +35,8 @@ import {
 } from 'lucide-react';
 
 const BRAND_PURPLE = '#7C3AED';
+const BRAND_YELLOW = '#FFBD59';
+const BRAND_YELLOW_LIGHT = '#FEEB99';
 import { cn } from '@/lib/utils';
 import StreamWorkflowPreview from './StreamWorkflowPreview';
 import StreamStepMonitor from './StreamStepMonitor';
@@ -94,6 +96,10 @@ interface ChatInterfaceProps {
   // Brand colors
   brandGreen?: string;
   brandBlue?: string;
+  // Auto-size
+  autoSize?: boolean;
+  canvasAreaWidth?: number | null;
+  canvasAreaLeft?: number | null;
 }
 
 const BRAND_GREEN = '#50C878';
@@ -138,9 +144,32 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   parseMarkdown = (content) => content,
   brandGreen = BRAND_GREEN,
   brandBlue = BRAND_BLUE,
+  autoSize = false,
+  canvasAreaWidth = null,
+  canvasAreaLeft = null,
 }) => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  // Draggable state for collapsed button
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(() => {
+    // Load saved position from localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('trinity_ai_collapsed_position');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [hasMoved, setHasMoved] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -155,6 +184,79 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [messages.length]);
 
+  // Save position to localStorage when it changes
+  useEffect(() => {
+    if (dragPosition && typeof window !== 'undefined') {
+      localStorage.setItem('trinity_ai_collapsed_position', JSON.stringify(dragPosition));
+    }
+  }, [dragPosition]);
+
+  // Handle dragging for collapsed button
+  useEffect(() => {
+    if (!isCollapsed || !isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newX = e.clientX - dragOffset.x;
+      const newY = e.clientY - dragOffset.y;
+      
+      // Constrain to viewport bounds
+      const buttonSize = 48; // h-12 w-12 = 48px
+      const maxX = window.innerWidth - buttonSize;
+      const maxY = window.innerHeight - buttonSize;
+      
+      const constrainedX = Math.max(0, Math.min(newX, maxX));
+      const constrainedY = Math.max(0, Math.min(newY, maxY));
+      
+      // Check if position actually changed (user is dragging, not just clicking)
+      setDragPosition(prev => {
+        if (prev) {
+          const moved = Math.abs(constrainedX - prev.x) > 2 || Math.abs(constrainedY - prev.y) > 2;
+          if (moved) {
+            setHasMoved(true);
+          }
+        }
+        return {
+          x: constrainedX,
+          y: constrainedY
+        };
+      });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      // Reset hasMoved after a short delay
+      setTimeout(() => setHasMoved(false), 100);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragOffset, isCollapsed]);
+
+  const handleDragStart = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!buttonRef.current) return;
+    
+    const rect = buttonRef.current.getBoundingClientRect();
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    });
+    setIsDragging(true);
+    setHasMoved(false);
+    e.preventDefault();
+  };
+
+  const handleButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // Only toggle if we didn't drag (user just clicked without moving)
+    if (!hasMoved && !isDragging) {
+      onToggleCollapse?.();
+    }
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -162,31 +264,77 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  // If collapsed, show only the toggle button with sparkle icon
+  // If collapsed, show only the toggle button with sparkle icon (draggable)
   if (isCollapsed) {
+    const getDefaultPosition = () => {
+      if (typeof window !== 'undefined') {
+        return { x: window.innerWidth / 2 - 24, y: window.innerHeight - 80 };
+      }
+      return { x: 0, y: 0 };
+    };
+    const defaultPosition = getDefaultPosition();
+    const position = dragPosition || defaultPosition;
+    
     return (
-      <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pointer-events-none">
-        <div className="w-full max-w-4xl mb-6 mx-4 pointer-events-auto flex justify-center">
-          <Button
-            onClick={() => onToggleCollapse?.()}
-            className="h-12 w-12 bg-white border border-border/50 shadow-lg hover:shadow-xl transition-all duration-200 hover:scale-105 rounded-2xl p-0 group"
-            size="icon"
-          >
-            <Sparkles 
-              className="w-5 h-5 transition-colors duration-200 group-hover:text-black" 
-              style={{ 
-                color: BRAND_PURPLE 
-              }}
-            />
-          </Button>
-        </div>
+      <div className="fixed inset-0 z-40 pointer-events-none">
+        <Button
+          ref={buttonRef}
+          onMouseDown={handleDragStart}
+          onClick={handleButtonClick}
+          className={cn(
+            "h-12 w-12 bg-white border border-border/50 shadow-lg hover:shadow-xl transition-all duration-200 rounded-2xl p-0 group cursor-move",
+            "hover:bg-[#FFBD59]",
+            isDragging && "scale-105"
+          )}
+          style={{
+            position: 'absolute',
+            left: `${position.x}px`,
+            top: `${position.y}px`,
+            pointerEvents: 'auto',
+          }}
+          size="icon"
+        >
+          <Sparkles 
+            className="w-5 h-5 transition-colors duration-200" 
+            style={{ 
+              color: BRAND_PURPLE 
+            }}
+          />
+        </Button>
       </div>
     );
   }
 
+  // Calculate width and position for auto-size mode
+  const containerWidth = autoSize && canvasAreaWidth 
+    ? `${canvasAreaWidth}px` 
+    : undefined;
+  const containerLeft = autoSize && canvasAreaLeft !== null
+    ? `${canvasAreaLeft}px`
+    : undefined;
+
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 flex justify-center pointer-events-none">
-      <div className="w-full max-w-4xl mb-6 mx-4 pointer-events-auto">
+    <div 
+      className="fixed bottom-0 z-40 flex pointer-events-none"
+      style={autoSize && canvasAreaWidth && canvasAreaLeft !== null ? {
+        left: containerLeft,
+        width: containerWidth,
+        right: 'auto',
+      } : {
+        left: '0',
+        right: '0',
+        justifyContent: 'center',
+      }}
+    >
+      <div 
+        className={`mb-6 pointer-events-auto ${!autoSize ? 'w-full max-w-4xl mx-4' : ''}`}
+        style={autoSize && canvasAreaWidth ? {
+          width: containerWidth,
+          maxWidth: containerWidth,
+          marginLeft: '0px',
+          marginRight: '0px',
+        } : {}}
+      >
         <Collapsible open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
           {/* Chat History */}
           <CollapsibleContent className="mb-3" forceMount asChild>
@@ -224,7 +372,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                             animate={{ rotate: isHistoryOpen ? 0 : 180 }}
                             transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
                           >
-                            <ChevronUp className="w-4 h-4" />
+                            <ChevronDown className="w-4 h-4" />
                           </motion.div>
                         </Button>
                       </CollapsibleTrigger>

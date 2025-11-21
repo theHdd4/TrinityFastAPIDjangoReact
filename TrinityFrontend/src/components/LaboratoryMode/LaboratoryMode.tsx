@@ -48,6 +48,7 @@ const LaboratoryMode = () => {
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isHeaderMinimized, setIsHeaderMinimized] = useState(false);
   const [isTrinityAIVisible, setIsTrinityAIVisible] = useState(true); // Track if AI panel should be visible at all
+  const [isHorizontalAICollapsed, setIsHorizontalAICollapsed] = useState(false); // Track collapse state for horizontal view only
   // Layout preference: 'vertical' (default) or 'horizontal'
   const [trinityAILayout, setTrinityAILayout] = useState<'vertical' | 'horizontal'>(() => {
     const saved = localStorage.getItem('trinity_ai_layout_preference');
@@ -883,6 +884,12 @@ const LaboratoryMode = () => {
                 if (newActive === 'trinity' && !isTrinityAIVisible) {
                   setIsTrinityAIVisible(true);
                 }
+                // In horizontal view, toggle collapse state when AI icon is clicked
+                if (trinityAILayout === 'horizontal' && newActive === 'trinity') {
+                  setIsHorizontalAICollapsed(false); // Expand when AI icon is clicked
+                } else if (trinityAILayout === 'horizontal' && newActive === null && auxActive === 'trinity') {
+                  setIsHorizontalAICollapsed(true); // Collapse when AI icon is clicked again
+                }
               }}
               trinityAILayout={trinityAILayout}
               isTrinityAIVisible={isTrinityAIVisible}
@@ -900,28 +907,33 @@ const LaboratoryMode = () => {
 
           {/* Trinity AI Panel - Only for horizontal layout */}
           {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
+          {/* In horizontal view, panel stays visible and aligned with canvas area */}
           {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
-            <div className="absolute bottom-0 left-0 right-0 z-50">
-              <TrinityAIPanel
-                isCollapsed={auxActive !== 'trinity'}
-                onToggle={() => {
-                  // Toggle between collapsed (minimized line) and expanded
-                  // Clicking AI icon toggles between collapsed and expanded
-                  if (auxActive === 'trinity') {
-                    // If expanded, collapse it to minimized line
+            <div 
+              className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
+            >
+              <div className="pointer-events-auto">
+                <TrinityAIPanel
+                  isCollapsed={isHorizontalAICollapsed}
+                  onToggle={() => {
+                    // In horizontal view, toggle between collapsed (sparkle icon) and expanded
+                    // Don't auto-minimize when other panels open - only toggle when AI icon is clicked
+                    setIsHorizontalAICollapsed(prev => !prev);
+                    if (isHorizontalAICollapsed) {
+                      setAuxActive('trinity');
+                    } else {
+                      setAuxActive(null);
+                    }
+                  }}
+                  onClose={() => {
+                    // Only X button calls this - completely hide the panel
+                    setIsTrinityAIVisible(false);
+                    setIsHorizontalAICollapsed(false);
                     setAuxActive(null);
-                  } else {
-                    // If collapsed, expand it
-                    setAuxActive('trinity');
-                  }
-                }}
-                onClose={() => {
-                  // Only X button calls this - completely hide the panel
-                  setIsTrinityAIVisible(false);
-                  setAuxActive(null);
-                }}
-                layout="horizontal"
-              />
+                  }}
+                  layout="horizontal"
+                />
+              </div>
             </div>
           )}
         </div>

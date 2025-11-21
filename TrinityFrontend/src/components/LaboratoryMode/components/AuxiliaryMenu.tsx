@@ -52,8 +52,22 @@ const AuxiliaryMenu: React.FC<Props> = ({
     }
   };
 
-  const openSettings = () => setActive(active === 'settings' ? null : 'settings');
-  const openFrames = () => setActive(active === 'frames' ? null : 'frames');
+  const openSettings = () => {
+    // In horizontal layout, don't close AI panel when opening settings
+    if (trinityAILayout === 'horizontal') {
+      setActive(active === 'settings' ? null : 'settings');
+    } else {
+      setActive(active === 'settings' ? null : 'settings');
+    }
+  };
+  const openFrames = () => {
+    // In horizontal layout, don't close AI panel when opening frames
+    if (trinityAILayout === 'horizontal') {
+      setActive(active === 'frames' ? null : 'frames');
+    } else {
+      setActive(active === 'frames' ? null : 'frames');
+    }
+  };
   const openHelp = () => setActive(active === 'help' ? null : 'help');
   const openExhibition = () => setActive(active === 'exhibition' ? null : 'exhibition');
   const openTrinityAI = () => setActive(active === 'trinity' ? null : 'trinity');
