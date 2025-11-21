@@ -27,19 +27,44 @@ const getProtocol = () => {
 
 const protocol = getProtocol();
 
+// Helper function to check if hostname is a domain name (not an IP address)
+const isDomainName = (hostname: string): boolean => {
+  if (!hostname) return false;
+  // Check if it's localhost or 127.0.0.1
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return false;
+  // Check if it matches IP address pattern (IPv4: xxx.xxx.xxx.xxx)
+  const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipPattern.test(hostname)) return false;
+  // If it contains letters or is not a valid IP, it's a domain name
+  return true;
+};
+
 if (!backendOrigin) {
   if (hostIp) {
     // If accessing via localhost, use localhost for backend too (for cookie/session compatibility)
     if (typeof window !== 'undefined' && 
         (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
       backendOrigin = `${protocol}//${window.location.hostname}:${djangoPort}`;
+    } else if (typeof window !== 'undefined' && isDomainName(window.location.hostname)) {
+      // If accessing via domain name, use the same domain WITHOUT port (uses reverse proxy)
+      // This makes usesProxy = true, which uses /admin/api prefix
+      // Requests will go to: https://domain.com/admin/api/... (proxied by nginx to Django)
+      backendOrigin = window.location.origin;
     } else {
+      // Use IP address only when accessing via IP directly
       // Use the same protocol as the current page (HTTPS if page is HTTPS)
       backendOrigin = `${protocol}//${hostIp}:${djangoPort}`;
     }
   } else if (typeof window !== 'undefined') {
-    const regex = new RegExp(`:${frontendPort}$`);
-    backendOrigin = window.location.origin.replace(regex, `:${djangoPort}`);
+    // Check if accessing via domain name
+    if (isDomainName(window.location.hostname)) {
+      // Use same domain without port (reverse proxy)
+      backendOrigin = window.location.origin;
+    } else {
+      // Use IP/port for direct access
+      const regex = new RegExp(`:${frontendPort}$`);
+      backendOrigin = window.location.origin.replace(regex, `:${djangoPort}`);
+    }
   } else {
     backendOrigin = `http://localhost:${djangoPort}`;
   }
@@ -58,24 +83,53 @@ if (typeof window !== 'undefined' &&
   backendOrigin = backendOrigin.replace(/http:\/\/[\d.]+:/, `${protocol}//${window.location.hostname}:`);
 }
 
+// CRITICAL: If accessing via domain name, ALWAYS use the same domain (without port) for reverse proxy
+// This overrides any hardcoded VITE_BACKEND_ORIGIN or IP-based configuration
+if (typeof window !== 'undefined') {
+  const hostname = window.location.hostname;
+  const isDomain = isDomainName(hostname);
+  
+  if (isDomain) {
+    // Force use of domain without port to enable reverse proxy routing
+    // This ensures requests go through nginx at /admin/api/... instead of direct IP:port
+    const currentOrigin = window.location.origin;
+    const oldBackendOrigin = backendOrigin;
+    
+    // ALWAYS override when accessing via domain - no conditions
+    backendOrigin = currentOrigin;
+    
+    // Log the override for debugging
+    if (oldBackendOrigin !== currentOrigin) {
+      console.warn(`[API Config] DOMAIN ACCESS DETECTED: Overriding backendOrigin`);
+      console.warn(`  From: ${oldBackendOrigin}`);
+      console.warn(`  To: ${currentOrigin}`);
+      console.warn(`  Hostname: ${hostname}`);
+      console.warn(`  This enables reverse proxy routing via /admin/api/`);
+    }
+  }
+}
+
 
 const usesProxy = !backendOrigin.includes(`:${djangoPort}`);
 const djangoPrefix = usesProxy ? '/admin/api' : '/api';
 
 // Set `VITE_BACKEND_ORIGIN` if the APIs live on a different domain.
 
-// console.log('🔧 API Configuration Debug:', {
-//   hostIp,
-//   isDevStack,
-//   djangoPort,
-//   fastapiPort,
-//   aiPort,
-//   frontendPort,
-//   backendOrigin,
-//   windowLocation: typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port}` : 'server-side',
-//   buildModelApi: `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/build-model-feature-based`
-// });
-// console.log('Using backend origin', backendOrigin);
+// Debug logging - always show in browser for troubleshooting
+if (typeof window !== 'undefined') {
+  console.log('[Trinity API] Resolved backend endpoints', {
+    windowOrigin: window.location.origin,
+    backendOrigin,
+    fastapiOrigin: backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`),
+    exhibitionApi: `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/exhibition`,
+    laboratoryApi: `${backendOrigin.replace(new RegExp(`:${djangoPort}$`), `:${fastapiPort}`)}/api/laboratory`,
+    accountsApi: `${backendOrigin}${djangoPrefix}/accounts`,
+    usesProxy,
+    djangoPrefix,
+    isDomain: isDomainName(window.location.hostname),
+    hostname: window.location.hostname
+  });
+}
 
 const normalizeUrl = (url?: string) => {
   if (!url) return undefined;
