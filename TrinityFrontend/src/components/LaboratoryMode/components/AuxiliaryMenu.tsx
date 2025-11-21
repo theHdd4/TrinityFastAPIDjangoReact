@@ -21,6 +21,9 @@ interface Props {
   onActiveChange?: (
     active: 'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null,
   ) => void;
+  trinityAILayout?: 'vertical' | 'horizontal';
+  isTrinityAIVisible?: boolean;
+  onTrinityAIClose?: () => void;
 }
 
 const AuxiliaryMenu: React.FC<Props> = ({
@@ -28,7 +31,10 @@ const AuxiliaryMenu: React.FC<Props> = ({
   selectedCardId,
   cardExhibited,
   active: activeProp,
-  onActiveChange
+  onActiveChange,
+  trinityAILayout = 'vertical',
+  isTrinityAIVisible = true,
+  onTrinityAIClose
 }) => {
   const [internalActive, setInternalActive] = useState<
     'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null
@@ -91,14 +97,19 @@ const AuxiliaryMenu: React.FC<Props> = ({
         />
       )}
 
-      {/* Trinity AI Panel (kept mounted for background operations) */}
-      <div className={active === 'trinity' ? '' : 'hidden'}>
-        <TrinityAIPanel
-          isCollapsed={active !== 'trinity'}
-          onToggle={() => setActive(active === 'trinity' ? null : 'trinity')}
-          onBackgroundStatusChange={handleTrinityBackgroundStatus}
-        />
-      </div>
+      {/* Trinity AI Panel - Only render for vertical layout */}
+      {/* For horizontal layout, it's rendered in LaboratoryMode component at bottom */}
+      {trinityAILayout === 'vertical' && isTrinityAIVisible && (
+        <div className={active === 'trinity' ? '' : 'hidden'}>
+          <TrinityAIPanel
+            isCollapsed={active !== 'trinity'}
+            onToggle={() => setActive(active === 'trinity' ? null : 'trinity')}
+            onBackgroundStatusChange={handleTrinityBackgroundStatus}
+            layout="vertical"
+            onClose={onTrinityAIClose}
+          />
+        </div>
+      )}
 
       {showTrinityBackgroundBanner && (
         <div className="absolute right-16 bottom-8 z-40 pointer-events-none">
@@ -129,11 +140,15 @@ const AuxiliaryMenu: React.FC<Props> = ({
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
         <div className="p-3 border-b border-gray-200 flex items-center justify-center">
           <button
-            onClick={openTrinityAI}
+            onClick={() => {
+              // Toggle between collapsed and expanded, but never completely hide
+              // The panel is always visible, just minimized or expanded
+              openTrinityAI();
+            }}
             className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
               active === 'trinity' ? 'bg-muted text-foreground' : ''
             }`}
-            title="Trinity AI"
+            title="Trinity AI - Click to expand/collapse"
             data-trinity-ai="true"
             type="button"
           >

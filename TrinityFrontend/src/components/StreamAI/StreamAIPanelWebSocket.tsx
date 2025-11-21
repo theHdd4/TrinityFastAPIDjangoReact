@@ -4,7 +4,11 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '@/lib/utils';
+import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle, ChevronUp, ChevronDown, Plug, Wrench, Brain } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
@@ -16,6 +20,7 @@ import { listMemoryChats, saveMemoryChat, deleteMemoryChat } from '@/lib/trinity
 import type { MemoryChatResponse } from '@/lib/trinityMemory';
 import { AgentModeProvider, useAgentMode } from './context/AgentModeContext';
 import VoiceInputButton from './VoiceInputButton';
+import ChatInterface from './ChatInterface';
 
 const BRAND_GREEN = '#50C878';
 const BRAND_PURPLE = '#7C3AED';
@@ -103,9 +108,11 @@ interface TrinityAIPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
   onBackgroundStatusChange?: (status: TrinityAIBackgroundStatus) => void;
+  layout?: 'vertical' | 'horizontal'; // New prop for layout direction
+  onClose?: () => void; // Callback for completely hiding the panel (X button)
 }
 
-const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle, onBackgroundStatusChange }) => {
+const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle, onBackgroundStatusChange, layout: layoutProp, onClose }) => {
   // Chat management
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -115,9 +122,20 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [isInitialized, setIsInitialized] = useState(false);
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false); // For collapsible chat history in horizontal mode
+  const [selectedAgent, setSelectedAgent] = useState('Default'); // For agent selection dropdown
   const [panelWidth, setPanelWidth] = useState(384); // Default 384px (w-96)
+  const [panelHeight, setPanelHeight] = useState(500); // Default height for horizontal mode
   const [isPanelFrozen, setIsPanelFrozen] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  // Layout preference: 'vertical' (default) or 'horizontal'
+  const [preferredLayout, setPreferredLayout] = useState<'vertical' | 'horizontal'>(() => {
+    const saved = localStorage.getItem('trinity_ai_layout_preference');
+    return (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
+  });
+  
+  // Use preferred layout from settings if layout prop not provided
+  const layout = layoutProp || preferredLayout;
   const [baseFontSize] = useState(14);
   const [smallFontSize] = useState(12);
   const isCompact = panelWidth <= 420;
@@ -716,8 +734,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     }
   }, [currentChatId]);
   
-  // Resize handlers
+  // Resize handlers - for vertical mode (width)
   useEffect(() => {
+    if (layout === 'horizontal') return; // Skip for horizontal mode
+    
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
       const newWidth = window.innerWidth - e.clientX;
@@ -737,7 +757,32 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing]);
+  }, [isResizing, layout]);
+  
+  // Resize handlers - for horizontal mode (height)
+  useEffect(() => {
+    if (layout !== 'horizontal') return; // Only for horizontal mode
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const newHeight = window.innerHeight - e.clientY;
+      setPanelHeight(Math.max(300, Math.min(800, newHeight)));
+    };
+    
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+    
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, layout]);
   
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isPanelFrozen) return;
@@ -1756,6 +1801,276 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     return null;
   }
 
+  // For horizontal layout, render with new ChatInterface component
+  if (layout === 'horizontal') {
+    return (
+      <>
+        <ChatInterface
+          messages={messages}
+          inputValue={inputValue}
+          setInputValue={setInputValue}
+          isLoading={isLoading}
+          onSendMessage={handleSendMessage}
+          selectedAgent={selectedAgent}
+          setSelectedAgent={setSelectedAgent}
+          onMinimize={onToggle}
+          onSettings={() => setShowSettings(!showSettings)}
+          onClose={() => {
+            if (wsConnection) {
+              wsConnection.close();
+            }
+            setIsLoading(false);
+            if (onClose) {
+              onClose();
+            } else {
+              onToggle();
+            }
+          }}
+          onToggleCollapse={onToggle}
+          isCollapsed={isCollapsed}
+          onAttachClick={handleAttachClick}
+          onVoiceTranscript={(text) => {
+            setInputValue(prev => prev ? `${prev} ${text}` : text);
+          }}
+          showFilePicker={showFilePicker}
+          availableFiles={availableFiles}
+          loadingFiles={loadingFiles}
+          onFileSelect={(fileName) => {
+            setInputValue(prev => prev ? `${prev} @${fileName}` : `@${fileName}`);
+            setShowFilePicker(false);
+          }}
+          textareaRef={textareaRef}
+          onHistoryClick={() => setShowChatHistory(!showChatHistory)}
+          showChatHistory={showChatHistory}
+          onMemoryClick={() => setShowChatHistory(!showChatHistory)}
+          onConnectorsClick={() => {
+            // TODO: Implement connectors functionality
+            console.log('Connectors clicked');
+          }}
+          onToolsClick={() => {
+            // TODO: Implement tools functionality
+            console.log('Tools clicked');
+          }}
+          onAgentClick={() => {
+            // TODO: Implement agent functionality
+            console.log('Agent clicked');
+          }}
+          onAdvancedReasoningClick={() => {
+            // TODO: Implement advanced reasoning functionality
+            console.log('Advanced Reasoning clicked');
+          }}
+          onWorkflowAccept={() => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+            setIsLoading(true);
+          }
+        }}
+        onWorkflowReject={() => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({ type: 'reject_plan' }));
+            wsConnection.close();
+            setWsConnection(null);
+          }
+          setIsLoading(false);
+        }}
+        onWorkflowAdd={(info) => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({
+              type: 'add_info',
+              step_number: 0,
+              additional_info: info,
+              original_prompt: originalPrompt
+            }));
+            setIsLoading(true);
+          }
+        }}
+        onWorkflowRunAll={() => {
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            startAutoRun();
+            wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+            setIsLoading(true);
+          }
+        }}
+        onStepAccept={(stepNumber) => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({
+              type: 'approve_step',
+              step_number: stepNumber
+            }));
+            // Find and remove the step approval message
+            setMessages(prev => {
+              const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
+              return msgToRemove ? prev.filter(m => m.id !== msgToRemove.id) : prev;
+            });
+            setIsLoading(true);
+          }
+        }}
+        onStepReject={(stepNumber) => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({
+              type: 'reject_workflow',
+              step_number: stepNumber
+            }));
+            wsConnection.close();
+            setWsConnection(null);
+          }
+          // Find and remove the step approval message
+          setMessages(prev => {
+            const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
+            return msgToRemove ? prev.filter(m => m.id !== msgToRemove.id) : prev;
+          });
+          setIsLoading(false);
+        }}
+        onStepAdd={(stepNumber, info) => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({
+              type: 'add_info',
+              step_number: stepNumber,
+              additional_info: info,
+              original_prompt: originalPrompt
+            }));
+            // Find and remove the step approval message
+            setMessages(prev => {
+              const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
+              return msgToRemove ? prev.filter(m => m.id !== msgToRemove.id) : prev;
+            });
+            setIsLoading(true);
+          }
+        }}
+        onStepRunAll={(stepNumber, sequenceId) => {
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            startAutoRun();
+            // Find and remove the step approval message
+            setMessages(prev => {
+              const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
+              return msgToRemove ? prev.filter(m => m.id !== msgToRemove.id) : prev;
+            });
+            queueAutoApprove(stepNumber, sequenceId);
+            setIsLoading(true);
+          }
+        }}
+        isAutoRunning={isAutoRunning}
+        parseMarkdown={parseMarkdown}
+      />
+      
+      {/* Settings Panel for Horizontal Layout */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div 
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto"
+            onClick={() => setShowSettings(false)}
+          />
+          <div className="relative w-full max-w-md mx-4 bg-white backdrop-blur-xl border-2 border-gray-200 rounded-2xl shadow-2xl pointer-events-auto max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Settings</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowSettings(false)}
+                  className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            
+            <ScrollArea className="flex-1 p-4">
+              <div className="space-y-6">
+                {/* Panel Settings */}
+                <div className="space-y-3">
+                  <h4 className="font-semibold text-gray-700 mb-3 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Panel Settings</h4>
+                  
+                  {/* Layout Preference Toggle */}
+                  <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>View</h5>
+                        <p className="text-gray-600 font-inter text-xs">Choose between horizontal and vertical layout</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-medium ${preferredLayout === 'vertical' ? 'text-gray-800' : 'text-gray-400'}`}>Vertical</span>
+                        <button
+                          onClick={() => {
+                            const newLayout = preferredLayout === 'vertical' ? 'horizontal' : 'vertical';
+                            setPreferredLayout(newLayout);
+                            localStorage.setItem('trinity_ai_layout_preference', newLayout);
+                            // Dispatch custom event for same-tab updates
+                            window.dispatchEvent(new Event('trinity_ai_layout_changed'));
+                            setShowSettings(false); // Close settings after changing layout
+                          }}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            preferredLayout === 'horizontal' ? '' : 'bg-gray-300'
+                          }`}
+                          style={preferredLayout === 'horizontal' ? { backgroundColor: BRAND_GREEN } : undefined}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            preferredLayout === 'horizontal' ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
+                        </button>
+                        <span className={`text-xs font-medium ${preferredLayout === 'horizontal' ? 'text-gray-800' : 'text-gray-400'}`}>Horizontal</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Freeze Panel Toggle */}
+                  <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>Freeze Panel Size</h5>
+                        <p className="text-gray-600 font-inter text-xs">Lock panel width and prevent resizing</p>
+                      </div>
+                      <button
+                        onClick={() => setIsPanelFrozen(!isPanelFrozen)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          isPanelFrozen ? '' : 'bg-gray-300'
+                        }`}
+                        style={isPanelFrozen ? { backgroundColor: BRAND_GREEN } : undefined}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          isPanelFrozen ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* WebSocket Connection Status */}
+                  <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
+                    <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Connection Status</h5>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-3 h-3 rounded-full ${wsConnection ? 'animate-pulse' : ''}`}
+                        style={{ backgroundColor: wsConnection ? BRAND_GREEN : '#D1D5DB' }}
+                      ></div>
+                      <span className="text-gray-600 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
+                        {wsConnection ? 'Connected' : 'Disconnected'}
+                      </span>
+                    </div>
+                    {currentWorkflowMessageId && (
+                      <div className="mt-2">
+                        <p className="text-gray-600 font-inter text-xs">
+                          Active workflow in progress
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </ScrollArea>
+          </div>
+        </div>
+      )}
+      </>
+    );
+  }
+
+  // Original vertical layout
   return (
     <div className={isCollapsed ? 'hidden' : ''} style={{ height: '100%' }}>
     <Card className="h-full bg-white backdrop-blur-xl shadow-[0_20px_70px_rgba(0,0,0,0.3)] border-2 border-gray-200 overflow-hidden flex flex-col relative ring-1 ring-gray-100" style={{ width: `${panelWidth}px` }}>
@@ -1781,6 +2096,37 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               {/* Panel Settings */}
               <div className="space-y-3">
                 <h4 className="font-semibold text-gray-700 mb-3 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Panel Settings</h4>
+                
+                {/* Layout Preference Toggle */}
+                <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>View</h5>
+                      <p className="text-gray-600 font-inter text-xs">Choose between horizontal and vertical layout</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-medium ${preferredLayout === 'vertical' ? 'text-gray-800' : 'text-gray-400'}`}>Vertical</span>
+                      <button
+                        onClick={() => {
+                          const newLayout = preferredLayout === 'vertical' ? 'horizontal' : 'vertical';
+                          setPreferredLayout(newLayout);
+                          localStorage.setItem('trinity_ai_layout_preference', newLayout);
+                          // Dispatch custom event for same-tab updates
+                          window.dispatchEvent(new Event('trinity_ai_layout_changed'));
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          preferredLayout === 'horizontal' ? '' : 'bg-gray-300'
+                        }`}
+                        style={preferredLayout === 'horizontal' ? { backgroundColor: BRAND_GREEN } : undefined}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          preferredLayout === 'horizontal' ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                      <span className={`text-xs font-medium ${preferredLayout === 'horizontal' ? 'text-gray-800' : 'text-gray-400'}`}>Horizontal</span>
+                    </div>
+                  </div>
+                </div>
                 
                 {/* Freeze Panel Toggle */}
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
