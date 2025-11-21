@@ -15,7 +15,15 @@ export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>): Prom
   const initialStatus = (initial.task_status || initial.status || '').toLowerCase();
   if (initialStatus === 'success') {
     if (initial.result && typeof initial.result === 'object') {
-      return initial.result as T;
+      const merged: Record<string, unknown> = {
+        ...(initial.result as Record<string, unknown>),
+      };
+      if (initial.metadata) merged.metadata = initial.metadata;
+      if (initial.task_id) merged.task_id = initial.task_id;
+      if (initial.task_status || initial.status) {
+        merged.task_status = initial.task_status || initial.status;
+      }
+      return merged as T;
     }
     return initial as unknown as T;
   }
@@ -41,7 +49,15 @@ export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>): Prom
     const status = (payload.status || payload.task_status || '').toLowerCase();
     if (status === 'success') {
       if (payload.result && typeof payload.result === 'object') {
-        return payload.result as T;
+        const merged: Record<string, unknown> = {
+          ...(payload.result as Record<string, unknown>),
+        };
+        if (payload.metadata) merged.metadata = payload.metadata;
+        if (payload.task_id) merged.task_id = payload.task_id;
+        if (payload.task_status || payload.status) {
+          merged.task_status = payload.task_status || payload.status;
+        }
+        return merged as T;
       }
       return payload as unknown as T;
     }

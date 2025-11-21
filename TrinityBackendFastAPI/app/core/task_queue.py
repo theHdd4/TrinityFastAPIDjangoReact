@@ -35,12 +35,19 @@ class TaskSubmission:
             payload.setdefault("task_status", self.status)
             if self.detail and "detail" not in payload:
                 payload["detail"] = self.detail
+            if self.metadata is not None:
+                payload.setdefault("metadata", self.metadata)
             return payload
-        response: Dict[str, Any] = {"task_id": self.task_id, "task_status": self.status}
+        response: Dict[str, Any] = {
+            "task_id": self.task_id,
+            "task_status": self.status,
+        }
         if embed_result and self.result is not None:
             response["result"] = self.result
         if self.detail is not None:
             response["detail"] = self.detail
+        if self.metadata is not None:
+            response["metadata"] = self.metadata
         return response
 
 
