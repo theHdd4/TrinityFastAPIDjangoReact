@@ -86,6 +86,20 @@ services:
       - trinity-dev-net
     restart: always
 
+  celery-exporter:
+    image: danihodovic/celery-exporter:1.7.0
+    profiles:
+      - cache-monitoring
+    environment:
+      CE_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+    ports:
+      - "9808:9808"
+    depends_on:
+      - redis
+    networks:
+      - trinity-dev-net
+    restart: always
+
   prometheus:
     image: prom/prometheus:v2.52.0
     profiles:
@@ -101,6 +115,7 @@ services:
       - prometheus_data:/prometheus
     depends_on:
       - redis-exporter
+      - celery-exporter
     networks:
       - trinity-dev-net
     restart: always

@@ -1,0 +1,596 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "name": "Annotations & Alerts",
+        "type": "dashboard",
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "title": "Trinity Celery Overview",
+  "uid": "trinity-celery-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Active Workers",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(celery_worker_up{worker=~\"$worker\"})",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto",
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Active Tasks",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(celery_worker_tasks_active{worker=~\"$worker\"})",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto",
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Queued Tasks",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(celery_queue_length{queue=~\"$queue\"})",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto",
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Celery Beat Heartbeat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(celery_active_worker_count{queue=~\"$queue\"})",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto",
+        "orientation": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "red",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Worker Status",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "celery_worker_up{worker=~\"$worker\"}"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "Value": "Up"
+            },
+            "indexByName": {
+              "worker": 0,
+              "Value": 1
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "bargauge",
+      "title": "Worker Task Load",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 6,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "celery_worker_tasks_active{worker=~\"$worker\"}"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "displayMode": "gradient"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Task Throughput by Outcome",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(celery_task_sent_total{worker=~\"$worker\", name=~\"$task\"}[5m]))",
+          "legendFormat": "sent"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(celery_task_started_total{worker=~\"$worker\", name=~\"$task\"}[5m]))",
+          "legendFormat": "started"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(celery_task_succeeded_total{worker=~\"$worker\", name=~\"$task\"}[5m]))",
+          "legendFormat": "succeeded"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(celery_task_failed_total{worker=~\"$worker\", name=~\"$task\"}[5m]))",
+          "legendFormat": "failed"
+        },
+        {
+          "refId": "E",
+          "expr": "sum(rate(celery_task_retried_total{worker=~\"$worker\", name=~\"$task\"}[5m]))",
+          "legendFormat": "retried"
+        },
+        {
+          "refId": "F",
+          "expr": "sum(rate(celery_task_revoked_total{worker=~\"$worker\", name=~\"$task\"}[5m]))",
+          "legendFormat": "revoked"
+        },
+        {
+          "refId": "G",
+          "expr": "sum(rate(celery_task_rejected_total{worker=~\"$worker\", name=~\"$task\"}[5m]))",
+          "legendFormat": "rejected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Average Task Runtime (5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(celery_task_runtime_seconds_sum{worker=~\"$worker\", name=~\"$task\"}[5m]) / rate(celery_task_runtime_seconds_count{worker=~\"$worker\", name=~\"$task\"}[5m])",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Tasks by State (1h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (name) (increase(celery_task_succeeded_total{worker=~\"$worker\", name=~\"$task\"}[1h]))",
+          "legendFormat": "succeeded"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (name) (increase(celery_task_failed_total{worker=~\"$worker\", name=~\"$task\"}[1h]))",
+          "legendFormat": "failed"
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (name) (increase(celery_task_retried_total{worker=~\"$worker\", name=~\"$task\"}[1h]))",
+          "legendFormat": "retried"
+        },
+        {
+          "refId": "D",
+          "expr": "sum by (name) (increase(celery_task_revoked_total{worker=~\"$worker\", name=~\"$task\"}[1h]))",
+          "legendFormat": "revoked"
+        },
+        {
+          "refId": "E",
+          "expr": "sum by (name) (increase(celery_task_rejected_total{worker=~\"$worker\", name=~\"$task\"}[1h]))",
+          "legendFormat": "rejected"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Queue Depth by Queue",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "redis-metrics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 11
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (queue) (celery_queue_length{queue=~\"$queue\"})",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "worker",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "redis-metrics"
+        },
+        "query": "label_values(celery_worker_up, worker)",
+        "definition": "label_values(celery_worker_up, worker)",
+        "label": "Worker",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        }
+      },
+      {
+        "name": "task",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "redis-metrics"
+        },
+        "query": "label_values(celery_task_started_total, name)",
+        "definition": "label_values(celery_task_started_total, name)",
+        "label": "Task",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        }
+      },
+      {
+        "name": "queue",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "redis-metrics"
+        },
+        "query": "label_values(celery_queue_length, queue)",
+        "definition": "label_values(celery_queue_length, queue)",
+        "label": "Queue",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all",
+          "selected": false
+        }
+      }
+    ]
+  },
+  "refresh": "5s",
+  "timezone": "",
+  "weekStart": ""
+}
