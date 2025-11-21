@@ -20,11 +20,67 @@ import VoiceInputButton from './VoiceInputButton';
 const BRAND_GREEN = '#50C878';
 const BRAND_PURPLE = '#7C3AED';
 
-// FastAPI base URL - use same logic as api.ts for port detection
+// FastAPI base URL - use same logic as api.ts for port detection and domain routing
 const isDevStack = typeof window !== 'undefined' && window.location.port === '8081';
 const aiPort = import.meta.env.VITE_AI_PORT || (isDevStack ? '8005' : '8002');
 const hostIp = import.meta.env.VITE_HOST_IP || 'localhost';
-const FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || `http://${hostIp}:${aiPort}`;
+
+// Helper function to check if hostname is a domain name (not an IP address)
+const isDomainName = (hostname: string): boolean => {
+  if (!hostname) return false;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return false;
+  const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipPattern.test(hostname)) return false;
+  return true;
+};
+
+// Detect protocol from current page
+const getProtocol = () => {
+  if (typeof window !== 'undefined') {
+    return window.location.protocol === 'https:' ? 'https:' : 'http:';
+  }
+  return 'http:';
+};
+
+const protocol = getProtocol();
+
+// Construct FastAPI base URL with domain detection (same logic as api.ts)
+let FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL;
+
+if (!FASTAPI_BASE_URL) {
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    
+    // If accessing via domain name, use the same domain (without port) for reverse proxy
+    if (isDomainName(hostname)) {
+      // Use domain without port - requests will go through reverse proxy at /trinityai
+      FASTAPI_BASE_URL = window.location.origin;
+    } else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      // Use localhost with port for local development
+      FASTAPI_BASE_URL = `${protocol}//${hostname}:${aiPort}`;
+    } else {
+      // Use IP address with port for direct IP access
+      FASTAPI_BASE_URL = `${protocol}//${hostIp}:${aiPort}`;
+    }
+  } else {
+    // Server-side fallback
+    FASTAPI_BASE_URL = `http://${hostIp}:${aiPort}`;
+  }
+}
+
+// CRITICAL: If accessing via domain name, ALWAYS use the same domain (without port) for reverse proxy
+// This overrides any hardcoded VITE_FASTAPI_BASE_URL or IP-based configuration
+if (typeof window !== 'undefined' && isDomainName(window.location.hostname)) {
+  const currentOrigin = window.location.origin;
+  if (FASTAPI_BASE_URL !== currentOrigin) {
+    console.warn(`[StreamAI] DOMAIN ACCESS DETECTED: Overriding FASTAPI_BASE_URL`);
+    console.warn(`  From: ${FASTAPI_BASE_URL}`);
+    console.warn(`  To: ${currentOrigin}`);
+    console.warn(`  This enables reverse proxy routing via /trinityai`);
+    FASTAPI_BASE_URL = currentOrigin;
+  }
+}
+
 const MEMORY_API_BASE = `${(FASTAPI_BASE_URL || '').replace(/\/$/, '')}/trinityai`;
 
 // Add CSS for fade-in animation and slow pulse
