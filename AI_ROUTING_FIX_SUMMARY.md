@@ -68,8 +68,8 @@ frontend:
       VITE_FASTAPI_PORT: "8001"
       VITE_AI_PORT: "8002"                    # ✅ Correct AI port
       VITE_FRONTEND_PORT: "8080"
-      VITE_BACKEND_ORIGIN: "http://${HOST_IP:-10.2.2.131}:8000"
-      VITE_TRINITY_AI_API: "http://${HOST_IP:-10.2.2.131}:8002/trinityai"  # ✅ Explicit AI API URL
+      VITE_BACKEND_ORIGIN: "http://${HOST_IP:-10.2.4.48}:8000"
+      VITE_TRINITY_AI_API: "http://${HOST_IP:-10.2.4.48}:8002/trinityai"  # ✅ Explicit AI API URL
       VITE_ENVIRONMENT: "production"
 ```
 
@@ -80,8 +80,8 @@ frontend:
 ```yaml
 trinity-ai:
   environment:
-    OLLAMA_IP: ${OLLAMA_IP:-10.2.1.170}
-    HOST_IP: ${HOST_IP:-10.2.2.131}          # ✅ Added HOST_IP
+    OLLAMA_IP: ${OLLAMA_IP:-10.2.4.48}
+    HOST_IP: ${HOST_IP:-10.2.4.48}          # ✅ Added HOST_IP
     MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_prod?authSource=admin"
     CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"
 ```

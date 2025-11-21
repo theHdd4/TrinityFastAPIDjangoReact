@@ -1,0 +1,26 @@
+Local host configuration
+========================
+
+Default host and AI endpoints
+-----------------------------
+- Default HOST_IP and OLLAMA_IP: **10.2.4.48**
+- The compose examples and .env templates load this value automatically.
+
+Allowing alternate hosts (e.g., 10.2.1.170)
+-------------------------------------------
+1) Export the alternate host before starting Docker Compose:
+   - `export HOST_IP=10.2.1.170`
+   - `export OLLAMA_IP=10.2.1.170` (only if your Ollama server runs on that machine)
+2) Verify CORS/CSRF settings include the alternate host:
+   - Django: `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS` now list both 10.2.4.48 and 10.2.1.170.
+   - FastAPI: `FASTAPI_CORS_ORIGINS` supports both hosts by default.
+3) Rebuild any services that bake environment variables into the bundle when switching hosts:
+   - `docker compose -f docker-compose-dev.yml build frontend`
+   - `docker compose -f docker-compose-dev.yml build trinity-ai` (if OLLAMA_IP changed)
+4) Restart the stack so containers pick up the updated host values:
+   - `docker compose -f docker-compose-dev.yml up -d`
+
+Notes
+-----
+- Keep `VITE_HOST_IP` in the frontend `.env` aligned with `HOST_IP` so the browser points to the correct backend.
+- When exposing the app via tunnels or proxies, add the external origin to the CORS/CSRF lists alongside the IP entries above.
