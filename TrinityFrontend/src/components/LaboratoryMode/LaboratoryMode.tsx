@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
+import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -30,6 +30,7 @@ import {
   LAB_ENTRANCE_PREP_DELAY_MS,
 } from '@/utils/projectTransition';
 import { useCollaborativeSync } from '@/hooks/useCollaborativeSync';
+import { TrinityAIPanel } from '@/components/TrinityAI';
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 const useIsomorphicInsertionEffect =
@@ -45,6 +46,39 @@ const LaboratoryMode = () => {
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isHeaderMinimized, setIsHeaderMinimized] = useState(false);
+  const [isTrinityAIVisible, setIsTrinityAIVisible] = useState(true); // Track if AI panel should be visible at all
+  const [isHorizontalAICollapsed, setIsHorizontalAICollapsed] = useState(false); // Track collapse state for horizontal view only
+  // Layout preference: 'vertical' (default) or 'horizontal'
+  const [trinityAILayout, setTrinityAILayout] = useState<'vertical' | 'horizontal'>(() => {
+    const saved = localStorage.getItem('trinity_ai_layout_preference');
+    return (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
+  });
+  
+  // Listen for layout preference changes (from settings panel)
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const saved = localStorage.getItem('trinity_ai_layout_preference');
+      const newLayout = (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
+      setTrinityAILayout(newLayout);
+    };
+    
+    // Listen to custom event for same-tab updates
+    const handleCustomStorageChange = () => handleStorageChange();
+    window.addEventListener('trinity_ai_layout_changed', handleCustomStorageChange);
+    
+    // Listen to storage events for cross-tab updates
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'trinity_ai_layout_preference') {
+        handleStorageChange();
+      }
+    });
+    
+    return () => {
+      window.removeEventListener('trinity_ai_layout_changed', handleCustomStorageChange);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
   const { toast } = useToast();
   const { cards, setCards: setLabCards } = useLaboratoryStore();
@@ -681,17 +715,27 @@ const LaboratoryMode = () => {
       <Header />
       
       {/* Laboratory Header */}
-      <div
-        data-lab-header="true"
-        className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm"
-      >
-        <div className="flex items-center justify-between">
-          <div data-lab-header-text="true">
-            <h2 className="text-3xl font-light text-gray-900 mb-2">Laboratory Mode</h2>
-            <p className="text-gray-600 font-light">Build sophisticated applications with modular atoms</p>
-          </div>
+      {isHeaderMinimized ? (
+        /* Minimized State - Small icon button */
+        <div
+          data-lab-header="true"
+          className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-4 py-2 flex-shrink-0 shadow-sm"
+        >
+        </div>
+      ) : (
+        <div
+          data-lab-header="true"
+          className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm"
+        >
+          <div className="flex items-center justify-between">
+            <div data-lab-header-text="true" className="flex items-center gap-3">
+              <div>
+                <h2 className="text-3xl font-light text-gray-900 mb-2">Laboratory Mode</h2>
+                <p className="text-gray-600 font-light">Build sophisticated applications with modular atoms</p>
+              </div>
+            </div>
 
-          <div data-lab-toolbar="true" className="flex items-center space-x-3">
+            <div data-lab-toolbar="true" className="flex items-center space-x-3">
             {canEdit && activeUsers.length > 0 && (
               <div
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-gray-200 shadow-sm"
@@ -791,8 +835,9 @@ const LaboratoryMode = () => {
           </div>
           </div>
         </div>
+      )}
 
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden relative">
           {/* Atoms Sidebar */}
           <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
             <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
@@ -833,7 +878,25 @@ const LaboratoryMode = () => {
               selectedCardId={selectedCardId}
               cardExhibited={cardExhibited}
               active={auxActive}
-              onActiveChange={setAuxActive}
+              onActiveChange={(newActive) => {
+                setAuxActive(newActive);
+                // If clicking AI icon and panel was hidden, show it again
+                if (newActive === 'trinity' && !isTrinityAIVisible) {
+                  setIsTrinityAIVisible(true);
+                }
+                // In horizontal view, toggle collapse state when AI icon is clicked
+                if (trinityAILayout === 'horizontal' && newActive === 'trinity') {
+                  setIsHorizontalAICollapsed(false); // Expand when AI icon is clicked
+                } else if (trinityAILayout === 'horizontal' && newActive === null && auxActive === 'trinity') {
+                  setIsHorizontalAICollapsed(true); // Collapse when AI icon is clicked again
+                }
+              }}
+              trinityAILayout={trinityAILayout}
+              isTrinityAIVisible={isTrinityAIVisible}
+              onTrinityAIClose={() => {
+                setIsTrinityAIVisible(false);
+                setAuxActive(null);
+              }}
             />
             <FloatingNavigationList
               isVisible={showFloatingNavigationList}
@@ -841,6 +904,38 @@ const LaboratoryMode = () => {
               anchorSelector="[data-lab-header-text]"
             />
           </div>
+
+          {/* Trinity AI Panel - Only for horizontal layout */}
+          {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
+          {/* In horizontal view, panel stays visible and aligned with canvas area */}
+          {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
+            <div 
+              className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
+            >
+              <div className="pointer-events-auto">
+                <TrinityAIPanel
+                  isCollapsed={isHorizontalAICollapsed}
+                  onToggle={() => {
+                    // In horizontal view, toggle between collapsed (sparkle icon) and expanded
+                    // Don't auto-minimize when other panels open - only toggle when AI icon is clicked
+                    setIsHorizontalAICollapsed(prev => !prev);
+                    if (isHorizontalAICollapsed) {
+                      setAuxActive('trinity');
+                    } else {
+                      setAuxActive(null);
+                    }
+                  }}
+                  onClose={() => {
+                    // Only X button calls this - completely hide the panel
+                    setIsTrinityAIVisible(false);
+                    setIsHorizontalAICollapsed(false);
+                    setAuxActive(null);
+                  }}
+                  layout="horizontal"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         <ShareDialog

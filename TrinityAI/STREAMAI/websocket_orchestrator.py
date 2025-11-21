@@ -129,6 +129,72 @@ class RetryableJSONGenerationError(Exception):
         self.last_error = last_error
 
 
+@dataclass
+class StepEvaluation:
+    """Evaluation result for a workflow step execution."""
+    decision: str  # "continue", "retry_with_correction", "change_approach", "complete"
+    reasoning: str
+    quality_score: Optional[float] = None  # 0.0 to 1.0
+    correctness: bool = True
+    issues: List[str] = None
+    corrected_prompt: Optional[str] = None  # For retry_with_correction
+    alternative_approach: Optional[str] = None  # For change_approach
+    
+    def __post_init__(self):
+        if self.issues is None:
+            self.issues = []
+
+
+@dataclass
+class ReActState:
+    """ReAct agent state for a workflow sequence."""
+    sequence_id: str
+    user_prompt: str
+    goal_achieved: bool = False
+    current_step_number: int = 0
+    execution_history: List[Dict[str, Any]] = None  # Previous steps and results
+    thoughts: List[str] = None  # Reasoning history
+    observations: List[str] = None  # Observation history
+    retry_count: int = 0  # Current step retry count
+    max_retries_per_step: int = 2
+    
+    def __post_init__(self):
+        if self.execution_history is None:
+            self.execution_history = []
+        if self.thoughts is None:
+            self.thoughts = []
+        if self.observations is None:
+            self.observations = []
+    
+    def add_thought(self, thought: str):
+        """Add a reasoning thought to history."""
+        self.thoughts.append(thought)
+    
+    def add_observation(self, observation: str):
+        """Add an observation to history."""
+        self.observations.append(observation)
+    
+    def add_execution(
+        self, 
+        step_number: int, 
+        atom_id: str, 
+        result: Dict[str, Any], 
+        evaluation: Optional[StepEvaluation] = None,
+        description: Optional[str] = None,
+        files_used: Optional[List[str]] = None
+    ):
+        """Add execution result to history."""
+        self.execution_history.append({
+            "step_number": step_number,
+            "atom_id": atom_id,
+            "result": result,
+            "evaluation": evaluation.__dict__ if evaluation else None,
+            "description": description,
+            "files_used": files_used or []
+        })
+        self.current_step_number = step_number
+
+
 class StreamWebSocketOrchestrator:
     """
     Orchestrates Stream AI workflow execution via WebSocket.
@@ -162,6 +228,7 @@ class StreamWebSocketOrchestrator:
         self._output_alias_registry: Dict[str, Dict[str, str]] = {}
         self._chat_file_mentions: Dict[str, List[str]] = {}
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
+        self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
 
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
@@ -340,29 +407,37 @@ Respond ONLY with valid JSON array, no other text:
 AVAILABLE ATOMS AND THEIR CAPABILITIES:
 
 1. **merge** - Merge/Join Datasets
-   - Capability: Combines two datasets based on common columns
-   - Use when: User wants to join, merge, combine, or link two files
-   - Keywords: merge, join, combine, link, match
-   - Output: merge_json with file paths and join configuration
-   - Example: "Merge sales and customer data on CustomerID"
+   - **CAN DO**: Combines two datasets based on common columns (inner, left, right, outer joins)
+   - **USE WHEN**: User wants to join, merge, combine, or link two files
+   - **REQUIRES**: Two input files with at least one common column
+   - **OUTPUT**: Creates a new merged file
+   - **KEYWORDS**: merge, join, combine, link, match
+   - **EXAMPLE**: "Merge sales.arrow and customer.arrow on CustomerID column"
+   - **DO NOT USE**: If you already merged the same two files in a previous step (use the output file instead)
+   - **REQUIRED IN PROMPT**: Specify both input files and the join column(s)
 
 2. **concat** - Concatenate Datasets
-   - Capability: Stacks multiple datasets vertically (append rows)
-   - Use when: User wants to append, stack, or combine rows from multiple files
-   - Keywords: concat, append, stack, combine vertically
-   - Output: concat_json with file list and concat configuration
-   - Example: "Concatenate Q1, Q2, Q3, Q4 sales data"
+   - **CAN DO**: Stacks multiple datasets vertically (append rows, same columns)
+   - **USE WHEN**: User wants to append, stack, or combine rows from multiple files
+   - **REQUIRES**: Multiple files with compatible column structures
+   - **OUTPUT**: Creates a new concatenated file
+   - **KEYWORDS**: concat, append, stack, combine vertically
+   - **EXAMPLE**: "Concatenate Q1_sales.arrow, Q2_sales.arrow, Q3_sales.arrow, Q4_sales.arrow"
+   - **DO NOT USE**: If you already concatenated the same files (use the output file instead)
+   - **REQUIRED IN PROMPT**: Specify all input files to concatenate
 
 3. **groupby-wtg-avg** - Group and Aggregate
-   - Capability: Groups data and calculates aggregations (sum, mean, count, etc.)
-   - Use when: User wants to summarize, aggregate, group, or calculate totals
-   - Keywords: group, aggregate, sum, average, mean, total, count, summarize
-   - Output: groupby_json with groupby columns and aggregation functions
-   - Example: "Group sales by region and calculate total revenue"
+   - **CAN DO**: Groups data by columns and calculates aggregations (sum, mean, count, max, min, etc.)
+   - **USE WHEN**: User wants to summarize, aggregate, group, or calculate totals
+   - **REQUIRES**: One input file with columns to group by and columns to aggregate
+   - **OUTPUT**: Creates a new grouped/aggregated file
+   - **KEYWORDS**: group, aggregate, sum, average, mean, total, count, summarize, group by
+   - **EXAMPLE**: "Group sales.arrow by Region column and calculate sum of Revenue column"
+   - **DO NOT USE**: If you already grouped the same file with the same columns (use the output file instead)
+   - **REQUIRED IN PROMPT**: Specify the file, group-by column(s), and aggregation column(s) with function (sum, mean, count, etc.)
 
 4. **dataframe-operations** - Excel-like DataFrame Operations (Powerful Tool)
-   - Capability: Comprehensive DataFrame manipulation like Excel - formulas, filters, sorts, transformations, column operations
-   - Use when: User wants to:
+   - **CAN DO**: Comprehensive DataFrame manipulation:
      * Apply formulas/calculations (PROD, SUM, DIV, IF, etc.)
      * Filter rows based on conditions
      * Sort data by columns
@@ -372,50 +447,88 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
      * Edit cell values
      * Find and replace values
      * Split or manipulate data like Excel
-   - Keywords: formula, calculate, compute, filter, where, sort, order, select, drop, remove, rename, transform, convert, round, edit, insert, delete, find, replace, split, excel, spreadsheet, manipulate, clean, prepare
-   - Output: dataframe_config with operations list (can include multiple operations in sequence)
-   - Example: "Apply formula PROD(Price, Volume) to Sales column", "Filter rows where revenue > 1000 and sort by date", "Rename column A to Revenue"
-   - IMPORTANT: This atom can handle multiple operations in one step, but for complex workflows, use ONE atom per task for clarity
+   - **USE WHEN**: User wants to filter, sort, calculate, transform, or manipulate data
+   - **REQUIRES**: One input file
+   - **OUTPUT**: Creates a new transformed file
+   - **KEYWORDS**: formula, calculate, compute, filter, where, sort, order, select, drop, remove, rename, transform, convert, round, edit, insert, delete, find, replace, split, excel, spreadsheet, manipulate, clean, prepare
+   - **EXAMPLE**: "Filter sales.arrow where Revenue > 1000 and sort by Date column", "Apply formula PROD(Price, Volume) to create Sales column"
+   - **DO NOT USE**: If you already performed the same operation on the same file (use the output file instead)
+   - **REQUIRED IN PROMPT**: Specify the file, exact operation(s), and column names (use ONLY column names from FILE METADATA)
 
 5. **create-column** - Create Calculated Columns
-   - Capability: Creates new columns using formulas and calculations
-   - Use when: User wants to add, create, calculate, or derive new columns
-   - Keywords: create, add, calculate, compute, derive, new column
-   - Output: json with column creation logic
-   - Example: "Create profit column as revenue minus cost"
+   - **CAN DO**: Creates new columns using formulas and calculations
+   - **USE WHEN**: User wants to add, create, calculate, or derive new columns
+   - **REQUIRES**: One input file
+   - **OUTPUT**: Creates a new file with the added column
+   - **KEYWORDS**: create, add, calculate, compute, derive, new column
+   - **EXAMPLE**: "Create Profit column in sales.arrow as Revenue minus Cost"
+   - **DO NOT USE**: If you already created the same column (use the output file instead)
+   - **REQUIRED IN PROMPT**: Specify the file, new column name, and calculation formula using existing column names
 
-6. **chart-maker** - Create Visualizations
-   - Capability: Generates charts and visualizations (bar, line, pie, scatter, etc.)
-   - Use when: User wants to visualize, plot, chart, or show data graphically
-   - Keywords: chart, plot, graph, visualize, show, display
-   - Output: chart_json with chart type and configuration
-   - Example: "Create bar chart showing sales by category"
+6. **create-transform** - Create Transformations
+   - **CAN DO**: Creates complex transformations and calculated columns
+   - **USE WHEN**: User wants complex data transformations
+   - **REQUIRES**: One input file
+   - **OUTPUT**: Creates a new transformed file
+   - **KEYWORDS**: transform, create transform, calculate, derive
+   - **EXAMPLE**: "Create transform in sales.arrow to calculate Profit as Revenue - Cost"
+   - **DO NOT USE**: If you already created the same transform (use the output file instead)
+   - **REQUIRED IN PROMPT**: Specify the file and transformation logic
 
-7. **correlation** - Correlation Analysis
-   - Capability: Calculates correlation matrix between numeric columns
-   - Use when: User wants to analyze relationships, correlations, or dependencies
-   - Keywords: correlation, relationship, dependency, associate
-   - Output: correlation configuration
-   - Example: "Analyze correlation between price and sales"
+7. **chart-maker** - Create Visualizations
+   - **CAN DO**: Generates charts and visualizations (bar, line, pie, scatter, etc.)
+   - **USE WHEN**: User wants to visualize, plot, chart, or show data graphically
+   - **REQUIRES**: One input file with data to visualize
+   - **OUTPUT**: Creates a chart visualization
+   - **KEYWORDS**: chart, plot, graph, visualize, show, display
+   - **EXAMPLE**: "Create bar chart from sales.arrow showing Revenue by Category"
+   - **CAN USE MULTIPLE TIMES**: Yes, for different visualizations
+   - **REQUIRED IN PROMPT**: Specify the file, chart type, x-axis column, y-axis column (if applicable)
+   - **⚠️ CRITICAL FILE SELECTION**: 
+     * If previous steps created output files (marked with 📄 in EXECUTION HISTORY), you MUST use the MOST RECENT output file
+     * Do NOT use original input files if a processed/transformed file exists from previous steps
+     * Example: If Step 1 merged files → Step 2 grouped data → Use the grouped output file for chart, NOT the original files
+     * Check EXECUTION HISTORY for output files created by previous steps
 
-8. **data-upload-validate** - Load Data
-   - Capability: Loads and validates data files (CSV, Excel, Arrow)
-   - Use when: Files don't exist yet and need to be uploaded
-   - Keywords: load, upload, import, read
-   - Output: File validation results
-   - Example: "Load sales.csv file"
-   - NOTE: Skip this if files already exist in available_files!
+8. **correlation** - Correlation Analysis
+   - **CAN DO**: Calculates correlation matrix between numeric columns
+   - **USE WHEN**: User wants to analyze relationships, correlations, or dependencies
+   - **REQUIRES**: One input file with numeric columns
+   - **OUTPUT**: Correlation analysis results
+   - **KEYWORDS**: correlation, relationship, dependency, associate
+   - **EXAMPLE**: "Analyze correlation between Price and Sales columns in sales.arrow"
+   - **REQUIRED IN PROMPT**: Specify the file and column names to analyze
 
-WORKFLOW PLANNING RULES:
-- Put data loading (data-upload-validate) FIRST when user mentions files - it loads from MinIO and optionally applies dtype changes
-- Put data transformations (merge, concat, filter, groupby, dataframe-operations) BEFORE visualization
-- Put chart-maker for visualization and may  use multiple times if required 
-- ALWAYS Put chart-maker atleast once in the workflow for visualization for the user to see the data in a visual way.
-- Each step should build on previous steps
-- For dataframe-operations: Use ONE atom per task for clarity (e.g., one for filtering, one for formulas, one for sorting)
-- Workflows can be long (5-10+ steps) - break complex tasks into individual steps
-- Consider data dependencies between steps
-- Example long workflow: Load → Filter → Apply Formula → Sort → Group → Visualize
+9. **data-upload-validate** - Load Data
+   - **CAN DO**: Loads and validates data files (CSV, Excel, Arrow) from MinIO
+   - **USE WHEN**: Files don't exist yet and need to be uploaded/loaded
+   - **REQUIRES**: File name to load
+   - **OUTPUT**: Validated file available for next steps
+   - **KEYWORDS**: load, upload, import, read
+   - **EXAMPLE**: "Load sales.csv file"
+   - **DO NOT USE**: If files already exist in available_files! Skip this step.
+   - **REQUIRED IN PROMPT**: Specify the file name to load
+
+CRITICAL RULES FOR ATOM SELECTION:
+1. **Check EXECUTION HISTORY first**: If an atom was already used, do NOT use it again with the same files
+2. **Use output files**: If a previous step created a file, use that file in the next step
+3. **One operation per step**: For clarity, use one atom per step (except chart-maker which can be used multiple times)
+4. **Column names**: Use ONLY column names from FILE METADATA - do NOT invent column names
+5. **File availability**: Only use files that are in AVAILABLE FILES section
+6. **PPG** : PPG meaning is not price  it is promoted price group ( like pack type , variant etc it is also categorical variable in dataframe)
+
+WORKFLOW PLANNING:
+- **Order**: Load → Transform → Merge/Concat → Group/Aggregate → Visualize
+- **Data loading**: Use data-upload-validate FIRST only if files don't exist
+- **Transformations**: Use dataframe-operations, create-column, create-transform for data preparation
+- **Combining data**: Use merge or concat to combine datasets
+- **Summarization**: Use groupby-wtg-avg for aggregations
+- **Visualization**: **MANDATORY** - Use chart-maker at least once (usually at the end) to show results
+- **⚠️ CRITICAL**: Chart-maker MUST be included in EVERY workflow before completion
+- **Each step builds on previous**: Use output files from previous steps
+- **⚠️ CRITICAL FOR CHART-MAKER**: When planning chart-maker, ALWAYS use the MOST RECENT output file from previous steps (check EXECUTION HISTORY for output files marked with 📄)
+- **Example workflow**: Load → Filter → Apply Formula → Merge → Group → Chart (chart uses the grouped output file, NOT original files)
+- **Completion Rule**: Only set goal_achieved: true AFTER chart-maker has been executed
 """
     
     def _extract_file_names_from_prompt(self, user_prompt: str, available_files: Optional[List[str]] = None) -> List[str]:
@@ -1112,6 +1225,968 @@ WORKFLOW PLANNING RULES:
             logger.error("❌ Cannot generate workflow - AI generation failed. Please retry or rephrase your request.")
             return [], [], False
     
+    async def _generate_next_step_with_react(
+        self,
+        user_prompt: str,
+        execution_history: List[Dict[str, Any]],
+        available_files: List[str],
+        previous_results: List[Dict[str, Any]],
+        sequence_id: str,
+        priority_files: Optional[List[str]] = None
+    ) -> Optional[WorkflowStepPlan]:
+        """
+        Generate the next workflow step using ReAct-style planning.
+        
+        Uses Thought-Action pattern:
+        - Thought: Analyze current state and what needs to be done
+        - Action: Select next tool and generate parameters
+        
+        Args:
+            user_prompt: Original user request
+            execution_history: Previous steps and their results
+            available_files: List of available file names
+            previous_results: Results from previous steps
+            sequence_id: Sequence identifier
+            priority_files: Priority files to focus on
+            
+        Returns:
+            WorkflowStepPlan for the next step, or None if goal is achieved
+        """
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for ReAct planning but is not installed")
+        
+        # Extract files mentioned in prompt
+        prompt_files = self._extract_file_names_from_prompt(user_prompt, available_files)
+        prompt_files = self._merge_file_references(prompt_files, priority_files)
+        files_exist = self._match_files_with_available(prompt_files, available_files) if available_files else False
+        
+        # Build ReAct planning prompt
+        react_prompt = self._build_react_planning_prompt(
+            user_prompt=user_prompt,
+            execution_history=execution_history,
+            available_files=available_files,
+            previous_results=previous_results,
+            prompt_files=prompt_files,
+            files_exist=files_exist
+        )
+        
+        logger.info(f"🤖 ReAct Planning: Generating next step...")
+        logger.debug(f"📝 ReAct Prompt length: {len(react_prompt)} chars")
+        
+        # Define LLM call function
+        async def _call_llm_for_react_step() -> Dict[str, Any]:
+            """Inner function that makes the LLM call for ReAct step planning"""
+            async with aiohttp.ClientSession() as session:
+                payload = {
+                    "model": self.llm_model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a ReAct-style agent that plans data workflow steps. Respond with valid JSON only."
+                        },
+                        {"role": "user", "content": react_prompt}
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 1500
+                }
+                
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.bearer_token}"
+                }
+                
+                async with session.post(
+                    self.llm_api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=60)
+                ) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    
+                    content = result["choices"][0]["message"]["content"]
+                    logger.debug(f"🤖 ReAct LLM response: {content[:300]}...")
+                    
+                    # Parse JSON from response
+                    if "```json" in content:
+                        content = content.split("```json")[1].split("```")[0].strip()
+                    elif "```" in content:
+                        content = content.split("```")[1].split("```")[0].strip()
+                    
+                    step_data = json.loads(content)
+                    
+                    if not isinstance(step_data, dict):
+                        raise ValueError("LLM response is not a dictionary")
+                    
+                    # Check if goal is achieved
+                    if step_data.get("goal_achieved", False):
+                        logger.info("✅ ReAct: Goal achieved, no more steps needed")
+                        return {"goal_achieved": True}
+                    
+                    return step_data
+        
+        try:
+            step_data = await self._retry_llm_json_generation(
+                llm_call_func=_call_llm_for_react_step,
+                step_name="ReAct Step Planning",
+                max_attempts=3
+            )
+            
+            if step_data.get("goal_achieved", False):
+                return None
+            
+            # Extract step information
+            atom_id = step_data.get("atom_id")
+            description = step_data.get("description", "")
+            thought = step_data.get("thought", "")
+            
+            if not atom_id:
+                raise ValueError("ReAct step planning did not return atom_id")
+            
+            # Store thought in ReAct state
+            react_state = self._sequence_react_state.get(sequence_id)
+            if react_state:
+                react_state.add_thought(thought)
+            
+            # Build enriched step plan
+            step_number = len(execution_history) + 1
+            files_used = step_data.get("files_used", [])
+            inputs = step_data.get("inputs", [])
+            output_alias = step_data.get("output_alias", f"step_{step_number}_output")
+            
+            # SPECIAL HANDLING FOR CHART-MAKER: Ensure it uses the most recent output file from previous steps
+            if atom_id == "chart-maker" and available_files:
+                # Find the most recent output file from execution history
+                most_recent_output_file = None
+                if execution_history:
+                    # Look for output files in reverse order (most recent first)
+                    for hist in reversed(execution_history):
+                        result = hist.get("result", {})
+                        saved_path = None
+                        hist_atom = hist.get("atom_id", "")
+                        
+                        # Extract output file from result
+                        if hist_atom == "merge" and result.get("merge_json"):
+                            saved_path = result.get("merge_json", {}).get("result_file") or result.get("saved_path")
+                        elif hist_atom == "concat" and result.get("concat_json"):
+                            saved_path = result.get("concat_json", {}).get("result_file") or result.get("saved_path")
+                        elif hist_atom in ["create-column", "create-transform", "groupby-wtg-avg", "dataframe-operations"]:
+                            saved_path = result.get("output_file") or result.get("saved_path")
+                        elif result.get("output_file"):
+                            saved_path = result.get("output_file")
+                        elif result.get("saved_path"):
+                            saved_path = result.get("saved_path")
+                        
+                        if saved_path and saved_path in available_files:
+                            most_recent_output_file = saved_path
+                            break
+                
+                # If no output file found in history, use the most recent file from available_files
+                if not most_recent_output_file and available_files:
+                    most_recent_output_file = available_files[-1]  # Last file is most recent
+                
+                # If chart-maker doesn't have files or is using old files, update to use most recent output
+                if most_recent_output_file:
+                    if not files_used or (files_used and files_used[0] != most_recent_output_file):
+                        logger.info(f"📊 ReAct: Chart-maker should use most recent output file: {most_recent_output_file}")
+                        logger.info(f"   LLM specified files: {files_used}, updating to use: {most_recent_output_file}")
+                        files_used = [most_recent_output_file]
+                        # Update the step_data to reflect this change
+                        step_data["files_used"] = files_used
+            
+            # Get atom guidance
+            guidance = ATOM_MAPPING.get(atom_id, {})
+            
+            # Build prompt for the step
+            prompt_text = self._compose_prompt(
+                atom_id=atom_id,
+                description=description,
+                guidance=guidance,
+                files_used=files_used,
+                inputs=inputs,
+                output_alias=output_alias,
+                is_stream_workflow=True
+            )
+            
+            # Create WorkflowStepPlan
+            step_plan = WorkflowStepPlan(
+                step_number=step_number,
+                atom_id=atom_id,
+                description=description,
+                prompt=prompt_text,
+                files_used=files_used,
+                inputs=inputs,
+                output_alias=output_alias,
+                atom_prompt=prompt_text
+            )
+            
+            logger.info(f"✅ ReAct: Generated step {step_number}: {atom_id} - {description}")
+            return step_plan
+            
+        except RetryableJSONGenerationError as e:
+            logger.error(f"❌ ReAct step planning failed after all retries: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ ReAct step planning failed with unexpected error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    async def _evaluate_step_result(
+        self,
+        execution_result: Dict[str, Any],
+        atom_id: str,
+        step_number: int,
+        user_prompt: str,
+        step_plan: WorkflowStepPlan,
+        execution_history: List[Dict[str, Any]],
+        sequence_id: str
+    ) -> StepEvaluation:
+        """
+        Evaluate the result of a step execution using LLM.
+        
+        Evaluates:
+        - Correctness (success, error handling)
+        - Quality (meets user goal, data integrity)
+        - Next action decision (continue, retry_with_correction, change_approach, complete)
+        
+        Args:
+            execution_result: Result from atom execution
+            atom_id: ID of the atom that was executed
+            step_number: Step number
+            user_prompt: Original user request
+            step_plan: The step plan that was executed
+            execution_history: Previous execution history
+            sequence_id: Sequence identifier
+            
+        Returns:
+            StepEvaluation with decision and reasoning
+        """
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is required for step evaluation but is not installed")
+        
+        # Build evaluation prompt
+        eval_prompt = self._build_react_evaluation_prompt(
+            execution_result=execution_result,
+            atom_id=atom_id,
+            step_number=step_number,
+            user_prompt=user_prompt,
+            step_plan=step_plan,
+            execution_history=execution_history
+        )
+        
+        logger.info(f"🔍 ReAct: Evaluating step {step_number} result...")
+        logger.debug(f"📝 Evaluation prompt length: {len(eval_prompt)} chars")
+        
+        # Define LLM call function
+        async def _call_llm_for_evaluation() -> Dict[str, Any]:
+            """Inner function that makes the LLM call for evaluation"""
+            async with aiohttp.ClientSession() as session:
+                payload = {
+                    "model": self.llm_model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "You are a ReAct-style agent evaluator. Evaluate step execution results and decide next actions. Respond with valid JSON only."
+                        },
+                        {"role": "user", "content": eval_prompt}
+                    ],
+                    "temperature": 0.2,  # Lower temperature for more consistent evaluation
+                    "max_tokens": 800  # Reduced for faster evaluation
+                }
+                
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.bearer_token}"
+                }
+                
+                async with session.post(
+                    self.llm_api_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=90)  # Increased timeout for evaluation
+                ) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    
+                    content = result["choices"][0]["message"]["content"]
+                    logger.debug(f"🔍 Evaluation LLM response: {content[:300]}...")
+                    
+                    # Parse JSON from response
+                    if "```json" in content:
+                        content = content.split("```json")[1].split("```")[0].strip()
+                    elif "```" in content:
+                        content = content.split("```")[1].split("```")[0].strip()
+                    
+                    eval_data = json.loads(content)
+                    
+                    if not isinstance(eval_data, dict):
+                        raise ValueError("Evaluation response is not a dictionary")
+                    
+                    return eval_data
+        
+        try:
+            eval_data = await self._retry_llm_json_generation(
+                llm_call_func=_call_llm_for_evaluation,
+                step_name="Step Evaluation",
+                max_attempts=2  # Fewer retries for evaluation
+            )
+            
+            # Extract evaluation data
+            decision = eval_data.get("decision", "continue")
+            reasoning = eval_data.get("reasoning", "")
+            quality_score = eval_data.get("quality_score")
+            correctness = eval_data.get("correctness", True)
+            issues = eval_data.get("issues", [])
+            corrected_prompt = eval_data.get("corrected_prompt")
+            alternative_approach = eval_data.get("alternative_approach")
+            
+            # Validate decision
+            valid_decisions = ["continue", "retry_with_correction", "change_approach", "complete"]
+            if decision not in valid_decisions:
+                logger.warning(f"⚠️ Invalid decision '{decision}', defaulting to 'continue'")
+                decision = "continue"
+            
+            evaluation = StepEvaluation(
+                decision=decision,
+                reasoning=reasoning,
+                quality_score=quality_score,
+                correctness=correctness,
+                issues=issues if isinstance(issues, list) else [],
+                corrected_prompt=corrected_prompt,
+                alternative_approach=alternative_approach
+            )
+            
+            # Store observation in ReAct state
+            react_state = self._sequence_react_state.get(sequence_id)
+            if react_state:
+                observation = f"Step {step_number} ({atom_id}): {reasoning}"
+                react_state.add_observation(observation)
+            
+            logger.info(f"✅ ReAct: Evaluation complete - Decision: {decision}")
+            logger.debug(f"   Reasoning: {reasoning[:200]}...")
+            
+            return evaluation
+            
+        except RetryableJSONGenerationError as e:
+            logger.error(f"❌ Step evaluation failed after all retries: {e}")
+            # Fallback to simple success/failure check
+            success = bool(execution_result.get("success", True))
+            return StepEvaluation(
+                decision="continue" if success else "retry_with_correction",
+                reasoning=f"Evaluation failed, using fallback: {'success' if success else 'failure'}",
+                correctness=success,
+                issues=["Evaluation LLM call failed"] if not success else []
+            )
+        except Exception as e:
+            logger.error(f"❌ Step evaluation failed with unexpected error: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback
+            success = bool(execution_result.get("success", True))
+            return StepEvaluation(
+                decision="continue" if success else "retry_with_correction",
+                reasoning=f"Evaluation error: {str(e)}",
+                correctness=success,
+                issues=[f"Evaluation error: {str(e)}"]
+            )
+    
+    def _build_react_planning_prompt(
+        self,
+        user_prompt: str,
+        execution_history: List[Dict[str, Any]],
+        available_files: List[str],
+        previous_results: List[Dict[str, Any]],
+        prompt_files: List[str],
+        files_exist: bool
+    ) -> str:
+        """
+        Build ReAct-style planning prompt for next step generation.
+        
+        Uses Thought-Action pattern.
+        """
+        lines: List[str] = []
+        
+        # Detect if user is asking for something new
+        user_request_keywords = ["chart", "graph", "visualize", "plot", "redo", "redo it", "modify", "change", 
+                                 "create", "generate", "make", "show", "display", "analyze", "do", "now", 
+                                 "also", "and", "then", "next", "please", "can you", "i want", "i need"]
+        user_asking_for_something = any(keyword.lower() in user_prompt.lower() for keyword in user_request_keywords)
+        
+        lines.append("You are a ReAct-style agent planning the next step in a data workflow.")
+        lines.append("")
+        lines.append("## ⚠️ CRITICAL: ALWAYS HONOR USER REQUESTS")
+        lines.append("**MOST IMPORTANT RULE**: If the user asks for something, you MUST do it. Never refuse, never say 'no need', never ignore user requests.")
+        lines.append("- If user asks for 'chart' → Generate a chart (even if one exists, user may want different type)")
+        lines.append("- If user asks for 'redo' → Redo the operation")
+        lines.append("- If user asks for 'modify' → Modify as requested")
+        lines.append("- If user asks for ANY operation → Execute it with goal_achieved: false")
+        lines.append("- Only set goal_achieved: true if user's request is COMPLETELY done AND user is NOT asking for more")
+        lines.append("")
+        lines.append("## USER REQUEST")
+        lines.append(user_prompt)
+        lines.append("")
+        
+        if user_asking_for_something:
+            lines.append("**⚠️ USER IS ASKING FOR SOMETHING - YOU MUST EXECUTE IT:**")
+            lines.append("- The user request contains keywords indicating they want an operation performed")
+            lines.append("- You MUST set goal_achieved: false and plan the requested step")
+            lines.append("- Do NOT refuse or say the work is already done")
+            lines.append("- Do NOT set goal_achieved: true when user is asking for something")
+            lines.append("")
+        else:
+            lines.append("**Analyze the user request above:**")
+            lines.append("- Is the user asking for something specific? (chart, redo, modify, analyze, etc.)")
+            lines.append("- If YES: You MUST execute it. Set goal_achieved: false and plan the step.")
+            lines.append("- If user is asking for something NEW, the goal is NOT achieved yet.")
+            lines.append("")
+        
+        if execution_history:
+            # Check if chart-maker has been used
+            chart_maker_used = any(h.get("atom_id") == "chart-maker" for h in execution_history)
+            
+            lines.append("## EXECUTION HISTORY (ALREADY COMPLETED - DO NOT REPEAT)")
+            lines.append("⚠️ CRITICAL: These steps have ALREADY been executed. DO NOT repeat them!")
+            lines.append("")
+            
+            # Add warning if chart-maker hasn't been used
+            if not chart_maker_used:
+                lines.append("⚠️ **CHART-MAKER NOT YET USED**: Chart-maker has NOT been executed yet.")
+                lines.append("   - You MUST plan to use chart-maker before setting goal_achieved: true")
+                lines.append("   - Chart-maker should visualize the final results from the most recent step")
+                lines.append("   - Use the most recent output file (marked with 📄 below) for the chart")
+                lines.append("")
+            for idx, hist in enumerate(execution_history, 1):
+                step_num = hist.get("step_number", "?")
+                atom_id = hist.get("atom_id", "?")
+                description = hist.get("description", "N/A")
+                files_used = hist.get("files_used", [])
+                result = hist.get("result", {})
+                success = result.get("success", True)
+                evaluation = hist.get("evaluation", {})
+                decision = evaluation.get("decision", "continue") if evaluation else "continue"
+                
+                lines.append(f"**Step {step_num}: {atom_id}** - {'✅ Success' if success else '❌ Failed'}")
+                lines.append(f"  Description: {description}")
+                if files_used:
+                    files_display = [self._display_file_name(f) for f in files_used]
+                    lines.append(f"  Files used: {', '.join(files_display)}")
+                
+                # Show output file if available
+                saved_path = None
+                if isinstance(result, dict):
+                    # Try to extract output file from result
+                    if atom_id == "merge" and result.get("merge_json"):
+                        saved_path = result.get("merge_json", {}).get("result_file") or result.get("saved_path")
+                    elif atom_id == "concat" and result.get("concat_json"):
+                        saved_path = result.get("concat_json", {}).get("result_file") or result.get("saved_path")
+                    elif atom_id in ["create-column", "create-transform"] and result.get("create_transform_json"):
+                        saved_path = result.get("create_transform_json", {}).get("result_file") or result.get("saved_path")
+                    elif result.get("output_file"):
+                        saved_path = result.get("output_file")
+                    elif result.get("saved_path"):
+                        saved_path = result.get("saved_path")
+                
+                if saved_path:
+                    file_display = self._display_file_name(saved_path)
+                    lines.append(f"  📄 **OUTPUT FILE CREATED: {file_display} ({saved_path})**")
+                    lines.append(f"     ⚠️ **YOU MUST USE THIS FILE in the next step - DO NOT repeat {atom_id}**")
+                
+                if not success:
+                    error = result.get("error") or result.get("message", "Unknown error")
+                    lines.append(f"  ❌ Error: {error}")
+                elif decision == "complete":
+                    lines.append(f"  ✅ Goal achieved - workflow should be complete")
+                
+                lines.append("")  # Blank line between steps
+            
+            lines.append("⚠️ **CRITICAL REMINDERS:**")
+            lines.append("1. DO NOT repeat any of the above steps with the same atom_id")
+            lines.append("2. DO NOT use the same files that were already processed")
+            lines.append("3. USE the output files created by previous steps (marked with 📄)")
+            lines.append("4. If a step created a file, that file is now available in AVAILABLE FILES section above")
+            lines.append("5. If all required operations are done, set goal_achieved: true")
+            lines.append("")
+        else:
+            lines.append("## EXECUTION HISTORY")
+            lines.append("No previous steps executed yet.")
+            lines.append("")
+        
+        lines.append("## AVAILABLE FILES")
+        lines.append("These files are available for use. Files created by previous steps are marked with ⭐")
+        if available_files:
+            # Get file metadata to show column names
+            file_metadata = self._get_file_metadata(available_files)
+            
+            # Show recently created files first (last in list are newest)
+            recent_files = available_files[-10:] if len(available_files) > 10 else available_files
+            older_files = available_files[:-10] if len(available_files) > 10 else []
+            
+            if recent_files:
+                lines.append("")
+                lines.append("⭐ RECENTLY CREATED FILES (from previous steps - USE THESE FIRST):")
+                for f in recent_files:
+                    file_display = self._display_file_name(f)
+                    lines.append(f"  ⭐ {file_display} ({f})")
+                    # Show column names if available
+                    if f in file_metadata:
+                        columns = file_metadata[f].get("columns", [])
+                        if columns:
+                            lines.append(f"     Columns: {', '.join(columns[:10])}")
+                            if len(columns) > 10:
+                                lines.append(f"     ... and {len(columns) - 10} more columns")
+            
+            if older_files:
+                lines.append("")
+                lines.append("Other available files:")
+                for f in older_files[:15]:  # Limit older files
+                    file_display = self._display_file_name(f)
+                    lines.append(f"  - {file_display} ({f})")
+                    # Show column names if available
+                    if f in file_metadata:
+                        columns = file_metadata[f].get("columns", [])
+                        if columns:
+                            lines.append(f"    Columns: {', '.join(columns[:8])}")
+                            if len(columns) > 8:
+                                lines.append(f"    ... and {len(columns) - 8} more")
+                if len(older_files) > 15:
+                    lines.append(f"  ... and {len(older_files) - 15} more files")
+        else:
+            lines.append("No files available")
+        lines.append("")
+        lines.append("⚠️ CRITICAL FILE USAGE RULES:")
+        lines.append("1. If a previous step created a file, you MUST use that file in the next step")
+        lines.append("2. Do NOT repeat the same operation that created the file")
+        lines.append("3. Use ONLY the column names shown above - do NOT invent or guess column names")
+        lines.append("4. Files marked with ⭐ are the most recent outputs - prefer these for next steps")
+        lines.append("")
+        
+        if prompt_files:
+            lines.append("## PRIORITY FILES (mentioned in user request)")
+            for f in prompt_files:
+                lines.append(f"- {f}")
+            lines.append("")
+        
+        lines.append("## AVAILABLE TOOLS (atoms)")
+        atom_capabilities = self._get_atom_capabilities_for_llm()
+        lines.append(atom_capabilities)
+        lines.append("")
+        
+        lines.append("## YOUR TASK")
+        lines.append("Analyze the current state and plan the NEXT SINGLE STEP.")
+        lines.append("")
+        lines.append("Follow this structure:")
+        lines.append("")
+        lines.append("**THOUGHT (REQUIRED - Be detailed and explicit):**")
+        lines.append("1. **Review EXECUTION HISTORY**: What steps have been completed? What files were created?")
+        lines.append("2. **Review USER REQUEST**: What did the user ask for? What still needs to be done?")
+        lines.append("3. **Review AVAILABLE FILES**: Which files are available? Which is the most recent output?")
+        lines.append("4. **Determine NEXT ACTION**: What specific operation needs to be done next?")
+        lines.append("5. **Check CHART REQUIREMENT**: Has chart-maker been used? If not, plan to use it (usually at the end)")
+        lines.append("6. **Select APPROPRIATE TOOL**: Which atom_id matches the next action?")
+        lines.append("7. **Verify FILE SELECTION**: Which file(s) should be used? Use the most recent output file if available.")
+        lines.append("")
+        lines.append("**ACTION (REQUIRED - Be specific):**")
+        lines.append("- Select the next tool (atom_id) - must match one of the available atoms")
+        lines.append("- Generate CLEAR step description that explains what this step will do")
+        lines.append("- Specify EXACT files to use (use file paths from AVAILABLE FILES section)")
+        lines.append("- Provide descriptive output alias for the result")
+        lines.append("")
+        lines.append("Respond with JSON in this format:")
+        lines.append("{")
+        lines.append('  "thought": "Your reasoning about what to do next",')
+        lines.append('  "atom_id": "merge|concat|chart-maker|groupby-wtg-avg|...",')
+        lines.append('  "description": "Clear description of this step",')
+        lines.append('  "files_used": ["file1.arrow", "file2.arrow"],')
+        lines.append('  "inputs": ["input1", "input2"],')
+        lines.append('  "output_alias": "descriptive_output_name",')
+        lines.append('  "goal_achieved": false')
+        lines.append("}")
+        lines.append("")
+        lines.append("## CRITICAL RULES (MUST FOLLOW):")
+        lines.append("1. ⚠️ **ALWAYS LISTEN TO THE USER** - If the user asks for something, you MUST do it. Never refuse or say 'no need'")
+        lines.append("2. ⚠️ **DO NOT repeat any step** that has already been executed (check EXECUTION HISTORY above)")
+        lines.append("3. ⚠️ **If a previous step created a file, USE THAT FILE** in the next step - do NOT recreate it")
+        lines.append("4. ⚠️ **Only set goal_achieved: true if the user's request is COMPLETELY done AND user is not asking for more**")
+        lines.append("5. ⚠️ **If user asks for something NEW (chart, redo, modify, etc.), set goal_achieved: false** and continue")
+        lines.append("6. ⚠️ **Only plan ONE step at a time** - do not plan multiple steps")
+        lines.append("7. ⚠️ **Choose a DIFFERENT tool/operation** than what was already done (unless user explicitly asks to redo)")
+        lines.append("8. ⚠️ **Use files marked with ⭐** (recently created) when possible")
+        lines.append("9. ⚠️ **Use ONLY column names** shown in FILE METADATA above - do NOT invent column names")
+        lines.append("10. ⚠️ **User requests take priority** - If user asks for chart, redo, or any operation, you MUST execute it")
+        lines.append("")
+        lines.append("## ⚠️ CRITICAL: CHART-MAKER MUST ALWAYS BE INCLUDED")
+        lines.append("**MANDATORY RULE**: Chart-maker MUST be used in EVERY workflow:")
+        lines.append("1. **If chart-maker has NOT been used yet**: You MUST plan to use it (usually as the last step)")
+        lines.append("2. **If data transformations are done**: Use chart-maker to visualize the results")
+        lines.append("3. **If user's main request is complete**: Add chart-maker to show the final results visually")
+        lines.append("4. **ONLY set goal_achieved: true AFTER chart-maker has been executed** (unless user explicitly doesn't want visualization)")
+        lines.append("")
+        lines.append("**When planning chart-maker:**")
+        lines.append("- **Check EXECUTION HISTORY** for output files created by previous steps (marked with 📄)")
+        lines.append("- **USE THE MOST RECENT OUTPUT FILE** from previous steps (usually the last file in AVAILABLE FILES marked with ⭐)")
+        lines.append("- **Do NOT use original input files** if a processed/transformed file exists from previous steps")
+        lines.append("- **Example**: If Step 1: merge created merged_data.arrow → Step 2: groupby created grouped_data.arrow → Use grouped_data.arrow for chart, NOT the original files")
+        lines.append("- **The chart should visualize the RESULT of previous transformations**, not the raw input data")
+        lines.append("")
+        lines.append("## LOOP PREVENTION (CRITICAL):")
+        lines.append("Before planning your step, check:")
+        lines.append("")
+        lines.append("1. **Check EXECUTION HISTORY**: Has the atom_id you're planning already been used?")
+        lines.append("   - If YES: You MUST use a DIFFERENT atom_id OR use a DIFFERENT file")
+        lines.append("   - Example: If Step 1 used 'groupby-wtg-avg' on file A, do NOT use 'groupby-wtg-avg' on file A again")
+        lines.append("")
+        lines.append("2. **Check FILES USED**: Are you planning to use the same files as a previous step?")
+        lines.append("   - If YES and same atom_id: This is a LOOP - choose a different atom_id or different files")
+        lines.append("   - Example: If Step 1 used 'merge' on files [A, B], do NOT use 'merge' on [A, B] again")
+        lines.append("")
+        lines.append("3. **Check OUTPUT FILES**: Did a previous step create a file you should use?")
+        lines.append("   - If YES: Use that output file instead of repeating the operation")
+        lines.append("   - Example: If Step 1 created 'merged_data.arrow', use 'merged_data.arrow' in Step 2, not the original files")
+        lines.append("")
+        lines.append("4. **Check GOAL STATUS**: Is the user's request fully satisfied?")
+        lines.append("   - **CRITICAL**: Only set goal_achieved: true if:")
+        lines.append("     * The user is NOT asking for anything more")
+        lines.append("     * ALL required operations are complete")
+        lines.append("     * **Chart-maker has been executed** (visualization is shown)")
+        lines.append("   - If chart-maker has NOT been used yet, set goal_achieved: false and plan chart-maker as next step")
+        lines.append("   - If user asks for 'chart', 'redo', 'modify', or any new operation, set goal_achieved: false and continue")
+        lines.append("   - Example: If user asked for 'merge and chart', and merge is done but chart-maker not used, set goal_achieved: false and plan chart-maker")
+        lines.append("   - Example: If user asked for 'merge and chart', both are done, and user says 'thanks' or nothing, then set goal_achieved: true")
+        lines.append("   - **ALWAYS honor user requests** - Never refuse or say 'no need to do'")
+        lines.append("")
+        lines.append("**ANTI-LOOP EXAMPLES:**")
+        lines.append("- ❌ BAD: Step 1: groupby on file A → Step 2: groupby on file A (SAME operation, SAME file)")
+        lines.append("- ✅ GOOD: Step 1: groupby on file A → Step 2: chart-maker on output_file (DIFFERENT operation, uses output)")
+        lines.append("- ❌ BAD: Step 1: merge files [A, B] → Step 2: merge files [A, B] (REPEATED)")
+        lines.append("- ✅ GOOD: Step 1: merge files [A, B] → Step 2: groupby on merged_output (USES OUTPUT)")
+        lines.append("")
+        lines.append("## 📚 DETAILED WORKFLOW EXAMPLES (Learn from these):")
+        lines.append("")
+        lines.append("### Example 1: Compute Annual Sales of Product/Brand/SKU Over Years Across Markets")
+        lines.append("")
+        lines.append("**User Request**: 'How to compute annual sales of a particular product or SKU or brand over the last few years across markets or regions?'")
+        lines.append("")
+        lines.append("**Step-by-Step Workflow:**")
+        lines.append("1. **Check Date/Year Column**: Check if 'Year' column exists. If not, check if 'date' column exists.")
+        lines.append("2. **Handle Date DataType** (if needed): If 'date' exists but is in object form:")
+        lines.append("   - Use data-upload-validate atom to load the file")
+        lines.append("   - Change datatype of 'date' column to 'datetime' using dtype_changes")
+        lines.append("   - Save the dataframe")
+        lines.append("3. **Create Year Column** (if needed):")
+        lines.append("   - Use dataframe-operations atom")
+        lines.append("   - Create a new column called 'Year' using the formula 'Year' (extracts year from date column)")
+        lines.append("   - Save the dataframe")
+        lines.append("4. **Group and Aggregate Sales**:")
+        lines.append("   - Use groupby-wtg-avg atom")
+        lines.append("   - Group by: product/brand/SKU, market/region, Year")
+        lines.append("   - For volume and value sales: aggregate using 'sum'")
+        lines.append("   - For price and distribution: aggregate using 'weighted_avg' (weighted mean of volume)")
+        lines.append("   - Save this new dataframe")
+        lines.append("5. **Visualize Results**:")
+        lines.append("   - Use chart-maker atom")
+        lines.append("   - Chart type: bar chart")
+        lines.append("   - X-axis: 'Year'")
+        lines.append("   - Y-axis: 'Annual sales' (or aggregated sales column)")
+        lines.append("   - Use the output file from step 4")
+        lines.append("")
+        lines.append("### Example 2: Compute Market Share of Products Across Markets for Specific Time")
+        lines.append("")
+        lines.append("**User Request**: 'How will you compute market share of different products across markets for a specific time?'")
+        lines.append("")
+        lines.append("**Step-by-Step Workflow:**")
+        lines.append("1. **Check Date/Year Column**: Check if 'Year' column exists. If not, check if 'date' column exists.")
+        lines.append("2. **Handle Date DataType** (if needed): If 'date' exists but is in object form:")
+        lines.append("   - Use data-upload-validate atom to load the file")
+        lines.append("   - Change datatype of 'date' column to 'datetime' using dtype_changes")
+        lines.append("   - Save the dataframe")
+        lines.append("3. **Create Time Period Column**:")
+        lines.append("   - Use dataframe-operations atom")
+        lines.append("   - Create a new column for the specific time period (Year, Month, or Quarter)")
+        lines.append("   - Use formula 'Year', 'Month', or 'Quarter' as appropriate")
+        lines.append("   - Save the dataframe")
+        lines.append("4. **Check for Market Share Column**:")
+        lines.append("   - If 'Market Share' column already exists:")
+        lines.append("     → Go to Step 5 (Visualize)")
+        lines.append("   - If 'Market Share' column does NOT exist:")
+        lines.append("     → Continue to Step 4a")
+        lines.append("4a. **Calculate Category Sales**:")
+        lines.append("   - Use groupby-wtg-avg atom")
+        lines.append("   - Group by: market, date (or time period column)")
+        lines.append("   - For volume and value sales: aggregate using 'sum'")
+        lines.append("   - For price and distribution: aggregate using 'weighted_avg'")
+        lines.append("   - Rename aggregated column to 'Category Sales'")
+        lines.append("   - Save this dataframe as 'Category Sales'")
+        lines.append("4b. **Merge with Original Data**:")
+        lines.append("   - Use merge atom")
+        lines.append("   - Left join: original dataframe with 'Category Sales' dataframe")
+        lines.append("   - Join on: 'Market' and 'date' (or time period column)")
+        lines.append("   - Save merged dataframe as 'Merged_Brand_Cat'")
+        lines.append("4c. **Calculate Market Share**:")
+        lines.append("   - Use dataframe-operations atom")
+        lines.append("   - Select 'Merged_Brand_Cat' file")
+        lines.append("   - Create new column called 'Market Share'")
+        lines.append("   - Formula: Sales value / Category Sales (DIV operation)")
+        lines.append("   - Save the dataframe")
+        lines.append("5. **Visualize Market Share**:")
+        lines.append("   - Use chart-maker atom")
+        lines.append("   - Chart type: pie chart")
+        lines.append("   - X-axis: 'brand' or 'product'")
+        lines.append("   - Y-axis: 'Market Share'")
+        lines.append("   - Filters: Add 'market' and time period as filters")
+        lines.append("   - Use the output file from step 4c (or step 3 if market share already existed)")
+        lines.append("")
+        lines.append("**Key Learnings from Examples:**")
+        lines.append("- Always check for required columns (Year, date, Market Share) before using them")
+        lines.append("- Handle data types properly (object → datetime conversion)")
+        lines.append("- Create derived columns when needed (Year, Market Share)")
+        lines.append("- Use groupby for aggregations (sum for sales, weighted_avg for price/distribution)")
+        lines.append("- Use merge to combine dataframes when calculating ratios (market share = brand sales / category sales)")
+        lines.append("- Always end with chart-maker to visualize results")
+        lines.append("- Use output files from previous steps, not original files")
+        lines.append("")
+        
+        return "\n".join(lines)
+    
+    def _build_react_evaluation_prompt(
+        self,
+        execution_result: Dict[str, Any],
+        atom_id: str,
+        step_number: int,
+        user_prompt: str,
+        step_plan: WorkflowStepPlan,
+        execution_history: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Build ReAct-style evaluation prompt for step result assessment.
+        """
+        lines: List[str] = []
+        
+        # Detect if user is asking for something new
+        user_request_keywords = ["chart", "graph", "visualize", "plot", "redo", "redo it", "modify", "change", 
+                                 "create", "generate", "make", "show", "display", "analyze", "do", "now", 
+                                 "also", "and", "then", "next", "please", "can you", "i want", "i need"]
+        user_asking_for_something = any(keyword.lower() in user_prompt.lower() for keyword in user_request_keywords)
+        
+        lines.append("You are a ReAct-style agent evaluator. Evaluate the execution result of a workflow step.")
+        lines.append("")
+        lines.append("## ⚠️ CRITICAL: ALWAYS HONOR USER REQUESTS")
+        lines.append("**MOST IMPORTANT RULE**: If the user asks for something, you MUST continue. Never refuse, never say 'no need', never set decision='complete' when user is asking for more.")
+        lines.append("")
+        lines.append("## USER REQUEST")
+        lines.append(user_prompt)
+        lines.append("")
+        
+        if user_asking_for_something:
+            lines.append("**⚠️ USER IS ASKING FOR SOMETHING - YOU MUST CONTINUE:**")
+            lines.append("- The user request contains keywords indicating they want an operation performed")
+            lines.append("- You MUST set decision='continue' (NOT 'complete')")
+            lines.append("- Do NOT refuse or say the work is already done")
+            lines.append("- Do NOT set decision='complete' when user is asking for something")
+            lines.append("")
+        
+        lines.append("## STEP THAT WAS EXECUTED")
+        lines.append(f"Step {step_number}: {atom_id}")
+        lines.append(f"Description: {step_plan.description}")
+        lines.append(f"Files used: {', '.join(step_plan.files_used) if step_plan.files_used else 'None'}")
+        lines.append("")
+        
+        lines.append("## EXECUTION RESULT")
+        # Format result for readability - truncate large results to prevent timeout
+        result_str = json.dumps(execution_result, indent=2)
+        # Truncate if too long (keep it concise for faster evaluation)
+        max_result_length = 1500  # Reduced from 2000 for faster processing
+        if len(result_str) > max_result_length:
+            result_str = result_str[:max_result_length] + "\n... (truncated - result too large)"
+        lines.append(result_str)
+        lines.append("")
+        
+        # Add summary of result size
+        if len(json.dumps(execution_result)) > max_result_length:
+            lines.append(f"Note: Full result is {len(json.dumps(execution_result))} chars, showing summary above")
+            lines.append("")
+        
+        success = bool(execution_result.get("success", True))
+        error = execution_result.get("error") or execution_result.get("message", "")
+        
+        lines.append("## EXECUTION STATUS")
+        lines.append(f"Success: {success}")
+        if error and not success:
+            lines.append(f"Error: {error}")
+        lines.append("")
+        
+        if execution_history:
+            lines.append("## PREVIOUS STEPS")
+            for hist in execution_history[-3:]:  # Last 3 steps
+                step_num = hist.get("step_number", "?")
+                atom_id_hist = hist.get("atom_id", "?")
+                result_hist = hist.get("result", {})
+                success_hist = result_hist.get("success", True)
+                lines.append(f"Step {step_num}: {atom_id_hist} - {'✅' if success_hist else '❌'}")
+            lines.append("")
+        
+        lines.append("## YOUR TASK")
+        lines.append("Evaluate this step execution and decide what to do next.")
+        lines.append("")
+        lines.append("**EVALUATION CHECKLIST (Be thorough):**")
+        lines.append("1. **Correctness**: Was the execution successful? Any errors? Check the execution_result for success status.")
+        lines.append("2. **Result Quality**: Does the result meet the user's goal? Is the data correct? Check if output files were created.")
+        lines.append("3. **Issues**: Are there any problems or anomalies in the result?")
+        lines.append("4. **Chart Requirement**: Has chart-maker been used in this workflow? If NOT, you MUST set decision='continue' to plan chart-maker next.")
+        lines.append("5. **Next Action**: What should happen next? If chart-maker not used, plan it. If all done including chart, set decision='complete'.")
+        lines.append("")
+        lines.append("Respond with JSON in this format:")
+        lines.append("{")
+        lines.append('  "decision": "continue|retry_with_correction|change_approach|complete",')
+        lines.append('  "reasoning": "Your detailed reasoning about the result and decision",')
+        lines.append('  "quality_score": 0.85,  // Optional: 0.0 to 1.0')
+        lines.append('  "correctness": true,  // Was execution successful?')
+        lines.append('  "issues": ["issue1", "issue2"],  // List any problems found')
+        lines.append('  "corrected_prompt": "...",  // Only if decision is retry_with_correction')
+        lines.append('  "alternative_approach": "..."  // Only if decision is change_approach')
+        lines.append("}")
+        lines.append("")
+        lines.append("DECISION GUIDE:")
+        lines.append("- **continue**: Step succeeded and we should proceed to next step")
+        lines.append("- **retry_with_correction**: Step failed or has issues, retry with corrected parameters")
+        lines.append("- **change_approach**: Current approach won't work, try different tool/strategy")
+        lines.append("- **complete**: User's goal is fully achieved, workflow is done")
+        lines.append("")
+        lines.append("⚠️ CRITICAL: When to set decision='complete':")
+        lines.append("- **ONLY** if the user's original request has been fully satisfied AND user is NOT asking for more")
+        lines.append("- If all required data transformations are done AND user has not requested additional work")
+        lines.append("- If the final output (chart, report, etc.) has been created AND user is satisfied")
+        lines.append("- **DO NOT set 'complete' if:**")
+        lines.append("  * User asks for a chart (even if one exists, user may want a different type)")
+        lines.append("  * User asks to 'redo' or 'modify' something")
+        lines.append("  * User asks for additional analysis or operations")
+        lines.append("  * User makes ANY new request - always honor it with decision='continue'")
+        lines.append("- **ALWAYS LISTEN TO THE USER** - If user asks for something, set decision='continue' and do it")
+        lines.append("- DO NOT set 'complete' if more work is clearly needed or if user is asking for something")
+        lines.append("")
+        lines.append("⚠️ REDUNDANCY CHECK (CRITICAL):")
+        lines.append("Before deciding, check if this step is redundant:")
+        lines.append("")
+        lines.append("1. **Same atom, same files**: If this step used the same atom_id and same files as a previous step:")
+        lines.append("   - This is REDUNDANT - set decision='complete' if goal is achieved, or 'change_approach' if not")
+        lines.append("   - Example: Step 1 used 'groupby' on file A → Step 2 used 'groupby' on file A = REDUNDANT")
+        lines.append("")
+        lines.append("2. **Same operation, different files**: If this step did the same operation but on different files:")
+        lines.append("   - This might be intentional (e.g., grouping multiple files separately)")
+        lines.append("   - Check if the user's goal requires this, or if it's redundant")
+        lines.append("")
+        lines.append("3. **Output file created**: If this step created an output file:")
+        lines.append("   - Check if that output file should be used in the next step")
+        lines.append("   - If the next step would repeat this operation, set decision='complete' or 'change_approach'")
+        lines.append("")
+        lines.append("4. **Goal completion check**: Review the user's original request:")
+        lines.append("   - Have all required operations been completed?")
+        lines.append("   - **CRITICAL**: Has chart-maker been executed? If NOT, set decision='continue' to plan chart-maker")
+        lines.append("   - Has a visualization been created? Chart-maker MUST be used before completion")
+        lines.append("   - **CRITICAL**: Is the user asking for something NEW or additional work?")
+        lines.append("   - If user asks for chart, redo, modify, or any new operation → set decision='continue' (NOT 'complete')")
+        lines.append("   - Only set decision='complete' if:")
+        lines.append("     * ALL operations are done")
+        lines.append("     * Chart-maker has been executed (visualization shown)")
+        lines.append("     * User is NOT asking for more")
+        lines.append("   - **ALWAYS honor user requests** - Never refuse or say the work is already done")
+        lines.append("")
+        lines.append("⚠️ LOOP PREVENTION:")
+        lines.append("- If this step is similar to a previous step, consider if goal is achieved")
+        lines.append("- If the same operation keeps succeeding, the goal might be complete")
+        lines.append("- If you see a pattern of repetition, set decision='complete' or 'change_approach'")
+        lines.append("- Check if user's request has been fully addressed")
+        lines.append("")
+        lines.append("**EVALUATION EXAMPLES:**")
+        lines.append("- ✅ GOOD: Step succeeded, created output file, goal not yet achieved → decision='continue'")
+        lines.append("- ✅ GOOD: Step succeeded, user asks for chart → decision='continue' (ALWAYS honor user requests)")
+        lines.append("- ✅ GOOD: Step succeeded, user asks to redo → decision='continue' (ALWAYS honor user requests)")
+        lines.append("- ✅ GOOD: Step succeeded, all operations done, chart created, user says 'thanks' → decision='complete'")
+        lines.append("- ❌ BAD: Step succeeded, user asks for chart, but you set decision='complete' → WRONG! Should be 'continue'")
+        lines.append("- ❌ BAD: Step succeeded but same as previous step → decision='complete' (if goal achieved) or 'change_approach'")
+        lines.append("- ❌ BAD: Step failed due to wrong column names → decision='retry_with_correction'")
+        lines.append("- ❌ BAD: Refusing user request or saying 'no need' → NEVER do this! Always honor user requests")
+        lines.append("")
+        lines.append("Be thorough in your evaluation and provide clear reasoning.")
+        
+        return "\n".join(lines)
+    
+    async def _handle_react_decision(
+        self,
+        evaluation: StepEvaluation,
+        step_plan: WorkflowStepPlan,
+        sequence_id: str,
+        websocket,
+        execution_result: Dict[str, Any]
+    ) -> Tuple[bool, Optional[WorkflowStepPlan]]:
+        """
+        Handle the decision from step evaluation.
+        
+        Returns:
+            Tuple of (should_continue, next_step_plan)
+            - should_continue: Whether to continue the workflow
+            - next_step_plan: Next step plan if applicable, None if complete or retry
+        """
+        decision = evaluation.decision
+        react_state = self._sequence_react_state.get(sequence_id)
+        
+        # Send decision event (with error handling to prevent hangs)
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "react_decision",
+                    {
+                        "sequence_id": sequence_id,
+                        "decision": decision,
+                        "reasoning": evaluation.reasoning,
+                        "quality_score": evaluation.quality_score,
+                        "correctness": evaluation.correctness,
+                        "issues": evaluation.issues
+                    }
+                ),
+                "react_decision event"
+            )
+        except WebSocketDisconnect:
+            logger.warning(f"⚠️ WebSocket disconnected during react_decision, continuing workflow")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to send react_decision event: {e}, continuing workflow")
+        
+        if decision == "complete":
+            logger.info("✅ ReAct: Goal achieved, workflow complete")
+            if react_state:
+                react_state.goal_achieved = True
+            return (False, None)
+        
+        elif decision == "retry_with_correction":
+            if react_state:
+                react_state.retry_count += 1
+                if react_state.retry_count >= react_state.max_retries_per_step:
+                    logger.warning(f"⚠️ ReAct: Max retries ({react_state.max_retries_per_step}) reached for step, changing approach")
+                    decision = "change_approach"
+                else:
+                    logger.info(f"🔄 ReAct: Retrying step with correction (attempt {react_state.retry_count})")
+                    # Use corrected prompt if provided
+                    if evaluation.corrected_prompt:
+                        step_plan.prompt = evaluation.corrected_prompt
+                        step_plan.atom_prompt = evaluation.corrected_prompt
+                    return (True, step_plan)  # Retry same step
+            
+            # If max retries reached, fall through to change_approach
+        
+        if decision == "change_approach":
+            logger.info("🔄 ReAct: Changing approach for this step")
+            if react_state:
+                react_state.retry_count = 0  # Reset retry count for new approach
+            # Return None to trigger new step generation with different approach
+            return (True, None)
+        
+        # Default: continue to next step
+        logger.info("➡️ ReAct: Continuing to next step")
+        if react_state:
+            react_state.retry_count = 0  # Reset retry count
+        return (True, None)
+    
     
     async def execute_workflow_with_websocket(
         self,
@@ -1187,206 +2262,23 @@ WORKFLOW PLANNING RULES:
                 "connected event"
             )
             
-            logger.info(f"🚀 Starting workflow for sequence: {sequence_id}")
+            logger.info(f"🚀 Starting ReAct workflow for sequence: {sequence_id}")
             
             # ================================================================
-            # PHASE 1: GENERATE PLAN (Using LLM with atom knowledge)
+            # INITIALIZE REACT STATE
             # ================================================================
-            logger.info("📋 PHASE 1: Generating workflow plan with LLM...")
-            
-            # Use LLM to generate intelligent workflow with retry mechanism
-            try:
-                workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                    user_prompt=effective_user_prompt,
-                    available_files=available_files,
-                    priority_files=file_focus
-                )
-            except RetryableJSONGenerationError as e:
-                logger.error(f"❌ Workflow generation failed after all retries: {e}")
-                # Send error event asking user to rephrase
-                await self._send_event(
-                    websocket,
-                    WebSocketEvent(
-                        "workflow_generation_failed",
-                        {
-                            "sequence_id": sequence_id,
-                            "error": str(e),
-                            "message": (
-                                "Failed to generate workflow plan after 3 attempts. "
-                                "Please rephrase your query in a clearer way."
-                            ),
-                            "suggestion": "Try being more specific about what operations you want to perform."
-                        }
-                    ),
-                    "workflow_generation_failed event"
-                )
-                return  # Stop workflow execution
-            
-            # Create plan structure
-            enriched_steps = self._build_enriched_plan(
-                workflow_steps_raw=workflow_steps_raw,
-                prompt_files=prompt_files,
-                available_files=available_files
+            react_state = ReActState(
+                sequence_id=sequence_id,
+                user_prompt=effective_user_prompt
             )
-
-            plan = WorkflowPlan(
-                workflow_steps=enriched_steps,
-                total_steps=len(enriched_steps)
-            )
+            self._sequence_react_state[sequence_id] = react_state
             
-            logger.info(f"✅ Generated workflow with {plan.total_steps} steps")
-            for step in plan.workflow_steps:
-                logger.info(f"   Step {step.step_number}: {step.atom_id} - {step.description}")
-            
-            # Send plan_generated event
-            await self._send_event(
-                websocket,
-                WebSocketEvent(
-                    "plan_generated",
-                    {
-                        "plan": plan.to_dict(),
-                        "sequence_id": sequence_id,
-                        "total_steps": plan.total_steps
-                    }
-                ),
-                "plan_generated event"
-            )
-            
-            logger.info(f"✅ Plan generated with {plan.total_steps} steps")
+            logger.info("🧠 ReAct: Initialized agent state")
             
             # ================================================================
-            # WAIT FOR USER APPROVAL
+            # REACT LOOP: Thought → Action → Observation → Thought...
             # ================================================================
-            logger.info("⏸️ Waiting for user approval (approve_plan or reject_plan)...")
-            
-            # Wait for approval message from frontend
-            approval_received = False
-            rejected = False
-            
-            while not approval_received and not rejected:
-                try:
-                    # Wait for message from client
-                    message_data = await websocket.receive_text()
-                    approval_msg = json.loads(message_data)
-                    
-                    logger.info(f"📨 Received approval message: {approval_msg}")
-                    
-                    if approval_msg.get('type') == 'approve_plan':
-                        approval_received = True
-                        logger.info("✅ User approved workflow - proceeding with execution")
-                    elif approval_msg.get('type') == 'reject_plan':
-                        rejected = True
-                        logger.info("❌ User rejected workflow - stopping")
-                        await self._send_event(
-                            websocket,
-                            WebSocketEvent(
-                                "workflow_rejected",
-                                {"message": "Workflow rejected by user", "sequence_id": sequence_id}
-                            ),
-                            "workflow_rejected plan phase"
-                        )
-                        return  # Exit without executing
-                    elif approval_msg.get('type') == 'add_info':
-                        # User added info before step 1 - regenerate entire workflow
-                        additional_info = approval_msg.get('additional_info', '')
-                        original_prompt = approval_msg.get('original_prompt', user_prompt)
-                        combined_prompt = f"{original_prompt}. Additional requirements: {additional_info}"
-                        combined_with_history = self._apply_history_context(combined_prompt, history_summary)
-                        
-                        logger.info(f"➕ Regenerating workflow with additional info: {additional_info}")
-
-                        updated_focus = self._merge_file_references(
-                            self._chat_file_mentions.get(sequence_id),
-                            self._extract_file_names_from_prompt(additional_info, available_files),
-                        )
-                        if updated_focus:
-                            self._chat_file_mentions[sequence_id] = updated_focus
-                            combined_with_history = self._append_file_focus_note(combined_with_history, updated_focus)
-                        
-                        # Regenerate workflow with combined prompt (with retry mechanism)
-                        try:
-                            workflow_steps_raw, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                                user_prompt=combined_with_history,
-                                available_files=available_files,
-                                priority_files=updated_focus
-                            )
-                        except RetryableJSONGenerationError as e:
-                            logger.error(f"❌ Workflow regeneration failed after all retries: {e}")
-                            # Send error event asking user to rephrase
-                            await self._send_event(
-                                websocket,
-                                WebSocketEvent(
-                                    "workflow_generation_failed",
-                                    {
-                                        "sequence_id": sequence_id,
-                                        "error": str(e),
-                                        "message": (
-                                            "Failed to regenerate workflow plan after 3 attempts. "
-                                            "Please rephrase your query in a clearer way."
-                                        ),
-                                        "suggestion": "Try being more specific about what operations you want to perform."
-                                    }
-                                ),
-                                "workflow_generation_failed event (regeneration)"
-                            )
-                            return  # Stop workflow execution
-                        
-                        enriched_steps = self._build_enriched_plan(
-                            workflow_steps_raw=workflow_steps_raw,
-                            prompt_files=prompt_files,
-                            available_files=available_files
-                        )
-
-                        plan = WorkflowPlan(
-                            workflow_steps=enriched_steps,
-                            total_steps=len(enriched_steps)
-                        )
-                        
-                        # Send updated plan
-                        await self._send_event(
-                            websocket,
-                            WebSocketEvent(
-                                "plan_generated",
-                                {
-                                    "plan": plan.to_dict(),
-                                    "sequence_id": sequence_id,
-                                    "total_steps": plan.total_steps
-                                }
-                            ),
-                            "plan_generated event (update)"
-                        )
-                        
-                        logger.info(f"✅ Regenerated workflow with {plan.total_steps} steps")
-                        # Continue waiting for approval
-                    elif approval_msg.get('type') == 'stop_workflow':
-                        logger.info("🛑 User stopped workflow before execution")
-                        self._cancelled_sequences.add(sequence_id)
-                        await self._send_event(
-                            websocket,
-                            WebSocketEvent(
-                                "workflow_stopped",
-                                {
-                                    "message": "Workflow stopped by user before execution",
-                                    "sequence_id": sequence_id
-                                }
-                            ),
-                            "workflow_stopped (plan phase)"
-                        )
-                        return
-                except WebSocketDisconnect:
-                    logger.info("🔌 WebSocket disconnected while waiting for initial approval")
-                    return
-                except Exception as e:
-                    logger.error(f"❌ Error waiting for approval: {e}")
-                    break
-            
-            if rejected:
-                return  # Don't execute if rejected
-            
-            # ================================================================
-            # PHASE 2: EXECUTE STEPS (after approval)
-            # ================================================================
-            logger.info("🚀 PHASE 2: Starting step-by-step execution...")
+            logger.info("🔄 ReAct: Starting step-wise execution loop...")
             
             await self._send_event(
                 websocket,
@@ -1394,20 +2286,42 @@ WORKFLOW PLANNING RULES:
                     "workflow_started",
                     {
                         "sequence_id": sequence_id,
-                        "total_steps": plan.total_steps
+                        "mode": "react",
+                        "message": "ReAct agent started",
+                        "loading": True  # UI loading state
                     }
                 ),
-                "workflow_started event"
+                "workflow_started event (ReAct)"
             )
             
-            if sequence_id in self._cancelled_sequences:
-                logger.info(f"🛑 Workflow {sequence_id} marked as cancelled before execution start")
-                self._cancelled_sequences.discard(sequence_id)
-                return
-
-            for idx, step in enumerate(plan.workflow_steps):
+            # Send initial progress event
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_progress",
+                        {
+                            "sequence_id": sequence_id,
+                            "current_step": 0,
+                            "total_steps": "?",
+                            "progress_percent": 0,
+                            "status": "starting",
+                            "loading": True
+                        }
+                    ),
+                    "workflow_progress event (initial)"
+                )
+            except (WebSocketDisconnect, Exception) as e:
+                logger.warning(f"⚠️ Failed to send initial progress event: {e}")
+            
+            max_steps = 20  # Prevent infinite loops
+            current_step_number = 0
+            execution_history: List[Dict[str, Any]] = []
+            previous_results: List[Dict[str, Any]] = []
+            
+            while not react_state.goal_achieved and current_step_number < max_steps:
                 if sequence_id in self._cancelled_sequences:
-                    logger.info(f"🛑 Workflow {sequence_id} cancelled before executing step {step.step_number}")
+                    logger.info(f"🛑 Workflow {sequence_id} cancelled during ReAct loop")
                     self._cancelled_sequences.discard(sequence_id)
                     await self._send_event(
                         websocket,
@@ -1418,185 +2332,517 @@ WORKFLOW PLANNING RULES:
                                 "sequence_id": sequence_id
                             }
                         ),
-                        "workflow_stopped (pre-step)"
+                        "workflow_stopped (ReAct loop)"
                     )
-                    return
-
-                await self._execute_step_with_events(
-                    websocket=websocket,
-                    step=step,
-                    plan=plan,
-                    sequence_id=sequence_id,
-                    original_prompt=effective_user_prompt,
-                    project_context=project_context,
-                    user_id=user_id,
-                    available_files=available_files
-                )
+                    break
                 
-                # Wait for user approval between steps (if not last step)
-                if idx < len(plan.workflow_steps) - 1:
-                    logger.info(f"⏸️ Waiting for approval before step {step.step_number + 1}...")
+                current_step_number += 1
+                logger.info(f"🔄 ReAct Cycle {current_step_number}: Starting...")
+                
+                # Send progress update
+                try:
+                    progress_percent = min(int((current_step_number / max_steps) * 100), 99)  # Cap at 99% until complete
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "workflow_progress",
+                            {
+                                "sequence_id": sequence_id,
+                                "current_step": current_step_number,
+                                "total_steps": "?",
+                                "progress_percent": progress_percent,
+                                "status": "in_progress",
+                                "loading": True,
+                                "message": f"Processing step {current_step_number}..."
+                            }
+                        ),
+                        "workflow_progress event"
+                    )
+                except (WebSocketDisconnect, Exception) as e:
+                    logger.warning(f"⚠️ Failed to send progress event: {e}")
+                
+                # ============================================================
+                # THOUGHT: Generate next step
+                # ============================================================
+                logger.info(f"💭 ReAct: THOUGHT - Planning next step...")
+                
+                # Send thought event (with error handling)
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "react_thought",
+                            {
+                                "sequence_id": sequence_id,
+                                "step_number": current_step_number,
+                                "message": "Analyzing current state and planning next action...",
+                                "loading": True
+                            }
+                        ),
+                        "react_thought event"
+                    )
+                except (WebSocketDisconnect, Exception) as e:
+                    logger.warning(f"⚠️ Failed to send react_thought event: {e}, continuing...")
+                
+                # Generate next step with timeout protection
+                # IMPORTANT: Always get the latest available_files that includes newly created files from previous steps
+                current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+                logger.info(f"📁 ReAct: Using {len(current_available_files)} available files for step {current_step_number} planning")
+                if current_available_files:
+                    logger.debug(f"   Latest files: {current_available_files[-3:]}")  # Show last 3 files
+                
+                # Check for loop: same atom repeated multiple times
+                if len(execution_history) >= 2:
+                    recent_atoms = [h.get("atom_id") for h in execution_history[-3:]]
+                    if len(set(recent_atoms)) == 1 and len(recent_atoms) >= 2:
+                        repeated_atom = recent_atoms[0]
+                        logger.warning(f"⚠️ ReAct: Detected loop - same atom '{repeated_atom}' repeated {len(recent_atoms)} times")
+                        # Add warning to prompt context
+                        effective_user_prompt_with_warning = f"{effective_user_prompt}\n\n⚠️ WARNING: The atom '{repeated_atom}' has been executed {len(recent_atoms)} times in a row. You MUST choose a DIFFERENT atom or set goal_achieved: true if the task is complete."
+                    else:
+                        effective_user_prompt_with_warning = effective_user_prompt
+                else:
+                    effective_user_prompt_with_warning = effective_user_prompt
+                
+                try:
+                    next_step = await asyncio.wait_for(
+                        self._generate_next_step_with_react(
+                            user_prompt=effective_user_prompt_with_warning,
+                            execution_history=execution_history,
+                            available_files=current_available_files,  # Use updated file list with newly created files
+                            previous_results=previous_results,
+                            sequence_id=sequence_id,
+                            priority_files=file_focus
+                        ),
+                        timeout=90.0  # 90 second timeout for step generation
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"❌ ReAct: Step generation timed out after 90s, stopping workflow")
+                    react_state.goal_achieved = True
+                    break
+                except Exception as e:
+                    logger.error(f"❌ ReAct: Step generation failed: {e}, stopping workflow")
+                    react_state.goal_achieved = True
+                    break
+            
+                if next_step is None:
+                    # Check if chart-maker has been used before marking goal as achieved
+                    chart_maker_used = any(h.get("atom_id") == "chart-maker" for h in execution_history)
+                    if not chart_maker_used and execution_history:
+                        logger.info("📊 ReAct: Goal marked as achieved but chart-maker not used - forcing chart-maker step")
+                        # Force chart-maker as the final step
+                        current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+                        most_recent_file = current_available_files[-1] if current_available_files else None
+                        
+                        if most_recent_file:
+                            # Create a forced chart-maker step
+                            next_step = WorkflowStepPlan(
+                                step_number=current_step_number,
+                                atom_id="chart-maker",
+                                description=f"Create visualization of the final results from {self._display_file_name(most_recent_file)}",
+                                prompt="",
+                                files_used=[most_recent_file],
+                                inputs=[most_recent_file],
+                                output_alias="final_visualization"
+                            )
+                            logger.info(f"📊 ReAct: Forced chart-maker step using {most_recent_file}")
+                        else:
+                            logger.warning("⚠️ ReAct: No files available for forced chart-maker, marking goal as achieved")
+                            react_state.goal_achieved = True
+                            break
+                    else:
+                        logger.info("✅ ReAct: Goal achieved, no more steps needed")
+                        react_state.goal_achieved = True
+                        break
+                
+                # Update step number from generated step
+                next_step.step_number = current_step_number
+                
+                # ENHANCED LOOP DETECTION: Check if we're repeating the same atom with same files
+                if execution_history:
+                    last_step = execution_history[-1]
+                    last_atom = last_step.get("atom_id")
+                    current_atom = next_step.atom_id
                     
-                    step_approved = False
-                    workflow_rejected = False
-                    
-                    while not step_approved and not workflow_rejected:
-                        try:
-                            message_data = await websocket.receive_text()
-                            approval_msg = json.loads(message_data)
+                    # Check for exact match: same atom + same files
+                    if last_atom == current_atom:
+                        # Check if files are the same too
+                        last_files = set(last_step.get("files_used", []))  # Get from execution_history
+                        current_files = set(next_step.files_used or [])
+                        
+                        if last_files and current_files and last_files == current_files:
+                            logger.warning(f"⚠️ ReAct: LOOP DETECTED - Same atom '{current_atom}' with same files being repeated!")
+                            logger.warning(f"   Last step files: {last_files}")
+                            logger.warning(f"   Current step files: {current_files}")
+                            logger.warning(f"   Last step description: {last_step.get('description', 'N/A')}")
+                            logger.warning(f"   Current step description: {next_step.description}")
                             
-                            logger.info(f"📨 Received step approval message: {approval_msg}")
+                            # Force goal achieved to stop the loop
+                            logger.info("🛑 ReAct: Stopping workflow to prevent infinite loop")
+                            react_state.goal_achieved = True
                             
-                            if approval_msg.get('type') == 'approve_step':
-                                if approval_msg.get('step_number') == step.step_number:
-                                    try:
-                                        await self._auto_save_step(
-                                            sequence_id=sequence_id,
-                                            step_number=step.step_number,
-                                            workflow_step=step,
-                                            available_files=available_files
-                                        )
-                                    except Exception as save_error:
-                                        logger.error(f"❌ Auto-save failed for step {step.step_number}: {save_error}")
-                                        await self._send_event(
-                                            websocket,
-                                            WebSocketEvent(
-                                                "error",
-                                                {
-                                                    "sequence_id": sequence_id,
-                                                    "error": str(save_error),
-                                                    "message": f"Auto-save failed for step {step.step_number}: {save_error}"
-                                                }
-                                            ),
-                                            "auto-save error event"
-                                        )
-                                        workflow_rejected = True
-                                        break
-
-                                    step_approved = True
-                                    logger.info(f"✅ Step {step.step_number} approved - continuing to next step")
-                                else:
-                                    logger.warning(f"⚠️ Approval message for wrong step (expected {step.step_number}, got {approval_msg.get('step_number')})")
-                            
-                            elif approval_msg.get('type') == 'reject_workflow':
-                                workflow_rejected = True
-                                logger.info(f"❌ Workflow rejected at step {step.step_number}")
+                            # Send loop detection event
+                            try:
                                 await self._send_event(
                                     websocket,
                                     WebSocketEvent(
-                                        "workflow_rejected",
-                                        {"message": f"Workflow rejected by user at step {step.step_number}", "sequence_id": sequence_id}
-                                    ),
-                                    "workflow_rejected step phase"
-                                )
-                                return
-                            
-                            elif approval_msg.get('type') == 'add_info':
-                                # User added info between steps - regenerate remaining steps
-                                additional_info = approval_msg.get('additional_info', '')
-                                original_prompt = approval_msg.get('original_prompt', user_prompt)
-                                
-                                logger.info(f"➕ User added info at step {step.step_number}: {additional_info}")
-                                
-                                # Get previous results
-                                previous_results = self.result_storage.get_sequence_results(sequence_id)
-                                
-                                # Regenerate remaining steps with additional info
-                                remaining_steps = plan.workflow_steps[idx + 1:]
-                                if remaining_steps:
-                                    # Combine original prompt with additional info for remaining steps
-                                    combined_prompt = f"{original_prompt}. Additional requirements for remaining steps: {additional_info}"
-                                    combined_with_history = self._apply_history_context(combined_prompt, history_summary)
-                                    updated_focus = self._merge_file_references(
-                                        self._chat_file_mentions.get(sequence_id),
-                                        self._extract_file_names_from_prompt(additional_info, available_files),
-                                    )
-                                    if updated_focus:
-                                        self._chat_file_mentions[sequence_id] = updated_focus
-                                        combined_with_history = self._append_file_focus_note(combined_with_history, updated_focus)
-                                    
-                                    # Regenerate workflow and filter to remaining steps
-                                    new_workflow_steps, prompt_files, files_exist = await self._generate_workflow_with_llm(
-                                        user_prompt=combined_with_history,
-                                        available_files=available_files,
-                                        priority_files=updated_focus
-                                    )
-                                    
-                                    # Update plan with new remaining steps enriched with prompts
-                                    new_remaining_steps = self._build_enriched_plan(
-                                        workflow_steps_raw=new_workflow_steps,
-                                        prompt_files=prompt_files,
-                                        available_files=available_files,
-                                        start_index=step.step_number + 1,
-                                        initial_previous_alias=step.output_alias
-                                    )
-
-                                    # Replace remaining steps in plan
-                                    plan.workflow_steps = plan.workflow_steps[:idx + 1] + new_remaining_steps
-                                    plan.total_steps = len(plan.workflow_steps)
-                                    
-                                    # Send updated plan
-                                    await self._send_event(
-                                        websocket,
-                                        WebSocketEvent(
-                                            "plan_updated",
-                                            {
-                                                "plan": plan.to_dict(),
-                                                "sequence_id": sequence_id,
-                                                "total_steps": plan.total_steps,
-                                                "updated_from_step": step.step_number + 1
-                                            }
-                                        ),
-                                        "plan_updated event"
-                                    )
-                                    
-                                    logger.info(f"✅ Updated workflow: {len(new_remaining_steps)} new steps from step {step.step_number + 1}")
-                                    
-                                    # Continue to next step (which is now updated)
-                                    step_approved = True
-                            elif approval_msg.get('type') == 'stop_workflow':
-                                logger.info(f"🛑 Workflow {sequence_id} stopped by user at step {step.step_number}")
-                                self._cancelled_sequences.add(sequence_id)
-                                await self._send_event(
-                                    websocket,
-                                    WebSocketEvent(
-                                        "workflow_stopped",
+                                        "react_loop_detected",
                                         {
-                                            "message": f"Workflow stopped by user at step {step.step_number}",
-                                            "sequence_id": sequence_id
+                                            "sequence_id": sequence_id,
+                                            "step_number": current_step_number,
+                                            "repeated_atom": current_atom,
+                                            "message": f"Loop detected: {current_atom} repeated with same files. Stopping workflow."
                                         }
                                     ),
-                                    "workflow_stopped (step phase)"
+                                    "react_loop_detected event"
                                 )
-                                return
-                        except WebSocketDisconnect:
-                            logger.info("🔌 WebSocket disconnected while waiting for step approval")
-                            return
-                        except Exception as e:
-                            logger.error(f"❌ Error waiting for step approval: {e}")
+                            except (WebSocketDisconnect, Exception) as e:
+                                logger.warning(f"⚠️ Failed to send loop detection event: {e}")
+                            
                             break
+                        else:
+                            logger.info(f"ℹ️ ReAct: Same atom '{current_atom}' but different files - allowing")
+                            logger.debug(f"   Last files: {last_files}, Current files: {current_files}")
+                    else:
+                        logger.info(f"ℹ️ ReAct: Different atom - {last_atom} -> {current_atom}")
                     
-                    if workflow_rejected:
-                        return
+                    # Additional check: If same atom was used 2+ times in last 3 steps, warn
+                    if len(execution_history) >= 2:
+                        recent_atoms = [h.get("atom_id") for h in execution_history[-3:]]
+                        atom_count = recent_atoms.count(current_atom)
+                        if atom_count >= 2:
+                            logger.warning(f"⚠️ ReAct: Atom '{current_atom}' used {atom_count} times in last 3 steps - potential loop risk")
+                            # Don't stop, but log warning for evaluation to catch
+                
+                # ============================================================
+                # ACTION: Execute the step
+                # ============================================================
+                logger.info(f"⚡ ReAct: ACTION - Executing step {current_step_number} ({next_step.atom_id})...")
+                
+                # Send action event (with error handling)
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "react_action",
+                            {
+                                "sequence_id": sequence_id,
+                                "step_number": current_step_number,
+                                "atom_id": next_step.atom_id,
+                                "description": next_step.description,
+                                "message": f"Executing {next_step.atom_id}..."
+                            }
+                        ),
+                        "react_action event"
+                    )
+                except (WebSocketDisconnect, Exception) as e:
+                    logger.warning(f"⚠️ Failed to send react_action event: {e}, continuing...")
+                
+                # Create a minimal plan for execution compatibility
+                plan = WorkflowPlan(
+                    workflow_steps=[next_step],
+                    total_steps=1
+                )
+                
+                # Execute the step
+                # IMPORTANT: Always get the latest available_files that includes newly created files from previous steps
+                current_available_files_for_exec = self._sequence_available_files.get(sequence_id, available_files.copy())
+                logger.info(f"📁 ReAct: Using {len(current_available_files_for_exec)} available files for step {current_step_number} execution")
+                try:
+                    execution_result = await self._execute_step_with_events(
+                        websocket=websocket,
+                        step=next_step,
+                        plan=plan,
+                        sequence_id=sequence_id,
+                        original_prompt=effective_user_prompt,
+                        project_context=project_context,
+                        user_id=user_id,
+                        available_files=current_available_files_for_exec,  # Use updated file list with newly created files
+                        frontend_chat_id=frontend_chat_id  # Pass chat_id for cache isolation
+                    )
+                except Exception as e:
+                    logger.error(f"❌ ReAct: Step execution failed: {e}")
+                    execution_result = {
+                        "success": False,
+                        "error": str(e),
+                        "message": f"Step execution failed: {str(e)}"
+                    }
+                
+                # ============================================================
+                # OBSERVATION: Evaluate the result
+                # ============================================================
+                logger.info(f"👁️ ReAct: OBSERVATION - Evaluating step {current_step_number} result...")
+                
+                # Send observation event (with error handling)
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "react_observation",
+                            {
+                                "sequence_id": sequence_id,
+                                "step_number": current_step_number,
+                                "message": "Evaluating execution result..."
+                            }
+                        ),
+                        "react_observation event"
+                    )
+                except (WebSocketDisconnect, Exception) as e:
+                    logger.warning(f"⚠️ Failed to send react_observation event: {e}, continuing...")
+                
+                # Evaluate with timeout protection
+                try:
+                    evaluation = await asyncio.wait_for(
+                        self._evaluate_step_result(
+                            execution_result=execution_result,
+                            atom_id=next_step.atom_id,
+                            step_number=current_step_number,
+                            user_prompt=effective_user_prompt,
+                            step_plan=next_step,
+                            execution_history=execution_history,
+                            sequence_id=sequence_id
+                        ),
+                        timeout=120.0  # 2 minute timeout for evaluation
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"❌ ReAct: Evaluation timed out after 120s, using fallback")
+                    # Fallback evaluation
+                    success = bool(execution_result.get("success", True))
+                    evaluation = StepEvaluation(
+                        decision="continue" if success else "retry_with_correction",
+                        reasoning="Evaluation timed out, using fallback based on success flag",
+                        correctness=success,
+                        issues=["Evaluation timeout"] if not success else []
+                    )
+                except Exception as e:
+                    logger.error(f"❌ ReAct: Evaluation failed: {e}, using fallback")
+                    # Fallback evaluation
+                    success = bool(execution_result.get("success", True))
+                    evaluation = StepEvaluation(
+                        decision="continue" if success else "retry_with_correction",
+                        reasoning=f"Evaluation error: {str(e)}, using fallback",
+                        correctness=success,
+                        issues=[f"Evaluation error: {str(e)}"]
+                    )
+                
+                # ============================================================
+                # AUTO-SAVE: Save step output immediately for next steps
+                # ============================================================
+                if execution_result.get("success", True):
+                    try:
+                        logger.info(f"💾 ReAct: Auto-saving step {current_step_number} output...")
+                        # Get current available files list (will be updated by _auto_save_step)
+                        files_before_save = len(self._sequence_available_files.get(sequence_id, []))
+                        
+                        await self._auto_save_step(
+                            sequence_id=sequence_id,
+                            step_number=current_step_number,
+                            workflow_step=next_step,
+                            available_files=available_files,  # This will be updated with new file
+                            frontend_chat_id=frontend_chat_id  # Pass chat_id for cache isolation
+                        )
+                        
+                        # Verify file was added
+                        files_after_save = len(self._sequence_available_files.get(sequence_id, []))
+                        logger.info(f"✅ ReAct: Step {current_step_number} output saved. Files: {files_before_save} -> {files_after_save}")
+                        
+                        # Send file_created event for UI
+                        try:
+                            saved_path = self._step_output_files.get(sequence_id, {}).get(current_step_number)
+                            if saved_path:
+                                logger.info(f"📄 ReAct: New file available for next steps: {saved_path}")
+                                await self._send_event(
+                                    websocket,
+                                    WebSocketEvent(
+                                        "file_created",
+                                        {
+                                            "sequence_id": sequence_id,
+                                            "step_number": current_step_number,
+                                            "file_path": saved_path,
+                                            "output_alias": next_step.output_alias,
+                                            "message": f"File created: {saved_path}",
+                                            "available_for_next_steps": True
+                                        }
+                                    ),
+                                    "file_created event"
+                                )
+                        except (WebSocketDisconnect, Exception) as e:
+                            logger.warning(f"⚠️ Failed to send file_created event: {e}")
+                    except Exception as save_error:
+                        logger.error(f"❌ ReAct: Auto-save failed for step {current_step_number}: {save_error}")
+                        # Continue anyway - file might still be usable
+                
+                # Add to execution history (include files_used for loop detection)
+                execution_history.append({
+                    "step_number": current_step_number,
+                    "atom_id": next_step.atom_id,
+                    "files_used": next_step.files_used or [],  # Track files for loop detection
+                    "description": next_step.description,  # Track description for context
+                    "result": execution_result,
+                    "evaluation": evaluation.__dict__
+                })
+                previous_results.append(execution_result)
+                
+                # Record in ReAct state (include description and files_used for workflow context)
+                react_state.add_execution(
+                    step_number=current_step_number,
+                    atom_id=next_step.atom_id,
+                    result=execution_result,
+                    evaluation=evaluation,
+                    description=next_step.description,
+                    files_used=next_step.files_used or []
+                )
+                
+                # ============================================================
+                # DECISION: Handle evaluation decision
+                # ============================================================
+                try:
+                    should_continue, retry_step = await asyncio.wait_for(
+                        self._handle_react_decision(
+                            evaluation=evaluation,
+                            step_plan=next_step,
+                            sequence_id=sequence_id,
+                            websocket=websocket,
+                            execution_result=execution_result
+                        ),
+                        timeout=10.0  # 10 second timeout for decision handling
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"❌ ReAct: Decision handling timed out, defaulting to continue")
+                    should_continue = True
+                    retry_step = None
+                except Exception as e:
+                    logger.error(f"❌ ReAct: Decision handling failed: {e}, defaulting to continue")
+                    should_continue = True
+                    retry_step = None
+                
+                if not should_continue:
+                    # Goal achieved or workflow complete - but check if chart-maker was used
+                    chart_maker_used = any(h.get("atom_id") == "chart-maker" for h in execution_history)
+                    if not chart_maker_used and execution_history:
+                        logger.info("📊 ReAct: Goal marked as achieved but chart-maker not used - forcing chart-maker step")
+                        # Force chart-maker as the final step
+                        current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+                        most_recent_file = current_available_files[-1] if current_available_files else None
+                        
+                        if most_recent_file:
+                            # Create a forced chart-maker step
+                            forced_chart_step = WorkflowStepPlan(
+                                step_number=current_step_number + 1,
+                                atom_id="chart-maker",
+                                description=f"Create visualization of the final results from {self._display_file_name(most_recent_file)}",
+                                prompt="",
+                                files_used=[most_recent_file],
+                                inputs=[most_recent_file],
+                                output_alias="final_visualization"
+                            )
+                            logger.info(f"📊 ReAct: Forced chart-maker step using {most_recent_file}")
+                            # Set next_step to the forced chart step and continue
+                            next_step = forced_chart_step
+                            should_continue = True
+                            react_state.goal_achieved = False
+                            # Continue the loop to execute the forced chart-maker step
+                            # Skip the retry check since we're forcing a new step
+                            continue
+                        else:
+                            logger.warning("⚠️ ReAct: No files available for forced chart-maker, marking goal as achieved")
+                            react_state.goal_achieved = True
+                            break
+                    else:
+                        # Goal achieved and chart-maker used (or no execution history)
+                        react_state.goal_achieved = True
+                        break
+                
+                if retry_step is not None:
+                    # Retry the same step with corrections
+                    logger.info(f"🔄 ReAct: Retrying step {current_step_number} with corrections...")
+                    
+                    # Send correction event (with error handling)
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_correction",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "reasoning": evaluation.reasoning,
+                                    "corrected_prompt": evaluation.corrected_prompt,
+                                    "message": "Retrying step with corrections..."
+                                }
+                            ),
+                            "react_correction event"
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send react_correction event: {e}, continuing...")
+                    
+                    # Don't increment step number, retry same step
+                    current_step_number -= 1
+                    continue
+                
+                # Continue to next step
+                logger.info(f"➡️ ReAct: Continuing to next step...")
+                
+                # Additional loop prevention: If we've done many steps with same pattern, check for completion
+                if current_step_number >= 5 and len(execution_history) >= 5:
+                    # Check if last few steps are all successful
+                    recent_successes = [h.get("result", {}).get("success", False) for h in execution_history[-5:]]
+                    if all(recent_successes):
+                        logger.info(f"ℹ️ ReAct: Last 5 steps all successful - checking if goal might be achieved")
+                        # Check if same atom repeated
+                        recent_atoms = [h.get("atom_id") for h in execution_history[-3:]]
+                        if len(set(recent_atoms)) == 1:
+                            logger.warning(f"⚠️ ReAct: Same atom '{recent_atoms[0]}' repeated 3+ times with success - goal may be achieved")
+                            # Force evaluation to consider completion
+                            if evaluation.decision != "complete":
+                                logger.warning(f"⚠️ ReAct: Evaluation didn't mark as complete, but pattern suggests it should be")
+                                # Don't force it, but log the warning
             
-            # Send workflow completed
+            # ================================================================
+            # WORKFLOW COMPLETE
+            # ================================================================
+            if react_state.goal_achieved:
+                logger.info(f"✅ ReAct: Workflow completed successfully after {current_step_number} steps")
+            elif current_step_number >= max_steps:
+                logger.warning(f"⚠️ ReAct: Reached max steps ({max_steps}), stopping workflow")
+            
+            # Send final progress update
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_progress",
+                        {
+                            "sequence_id": sequence_id,
+                            "current_step": current_step_number,
+                            "total_steps": current_step_number,
+                            "progress_percent": 100,
+                            "status": "completed",
+                            "loading": False,  # Turn off loading
+                            "message": "Workflow completed!"
+                        }
+                    ),
+                    "workflow_progress event (final)"
+                )
+            except (WebSocketDisconnect, Exception) as e:
+                logger.warning(f"⚠️ Failed to send final progress event: {e}")
+            
             await self._send_event(
                 websocket,
                 WebSocketEvent(
                     "workflow_completed",
                     {
                         "sequence_id": sequence_id,
-                        "total_steps": plan.total_steps,
-                        "message": "All steps completed successfully!"
+                        "total_steps": current_step_number,
+                        "goal_achieved": react_state.goal_achieved,
+                        "message": "ReAct workflow completed!",
+                        "loading": False  # Turn off loading
                     }
                 ),
-                "workflow_completed event"
+                "workflow_completed event (ReAct)"
             )
             
-            logger.info(f"✅ Workflow completed: {sequence_id}")
-
-            # 🔧 CRITICAL FIX: Check if websocket is still connected before emitting workflow insight
-            # The connection might be closed after workflow_completed event
+            # Emit workflow insight if websocket is still connected
             try:
                 # Check connection state before emitting workflow insight
                 if hasattr(websocket, 'client_state') and websocket.client_state.name == 'DISCONNECTED':
@@ -1604,10 +2850,30 @@ WORKFLOW PLANNING RULES:
                 elif hasattr(websocket, 'application_state') and websocket.application_state.name == 'DISCONNECTED':
                     logger.warning(f"⚠️ WebSocket application state disconnected, skipping workflow insight for {sequence_id}")
                 else:
+                    # Create a plan summary for insight from execution history
+                    workflow_steps_summary = []
+                    for hist in execution_history:
+                        step_num = hist.get("step_number", 0)
+                        atom_id = hist.get("atom_id", "unknown")
+                        workflow_steps_summary.append(
+                            WorkflowStepPlan(
+                                step_number=step_num,
+                                atom_id=atom_id,
+                                description=f"Step {step_num}: {atom_id}",
+                                prompt="",
+                                files_used=[],
+                                inputs=[],
+                                output_alias=""
+                            )
+                        )
+                    plan_summary = WorkflowPlan(
+                        workflow_steps=workflow_steps_summary,
+                        total_steps=len(execution_history)
+                    )
                     await self._emit_workflow_insight(
                         websocket=websocket,
                         sequence_id=sequence_id,
-                        plan=plan,
+                        plan=plan_summary,
                         user_prompt=user_prompt,
                         project_context=project_context,
                         additional_context=history_summary or "",
@@ -1617,6 +2883,8 @@ WORKFLOW PLANNING RULES:
             except Exception as insight_error:
                 logger.warning(f"⚠️ Failed to emit workflow insight (connection may be closed): {insight_error}")
                 # Don't fail the entire workflow if insight emission fails
+            
+            # ReAct loop handles all execution - old loop code removed
             
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during workflow {sequence_id}")
@@ -1653,7 +2921,8 @@ WORKFLOW PLANNING RULES:
         original_prompt: str,
         project_context: Dict[str, Any],
         user_id: str,
-        available_files: List[str]
+        available_files: List[str],
+        frontend_chat_id: Optional[str] = None
     ):
         """
         Execute a single step with WebSocket events (SuperAgent pattern).
@@ -1793,7 +3062,22 @@ WORKFLOW PLANNING RULES:
                 step_number=step_number,
                 sequence_id=sequence_id,
                 websocket=websocket,
+                frontend_chat_id=frontend_chat_id
             )
+
+            # Log atom result details for debugging
+            logger.info(f"📊 Atom {atom_id} execution result keys: {list(execution_result.keys())}")
+            logger.info(f"📊 Atom {atom_id} success status: {execution_result.get('success', 'not_found')}")
+            
+            # Check if result has the expected structure for this atom
+            if atom_id == "merge" and "merge_json" not in execution_result:
+                logger.warning(f"⚠️ Merge atom result missing 'merge_json' key. Available keys: {list(execution_result.keys())}")
+            elif atom_id == "concat" and "concat_json" not in execution_result:
+                logger.warning(f"⚠️ Concat atom result missing 'concat_json' key. Available keys: {list(execution_result.keys())}")
+            elif atom_id == "groupby-wtg-avg" and "groupby_json" not in execution_result:
+                logger.warning(f"⚠️ Groupby atom result missing 'groupby_json' key. Available keys: {list(execution_result.keys())}")
+            elif atom_id == "chart-maker" and "chart_json" not in execution_result:
+                logger.warning(f"⚠️ Chart-maker atom result missing 'chart_json' key. Available keys: {list(execution_result.keys())}")
 
             execution_success = bool(execution_result.get("success", True))
             insight_text = await self._generate_step_insight(
@@ -1857,6 +3141,9 @@ WORKFLOW PLANNING RULES:
             
             logger.info(f"✅ Step {step_number} completed")
             
+            # Return execution result for ReAct evaluation
+            return execution_result
+            
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during step {step_number}")
             raise
@@ -1876,6 +3163,13 @@ WORKFLOW PLANNING RULES:
                 ),
                 f"step_failed event (step {step_number})"
             )
+            
+            # Return error result for ReAct evaluation
+            return {
+                "success": False,
+                "error": str(e),
+                "message": f"Step execution failed: {str(e)}"
+            }
     
     def _resolve_step_dependencies(self, sequence_id: str, step: WorkflowStepPlan) -> None:
         """Replace alias placeholders with the actual file paths produced earlier."""
@@ -2097,7 +3391,8 @@ WORKFLOW PLANNING RULES:
         sequence_id: str,
         step_number: int,
         workflow_step: WorkflowStepPlan,
-        available_files: List[str]
+        available_files: List[str],
+        frontend_chat_id: Optional[str] = None
     ) -> None:
         """
         Persist step output automatically before moving to the next step.
@@ -2138,7 +3433,9 @@ WORKFLOW PLANNING RULES:
             saved_path, auto_save_response = await self._auto_save_create_transform(
                 workflow_step=workflow_step,
                 execution_result=execution_result,
-                step_cache=step_cache
+                step_cache=step_cache,
+                frontend_chat_id=frontend_chat_id,
+                sequence_id=sequence_id
             )
         elif atom_id == "data-upload-validate":
             # 🔧 CRITICAL FIX: data-upload-validate doesn't create new files, it loads existing ones
@@ -2418,7 +3715,9 @@ WORKFLOW PLANNING RULES:
         self,
         workflow_step: WorkflowStepPlan,
         execution_result: Dict[str, Any],
-        step_cache: Dict[str, Any]
+        step_cache: Dict[str, Any],
+        frontend_chat_id: Optional[str] = None,
+        sequence_id: Optional[str] = None
     ) -> Tuple[str, Dict[str, Any]]:
         """Auto-save helper for create-transform atom outputs."""
         # Get result file from execution result (perform endpoint already saved it)
@@ -2444,10 +3743,21 @@ WORKFLOW PLANNING RULES:
             file_ref = execution_result.get("file") or execution_result.get("object_name")
             if file_ref:
                 try:
+                    # Include chat_id and sequence_id in cache key to prevent cache leakage between chats
+                    cache_key_params = []
+                    if frontend_chat_id:
+                        cache_key_params.append(f"chat_id={frontend_chat_id}")
+                    if sequence_id:
+                        cache_key_params.append(f"session_id={sequence_id}")
+                    
                     cached_url = f"{self.fastapi_base_url}/api/create-column/cached_dataframe?object_name={file_ref}"
+                    if cache_key_params:
+                        cached_url += "&" + "&".join(cache_key_params)
+                    
+                    logger.info(f"🔑 Fetching cached data with isolation: chat_id={frontend_chat_id}, session_id={sequence_id}")
                     response = await self._get_json(cached_url)
                     csv_data = response.get("data")
-                    logger.info(f"✅ Retrieved CSV data from cached_dataframe endpoint")
+                    logger.info(f"✅ Retrieved CSV data from cached_dataframe endpoint (isolated by chat/session)")
                 except Exception as e:
                     logger.warning(f"⚠️ Could not fetch cached results: {e}")
 
@@ -2775,6 +4085,18 @@ WORKFLOW PLANNING RULES:
             except Exception as send_exc:
                 logger.debug(f"Unable to notify client about workflow insight failure: {send_exc}")
 
+    def _is_websocket_connected(self, websocket) -> bool:
+        """Check if WebSocket is still connected."""
+        try:
+            if hasattr(websocket, 'client_state'):
+                return websocket.client_state.name != 'DISCONNECTED'
+            if hasattr(websocket, 'application_state'):
+                return websocket.application_state.name != 'DISCONNECTED'
+            # If we can't check state, assume connected (will fail on send if not)
+            return True
+        except Exception:
+            return True  # Assume connected if check fails
+
     async def _send_event(
         self,
         websocket,
@@ -2783,6 +4105,11 @@ WORKFLOW PLANNING RULES:
     ) -> None:
         """Safely send WebSocket event, converting close errors to disconnects."""
         try:
+            # Quick check before sending
+            if not self._is_websocket_connected(websocket):
+                logger.warning(f"⚠️ WebSocket disconnected, skipping {context}")
+                raise WebSocketDisconnect(code=1006)
+            
             await websocket.send_text(event.to_json())
         except WebSocketDisconnect:
             logger.info(f"🔌 WebSocket disconnected during {context}")
@@ -2801,6 +4128,7 @@ WORKFLOW PLANNING RULES:
         self._sequence_available_files.pop(sequence_id, None)
         self._output_alias_registry.pop(sequence_id, None)
         self._chat_file_mentions.pop(sequence_id, None)
+        self._sequence_react_state.pop(sequence_id, None)  # Cleanup ReAct state
 
     def _load_persisted_chat_summary(
         self,
@@ -3047,6 +4375,12 @@ WORKFLOW PLANNING RULES:
         header_lines.append("Respond with configuration details only – no filler text.")
 
         header_section = "\n".join(header_lines)
+        
+        # Build workflow context section showing what previous steps created
+        workflow_context_section = self._build_workflow_context_section(
+            sequence_id, atom_id, files_used, inputs, is_stream_workflow
+        ) if is_stream_workflow and sequence_id else ""
+        
         dataset_section = self._build_dataset_section(atom_id, files_used, inputs, output_alias, is_stream_workflow)
         atom_section = self._build_atom_instruction_section(atom_id, original_prompt, files_used, inputs)
         available_section = self._build_available_files_section(filtered_available_files, is_stream_workflow)
@@ -3066,6 +4400,7 @@ WORKFLOW PLANNING RULES:
 
         prompt_sections = [
             header_section,
+            workflow_context_section,  # Add workflow context before dataset section
             dataset_section,
             atom_section,
             available_section,
@@ -3104,22 +4439,66 @@ WORKFLOW PLANNING RULES:
             lines.append("🚨 USE ONLY THIS FILE - DO NOT USE ANY OTHER FILES")
             lines.append("The file(s) specified below are MANDATORY for this workflow step.")
             lines.append("")
-        
-        # Add file metadata with column names if available
+
+        # Add comprehensive file metadata with column names, data types, and row counts
         if file_metadata:
-            lines.append("**FILE METADATA (CRITICAL - Use ONLY these column names):**")
+            lines.append("**📊 COMPREHENSIVE FILE METADATA (CRITICAL - Use ONLY these details):**")
+            lines.append("")
             for file_path in all_file_paths:
                 if file_path in file_metadata:
                     metadata = file_metadata[file_path]
                     columns = metadata.get("columns", [])
+                    file_display = self._display_file_name(file_path)
+                    
+                    lines.append(f"**File Details:**")
+                    lines.append(f"- **Full Path:** `{file_path}`")
+                    lines.append(f"- **Display Name:** `{file_display}`")
+                    
+                    # Add row count if available
+                    row_count = metadata.get("row_count") or metadata.get("rows") or metadata.get("num_rows")
+                    if row_count:
+                        lines.append(f"- **Row Count:** {row_count:,} rows")
+                    
+                    # Add file size if available
+                    file_size = metadata.get("file_size") or metadata.get("size")
+                    if file_size:
+                        lines.append(f"- **File Size:** {file_size}")
+                    
+                    # Add column details with data types if available
                     if columns:
-                        file_display = self._display_file_name(file_path)
-                        lines.append(f"- **File:** `{file_path}` (display: {file_display})")
-                        lines.append(f"  * **Valid columns:** {', '.join(columns[:15])}")
-                        if len(columns) > 15:
-                            lines.append(f"  * ... and {len(columns) - 15} more columns")
+                        lines.append(f"- **Total Columns:** {len(columns)}")
                         lines.append("")
-            lines.append("⚠️ **IMPORTANT:** Use ONLY the column names listed above. Do NOT invent or guess column names.")
+                        lines.append("**Column Names (Use EXACTLY as shown - case-sensitive):**")
+                        
+                        # Show all columns with data types if available
+                        column_types = metadata.get("column_types", {}) or metadata.get("dtypes", {})
+                        if column_types and isinstance(column_types, dict):
+                            # Show columns with their data types
+                            for col in columns[:20]:  # Show first 20 columns with types
+                                col_type = column_types.get(col, "unknown")
+                                lines.append(f"  - `{col}` (type: {col_type})")
+                            if len(columns) > 20:
+                                lines.append(f"  - ... and {len(columns) - 20} more columns")
+                                # Show remaining column names without types
+                                for col in columns[20:30]:
+                                    lines.append(f"  - `{col}`")
+                                if len(columns) > 30:
+                                    lines.append(f"  - ... and {len(columns) - 30} more columns")
+                        else:
+                            # Show columns without types
+                            lines.append(f"  {', '.join([f'`{col}`' for col in columns[:15]])}")
+                        if len(columns) > 15:
+                                lines.append(f"  ... and {len(columns) - 15} more columns: {', '.join([f'`{col}`' for col in columns[15:25]])}")
+                                if len(columns) > 25:
+                                    lines.append(f"  ... and {len(columns) - 25} more columns")
+                        
+                        lines.append("")
+                        lines.append("⚠️ **CRITICAL:** Use ONLY the column names listed above. Do NOT invent, guess, or modify column names.")
+                        lines.append("⚠️ **CRITICAL:** Column names are case-sensitive. Use exact spelling and capitalization.")
+                    else:
+                        lines.append("- **Columns:** Column information not available - use file metadata section above")
+                    
+                    lines.append("")
             lines.append("")
 
         def append_line(label: str, value: Optional[str]) -> None:
@@ -3175,6 +4554,81 @@ WORKFLOW PLANNING RULES:
         section_title = "🚨 Datasets & dependencies (MANDATORY for Stream AI workflow):" if is_stream_workflow else "Datasets & dependencies:"
         return section_title + "\n" + "\n".join(lines)
 
+    def _build_workflow_context_section(
+        self,
+        sequence_id: str,
+        atom_id: str,
+        files_used: List[str],
+        inputs: List[str],
+        is_stream_workflow: bool = True
+    ) -> str:
+        """
+        Build workflow context section showing what previous steps created.
+        This helps the atom LLM understand the workflow flow and which files to use.
+        """
+        lines: List[str] = []
+        
+        # Get execution history from ReAct state
+        react_state = self._sequence_react_state.get(sequence_id)
+        if not react_state:
+            return ""  # No ReAct state, no context needed
+        
+        # Check if execution_history exists and has items
+        execution_history = react_state.execution_history
+        if not execution_history or len(execution_history) == 0:
+            return ""  # No previous steps, no context needed
+        
+        lines.append("## 🔄 WORKFLOW CONTEXT (What Previous Steps Created):")
+        lines.append("")
+        lines.append("The following steps were executed before this step. Use their output files:")
+        lines.append("")
+        
+        # Show last 3 steps for context
+        recent_steps = execution_history[-3:]
+        for idx, hist in enumerate(recent_steps, 1):
+            step_num = hist.get("step_number", "?")
+            hist_atom = hist.get("atom_id", "?")
+            description = hist.get("description", "N/A")  # May not be in ReActState execution_history
+            result = hist.get("result", {})
+            
+            lines.append(f"**Step {step_num}: {hist_atom}**")
+            lines.append(f"  - Description: {description}")
+            
+            # Extract output file
+            saved_path = None
+            if hist_atom == "merge" and result.get("merge_json"):
+                saved_path = result.get("merge_json", {}).get("result_file") or result.get("saved_path")
+            elif hist_atom == "concat" and result.get("concat_json"):
+                saved_path = result.get("concat_json", {}).get("result_file") or result.get("saved_path")
+            elif hist_atom in ["create-column", "create-transform", "groupby-wtg-avg", "dataframe-operations"]:
+                saved_path = result.get("output_file") or result.get("saved_path")
+            elif result.get("output_file"):
+                saved_path = result.get("output_file")
+            elif result.get("saved_path"):
+                saved_path = result.get("saved_path")
+            
+            if saved_path:
+                file_display = self._display_file_name(saved_path)
+                lines.append(f"  - 📄 **Output File Created:** `{saved_path}` (display: {file_display})")
+                
+                # Check if this file is being used in current step
+                if saved_path in files_used or saved_path in inputs:
+                    lines.append(f"  - ✅ **This file is being used in the current step**")
+            
+            lines.append("")
+        
+        # Special emphasis for chart-maker
+        if atom_id == "chart-maker":
+            lines.append("⚠️ **CRITICAL FOR CHART-MAKER:**")
+            if files_used:
+                file_display = self._display_file_name(files_used[0])
+                lines.append(f"- You MUST use the file: `{files_used[0]}` (display: {file_display})")
+                lines.append(f"- This file was created by a previous workflow step (see above)")
+                lines.append(f"- Use this file's columns and data structure for the chart")
+            lines.append("")
+        
+        return "\n".join(lines)
+    
     def _build_atom_instruction_section(
         self,
         atom_id: str,
@@ -3192,6 +4646,10 @@ WORKFLOW PLANNING RULES:
             return self._build_dataframe_operations_section(original_prompt, inputs or files_used)
         if atom_id == "chart-maker":
             return self._build_chart_section(original_prompt, inputs or files_used)
+        if atom_id == "create-column":
+            return self._build_create_column_section(original_prompt, inputs or files_used)
+        if atom_id == "create-transform":
+            return self._build_create_transform_section(original_prompt, inputs or files_used)
         if atom_id == "data-upload-validate":
             return self._build_data_upload_validate_section(original_prompt, files_used, inputs)
         return self._build_generic_section(atom_id, original_prompt)
@@ -3472,7 +4930,9 @@ WORKFLOW PLANNING RULES:
         focus_columns = self._extract_focus_entities(prompt_lower)
         filters = self._extract_filter_clauses(original_prompt)
 
-        lines: List[str] = ["Chart configuration (return JSON only):"]
+        lines: List[str] = ["## 📊 CHART CONFIGURATION (return JSON only):"]
+        lines.append("")
+        lines.append("**JSON Format:**")
         lines.append("{")
         lines.append('  "chart_type": "<bar|line|pie|scatter|area|combo>",')
         lines.append('  "data_source": "<input dataset name>",')
@@ -3482,6 +4942,88 @@ WORKFLOW PLANNING RULES:
         lines.append('  "filters": [{"column": "<column>", "operator": "==|>|<|contains", "value": "<exact value>"}],')
         lines.append('  "title": "<human friendly title>"')
         lines.append("}")
+        lines.append("")
+        lines.append("## ⚠️ CRITICAL FILE USAGE (MOST IMPORTANT):")
+        lines.append("")
+        if possible_inputs:
+            file_path = possible_inputs[0]
+            file_display = self._display_file_name(file_path)
+            
+            # Get file metadata for this file
+            file_metadata = self._get_file_metadata([file_path])
+            metadata = file_metadata.get(file_path, {}) if file_metadata else {}
+            columns = metadata.get("columns", [])
+            row_count = metadata.get("row_count") or metadata.get("rows") or metadata.get("num_rows")
+            
+            lines.append(f"**📁 PRIMARY DATA SOURCE FILE (MANDATORY):**")
+            lines.append(f"- **Full Path:** `{file_path}`")
+            lines.append(f"- **Display Name:** `{file_display}`")
+            if row_count:
+                lines.append(f"- **Row Count:** {row_count:,} rows")
+            lines.append(f"- **⚠️ CRITICAL:** You MUST use this EXACT file path as `data_source` in your JSON response")
+            lines.append(f"- **⚠️ CRITICAL:** This file was created/processed by previous workflow steps")
+            lines.append(f"- **⚠️ CRITICAL:** Do NOT use any other file - use ONLY `{file_path}`")
+            lines.append("")
+            
+            if columns:
+                lines.append(f"**📋 AVAILABLE COLUMNS IN THIS FILE ({len(columns)} columns):**")
+                lines.append("")
+                # Show columns with types if available
+                column_types = metadata.get("column_types", {}) or metadata.get("dtypes", {})
+                if column_types and isinstance(column_types, dict):
+                    # Categorize columns
+                    categorical_cols = []
+                    numeric_cols = []
+                    other_cols = []
+                    
+                    for col in columns:
+                        col_type = str(column_types.get(col, "unknown")).lower()
+                        if any(t in col_type for t in ["object", "string", "category", "bool"]):
+                            categorical_cols.append((col, col_type))
+                        elif any(t in col_type for t in ["int", "float", "number"]):
+                            numeric_cols.append((col, col_type))
+                        else:
+                            other_cols.append((col, col_type))
+                    
+                    if categorical_cols:
+                        lines.append("**Categorical Columns (use for x_column or breakdown_columns):**")
+                        for col, col_type in categorical_cols[:15]:
+                            lines.append(f"  - `{col}` (type: {col_type})")
+                        if len(categorical_cols) > 15:
+                            lines.append(f"  - ... and {len(categorical_cols) - 15} more categorical columns")
+                        lines.append("")
+                    
+                    if numeric_cols:
+                        lines.append("**Numeric Columns (use for y_column):**")
+                        for col, col_type in numeric_cols[:15]:
+                            lines.append(f"  - `{col}` (type: {col_type})")
+                        if len(numeric_cols) > 15:
+                            lines.append(f"  - ... and {len(numeric_cols) - 15} more numeric columns")
+                        lines.append("")
+                    
+                    if other_cols:
+                        lines.append("**Other Columns:**")
+                        for col, col_type in other_cols[:10]:
+                            lines.append(f"  - `{col}` (type: {col_type})")
+                        if len(other_cols) > 10:
+                            lines.append(f"  - ... and {len(other_cols) - 10} more columns")
+                        lines.append("")
+                else:
+                    # Show all columns without types
+                    lines.append("**All Columns:**")
+                    lines.append(f"  {', '.join([f'`{col}`' for col in columns[:20]])}")
+                    if len(columns) > 20:
+                        lines.append(f"  ... and {len(columns) - 20} more columns")
+                    lines.append("")
+                
+                lines.append("⚠️ **CRITICAL:** Use ONLY the column names listed above. Column names are case-sensitive.")
+                lines.append("⚠️ **CRITICAL:** For x_column, use categorical columns. For y_column, use numeric columns.")
+                lines.append("")
+        else:
+            lines.append("- **CRITICAL:** Use the file specified in the 'Datasets & dependencies' section above")
+            lines.append("- This should be the output file from previous workflow steps")
+            lines.append("- Do NOT use original input files if processed files exist")
+            lines.append("- Check the FILE METADATA section above for available columns")
         lines.append("")
         lines.append("Rules:")
         lines.append("- Use EXACT column names from dataset metadata (case-sensitive, spaces preserved).")
@@ -3501,9 +5043,6 @@ WORKFLOW PLANNING RULES:
             lines.append("- Filter hints from prompt:")
             for flt in filters:
                 lines.append(f"  * {flt}")
-
-        if possible_inputs:
-            lines.append(f"- Use dataset: `{possible_inputs[0]}` as data_source.")
 
         lines.append("- Output must be pure JSON (no prose).")
         return "\n".join(lines)
@@ -3627,6 +5166,288 @@ WORKFLOW PLANNING RULES:
         lines.append("- Use EXACT file name/path (case-sensitive, with extension)")
         lines.append("- If file name doesn't match exactly, the operation will fail")
         lines.append("- After loading, the file will be available for downstream operations")
+        
+        return "\n".join(lines)
+    
+    def _build_create_column_section(self, original_prompt: str, possible_inputs: List[str]) -> str:
+        """
+        Build comprehensive instructions for create-column atom.
+        Includes detailed file metadata with column statistics.
+        """
+        lines: List[str] = []
+        
+        lines.append("## 📊 CREATE COLUMN CONFIGURATION:")
+        lines.append("")
+        lines.append("**Task:** Create a new calculated column based on existing columns.")
+        lines.append("")
+        
+        if possible_inputs:
+            file_path = possible_inputs[0]
+            file_display = self._display_file_name(file_path)
+            
+            # Get comprehensive file metadata
+            file_metadata = self._get_file_metadata([file_path])
+            metadata = file_metadata.get(file_path, {}) if file_metadata else {}
+            columns = metadata.get("columns", [])
+            row_count = metadata.get("row_count") or metadata.get("rows") or metadata.get("num_rows")
+            column_stats = metadata.get("column_stats", {}) or metadata.get("statistics", {})
+            column_types = metadata.get("column_types", {}) or metadata.get("dtypes", {})
+            
+            lines.append("## ⚠️ CRITICAL FILE INFORMATION:")
+            lines.append("")
+            lines.append(f"**📁 INPUT FILE (MANDATORY):**")
+            lines.append(f"- **Full Path:** `{file_path}`")
+            lines.append(f"- **Display Name:** `{file_display}`")
+            if row_count:
+                lines.append(f"- **Row Count:** {row_count:,} rows")
+            lines.append("")
+            
+            if columns:
+                lines.append(f"## 📋 COMPREHENSIVE COLUMN DETAILS ({len(columns)} columns):")
+                lines.append("")
+                lines.append("**⚠️ CRITICAL:** Use ONLY these column names (case-sensitive). Do NOT invent column names.")
+                lines.append("")
+                
+                # Categorize columns
+                numeric_cols = []
+                categorical_cols = []
+                other_cols = []
+                
+                for col in columns:
+                    col_type = str(column_types.get(col, "unknown")).lower() if column_types else "unknown"
+                    if any(t in col_type for t in ["int", "float", "number", "numeric"]):
+                        numeric_cols.append(col)
+                    elif any(t in col_type for t in ["object", "string", "category", "bool"]):
+                        categorical_cols.append(col)
+                    else:
+                        other_cols.append(col)
+                
+                # Show numeric columns with statistics
+                if numeric_cols:
+                    lines.append("**🔢 NUMERIC COLUMNS (with statistics):**")
+                    lines.append("")
+                    for col in numeric_cols[:30]:  # Show first 30 numeric columns
+                        lines.append(f"**Column: `{col}`**")
+                        col_type = column_types.get(col, "unknown") if column_types else "unknown"
+                        lines.append(f"  - Data Type: {col_type}")
+                        
+                        # Get statistics for this column
+                        col_stats = column_stats.get(col, {}) if column_stats else {}
+                        if col_stats:
+                            if "count" in col_stats or "non_null_count" in col_stats:
+                                count = col_stats.get("count") or col_stats.get("non_null_count")
+                                lines.append(f"  - Count (non-null): {count:,}")
+                            if "mean" in col_stats or "average" in col_stats:
+                                mean = col_stats.get("mean") or col_stats.get("average")
+                                lines.append(f"  - Mean: {mean}")
+                            if "min" in col_stats or "minimum" in col_stats:
+                                min_val = col_stats.get("min") or col_stats.get("minimum")
+                                lines.append(f"  - Min: {min_val}")
+                            if "max" in col_stats or "maximum" in col_stats:
+                                max_val = col_stats.get("max") or col_stats.get("maximum")
+                                lines.append(f"  - Max: {max_val}")
+                            if "std" in col_stats or "stddev" in col_stats or "standard_deviation" in col_stats:
+                                std = col_stats.get("std") or col_stats.get("stddev") or col_stats.get("standard_deviation")
+                                lines.append(f"  - Std Dev: {std}")
+                            if "median" in col_stats:
+                                lines.append(f"  - Median: {col_stats.get('median')}")
+                            if "null_count" in col_stats or "missing" in col_stats:
+                                null_count = col_stats.get("null_count") or col_stats.get("missing")
+                                lines.append(f"  - Null Count: {null_count}")
+                        else:
+                            lines.append(f"  - Statistics: Not available")
+                        lines.append("")
+                    
+                    if len(numeric_cols) > 30:
+                        lines.append(f"  ... and {len(numeric_cols) - 30} more numeric columns")
+                        lines.append("")
+                
+                # Show categorical columns
+                if categorical_cols:
+                    lines.append("**📝 CATEGORICAL COLUMNS:**")
+                    lines.append("")
+                    for col in categorical_cols[:30]:  # Show first 30 categorical columns
+                        col_type = column_types.get(col, "unknown") if column_types else "unknown"
+                        lines.append(f"  - `{col}` (type: {col_type})")
+                        col_stats = column_stats.get(col, {}) if column_stats else {}
+                        if col_stats:
+                            if "unique_count" in col_stats or "distinct_count" in col_stats:
+                                unique = col_stats.get("unique_count") or col_stats.get("distinct_count")
+                                lines.append(f"    * Unique values: {unique}")
+                            if "null_count" in col_stats:
+                                lines.append(f"    * Null count: {col_stats.get('null_count')}")
+                    lines.append("")
+                    
+                    if len(categorical_cols) > 30:
+                        lines.append(f"  ... and {len(categorical_cols) - 30} more categorical columns")
+                        lines.append("")
+                
+                # Show other columns
+                if other_cols:
+                    lines.append("**📌 OTHER COLUMNS:**")
+                    for col in other_cols[:20]:
+                        col_type = column_types.get(col, "unknown") if column_types else "unknown"
+                        lines.append(f"  - `{col}` (type: {col_type})")
+                    if len(other_cols) > 20:
+                        lines.append(f"  ... and {len(other_cols) - 20} more columns")
+                    lines.append("")
+            else:
+                lines.append("⚠️ Column information not available - check file metadata section above")
+                lines.append("")
+        
+        lines.append("## 📝 INSTRUCTIONS:")
+        lines.append("")
+        lines.append("1. **Use the file specified above** - this is the input dataset")
+        lines.append("2. **Use ONLY column names from the list above** - they are case-sensitive")
+        lines.append("3. **For calculations:** Use the statistics (mean, min, max, etc.) to understand the data range")
+        lines.append("4. **Create the new column** based on the user's request")
+        lines.append("5. **Return JSON** with the column creation configuration")
+        lines.append("")
+        lines.append("**Example:** If user asks to create 'Profit' as Revenue - Cost:")
+        lines.append("- Use the exact column names: `Revenue` and `Cost` (check the list above)")
+        lines.append("- Formula: Revenue - Cost")
+        lines.append("- Return JSON with column name, formula, and data type")
+        
+        return "\n".join(lines)
+    
+    def _build_create_transform_section(self, original_prompt: str, possible_inputs: List[str]) -> str:
+        """
+        Build comprehensive instructions for create-transform atom.
+        Includes detailed file metadata with column statistics.
+        """
+        lines: List[str] = []
+        
+        lines.append("## 🔄 CREATE TRANSFORM CONFIGURATION:")
+        lines.append("")
+        lines.append("**Task:** Create a transformation or calculated column based on existing columns.")
+        lines.append("")
+        
+        if possible_inputs:
+            file_path = possible_inputs[0]
+            file_display = self._display_file_name(file_path)
+            
+            # Get comprehensive file metadata
+            file_metadata = self._get_file_metadata([file_path])
+            metadata = file_metadata.get(file_path, {}) if file_metadata else {}
+            columns = metadata.get("columns", [])
+            row_count = metadata.get("row_count") or metadata.get("rows") or metadata.get("num_rows")
+            column_stats = metadata.get("column_stats", {}) or metadata.get("statistics", {})
+            column_types = metadata.get("column_types", {}) or metadata.get("dtypes", {})
+            
+            lines.append("## ⚠️ CRITICAL FILE INFORMATION:")
+            lines.append("")
+            lines.append(f"**📁 INPUT FILE (MANDATORY):**")
+            lines.append(f"- **Full Path:** `{file_path}`")
+            lines.append(f"- **Display Name:** `{file_display}`")
+            if row_count:
+                lines.append(f"- **Row Count:** {row_count:,} rows")
+            lines.append("")
+            
+            if columns:
+                lines.append(f"## 📋 COMPREHENSIVE COLUMN DETAILS ({len(columns)} columns):")
+                lines.append("")
+                lines.append("**⚠️ CRITICAL:** Use ONLY these column names (case-sensitive). Do NOT invent column names.")
+                lines.append("")
+                
+                # Categorize columns
+                numeric_cols = []
+                categorical_cols = []
+                other_cols = []
+                
+                for col in columns:
+                    col_type = str(column_types.get(col, "unknown")).lower() if column_types else "unknown"
+                    if any(t in col_type for t in ["int", "float", "number", "numeric"]):
+                        numeric_cols.append(col)
+                    elif any(t in col_type for t in ["object", "string", "category", "bool"]):
+                        categorical_cols.append(col)
+                    else:
+                        other_cols.append(col)
+                
+                # Show numeric columns with statistics
+                if numeric_cols:
+                    lines.append("**🔢 NUMERIC COLUMNS (with statistics):**")
+                    lines.append("")
+                    for col in numeric_cols[:30]:  # Show first 30 numeric columns
+                        lines.append(f"**Column: `{col}`**")
+                        col_type = column_types.get(col, "unknown") if column_types else "unknown"
+                        lines.append(f"  - Data Type: {col_type}")
+                        
+                        # Get statistics for this column
+                        col_stats = column_stats.get(col, {}) if column_stats else {}
+                        if col_stats:
+                            if "count" in col_stats or "non_null_count" in col_stats:
+                                count = col_stats.get("count") or col_stats.get("non_null_count")
+                                lines.append(f"  - Count (non-null): {count:,}")
+                            if "mean" in col_stats or "average" in col_stats:
+                                mean = col_stats.get("mean") or col_stats.get("average")
+                                lines.append(f"  - Mean: {mean}")
+                            if "min" in col_stats or "minimum" in col_stats:
+                                min_val = col_stats.get("min") or col_stats.get("minimum")
+                                lines.append(f"  - Min: {min_val}")
+                            if "max" in col_stats or "maximum" in col_stats:
+                                max_val = col_stats.get("max") or col_stats.get("maximum")
+                                lines.append(f"  - Max: {max_val}")
+                            if "std" in col_stats or "stddev" in col_stats or "standard_deviation" in col_stats:
+                                std = col_stats.get("std") or col_stats.get("stddev") or col_stats.get("standard_deviation")
+                                lines.append(f"  - Std Dev: {std}")
+                            if "median" in col_stats:
+                                lines.append(f"  - Median: {col_stats.get('median')}")
+                            if "null_count" in col_stats or "missing" in col_stats:
+                                null_count = col_stats.get("null_count") or col_stats.get("missing")
+                                lines.append(f"  - Null Count: {null_count}")
+                        else:
+                            lines.append(f"  - Statistics: Not available")
+                        lines.append("")
+                    
+                    if len(numeric_cols) > 30:
+                        lines.append(f"  ... and {len(numeric_cols) - 30} more numeric columns")
+                        lines.append("")
+                
+                # Show categorical columns
+                if categorical_cols:
+                    lines.append("**📝 CATEGORICAL COLUMNS:**")
+                    lines.append("")
+                    for col in categorical_cols[:30]:  # Show first 30 categorical columns
+                        col_type = column_types.get(col, "unknown") if column_types else "unknown"
+                        lines.append(f"  - `{col}` (type: {col_type})")
+                        col_stats = column_stats.get(col, {}) if column_stats else {}
+                        if col_stats:
+                            if "unique_count" in col_stats or "distinct_count" in col_stats:
+                                unique = col_stats.get("unique_count") or col_stats.get("distinct_count")
+                                lines.append(f"    * Unique values: {unique}")
+                            if "null_count" in col_stats:
+                                lines.append(f"    * Null count: {col_stats.get('null_count')}")
+                    lines.append("")
+                    
+                    if len(categorical_cols) > 30:
+                        lines.append(f"  ... and {len(categorical_cols) - 30} more categorical columns")
+                        lines.append("")
+                
+                # Show other columns
+                if other_cols:
+                    lines.append("**📌 OTHER COLUMNS:**")
+                    for col in other_cols[:20]:
+                        col_type = column_types.get(col, "unknown") if column_types else "unknown"
+                        lines.append(f"  - `{col}` (type: {col_type})")
+                    if len(other_cols) > 20:
+                        lines.append(f"  ... and {len(other_cols) - 20} more columns")
+                    lines.append("")
+            else:
+                lines.append("⚠️ Column information not available - check file metadata section above")
+                lines.append("")
+        
+        lines.append("## 📝 INSTRUCTIONS:")
+        lines.append("")
+        lines.append("1. **Use the file specified above** - this is the input dataset")
+        lines.append("2. **Use ONLY column names from the list above** - they are case-sensitive")
+        lines.append("3. **For transformations:** Use the statistics (mean, min, max, etc.) to understand the data range")
+        lines.append("4. **Create the transformation** based on the user's request")
+        lines.append("5. **Return JSON** with the transformation configuration")
+        lines.append("")
+        lines.append("**Example:** If user asks to create 'Profit' as Revenue - Cost:")
+        lines.append("- Use the exact column names: `Revenue` and `Cost` (check the list above)")
+        lines.append("- Formula: Revenue - Cost")
+        lines.append("- Return JSON with column name, formula, and data type")
         
         return "\n".join(lines)
     
@@ -3848,8 +5669,13 @@ WORKFLOW PLANNING RULES:
                 file_names.append(filename)
                 path_to_filename[file_path] = filename
             
-            # Get comprehensive file details
+            # Get comprehensive file details including statistics
             if file_names:
+                # Try to get file context with statistics if available
+                try:
+                    file_details_dict = file_handler.get_file_context(file_names, use_backend_endpoint=True)
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get file context with statistics: {e}, trying without statistics")
                 file_details_dict = file_handler.get_file_context(file_names, use_backend_endpoint=True)
                 
                 if file_details_dict:
@@ -3877,6 +5703,12 @@ WORKFLOW PLANNING RULES:
                                     file_path in obj_name):
                                     metadata_dict[file_path] = metadata
                                     break
+                    
+                    # Log what metadata was retrieved
+                    for file_path, metadata in metadata_dict.items():
+                        has_stats = bool(metadata.get("column_stats") or metadata.get("statistics"))
+                        has_cols = bool(metadata.get("columns"))
+                        logger.debug(f"📊 File {file_path}: columns={has_cols}, statistics={has_stats}")
                     
                     logger.info(f"✅ Retrieved metadata for {len(metadata_dict)}/{len(file_paths)} files")
                 else:
@@ -4031,7 +5863,8 @@ WORKFLOW PLANNING RULES:
         session_id: str,
         step_number: int,
         sequence_id: str,
-        websocket
+        websocket,
+        frontend_chat_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute atom endpoint with retry support when success=False or request fails.
@@ -4045,6 +5878,7 @@ WORKFLOW PLANNING RULES:
                     atom_id=atom_id,
                     parameters=parameters,
                     session_id=session_id,
+                    frontend_chat_id=frontend_chat_id
                 )
             except Exception as exec_error:
                 last_error = exec_error
@@ -4151,7 +5985,8 @@ WORKFLOW PLANNING RULES:
         self,
         atom_id: str,
         parameters: Dict[str, Any],
-        session_id: str
+        session_id: str,
+        frontend_chat_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute atom endpoint"""
         if aiohttp is None:
@@ -4166,6 +6001,11 @@ WORKFLOW PLANNING RULES:
             "prompt": parameters.get("prompt", ""),
             "session_id": session_id
         }
+        
+        # Add chat_id for Redis cache isolation between chats
+        if frontend_chat_id:
+            payload["chat_id"] = frontend_chat_id
+            logger.info(f"🔑 Including chat_id in payload for cache isolation: {frontend_chat_id}")
         
         # 🔧 CRITICAL FIX: Include client_name, app_name, project_name for atoms that need MinIO access
         # These are required for the agent to find files in MinIO using the correct prefix
