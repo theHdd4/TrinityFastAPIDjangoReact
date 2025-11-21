@@ -88,6 +88,18 @@ services:
       - trinity-net
     restart: always
 
+  celery-exporter:
+    image: danihodovic/celery-exporter:0.12.2
+    environment:
+      CE_BROKER_URL: ${CELERY_BROKER_URL:-${REDIS_URL:-redis://redis:6379/0}}
+    ports:
+      - "9808:9808"
+    depends_on:
+      - redis
+    networks:
+      - trinity-net
+    restart: always
+
   prometheus:
     image: prom/prometheus:v2.52.0
     command:
