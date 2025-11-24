@@ -3158,9 +3158,10 @@ def _cast_series_dtype(series: pd.Series, dtype: str, datetime_format: str | Non
     if dtype_lower in {"datetime", "timestamp", "datetime64"}:
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
-        # IMPORTANT: Always use auto-detection for datetime64 to avoid null values
-        # Even if format is provided, ignore it and use auto-detection for consistency
-        return pd.to_datetime(normalized_series, errors="coerce")
+        # Normalize format string if provided (replace '/' and '.' with '-') to match normalized data
+        normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
+        # Use the provided format if available, otherwise fall back to auto-detection
+        return pd.to_datetime(normalized_series, format=normalized_format, errors="coerce")
     if dtype_lower == "date":
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
