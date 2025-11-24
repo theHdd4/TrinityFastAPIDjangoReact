@@ -308,10 +308,18 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   // Default select identifiers with unique_count > 1, and all measures and aggregation methods
   // Runs on initial load OR when file/data source changes
   useEffect(() => {
+    // Check if we have valid selected identifiers for the current file
+    // If selectedIdentifiers exist and are valid, don't reset them (user has made selections)
+    const hasValidSelections = selectedIdentifiers.length > 0 && 
+      selectedIdentifiers.every(id => fallbackIdentifiers.includes(id));
+    
     // Only set defaults if:
     // 1. We have identifiers available
     // 2. User hasn't explicitly interacted yet (or file just changed, which resets the flag)
-    const shouldSetDefaults = fallbackIdentifiers.length > 0 && !userHasInteractedRef.current;
+    // 3. AND we don't have valid existing selections (to preserve user selections when returning to same file)
+    const shouldSetDefaults = fallbackIdentifiers.length > 0 && 
+                              !userHasInteractedRef.current && 
+                              !hasValidSelections;
     
     if (shouldSetDefaults) {
       // Get identifiers with unique_count > 1
@@ -327,17 +335,29 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
         uniqueIdentifiersLength: uniqueIdentifiers.length,
         defaultIdentifiers: defaultIdentifiers,
         userHasInteracted: userHasInteractedRef.current,
+        hasValidSelections: hasValidSelections,
         dataSource: settings.dataSource
       });
       updateSettings(atomId, { selectedIdentifiers: defaultIdentifiers });
+    } else if (hasValidSelections) {
+      // If we have valid selections, mark as interacted to prevent future resets
+      userHasInteractedRef.current = true;
+      console.log('✅ [useEffect Default] Preserving existing identifier selections:', {
+        selectedIdentifiers: selectedIdentifiers,
+        dataSource: settings.dataSource
+      });
     }
     // Set default measures if needed (only if user hasn't interacted or file changed)
     if (fallbackMeasures.length > 0 && !userHasInteractedRef.current) {
-      console.log('⚙️ [useEffect Default] Setting default measures:', {
-        fallbackMeasures: fallbackMeasures,
-        dataSource: settings.dataSource
-      });
-      updateSettings(atomId, { selectedMeasureNames: fallbackMeasures });
+      const hasValidMeasureSelections = localSelectedMeasures.length > 0 && 
+        localSelectedMeasures.every(m => fallbackMeasures.includes(m));
+      if (!hasValidMeasureSelections) {
+        console.log('⚙️ [useEffect Default] Setting default measures:', {
+          fallbackMeasures: fallbackMeasures,
+          dataSource: settings.dataSource
+        });
+        updateSettings(atomId, { selectedMeasureNames: fallbackMeasures });
+      }
     }
     
     const allAggs = ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'];
