@@ -114,33 +114,9 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   return (
     <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
     <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
-      <div
-        className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 ${files.length > 0 ? 'p-2' : 'p-8'} ${disabled ? 'opacity-50 cursor-not-allowed' : isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
-        onDrop={disabled ? undefined : onDrop}
-        onDragOver={disabled ? undefined : onDragOver}
-        onDragLeave={disabled ? undefined : onDragLeave}
-      >
-        <div className={files.length > 0 ? "mb-0" : "mb-6"}>
-          <p className={`font-medium text-gray-900 ${files.length > 0 ? 'text-xs mb-2' : 'text-sm mb-4'}`}>{isDragOver ? 'Drop files here' : 'Click here to upload your file(s)'}</p>
-          <label htmlFor={inputId} className="cursor-pointer">
-            <div className={`mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl transform hover:scale-105 transition-transform duration-300 ${files.length > 0 ? 'w-10 h-10 mb-1' : 'w-16 h-16 mb-2'}`}>
-              <Upload className={`text-white drop-shadow-lg ${files.length > 0 ? 'w-5 h-5' : 'w-8 h-8'}`} />
-            </div>
-          </label>
-        </div>
-        <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={onFileSelect} className="hidden" id={inputId} disabled={disabled} />
-         {files.length === 0 && !useMasterFile && (
-           <>
-             <h3 className="text-3xl font-bold text-gray-900 mb-3 mt-6 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
-               Upload and Validate Operation
-             </h3>
-             <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">To ensure your data meets format requirements, go to Properties section and upload Master file for validation</p>
-           </>
-         )}
-      </div>
-
-      {/* Saved Dataframes Selector - Only show when validation steps are enabled */}
-      {useMasterFile && onSelectSavedDataframe && (() => {
+      <div className={useMasterFile && onSelectSavedDataframe ? "flex gap-3" : ""}>
+        {/* Saved Dataframes Selector - Only show when validation steps are enabled */}
+        {useMasterFile && onSelectSavedDataframe && (() => {
         const availableDataframes = savedDataframes.filter((frame) => {
           // Filter out files that are already in the canvas
           // Extract filename and normalize (handle spaces converted to underscores)
@@ -158,7 +134,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
         });
         
         return (
-          <div className="border rounded-lg p-4 bg-gray-50">
+          <div className="flex-1 border rounded-lg p-4 bg-gray-50">
             <label className="text-sm font-medium text-gray-700 block mb-2">
               Select from Saved Dataframes
             </label>
@@ -190,6 +166,34 @@ const UploadSection: React.FC<UploadSectionProps> = ({
           </div>
         );
       })()}
+
+        <div className={useMasterFile && onSelectSavedDataframe ? "flex-1" : ""}>
+          <div
+            className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 ${files.length > 0 ? 'p-2' : 'p-8'} ${disabled ? 'opacity-50 cursor-not-allowed' : isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
+            onDrop={disabled ? undefined : onDrop}
+            onDragOver={disabled ? undefined : onDragOver}
+            onDragLeave={disabled ? undefined : onDragLeave}
+          >
+            <div className={files.length > 0 ? "mb-0" : "mb-6"}>
+              <p className={`font-medium text-gray-900 ${files.length > 0 ? 'text-xs mb-2' : 'text-sm mb-4'}`}>{isDragOver ? 'Drop files here' : 'Click here to upload your file(s)'}</p>
+              <label htmlFor={inputId} className="cursor-pointer">
+                <div className={`mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-2xl transform hover:scale-105 transition-transform duration-300 ${files.length > 0 ? 'w-10 h-10 mb-1' : 'w-16 h-16 mb-2'}`}>
+                  <Upload className={`text-white drop-shadow-lg ${files.length > 0 ? 'w-5 h-5' : 'w-8 h-8'}`} />
+                </div>
+              </label>
+            </div>
+            <input type="file" multiple accept=".csv,.xlsx,.xls,.json" onChange={onFileSelect} className="hidden" id={inputId} disabled={disabled} />
+             {files.length === 0 && !useMasterFile && (
+               <>
+                 <h3 className="text-3xl font-bold text-gray-900 mb-3 mt-6 bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
+                   Upload and Validate Operation
+                 </h3>
+                 <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">To ensure your data meets format requirements, go to Properties section and upload Master file for validation</p>
+               </>
+             )}
+          </div>
+        </div>
+      </div>
       
       {/* Data Preview & Configuration Section */}
       <FileDataPreview 

@@ -47,18 +47,27 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
     (settings.validatorId && settings.validatorId.length > 0)
   );
 
-  const applySavedIdChange = (value: string) => {
+  const applySavedIdChange = async (value: string) => {
     setSavedId(value);
+    // Update validatorId in settings so it syncs properly
+    updateSettings(atomId, { validatorId: value });
   };
 
   const { requestChange: confirmSavedIdChange, dialog } = useDataSourceChangeWarning(async value => {
-    applySavedIdChange(value);
+    await applySavedIdChange(value);
   });
 
   const handleSavedIdChange = (value: string) => {
     const isDifferentSource = value !== savedId;
     confirmSavedIdChange(value, hasExistingUpdates && isDifferentSource);
   };
+
+  // Sync savedId with validatorId when it changes (e.g., from flight auto-fetch or canvas file switch)
+  useEffect(() => {
+    if (settings.validatorId && settings.validatorId !== savedId) {
+      setSavedId(settings.validatorId);
+    }
+  }, [settings.validatorId]);
 
   useEffect(() => {
     let query = '';
@@ -165,7 +174,9 @@ const ColumnClassifierSettings: React.FC<ColumnClassifierSettingsProps> = ({ ato
         ...data.final_classification.measures.map(name => ({ name, category: 'measures' })),
         ...data.final_classification.unclassified.map(name => ({ name, category: 'unclassified' }))
       ];
-      const custom = Object.fromEntries((settings.dimensions || []).map(d => [d, []]));
+      // COMMENTED OUT - dimensions disabled
+      // const custom = Object.fromEntries((settings.dimensions || []).map(d => [d, []]));
+      const custom = {};  // Empty dimensions object
       onClassification({ fileName: savedId, columns: cols, customDimensions: custom });
       updateSettings(atomId, {
         validatorId: savedId,

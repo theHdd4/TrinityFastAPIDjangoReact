@@ -19,7 +19,12 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   const [pendingY, setPendingY] = useState<string[]>(settings.yAxes || []);
   const [pendingX, setPendingX] = useState<string>(settings.xAxis || 'date');
   const [pendingDimensions, setPendingDimensions] = useState<Record<string, string[]>>(settings.dimensionMap || {});
-  const [originalDimensions, setOriginalDimensions] = useState<Record<string, string[]>>({});
+  // Initialize originalDimensions from settings.dimensionMap if it has identifiers (includes fallback from canvas)
+  const [originalDimensions, setOriginalDimensions] = useState<Record<string, string[]>>(
+    (settings.dimensionMap && settings.dimensionMap["identifiers"] && Array.isArray(settings.dimensionMap["identifiers"]) && settings.dimensionMap["identifiers"].length > 0)
+      ? settings.dimensionMap
+      : {}
+  );
 
   useEffect(() => {
     setPendingY(settings.yAxes || []);
@@ -34,23 +39,52 @@ const FeatureOverviewProperties: React.FC<Props> = ({ atomId }) => {
   }, [settings.dimensionMap]);
 
   // Fetch original dimension mapping from column classifier
+  // Priority: 1) settings.dimensionMap (includes fallback from canvas), 2) fetch from backend, 3) fallback to categorical columns
   useEffect(() => {
     const fetchOriginalDimensions = async () => {
       if (!settings.dataSource) return;
       
+      // Priority 1: Use settings.dimensionMap if it has identifiers (includes fallback from canvas)
+      if (settings.dimensionMap && settings.dimensionMap["identifiers"] && Array.isArray(settings.dimensionMap["identifiers"]) && settings.dimensionMap["identifiers"].length > 0) {
+        setOriginalDimensions(settings.dimensionMap);
+        return;
+      }
+      
+      // Priority 2: Fetch from backend
       try {
         const { mapping: rawMapping } = await fetchDimensionMapping({
           objectName: settings.dataSource,
         });
-        if (rawMapping && Object.keys(rawMapping).length > 0) {
+        if (rawMapping && rawMapping["identifiers"] && Array.isArray(rawMapping["identifiers"]) && rawMapping["identifiers"].length > 0) {
           setOriginalDimensions(rawMapping);
+          return;
         }
       } catch (error) {
+        // Continue to fallback
+      }
+      
+      // Priority 3: Fallback to categorical columns
+      const allCols = Array.isArray(settings.allColumns) && settings.allColumns.length > 0
+        ? settings.allColumns
+        : Array.isArray(settings.columnSummary)
+        ? settings.columnSummary
+        : [];
+      
+      const categoricalColumns = allCols
+        .filter((col: any) => {
+          const dataType = col?.data_type?.toLowerCase() || '';
+          return (dataType === 'object' || dataType === 'category' || dataType === 'string') && col?.column;
+        })
+        .map((col: any) => col.column)
+        .filter(Boolean);
+      
+      if (categoricalColumns.length > 0) {
+        setOriginalDimensions({ identifiers: categoricalColumns });
       }
     };
 
     fetchOriginalDimensions();
-  }, [settings.dataSource]);
+  }, [settings.dataSource, settings.allColumns, settings.columnSummary, settings.dimensionMap]);
 
   const handleChange = (newSettings: Partial<SettingsType>) => {
     updateSettings(atomId, newSettings);

@@ -68,6 +68,7 @@ export interface ExhibitionLayoutPayload {
   project_name: string;
   cards: any[];
   slide_objects: Record<string, any[]>;
+  autosaveEnabled?: boolean;
 }
 
 export interface ExhibitionLayoutResponse extends ExhibitionLayoutPayload {

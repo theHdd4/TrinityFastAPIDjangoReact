@@ -207,6 +207,7 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
 const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
   cards: LayoutCard[];
   workflowMolecules: WorkflowMolecule[];
+  autosaveEnabled?: boolean;
 } | null> => {
   try {
     const projectContext = getActiveProjectContext();
@@ -353,7 +354,16 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
         console.log('[Laboratory API] Using workflow molecules from MongoDB (old format, no moleculeIndex):', workflowMolecules);
       }
 
-      return { cards, workflowMolecules };
+      // Restore auxiliaryMenuLeftOpen from backend if available
+      if (data.auxiliaryMenuLeftOpen !== undefined) {
+        useLaboratoryStore.getState().setAuxiliaryMenuLeftOpen(data.auxiliaryMenuLeftOpen);
+        console.info('[Laboratory API] Restored auxiliaryMenuLeftOpen:', data.auxiliaryMenuLeftOpen);
+      }
+
+      // Return autosaveEnabled if available (will be handled by parent component)
+      const autosaveEnabled = data.autosaveEnabled !== undefined ? data.autosaveEnabled : true;
+
+      return { cards, workflowMolecules, autosaveEnabled };
     } else {
       console.warn('[Laboratory API] Invalid response format from MongoDB fetch', data);
       return null;
@@ -382,7 +392,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onCardFocus,
   onCardBlur,
 }, ref) => {
-  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
+  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -1037,14 +1047,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
     await prefetchDataframe(prev.csv);
     const { mapping: rawMapping } = await fetchDimensionMapping({ objectName: prev.csv });
-    const identifiers = Object.entries(rawMapping || {})
-      .filter(
-        ([k]) =>
-          k.toLowerCase() !== 'unattributed' &&
-          k.toLowerCase() !== 'unattributed_dimensions'
-      )
-      .flatMap(([, v]) => v)
-      .filter(Boolean);
+    // COMMENTED OUT - dimensions disabled, now fetch identifiers directly
+    // const identifiers = Object.entries(rawMapping || {})
+    //   .filter(
+    //     ([k]) =>
+    //       k.toLowerCase() !== 'unattributed' &&
+    //       k.toLowerCase() !== 'unattributed_dimensions'
+    //   )
+    //   .flatMap(([, v]) => v)
+    //   .filter(Boolean);
+    // Fetch identifiers directly from mapping (same as feature overview)
+    const identifiers = rawMapping && rawMapping["identifiers"] 
+      ? Array.isArray(rawMapping["identifiers"]) 
+        ? rawMapping["identifiers"].filter(Boolean)
+        : []
+      : [];
     let allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
     if (allColumns.length === 0) {
       const fetched = await fetchColumnSummary(prev.csv, { retries: 1 });

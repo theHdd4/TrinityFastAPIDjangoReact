@@ -222,6 +222,7 @@ class ConnectionManager:
                     atom_config_data={
                         "cards": latest_state.get("cards", []),
                         "workflow_molecules": latest_state.get("workflow_molecules", []),
+                        "auxiliaryMenuLeftOpen": latest_state.get("auxiliaryMenuLeftOpen", True),
                         "mode": "laboratory",
                     }
                 )

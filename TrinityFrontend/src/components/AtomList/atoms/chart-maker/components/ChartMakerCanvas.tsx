@@ -1060,8 +1060,8 @@ const renderChart = (
               defaultMinimized={true}
               borderColor="border-pink-500"
               customHeader={{
-                title: "Cardinality View",
-                subtitle: "Click Here to View Data",
+                title: "Data Summary",
+                subtitle: "Data in detail",
                 subtitleClickable: !!originalFileName,
                 onSubtitleClick: () => {
                   if (originalFileName) {

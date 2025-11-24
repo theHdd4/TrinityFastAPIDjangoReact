@@ -924,8 +924,8 @@ const MergeCanvas: React.FC<MergeCanvasProps> = ({ atomId,
             bodyClassName="max-h-80 overflow-y-auto"
             borderColor={`border-${merge.color.replace('bg-', '')}`}
             customHeader={{
-              title: "Cardinality View",
-              subtitle: "Click Here to View Data",
+              title: "Data Summary",
+              subtitle: "Data in detail",
               subtitleClickable: !!inputFileName && !!atomId,
               onSubtitleClick: handleViewDataClick,
               controls: (

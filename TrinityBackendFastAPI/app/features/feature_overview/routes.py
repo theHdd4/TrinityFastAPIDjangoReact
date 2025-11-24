@@ -378,11 +378,11 @@ class DimensionMappingRequest(BaseModel):
 
 @router.post("/dimension_mapping")
 async def dimension_mapping(req: DimensionMappingRequest):
-    """Return dimension to identifier mapping.
+    """Return identifier mapping for SKU table creation.
 
     Checks the ``env`` namespace in Redis for a cached environment entry.  When
     not found, the column classifier configuration is loaded from MongoDB.
-    This ensures Feature Overview can prefetch dimension mappings and render
+    This ensures Feature Overview can prefetch identifier mappings and render
     SKU tables and charts correctly.
     """
 
@@ -396,42 +396,77 @@ async def dimension_mapping(req: DimensionMappingRequest):
     env_key = f"env:{client}:{app}:{project}"
     cached_env = None
     file_env_key = None
+    found_file_specific = False
     if object_name:
         safe_file = quote(object_name, safe="")
         file_env_key = f"{env_key}:file:{safe_file}"
         cached_env = redis_client.get(file_env_key)
+        if cached_env:
+            found_file_specific = True
+            print(f"✅ found file-specific env in redis: {file_env_key}")
     if cached_env is None:
         cached_env = redis_client.get(env_key)
+        if cached_env:
+            print(f"✅ found general env in redis: {env_key}")
     if cached_env:
-        print("✅ found env in redis")
         try:
             env = json.loads(cached_env)
-            if object_name and env.get("file_name") and env["file_name"] != object_name:
-                dims = None
+            # If we found a file-specific key, we know it's for this file, so use it directly
+            # Only check file_name match if we found the general key
+            if found_file_specific:
+                identifiers = env.get("identifiers")
+            elif object_name and env.get("file_name") and env["file_name"] != object_name:
+                # General key found but file_name doesn't match, skip it
+                identifiers = None
             else:
-                dims = env.get("dimensions")
-            if isinstance(dims, dict):
-                return {"mapping": dims, "config": env, "source": "env"}
+                identifiers = env.get("identifiers")
+            if isinstance(identifiers, list) and len(identifiers) > 0:
+                # Create mapping from identifiers array: {"identifiers": [col1, col2, ...]}
+                mapping = {"identifiers": identifiers}
+                print(f"✅ returning identifiers from redis: {len(identifiers)} identifiers")
+                return {"mapping": mapping, "config": env, "source": "env"}
+            else:
+                print(f"⚠️ redis env found but no valid identifiers (got: {type(identifiers)})")
         except Exception as exc:  # pragma: no cover
             print(f"⚠️ dimension_mapping env parse error: {exc}")
     else:
         print("🔍 env not in redis")
 
+    print(f"🔍 checking MongoDB for config: client={client}, app={app}, project={project}, file_name={object_name}")
     mongo_cfg = get_classifier_config_from_mongo(
         client,
         app,
         project,
         object_name or None,
     )
-    if mongo_cfg and mongo_cfg.get("dimensions"):
-        print("📦 loaded mapping from MongoDB")
-        try:
-            redis_client.setex(env_key, 3600, json.dumps(mongo_cfg, default=str))
-            if file_env_key:
-                redis_client.setex(file_env_key, 3600, json.dumps(mongo_cfg, default=str))
-        except Exception:
-            pass
-        return {"mapping": mongo_cfg["dimensions"], "config": mongo_cfg}
+    if mongo_cfg:
+        has_identifiers = bool(mongo_cfg.get("identifiers"))
+        has_measures = bool(mongo_cfg.get("measures"))
+        has_dimensions = bool(mongo_cfg.get("dimensions"))
+        
+        print(f"📦 MongoDB config found: has_identifiers={has_identifiers}, has_measures={has_measures}, has_dimensions={has_dimensions}")
+        
+        # Return config if identifiers, measures, or dimensions exist
+        if has_identifiers or has_measures or has_dimensions:
+            print("📦 loaded mapping from MongoDB")
+            try:
+                redis_client.setex(env_key, 3600, json.dumps(mongo_cfg, default=str))
+                if file_env_key:
+                    redis_client.setex(file_env_key, 3600, json.dumps(mongo_cfg, default=str))
+                    print(f"✅ cached MongoDB config to Redis: {file_env_key}")
+            except Exception as exc:
+                print(f"⚠️ failed to cache to Redis: {exc}")
+            # Create mapping from identifiers array instead of dimensions
+            identifiers = mongo_cfg.get("identifiers", [])
+            if isinstance(identifiers, list) and len(identifiers) > 0:
+                mapping = {"identifiers": identifiers}
+                print(f"✅ returning identifiers from MongoDB: {len(identifiers)} identifiers")
+            else:
+                mapping = {}
+                print("⚠️ MongoDB config found but no identifiers")
+            return {"mapping": mapping, "config": mongo_cfg}
+    else:
+        print("❌ no MongoDB config found")
 
     raise HTTPException(status_code=404, detail="Mapping not found")
 

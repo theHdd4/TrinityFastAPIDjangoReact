@@ -112,6 +112,8 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const cards = useLaboratoryStore(state => state.cards);
   const setCards = useLaboratoryStore(state => state.setCards);
   const updateCard = useLaboratoryStore(state => state.updateCard);
+  const auxiliaryMenuLeftOpen = useLaboratoryStore(state => state.auxiliaryMenuLeftOpen);
+  const setAuxiliaryMenuLeftOpen = useLaboratoryStore(state => state.setAuxiliaryMenuLeftOpen);
   const { user } = useAuth();
   const userRef = useRef(user);
   
@@ -226,6 +228,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
 
       const labConfig = {
         cards: cards || [],
+        auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen,
         timestamp: new Date().toISOString(),
       };
       
@@ -239,7 +242,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       onErrorRef.current(error as Error);
       return null;
     }
-  }, [cards]);
+  }, [cards, auxiliaryMenuLeftOpen]);
 
   // Send message via WebSocket
   const sendMessage = useCallback((message: WSMessage) => {
@@ -465,6 +468,11 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
             isApplyingRemoteUpdateRef.current = true;
             setCards(message.payload.cards);
             lastCardsRef.current = message.payload.cards;
+            
+            // Update auxiliaryMenuLeftOpen if present in payload
+            if (message.payload.auxiliaryMenuLeftOpen !== undefined) {
+              setAuxiliaryMenuLeftOpen(message.payload.auxiliaryMenuLeftOpen);
+            }
             
             // Update last state to prevent echo
             const stateData = serializeState();

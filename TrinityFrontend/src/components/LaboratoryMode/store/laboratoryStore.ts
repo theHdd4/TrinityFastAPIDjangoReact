@@ -151,7 +151,7 @@ export const DEFAULT_DATAUPLOAD_SETTINGS: DataUploadSettings = {
 export const createDefaultDataUploadSettings = (): DataUploadSettings => ({
   masterFile: "",
   fileValidation: true,
-  bypassMasterUpload: false,
+  bypassMasterUpload: true,
   enableColumnClassifier: false,
   columnConfig: {},
   frequency: "monthly",
@@ -1875,8 +1875,10 @@ export const DEFAULT_UNPIVOT_SETTINGS: UnpivotSettings = {
 interface LaboratoryStore {
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;
+  auxiliaryMenuLeftOpen: boolean;
   setCards: (cards: LayoutCard[]) => void;
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
+  setAuxiliaryMenuLeftOpen: (open: boolean) => void;
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
@@ -1894,6 +1896,7 @@ interface LaboratoryStore {
 export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
   auxPanelActive: null,
+  auxiliaryMenuLeftOpen: true,
   setCards: (cards: LayoutCard[]) => {
     // FIX: Ensure cards is always an array
     if (!Array.isArray(cards)) {
@@ -1913,6 +1916,10 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => {
     set({ auxPanelActive: panel });
+  },
+
+  setAuxiliaryMenuLeftOpen: (open: boolean) => {
+    set({ auxiliaryMenuLeftOpen: open });
   },
 
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => {

@@ -90,6 +90,8 @@ class LaboratoryProjectStateIn(BaseModel):
     project_name: str = Field(..., min_length=1)
     cards: List[Dict[str, Any]] = Field(default_factory=list)
     workflow_molecules: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    auxiliaryMenuLeftOpen: Optional[bool] = Field(default=True)
+    autosaveEnabled: Optional[bool] = Field(default=True)
     mode: Optional[str] = Field(default=None)
 
 
@@ -190,6 +192,8 @@ async def get_laboratory_project_state(
             "status": "ok",
             "cards": result.get("cards", []),
             "workflow_molecules": result.get("workflow_molecules", []),
+            "auxiliaryMenuLeftOpen": result.get("auxiliaryMenuLeftOpen", True),
+            "autosaveEnabled": result.get("autosaveEnabled", True),
             "count": result.get("count", 0),
             "retrieved_at": timestamp,
             "collection": "atom_list_configuration",
@@ -211,6 +215,7 @@ async def get_laboratory_project_state(
 
 class ExhibitionProjectStateIn(LaboratoryProjectStateIn):
     slide_objects: Dict[str, Any] = Field(default_factory=dict)
+    autosaveEnabled: Optional[bool] = Field(default=True)
 
 
 exhibition_project_state_router = APIRouter(dependencies=[Depends(timing_dependency)])
@@ -248,6 +253,7 @@ async def save_exhibition_project_state(
             "mode": payload.mode or "exhibition",
             "cards": cards,
             "slide_objects": slide_objects,
+            "autosaveEnabled": payload.autosaveEnabled if hasattr(payload, 'autosaveEnabled') else True,
         },
         collection=collection,
     )
@@ -275,6 +281,82 @@ async def save_exhibition_project_state(
         response["documents_inserted"],
     )
     return response
+
+
+@exhibition_project_state_router.get("/get/{client_name}/{app_name}/{project_name}")
+async def get_exhibition_project_state(
+    client_name: str,
+    app_name: str,
+    project_name: str,
+    collection: AsyncIOMotorCollection = Depends(get_exhibition_layout_collection),
+):
+    """Get exhibition project state from MongoDB exhibition_list_configuration collection"""
+    try:
+        client_name = client_name.strip()
+        app_name = app_name.strip()
+        project_name = project_name.strip()
+
+        if not client_name or not app_name or not project_name:
+            raise HTTPException(status_code=400, detail="client_name, app_name, and project_name are required")
+
+        logger.info(
+            "project_state.exhibition.get client=%s app=%s project=%s",
+            client_name,
+            app_name,
+            project_name,
+        )
+
+        filter_query = {
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name,
+            "document_type": "layout_snapshot",
+        }
+
+        record = await collection.find_one(filter_query)
+        if not record:
+            # Try without document_type filter for backward compatibility
+            record = await collection.find_one({
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+            })
+
+        if not record:
+            return {
+                "status": "ok",
+                "cards": [],
+                "slide_objects": {},
+                "autosaveEnabled": True,
+                "retrieved_at": datetime.utcnow().isoformat(),
+                "collection": "exhibition_list_configuration",
+            }
+
+        record.pop("_id", None)
+        record.pop("document_type", None)
+
+        timestamp = datetime.utcnow().isoformat()
+
+        response = {
+            "status": "ok",
+            "cards": record.get("cards", []),
+            "slide_objects": record.get("slide_objects", {}),
+            "autosaveEnabled": record.get("autosaveEnabled", True),
+            "retrieved_at": timestamp,
+            "collection": "exhibition_list_configuration",
+        }
+        logger.info(
+            "project_state.exhibition.get.completed client=%s app=%s project=%s",
+            client_name,
+            app_name,
+            project_name,
+        )
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 router.include_router(
@@ -350,12 +432,28 @@ async def get_atom_list_configuration(
         # Extract workflow_molecules if available
         saved_workflow_molecules = workflow_molecules_doc.get("workflow_molecules", []) if workflow_molecules_doc else []
         
+        # Try to get UI metadata (auxiliaryMenuLeftOpen) from a separate document
+        ui_metadata_doc = await coll.find_one({
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "mode": mode,
+            "is_ui_metadata": True
+        })
+        
+        # Extract auxiliaryMenuLeftOpen if available, default to True
+        auxiliaryMenuLeftOpen = ui_metadata_doc.get("auxiliaryMenuLeftOpen", True) if ui_metadata_doc else True
+        # Extract autosaveEnabled if available, default to True
+        autosaveEnabled = ui_metadata_doc.get("autosaveEnabled", True) if ui_metadata_doc else True
+        
         if not atom_configs and not saved_workflow_molecules:
             logger.info(f"📦 No atom configurations found for {client_id}/{app_id}/{project_id} in mode {mode}")
             return {
                 "status": "success",
                 "cards": [],
                 "workflow_molecules": [],
+                "auxiliaryMenuLeftOpen": auxiliaryMenuLeftOpen,
+                "autosaveEnabled": autosaveEnabled,
                 "count": 0
             }
         
@@ -474,6 +572,8 @@ async def get_atom_list_configuration(
             "status": "success",
             "cards": cards,
             "workflow_molecules": workflow_molecules,
+            "auxiliaryMenuLeftOpen": auxiliaryMenuLeftOpen,
+            "autosaveEnabled": autosaveEnabled,
             "count": len(atom_configs)
         }
         
@@ -662,6 +762,33 @@ async def save_atom_list_configuration(
             logger.info(f"📦 Stored {len(workflow_molecules)} workflow_molecules with isActive and moleculeIndex")
             for i, mol in enumerate(workflow_molecules):
                 logger.info(f"🔍 DEBUG: Saved workflow molecule {i}: moleculeId={mol.get('moleculeId')}, isActive={mol.get('isActive')}, moleculeIndex={mol.get('moleculeIndex')}")
+        
+        # Save auxiliaryMenuLeftOpen and autosaveEnabled as a separate metadata document
+        auxiliaryMenuLeftOpen = atom_config_data.get("auxiliaryMenuLeftOpen", True)
+        autosaveEnabled = atom_config_data.get("autosaveEnabled", True)
+        ui_metadata_doc = {
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "mode": atom_config_data.get("mode", "build"),
+            "auxiliaryMenuLeftOpen": auxiliaryMenuLeftOpen,
+            "autosaveEnabled": autosaveEnabled,
+            "last_edited": timestamp,
+            "is_ui_metadata": True  # Marker to identify this document
+        }
+        
+        # Delete existing UI metadata document for this project/mode
+        await coll.delete_many({
+            "client_id": client_id,
+            "app_id": app_id,
+            "project_id": project_id,
+            "mode": atom_config_data.get("mode", "build"),
+            "is_ui_metadata": True
+        })
+        
+        # Insert the UI metadata document
+        await coll.insert_one(ui_metadata_doc)
+        logger.info(f"📦 Stored auxiliaryMenuLeftOpen: {auxiliaryMenuLeftOpen}, autosaveEnabled: {autosaveEnabled}")
         
         if docs:
             return {

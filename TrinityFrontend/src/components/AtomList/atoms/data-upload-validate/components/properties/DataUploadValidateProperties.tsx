@@ -1015,7 +1015,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
             className="data-[state=checked]:bg-[#458EE2]"
           />
         </div>
-        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between hidden">
           <span className="text-sm font-medium text-gray-700">Enable column classifier</span>
           <Switch
             checked={enableColumnClassifier}

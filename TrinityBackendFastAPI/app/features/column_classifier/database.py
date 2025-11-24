@@ -497,7 +497,9 @@ def save_classifier_config_to_mongo(config: dict):
             "project_name": config.get("project_name", ""),
             "identifiers": config.get("identifiers", []),
             "measures": config.get("measures", []),
-            "dimensions": config.get("dimensions", {}),
+            # COMMENTED OUT - dimensions disabled
+            # "dimensions": config.get("dimensions", {}),
+            "dimensions": {},  # Empty dimensions object
             "file_name": file_name,
             # Preserve any extra metadata such as environment variables
             **{
@@ -510,7 +512,7 @@ def save_classifier_config_to_mongo(config: dict):
                     "project_name",
                     "identifiers",
                     "measures",
-                    "dimensions",
+                    "dimensions",  # Still exclude dimensions from extra metadata
                     "file_name",
                 }
             },
@@ -612,3 +614,4 @@ async def save_classifier_config_to_postgres(config: dict):
         return {"status": "error", "error": str(exc)}
     finally:
         await conn.close()
+

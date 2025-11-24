@@ -65,33 +65,34 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
-  // Dimension settings state
-  const atom = useLaboratoryStore(state => state.getAtom(atomId || ''));
-  const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
-  const settings: SettingsType = {
-    ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
-    ...(atom?.settings as SettingsType)
-  };
-  const { toast } = useToast();
+  // COMMENTED OUT - dimensions disabled
+  // // Dimension settings state
+  // const atom = useLaboratoryStore(state => state.getAtom(atomId || ''));
+  // const updateSettings = useLaboratoryStore(state => state.updateAtomSettings);
+  // const settings: SettingsType = {
+  //   ...DEFAULT_COLUMN_CLASSIFIER_SETTINGS,
+  //   ...(atom?.settings as SettingsType)
+  // };
+  // const { toast } = useToast();
 
-  const [enableMapping, setEnableMapping] = useState<boolean>(true);
-  const [options, setOptions] = useState<string[]>(
-    Array.from(
-      new Set([
-        'unattributed',
-        'market',
-        'product',
-        ...(settings.dimensions || [])
-      ])
-    )
-  );
-  const [selected, setSelected] = useState<string[]>(
-    (settings.dimensions || []).filter(d => d !== 'unattributed')
-  );
-  const [showInput, setShowInput] = useState(false);
-  const [newDim, setNewDim] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  // const [enableMapping, setEnableMapping] = useState<boolean>(true);
+  // const [options, setOptions] = useState<string[]>(
+  //   Array.from(
+  //     new Set([
+  //       'unattributed',
+  //       'market',
+  //       'product',
+  //       ...(settings.dimensions || [])
+  //     ])
+  //   )
+  // );
+  // const [selected, setSelected] = useState<string[]>(
+  //   (settings.dimensions || []).filter(d => d !== 'unattributed')
+  // );
+  // const [showInput, setShowInput] = useState(false);
+  // const [newDim, setNewDim] = useState('');
+  // const [loading, setLoading] = useState(false);
+  // const [error, setError] = useState('');
 
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -99,74 +100,75 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
     }
   }, []);
 
-  // Dimension settings useEffect
-  React.useEffect(() => {
-    setEnableMapping(true);
-    setOptions(
-      Array.from(
-        new Set([
-          'unattributed',
-          'market',
-          'product',
-          ...(settings.dimensions || [])
-        ])
-      )
-    );
-    setSelected((settings.dimensions || []).filter(d => d !== 'unattributed'));
-  }, [settings.dimensions]);
+  // COMMENTED OUT - dimensions disabled
+  // // Dimension settings useEffect
+  // React.useEffect(() => {
+  //   setEnableMapping(true);
+  //   setOptions(
+  //     Array.from(
+  //       new Set([
+  //         'unattributed',
+  //         'market',
+  //         'product',
+  //         ...(settings.dimensions || [])
+  //       ])
+  //     )
+  //   );
+  //   setSelected((settings.dimensions || []).filter(d => d !== 'unattributed'));
+  // }, [settings.dimensions]);
 
-  const toggle = (dim: string) => {
-    setSelected(prev =>
-      prev.includes(dim) ? prev.filter(d => d !== dim) : [...prev, dim]
-    );
-  };
+  // const toggle = (dim: string) => {
+  //   setSelected(prev =>
+  //     prev.includes(dim) ? prev.filter(d => d !== dim) : [...prev, dim]
+  //   );
+  // };
 
-  const addDimension = () => {
-    const dim = newDim.trim().toLowerCase();
-    if (dim && !options.includes(dim) && options.length < 10) {
-      setOptions([...options, dim]);
-      setSelected([...selected, dim]);
-    }
-    setNewDim('');
-    setShowInput(false);
-  };
+  // const addDimension = () => {
+  //   const dim = newDim.trim().toLowerCase();
+  //   if (dim && !options.includes(dim) && options.length < 10) {
+  //     setOptions([...options, dim]);
+  //     setSelected([...selected, dim]);
+  //   }
+  //   setNewDim('');
+  //   setShowInput(false);
+  // };
 
-  const save = async () => {
-    if (!settings.validatorId || settings.data.files.length === 0) {
-      setError('Classify a dataframe first');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    try {
-      const dims = ['unattributed', ...selected];
-      updateSettings(atomId || '', {
-        enableDimensionMapping: true,
-        dimensions: dims
-      });
-      if (settings.data.files.length) {
-        const updatedFiles = settings.data.files.map(file => {
-          const identifiers = file.columns
-            .filter(c => c.category === 'identifiers')
-            .map(c => c.name);
-          const custom = dims.reduce((acc, d) => {
-            acc[d] = d === 'unattributed' ? identifiers : [];
-            return acc;
-          }, {} as { [key: string]: string[] });
-          return { ...file, customDimensions: custom };
-        });
-        updateSettings(atomId || '', {
-          data: { ...settings.data, files: updatedFiles }
-        });
-      }
-      toast({ title: 'Dimensions Saved Successfully' });
-    } catch (e: any) {
-      setError(e.message);
-      toast({ title: 'Unable to Save Dimensions', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // const save = async () => {
+  //   if (!settings.validatorId || settings.data.files.length === 0) {
+  //     setError('Classify a dataframe first');
+  //     return;
+  //   }
+  //   setLoading(true);
+  //   setError('');
+  //   try {
+  //     const dims = ['unattributed', ...selected];
+  //     updateSettings(atomId || '', {
+  //       enableDimensionMapping: true,
+  //       dimensions: dims
+  //     });
+  //     if (settings.data.files.length) {
+  //       const updatedFiles = settings.data.files.map(file => {
+  //         const identifiers = file.columns
+  //           .filter(c => c.category === 'identifiers')
+  //           .map(c => c.name);
+  //         const custom = dims.reduce((acc, d) => {
+  //           acc[d] = d === 'unattributed' ? identifiers : [];
+  //           return acc;
+  //         }, {} as { [key: string]: string[] });
+  //         return { ...file, customDimensions: custom };
+  //       });
+  //       updateSettings(atomId || '', {
+  //         data: { ...settings.data, files: updatedFiles }
+  //       });
+  //     }
+  //     toast({ title: 'Dimensions Saved Successfully' });
+  //   } catch (e: any) {
+  //     setError(e.message);
+  //     toast({ title: 'Unable to Save Dimensions', variant: 'destructive' });
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   // const sensors = useSensors(
   //   useSensor(PointerSensor, {
@@ -611,7 +613,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             <Card className="bg-white/80 backdrop-blur-sm overflow-hidden border-2 border-gray-200 rounded-xl">
                <div className="flex items-start gap-3 border-b border-slate-200 px-5 py-3">
                  <div className="flex items-center gap-3 flex-wrap">
-                   <span className="text-green-600 font-semibold text-base flex-shrink-0">(1/2)</span> 
+                   {/* <span className="text-green-600 font-semibold text-base flex-shrink-0">(1/2)</span>  */}
                    <div className="flex items-center gap-1 flex-wrap">
                      <span className="text-base font-semibold text-gray-900">Below are column names extracted from the data. Classify them into identifiers</span>
                      <TooltipProvider delayDuration={100}>
@@ -728,8 +730,9 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
             </Card>
         </div>
         
+        {/* COMMENTED OUT - dimensions disabled */}
         {/* Instructional Text - Show only if no dimensions are configured */}
-        {!hideDimensionInstructions && (!settings.dimensions || settings.dimensions.length === 0) && (
+        {/* {!hideDimensionInstructions && (!settings.dimensions || settings.dimensions.length === 0) && (
           <div className="w-full mt-6">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <div className="flex items-start space-x-3">
@@ -750,7 +753,7 @@ const ColumnClassifierCanvas: React.FC<ColumnClassifierCanvasProps> = ({
               </div>
             </div>
           </div>
-        )}
+        )} */}
         
         {/* <DragOverlay>
           {activeId ? (

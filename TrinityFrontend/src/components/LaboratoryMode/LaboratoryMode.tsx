@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
@@ -46,8 +47,9 @@ const LaboratoryMode = () => {
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
+  const [autosaveEnabled, setAutosaveEnabled] = useState(true); // Default to true, will be loaded from MongoDB
   const { toast } = useToast();
-  const { cards, setCards: setLabCards } = useLaboratoryStore();
+  const { cards, setCards: setLabCards, auxiliaryMenuLeftOpen } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
@@ -61,7 +63,7 @@ const LaboratoryMode = () => {
   
   // Real-time collaborative sync
   const { isConnected: isSyncConnected, activeUsers, cardEditors, notifyCardFocus, notifyCardBlur } = useCollaborativeSync({
-    enabled: canEdit, // Only enable for users with edit permissions
+    enabled: canEdit && autosaveEnabled, // Only enable for users with edit permissions and when autosave is enabled
     debounceMs: 2000, // 2 seconds debounce
     fullSyncIntervalMs: 30000, // 30 seconds full sync
     onError: (error) => {
@@ -173,6 +175,32 @@ const LaboratoryMode = () => {
     if (hasWorkflowData) {
       setShowFloatingNavigationList(false);
     }
+
+    // Load autosaveEnabled from MongoDB
+    const loadAutosaveEnabled = async () => {
+      const projectContext = getActiveProjectContext();
+      if (!projectContext) return;
+
+      try {
+        const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+        const response = await fetch(requestUrl, {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === 'ok' && data.autosaveEnabled !== undefined) {
+            setAutosaveEnabled(data.autosaveEnabled);
+            console.info('[Laboratory API] Restored autosaveEnabled:', data.autosaveEnabled);
+          }
+        }
+      } catch (error) {
+        console.warn('[Laboratory API] Failed to load autosaveEnabled, using default:', error);
+      }
+    };
+
+    loadAutosaveEnabled();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Note: Workflow data loading is now handled entirely by CanvasArea component
@@ -250,25 +278,29 @@ const LaboratoryMode = () => {
     return sortedCards;
   };
 
-  // Autosave: Automatically save and sync when cards change
+  // Autosave: Automatically save and sync when cards or auxiliaryMenuLeftOpen change
   useEffect(() => {
-    if (!canEdit) return;
+    if (!canEdit || !autosaveEnabled) return;
+    
+    const hasInitialCards = cards && cards.length > 0;
     
     // Skip autosave on initial load (wait for cards to be loaded)
-    const hasInitialCards = cards && cards.length > 0;
+    // But allow autosave for auxiliaryMenuLeftOpen changes even if no cards
     if (!hasInitialCards) {
       // Mark that we've checked and there are no cards yet
       if (!hasInitialCardsLoadedRef.current) {
         hasInitialCardsLoadedRef.current = true;
+        // Skip autosave on the very first load (when there are no cards)
+        return;
       }
-      return;
-    }
-    
-    // Mark that initial cards have been loaded
-    if (!hasInitialCardsLoadedRef.current) {
-      hasInitialCardsLoadedRef.current = true;
-      // Skip autosave on the very first load
-      return;
+      // After initial load, allow autosave even without cards (for auxiliaryMenuLeftOpen changes)
+    } else {
+      // Mark that initial cards have been loaded
+      if (!hasInitialCardsLoadedRef.current) {
+        hasInitialCardsLoadedRef.current = true;
+        // Skip autosave on the very first load (when cards are first loaded)
+        return;
+      }
     }
 
     // Debounce autosave to avoid too frequent saves
@@ -323,8 +355,12 @@ const LaboratoryMode = () => {
             project_name: projectContext.project_name,
             cards: sanitized.cards || [],
             workflow_molecules: workflowMoleculesForSave,
+            auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true,
+            autosaveEnabled: autosaveEnabled,
             mode: 'laboratory',
           };
+
+          console.log('🔄 [AUTOSAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
           try {
             const response = await fetch(requestUrl, {
@@ -387,7 +423,7 @@ const LaboratoryMode = () => {
     return () => {
       clearTimeout(autosaveTimer);
     };
-  }, [cards, canEdit, setExhibitionCards, sortCardsInWorkflowOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cards, auxiliaryMenuLeftOpen, canEdit, autosaveEnabled, setExhibitionCards, sortCardsInWorkflowOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUndo = async () => {
     if (!canEdit) return;
@@ -569,8 +605,12 @@ const LaboratoryMode = () => {
           project_name: projectContext.project_name,
           cards: sanitized.cards || [],
           workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
+          auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true, // Include auxiliary menu left state
+          autosaveEnabled: autosaveEnabled, // Include autosave toggle state
           mode: 'laboratory',
         };
+
+        console.log('💾 [MANUAL SAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
         const requestInit: RequestInit = {
           method: 'POST',
@@ -673,6 +713,40 @@ const LaboratoryMode = () => {
     }
   };
 
+  // Handle Ctrl+S keyboard shortcut for manual save (works regardless of autosave state)
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Check for Ctrl+S (or Cmd+S on Mac)
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        // Don't trigger if user is typing in an input field
+        const target = event.target as HTMLElement;
+        if (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.contentEditable === 'true' ||
+          target.getAttribute('role') === 'textbox'
+        ) {
+          return;
+        }
+
+        // Prevent default and stop propagation to prevent other handlers (like useSearchShortcut) from running
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        
+        if (canEdit) {
+          handleSave();
+        }
+      }
+    };
+
+    // Use capture phase to ensure this handler runs before others
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [canEdit, handleSave]);
+
   return (
     <div
       data-lab-preparing={isPreparingAnimation ? 'true' : undefined}
@@ -735,17 +809,29 @@ const LaboratoryMode = () => {
               <Undo2 className="w-4 h-4 mr-2" />
               Undo
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
-              onClick={handleSave}
-              disabled={!canEdit}
-              data-lab-save="true"
-            >
-              <Save className="w-4 h-4 mr-2" />
-              Save
-            </Button>
+            {canEdit && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-gray-200">
+                <span className="text-xs text-gray-600 font-medium">Auto Save</span>
+                <Switch
+                  checked={autosaveEnabled}
+                  onCheckedChange={setAutosaveEnabled}
+                  disabled={!canEdit}
+                />
+              </div>
+            )}
+            {!autosaveEnabled && (
+              <Button
+                variant="outline"
+                size="sm"
+                className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
+                onClick={handleSave}
+                disabled={!canEdit}
+                data-lab-save="true"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                Save
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"

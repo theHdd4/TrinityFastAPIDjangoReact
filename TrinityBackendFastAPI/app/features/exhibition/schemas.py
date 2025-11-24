@@ -138,6 +138,7 @@ class ExhibitionLayoutConfigurationOut(ExhibitionLayoutConfigurationBase):
     """Response payload when loading the exhibition layout."""
 
     updated_at: Optional[datetime] = Field(default=None)
+    autosaveEnabled: Optional[bool] = Field(default=True)
 
 
 class DocumentStylesPayload(BaseModel):

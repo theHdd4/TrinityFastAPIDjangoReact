@@ -720,23 +720,32 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
               ? settings.columnSummary
               : []
           )
-            .map((c: ColumnInfo) => c?.column)
+            .map((c: ColumnInfo) => c?.column?.toLowerCase())
             .filter(Boolean),
         );
-        const trimmedMapping = summaryColumns.size
+        // For identifiers mapping, don't filter - use identifiers from backend as-is
+        // The backend is the source of truth for identifiers
+        const trimmedMapping = summaryColumns.size && !mapping["identifiers"]
           ? Object.fromEntries(
               Object.entries(mapping)
                 .map(([dimension, values]) => {
+                  // Legacy dimensions filtering (case-insensitive)
                   const cols = Array.isArray(values)
                     ? Array.from(
-                        new Set(values.filter((val) => summaryColumns.has(val))),
+                        new Set(values.filter((val) => {
+                          if (!val) return false;
+                          const valLower = String(val).toLowerCase();
+                          return Array.from(summaryColumns).some((col: string) => 
+                            col.toLowerCase() === valLower
+                          );
+                        })),
                       )
                     : [];
                   return [dimension, cols];
                 })
-                .filter(([, cols]) => cols.length > 0),
+                .filter(([, cols]) => Array.isArray(cols) && cols.length > 0),
             )
-          : mapping;
+          : mapping; // Use mapping as-is if it has "identifiers" or if no summary columns
         setDimensionMap(trimmedMapping);
         
         // Only update settings if the mapping changed
@@ -746,9 +755,35 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
         }
 
         // Check if mapping has any valid entries
-        const hasValidMapping = Object.values(trimmedMapping).some(
+        let hasValidMapping = Object.values(trimmedMapping).some(
           (ids) => Array.isArray(ids) && ids.length > 0,
         );
+
+        // Fallback: If no identifiers found from MongoDB/Redis, use categorical columns
+        if (!hasValidMapping) {
+          const allCols = Array.isArray(settings.allColumns) && settings.allColumns.length > 0
+            ? settings.allColumns
+            : Array.isArray(settings.columnSummary)
+            ? settings.columnSummary
+            : [];
+          
+          // Extract categorical columns (object/category data types)
+          const categoricalColumns = allCols
+            .filter((col: any) => {
+              const dataType = col?.data_type?.toLowerCase() || '';
+              return (dataType === 'object' || dataType === 'category' || dataType === 'string') && col?.column;
+            })
+            .map((col: any) => col.column)
+            .filter(Boolean);
+          
+          if (categoricalColumns.length > 0) {
+            // Use categorical columns as identifiers fallback
+            trimmedMapping["identifiers"] = categoricalColumns;
+            setDimensionMap(trimmedMapping);
+            onUpdateSettings({ dimensionMap: trimmedMapping });
+            hasValidMapping = true;
+          }
+        }
 
         if (hasValidMapping) {
           setDimensionError(null);
@@ -2033,8 +2068,8 @@ const FeatureOverviewCanvas: React.FC<FeatureOverviewCanvasProps> = ({
               defaultMinimized={true}
               borderColor="border-green-500"
               customHeader={{
-                title: "Cardinality View",
-                subtitle: "Click Here to View Data",
+                title: "Data Summary",
+                subtitle: "Data in detail",
                 subtitleClickable: !!inputFileName && !!atomId,
                 onSubtitleClick: handleViewDataClick
               }}

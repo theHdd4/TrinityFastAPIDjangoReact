@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import BackToAppsIcon from '../TrinityAssets/BackToAppsIcon';
 import { REGISTRY_API } from '@/lib/api';
 import { saveCurrentProject } from '@/utils/projectStorage';
@@ -12,6 +12,30 @@ interface AppIdentityProps {
 const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack, onRename }) => {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(projectName || '');
+  const [appName, setAppName] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Get app name from env or current-app
+    try {
+      const envStr = localStorage.getItem('env');
+      if (envStr) {
+        const env = JSON.parse(envStr);
+        if (env.APP_NAME) {
+          setAppName(env.APP_NAME);
+          return;
+        }
+      }
+      const appStr = localStorage.getItem('current-app');
+      if (appStr) {
+        const app = JSON.parse(appStr);
+        if (app.name) {
+          setAppName(app.name);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
 
   const startEdit = () => {
     setName(projectName || '');
@@ -63,6 +87,12 @@ const AppIdentity: React.FC<AppIdentityProps> = ({ projectName, onGoBack, onRena
     <>
       {projectName && (
         <div className="flex items-center space-x-2 text-sm text-gray-600">
+          {appName && (
+            <span className="text-gray-500">
+              {appName}
+            </span>
+          )}
+          {appName && <span className="text-gray-400">/</span>}
           {editing ? (
             <input
               className="border rounded px-1 py-0.5 text-sm"

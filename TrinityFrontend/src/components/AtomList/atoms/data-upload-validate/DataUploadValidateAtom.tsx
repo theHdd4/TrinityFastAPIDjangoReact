@@ -449,6 +449,14 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         continue;
       }
 
+      // Show upload modal with processing state
+      setPendingUploadFile({ file: sanitizedFile, sanitizedFileName, data: null });
+      setUploadSheetOptions([]);
+      setUploadSelectedSheet('');
+      setUploadError('');
+      setUploadingFile(true);
+      setIsUploadModalOpen(true);
+
       const form = new FormData();
       form.append('file', sanitizedFile);
       if (env) {
@@ -468,6 +476,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         if (!res.ok) {
           const errorData = await res.json().catch(() => ({}));
           const errorMessage = errorData.detail || `Failed to upload ${sanitizedFileName}`;
+          setUploadingFile(false);
+          setUploadError(errorMessage);
           toast({ title: errorMessage, variant: 'destructive' });
           continue;
         }
@@ -476,7 +486,9 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         const data = await waitForTaskResult(payload);
         const filePath = (data as any).file_path as string | undefined;
         if (!filePath) {
+          setUploadingFile(false);
           toast({ title: `Upload response missing file path for ${sanitizedFileName}`, variant: 'destructive' });
+          setIsUploadModalOpen(false);
           continue;
         }
 
@@ -492,7 +504,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           setUploadSheetOptions(sheetNames.length ? sheetNames : selectedSheet ? [selectedSheet] : []);
           setUploadSelectedSheet(selectedSheet || sheetNames[0] || '');
           setUploadError('');
-          setIsUploadModalOpen(true);
+          setUploadingFile(false);
+          // Modal is already open, just update it for sheet selection
           continue; // Skip adding to uploaded array for now, will be added after sheet selection
         }
         
@@ -525,6 +538,10 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
         const finalPath = savedPath || filePath;
 
         uploaded.push({ name: sanitizedFileName, path: finalPath, size: file.size });
+        
+        // Close modal after successful upload
+        setUploadingFile(false);
+        setIsUploadModalOpen(false);
 
         if ((data as any).has_data_quality_issues && Array.isArray((data as any).warnings) && (data as any).warnings.length > 0) {
           const warnings = (data as any).warnings as string[];
@@ -550,6 +567,8 @@ const DataUploadValidateAtom: React.FC<Props> = ({ atomId }) => {
           toast({ title: `${sanitizedFileName} uploaded successfully` });
         }
       } catch (error: any) {
+        setUploadingFile(false);
+        setUploadError(error?.message || 'Upload failed');
         toast({
           title: `Failed to upload ${sanitizedFileName}`,
           description: error?.message,

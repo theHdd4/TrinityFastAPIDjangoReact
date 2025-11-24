@@ -3,6 +3,7 @@ import ChartMakerCanvas from './components/ChartMakerCanvas';
 import { useLaboratoryStore, DEFAULT_CHART_MAKER_SETTINGS, ChartMakerSettings as SettingsType, ChartMakerConfig } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { chartMakerApi } from './services/chartMakerApi';
 import { useToast } from '@/hooks/use-toast';
+import { BarChart3 } from 'lucide-react';
 import { 
   migrateLegacyChart, 
   buildTracesForAPI, 
@@ -482,36 +483,41 @@ const ChartMakerAtom: React.FC<Props> = ({ atomId }) => {
   // Only show rendered charts if they've been marked as rendered
   const chartsToShow = settings.charts;
 
-  // 🔧 CRITICAL FIX: Show loading state instead of white screen when data is not ready
-  // This prevents white screen when called from central AI
+  // 🔧 CRITICAL FIX: Show landing page when no file is selected (prevents white screen)
+  // This prevents white screen when called from central AI or when dragging atom before file selection
   if (!settings.fileId || !settings.uploadedData) {
-    console.log('⏳ ChartMakerAtom: Waiting for file data...', {
-      fileId: settings.fileId,
-      hasUploadedData: !!settings.uploadedData,
-      chartsCount: settings.charts?.length || 0
-    });
+    // console.log('⏳ ChartMakerAtom: Waiting for file data...', {
+    //   fileId: settings.fileId,
+    //   hasUploadedData: !!settings.uploadedData,
+    //   chartsCount: settings.charts?.length || 0
+    // });
     
-    // If we have charts configured but no data yet, show loading
-    if (settings.charts && settings.charts.length > 0) {
-      return (
-        <div className="w-full h-full min-h-[28rem] flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading chart data...</p>
-            <p className="text-sm text-muted-foreground mt-2">
-              {settings.charts.length} chart{settings.charts.length > 1 ? 's' : ''} configured
+    // Always show landing page when no file is selected, regardless of charts configured
+    return (
+      <div className="w-full h-full p-6 bg-gradient-to-br from-slate-50 via-purple-50/30 to-purple-50/50 overflow-y-auto relative">
+        <div className="absolute inset-0 opacity-20">
+          <svg width="80" height="80" viewBox="0 0 80 80" className="absolute inset-0 w-full h-full">
+            <defs>
+              <pattern id="emptyGrid" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="rgb(148 163 184 / 0.15)" strokeWidth="1"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#emptyGrid)" />
+          </svg>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center h-full">
+          <div className="text-center max-w-md">
+            <div className="w-24 h-24 mx-auto mb-8 rounded-2xl bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-300">
+              <BarChart3 className="w-12 h-12 text-white drop-shadow-lg" />
+            </div>
+            <h3 className="text-3xl font-bold text-gray-900 mb-3 bg-gradient-to-r from-purple-500 to-purple-600 bg-clip-text text-transparent">
+              Chart maker operation
+            </h3>
+            <p className="text-gray-600 mb-6 text-lg font-medium leading-relaxed">
+              Select a file from the properties panel to get started
             </p>
           </div>
-        </div>
-      );
-    }
-    
-    // If no charts configured yet, show empty state
-    return (
-      <div className="w-full h-full min-h-[28rem] flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-muted-foreground">Chart Maker</p>
-          <p className="text-sm text-muted-foreground mt-2">Waiting for configuration...</p>
         </div>
       </div>
     );

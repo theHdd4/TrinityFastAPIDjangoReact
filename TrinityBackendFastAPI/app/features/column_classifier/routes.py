@@ -236,7 +236,7 @@ async def classify_columns(
             reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
             df = reader.read_all().to_pandas()
 
-    df.columns = [str(c).lower() for c in df.columns]
+    df.columns = [str(c).strip().lower() for c in df.columns]
     all_columns = df.columns.tolist()
     column_types = {c: str(df[c].dtype) for c in df.columns}
 
@@ -251,19 +251,47 @@ async def classify_columns(
             detail=f"Invalid JSON format for classification lists: {str(e)}"
         )
 
-    # Validate user inputs - ensure they reference actual columns
-    all_user_columns = user_identifiers + user_measures + user_unclassified
-    invalid_columns = [col for col in all_user_columns if col not in all_columns]
+    # Normalize user-provided columns to lowercase for case-insensitive matching
+    # Create a mapping from lowercase to actual column names in dataframe
+    column_lowercase_map = {col.lower(): col for col in all_columns}
+    
+    # Normalize and validate user inputs - ensure they reference actual columns (case-insensitive)
+    normalized_identifiers = []
+    normalized_measures = []
+    normalized_unclassified = []
+    invalid_columns = []
+    
+    for col in user_identifiers:
+        col_lower = str(col).strip().lower()
+        if col_lower in column_lowercase_map:
+            normalized_identifiers.append(column_lowercase_map[col_lower])
+        else:
+            invalid_columns.append(col)
+    
+    for col in user_measures:
+        col_lower = str(col).strip().lower()
+        if col_lower in column_lowercase_map:
+            normalized_measures.append(column_lowercase_map[col_lower])
+        else:
+            invalid_columns.append(col)
+    
+    for col in user_unclassified:
+        col_lower = str(col).strip().lower()
+        if col_lower in column_lowercase_map:
+            normalized_unclassified.append(column_lowercase_map[col_lower])
+        else:
+            invalid_columns.append(col)
+    
     if invalid_columns:
         raise HTTPException(
             status_code=400, 
             detail=f"Invalid columns specified: {invalid_columns}. Available columns: {all_columns}"
         )
 
-    # Start with user-specified classifications
-    final_identifiers = user_identifiers.copy()
-    final_measures = user_measures.copy()
-    final_unclassified = user_unclassified.copy()
+    # Start with user-specified classifications (normalized to lowercase)
+    final_identifiers = normalized_identifiers.copy()
+    final_measures = normalized_measures.copy()
+    final_unclassified = normalized_unclassified.copy()
 
     # Get columns already classified by user
     user_classified_columns = set(final_identifiers + final_measures + final_unclassified)
@@ -280,13 +308,17 @@ async def classify_columns(
     identifier_keywords = [
         'id', 'name', 'brand', 'market', 'category', 'region', 'channel', 
         'date', 'time', 'year', 'week', 'month', 'variant', 'ppg', 'type', 
-        'code', 'packsize', 'packtype'
-    ]
+        'code', 'packsize', 'packtype',"sku","product",
+        "segment","subsegment","subchannel","zone","state","city","cluster","store","retailer","distributor","partner","account",
+        "customer","consumer","household","respondent","wave","period","quarter","day"]
+
+
     measure_keywords = [
         'sales', 'revenue', 'volume', 'amount', 'value', 'price', 'cost', 
         'profit', 'units', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 
-        'salesvalue', 'baseprice', 'promoprice'
-    ]
+        'salesvalue', 'baseprice', 'promoprice',
+        "sale","qty","quantity", "mrp","nrv","margin","loss","rate","spend","impressions","clicks","carts","orders","views","shares","likes",
+        "comments","ratings","scores","awareness","consideration","preference","nps","penetration","frequency","reach","trps","grps","weight","index","share"]
 
     auto_identifiers = []
     auto_measures = []
@@ -306,6 +338,9 @@ async def classify_columns(
         elif any(keyword in col_lower for keyword in measure_keywords):
             auto_measures.append(col)
             final_measures.append(col)
+        elif col_type in ["object", "category", "string"]:
+            auto_identifiers.append(col)
+            final_identifiers.append(col)
         elif col_type in ["numeric", "integer", "float64"]:
             auto_measures.append(col)
             final_measures.append(col)
@@ -323,6 +358,8 @@ async def classify_columns(
             confidence_scores[col] = 0.9
         elif any(keyword in col_lower for keyword in measure_keywords):
             confidence_scores[col] = 0.9
+        elif column_types.get(col) in ["object", "category", "string"]:
+            confidence_scores[col] = 0.7
         elif column_types.get(col) in ["numeric", "integer", "float64"]:
             confidence_scores[col] = 0.7
         else:
@@ -637,7 +674,9 @@ async def save_config(req: SaveConfigRequest):
         "project_name": req.project_name,
         "identifiers": req.identifiers,
         "measures": req.measures,
-        "dimensions": req.dimensions,
+        # COMMENTED OUT - dimensions disabled
+        # "dimensions": req.dimensions,
+        "dimensions": {},  # Empty dimensions object
         "env": env,
     }
     if req.file_name:
@@ -655,7 +694,9 @@ async def save_config(req: SaveConfigRequest):
     env_key = f"env:{req.client_name}:{req.app_name}:{req.project_name}"
     env["identifiers"] = req.identifiers
     env["measures"] = req.measures
-    env["dimensions"] = req.dimensions
+    # COMMENTED OUT - dimensions disabled
+    # env["dimensions"] = req.dimensions
+    env["dimensions"] = {}  # Empty dimensions object
     if req.file_name:
         env["file_name"] = req.file_name
     redis_client.setex(env_key, 3600, json.dumps(env, default=str))
@@ -665,12 +706,13 @@ async def save_config(req: SaveConfigRequest):
         file_env_key = f"{env_key}:file:{safe_file}"
         redis_client.setex(file_env_key, 3600, json.dumps(env, default=str))
 
-    if req.project_id:
-        map_key = f"project:{req.project_id}:dimensions"
-        redis_client.setex(map_key, 3600, json.dumps(req.dimensions, default=str))
-        # Persist the project-level mapping so cache refreshes pick up the
-        # updated assignments.
-        save_project_dimension_mapping(req.project_id, req.dimensions)
+    # COMMENTED OUT - dimensions disabled
+    # if req.project_id:
+    #     map_key = f"project:{req.project_id}:dimensions"
+    #     redis_client.setex(map_key, 3600, json.dumps(req.dimensions, default=str))
+    #     # Persist the project-level mapping so cache refreshes pick up the
+    #     # updated assignments.
+    #     save_project_dimension_mapping(req.project_id, req.dimensions)
 
     mongo_result = save_classifier_config_to_mongo(data)
     postgres_result = await save_classifier_config_to_postgres(data)

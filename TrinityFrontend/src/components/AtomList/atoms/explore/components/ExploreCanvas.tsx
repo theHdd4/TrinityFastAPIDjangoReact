@@ -3846,8 +3846,8 @@ const ExploreCanvas: React.FC<ExploreCanvasProps> = ({ data, isApplied, onDataCh
                 defaultMinimized={true}
                 borderColor="border-purple-500"
                 customHeader={{
-                  title: "Cardinality View",
-                  subtitle: "Click Here to View Data",
+                  title: "Data Summary",
+                  subtitle: "Data in detail",
                   subtitleClickable: !!safeData.dataframe,
                   onSubtitleClick: () => {
                     if (safeData.dataframe) {
