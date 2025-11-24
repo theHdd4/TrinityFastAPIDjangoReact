@@ -9,13 +9,15 @@ interface Props {
 const MergeAtom: React.FC<Props> = ({ atomId }) => {
   try {
     const atom = useLaboratoryStore(state => state.getAtom(atomId));
-    const settings = (atom?.settings as any) || {
-      file1: '',
-      file2: '',
-      joinColumns: [] as string[],
-      joinType: 'inner',
-      availableColumns: [] as string[],
-      mergeResults: null,
+    const rawSettings = (atom?.settings as any) || {};
+    const settings = {
+      file1: rawSettings.file1 || '',
+      file2: rawSettings.file2 || '',
+      joinColumns: Array.isArray(rawSettings.joinColumns) ? rawSettings.joinColumns : [],
+      joinType: rawSettings.joinType || 'inner',
+      availableColumns: Array.isArray(rawSettings.availableColumns) ? rawSettings.availableColumns : [],
+      mergeResults: rawSettings.mergeResults || null,
+      ...rawSettings, // Preserve other settings
     };
 
     return (

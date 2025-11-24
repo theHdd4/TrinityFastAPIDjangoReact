@@ -6,6 +6,7 @@ import { createColumnHandler } from './createColumnHandler';
 import { groupbyHandler } from './groupbyHandler';
 import { chartMakerHandler } from './chartMakerHandler';
 import { exploreHandler } from './exploreHandler';
+import { dfValidateHandler } from './dfValidateHandler';
 
 // Registry of all atom handlers
 export const atomHandlers: Record<string, AtomHandler> = {
@@ -16,6 +17,7 @@ export const atomHandlers: Record<string, AtomHandler> = {
   'groupby-wtg-avg': groupbyHandler,
   'chart-maker': chartMakerHandler,
   'explore': exploreHandler,
+  'data-upload-validate': dfValidateHandler,
 };
 
 // Helper function to check if an atom type has a specific handler
@@ -47,6 +49,8 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
         return !!(data.exploration_config);
       case 'dataframe-operations':
         return !!(data.dataframe_config);
+      case 'data-upload-validate':
+        return !!(data.validate_json);
       default:
         return false;
     }
@@ -68,6 +72,8 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
       return !!(data.exploration_config);
     case 'dataframe-operations':
       return !!(data.dataframe_config);
+    case 'data-upload-validate':
+      return !!(data.validate_json);
     default:
       return false;
   }
@@ -81,5 +87,6 @@ export {
   createColumnHandler, 
   groupbyHandler, 
   chartMakerHandler, 
-  exploreHandler 
+  exploreHandler,
+  dfValidateHandler 
 };

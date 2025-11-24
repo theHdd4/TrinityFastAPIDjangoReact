@@ -233,78 +233,10 @@ class StreamRAGEngine:
                 for atom_id in atoms[:max_atoms]
             ]
         
-        # Otherwise, build sequence from keywords
-        sequence = []
-        
-        # Always start with data upload if loading data
-        if any(kw in query_lower for kw in ["load", "upload", "file", "csv", "excel", "data"]):
-            sequence.append({
-                "atom_id": "data-upload-validate",
-                "metadata": self.get_atom_metadata("data-upload-validate"),
-                "dependencies": self.get_atom_dependencies("data-upload-validate"),
-                "reason": "Data loading detected in query"
-            })
-        
-        # Add exploration if needed
-        if any(kw in query_lower for kw in ["explore", "overview", "summary", "statistics", "analyze"]):
-            sequence.append({
-                "atom_id": "feature-overview",
-                "metadata": self.get_atom_metadata("feature-overview"),
-                "dependencies": self.get_atom_dependencies("feature-overview"),
-                "reason": "Exploration/analysis detected in query"
-            })
-        
-        # Add operations based on keywords
-        if any(kw in query_lower for kw in ["filter", "sort", "select", "remove", "drop"]):
-            sequence.append({
-                "atom_id": "dataframe-operations",
-                "metadata": self.get_atom_metadata("dataframe-operations"),
-                "dependencies": self.get_atom_dependencies("dataframe-operations"),
-                "reason": "Data operations detected in query"
-            })
-        
-        if any(kw in query_lower for kw in ["merge", "join", "combine"]):
-            sequence.append({
-                "atom_id": "merge",
-                "metadata": self.get_atom_metadata("merge"),
-                "dependencies": self.get_atom_dependencies("merge"),
-                "reason": "Merge operation detected in query"
-            })
-        
-        if any(kw in query_lower for kw in ["concat", "append", "stack"]):
-            sequence.append({
-                "atom_id": "concat",
-                "metadata": self.get_atom_metadata("concat"),
-                "dependencies": self.get_atom_dependencies("concat"),
-                "reason": "Concatenation detected in query"
-            })
-        
-        if any(kw in query_lower for kw in ["group", "aggregate", "sum", "mean", "average"]):
-            sequence.append({
-                "atom_id": "groupby-wtg-avg",
-                "metadata": self.get_atom_metadata("groupby-wtg-avg"),
-                "dependencies": self.get_atom_dependencies("groupby-wtg-avg"),
-                "reason": "Grouping/aggregation detected in query"
-            })
-        
-        if any(kw in query_lower for kw in ["correlation", "corr", "relationship"]):
-            sequence.append({
-                "atom_id": "correlation",
-                "metadata": self.get_atom_metadata("correlation"),
-                "dependencies": self.get_atom_dependencies("correlation"),
-                "reason": "Correlation analysis detected in query"
-            })
-        
-        # Add visualization if needed
-        if any(kw in query_lower for kw in ["chart", "plot", "graph", "visualize", "visual", "show"]):
-            sequence.append({
-                "atom_id": "chart-maker",
-                "metadata": self.get_atom_metadata("chart-maker"),
-                "dependencies": self.get_atom_dependencies("chart-maker"),
-                "reason": "Visualization detected in query"
-            })
-        
-        return sequence[:max_atoms]
+        # Manual keyword-based sequence generation removed
+        # All workflow generation must use AI/LLM, not manual keyword matching
+        logger.warning("⚠️ Manual keyword-based sequence generation removed. All workflows must be generated via AI/LLM.")
+        return []
     
     def generate_rag_context_for_sequence(self, query: str) -> str:
         """

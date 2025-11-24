@@ -19,6 +19,10 @@ export const createColumnHandler: AtomHandler = {
     console.log('📥 Data received:', JSON.stringify(data, null, 2));
     console.log('🆔 AtomId:', context.atomId);
     console.log('🔢 SessionId:', context.sessionId);
+    console.log('🔍 Data keys:', Object.keys(data));
+    console.log('🔍 Has json:', !!data.json);
+    console.log('🔍 Has create_json:', !!data.create_json);
+    console.log('🔍 Has config:', !!data.config);
     
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
@@ -41,7 +45,12 @@ export const createColumnHandler: AtomHandler = {
       console.warn('⚠️ No smart response text found!');
     }
     
-    if (!data.json || !Array.isArray(data.json) || data.json.length === 0) {
+    // Extract json - check multiple possible locations
+    const jsonData = data.json || data.create_json || data.config || null;
+    
+    if (!jsonData || !Array.isArray(jsonData) || jsonData.length === 0) {
+      console.error('❌ No create column configuration found in AI response');
+      console.error('📦 Available keys:', Object.keys(data));
       const errorMsg = createErrorMessage(
         'Create Column configuration',
         'No create column configuration found in AI response',
@@ -51,7 +60,7 @@ export const createColumnHandler: AtomHandler = {
       return { success: false, error: 'No create column configuration found in AI response' };
     }
 
-    const cfg = data.json[0]; // Get first configuration object
+    const cfg = jsonData[0]; // Get first configuration object
     if (!cfg || typeof cfg !== 'object') {
       const errorMsg = createErrorMessage(
         'Create Column configuration',
@@ -397,15 +406,42 @@ export const createColumnHandler: AtomHandler = {
       lastUpdateTime: Date.now()
     };
     
+    // 🔧 CRITICAL FIX: Get current settings and merge with new settings
+    const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+    const currentSettings = currentAtom?.settings || {};
+    
+    // Merge with existing settings
+    const mergedSettings = {
+      ...currentSettings, // Preserve all existing settings
+      ...settingsToUpdate // Apply new settings
+    };
+    
     console.log('🔧 Updating atom settings with:', {
       atomId,
       dataSource: resolvedDataSource,
       operationsCount: operations.length,
       operations: operations,
-      fullSettings: settingsToUpdate
+      mergedSettings: {
+        operations: mergedSettings.operations?.length || 0,
+        dataSource: mergedSettings.dataSource,
+        object_name: mergedSettings.object_name
+      }
     });
     
-    updateAtomSettings(atomId, settingsToUpdate);
+    updateAtomSettings(atomId, mergedSettings);
+    
+    // Force a small delay to ensure state propagation, then verify
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Verify the update was successful
+    const verifyAtom = useLaboratoryStore.getState().getAtom(atomId);
+    console.log('✅ Atom settings updated with create-column configuration:', {
+      atomExists: !!verifyAtom,
+      operationsCount: verifyAtom?.settings?.operations?.length || 0,
+      hasDataSource: !!verifyAtom?.settings?.dataSource,
+      hasObjectName: !!verifyAtom?.settings?.object_name,
+      dataSource: verifyAtom?.settings?.dataSource
+    });
     
     // 🔧 CRITICAL FIX: Load columns directly after setting dataSource
     if (resolvedDataSource) {

@@ -133,11 +133,11 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
         return fallbackAtomTitle ?? 'Variable';
       }
       if (layoutCard.moleculeTitle) {
-        return layoutCard.atoms.length > 0
+        return (Array.isArray(layoutCard.atoms) && layoutCard.atoms.length > 0)
           ? `${layoutCard.moleculeTitle} - ${layoutCard.atoms[0].title}`
           : layoutCard.moleculeTitle;
       }
-      return layoutCard.atoms.length > 0 ? layoutCard.atoms[0].title : fallbackAtomTitle ?? 'Variable';
+      return (Array.isArray(layoutCard.atoms) && layoutCard.atoms.length > 0) ? layoutCard.atoms[0].title : fallbackAtomTitle ?? 'Variable';
     },
     [],
   );
@@ -145,7 +145,9 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   const mapPersistedToAvailable = useCallback(
     (record: PersistedVariableResponse): AvailableVariable => {
       const sourceCard = cards.find(c => c.id === record.cardId);
-      const cardTitle = resolveCardTitle(sourceCard, sourceCard?.atoms[0]?.title ?? record.cardId ?? 'Variable');
+      const atoms = sourceCard?.atoms;
+      const fallbackTitle = (Array.isArray(atoms) && atoms.length > 0) ? atoms[0]?.title : undefined;
+      const cardTitle = resolveCardTitle(sourceCard, fallbackTitle ?? record.cardId ?? 'Variable');
 
       return {
         id: record.id ?? generateVariableId(),
@@ -165,7 +167,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
         updatedAt: record.updatedAt,
         cardId: record.cardId ?? card.id,
         cardTitle,
-        atomTitle: sourceCard?.atoms[0]?.title,
+        atomTitle: (Array.isArray(atoms) && atoms.length > 0) ? atoms[0]?.title : undefined,
       } satisfies AvailableVariable;
     },
     [card.id, cards, resolveCardTitle],
@@ -233,7 +235,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
       description: input.description?.trim() || undefined,
       usageSummary: input.usageSummary?.trim() || undefined,
       cardId: card.id,
-      atomId: card.atoms[0]?.id,
+      atomId: (Array.isArray(card.atoms) && card.atoms.length > 0) ? card.atoms[0]?.id : undefined,
       originCardId: input.originCardId ?? card.id,
       originVariableId: input.originVariableId,
       clientId: projectContext.client_name,
@@ -331,7 +333,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
         appended: false,
         originCardId: persisted.originCardId ?? card.id,
         originVariableId: persisted.originVariableId ?? undefined,
-        originAtomId: persisted.atomId ?? card.atoms[0]?.id,
+        originAtomId: persisted.atomId ?? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? card.atoms[0]?.id : undefined),
         clientId: persisted.clientId ?? projectContext.client_name,
         appId: persisted.appId ?? projectContext.app_name,
         projectId: persisted.projectId ?? projectContext.project_name,

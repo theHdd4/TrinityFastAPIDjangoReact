@@ -90,6 +90,14 @@ def health_check(
         from .storage import _context_prefix
         path_prefix = _context_prefix(client_name, app_name, project_name)
         
+        # Get cache stats if available
+        cache_stats = {}
+        try:
+            from .cache import get_cache_stats
+            cache_stats = get_cache_stats()
+        except Exception:
+            pass
+        
         return {
             "status": "healthy",
             "service": "memory",
@@ -98,7 +106,8 @@ def health_check(
                 "app": app_name or "default",
                 "project": project_name or "default"
             },
-            "storage_path": path_prefix
+            "storage_path": path_prefix,
+            "cache": cache_stats
         }
     except Exception as e:
         return {"status": "unhealthy", "service": "memory", "error": str(e)}
@@ -140,10 +149,10 @@ def list_chat_histories(
         description="Include message payloads in the listing response (defaults to True for backward compatibility).",
     ),
     message_limit: Optional[int] = Query(
-        8,
+        None,  # Changed from 8 to None - return all messages by default
         ge=1,
         le=storage.MAX_MESSAGES_DEFAULT,
-        description="Maximum number of messages to include per chat when include_messages is true.",
+        description="Maximum number of messages to include per chat when include_messages is true. If None, returns all messages.",
     ),
 ) -> ChatListResponse:
     """Return summaries of stored chat transcripts."""
@@ -158,8 +167,12 @@ def list_chat_histories(
         raw_messages = list(record.get("messages") or [])
         trimmed_messages = raw_messages
         if include_messages and raw_messages:
-            limit = message_limit or storage.MAX_MESSAGES_DEFAULT
-            trimmed_messages = raw_messages[-limit:]
+            # Only trim if message_limit is explicitly set
+            # If None, return all messages to avoid truncation
+            if message_limit is not None:
+                limit = min(message_limit, storage.MAX_MESSAGES_DEFAULT)
+                trimmed_messages = raw_messages[-limit:]
+            # else: return all messages (trimmed_messages = raw_messages)
         elif not include_messages:
             trimmed_messages = []
 
@@ -241,10 +254,15 @@ def upsert_chat_history(
 
 
 @router.delete("/chats/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_chat_history(chat_id: str) -> None:
+def delete_chat_history(
+    chat_id: str,
+    client: Optional[str] = Query(None, description="Client name"),
+    app: Optional[str] = Query(None, description="App name"),
+    project: Optional[str] = Query(None, description="Project name"),
+) -> None:
     """Remove a stored chat transcript."""
     try:
-        client_name, app_name, project_name = _get_project_context()
+        client_name, app_name, project_name = _get_project_context(client, app, project)
         storage.delete_chat(chat_id, client_name, app_name, project_name)
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -296,4 +314,116 @@ def delete_session_context(session_id: str) -> None:
         storage.delete_session(session_id, client_name, app_name, project_name)
     except storage.MemoryStorageError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/cache/stats")
+def get_cache_statistics() -> dict:
+    """Get Redis cache statistics."""
+    try:
+        from .cache import get_cache_stats, is_redis_available, REDIS_CACHE_PREFIX
+        from redis_client import get_redis_client
+        
+        stats = get_cache_stats()
+        
+        # Add detailed cache information
+        if stats.get("enabled"):
+            try:
+                client = get_redis_client()
+                # Get all cache keys
+                cache_keys = []
+                try:
+                    # Get all keys matching the cache prefix
+                    for key in client.scan_iter(match=f"{REDIS_CACHE_PREFIX}*"):
+                        if isinstance(key, bytes):
+                            key = key.decode('utf-8')
+                        cache_keys.append(key)
+                except Exception as e:
+                    logger.warning(f"Failed to scan cache keys: {e}")
+                
+                stats["cached_chat_keys"] = len(cache_keys)
+                stats["sample_keys"] = cache_keys[:5]  # Show first 5 keys as sample
+            except Exception as e:
+                stats["key_scan_error"] = str(e)
+        
+        return stats
+    except ImportError:
+        return {
+            "enabled": False,
+            "error": "Cache module not available"
+        }
+    except Exception as e:
+        return {
+            "enabled": False,
+            "error": str(e)
+        }
+
+
+@router.get("/cache/verify/{chat_id}")
+def verify_chat_cache(
+    chat_id: str,
+    client: Optional[str] = Query(None, description="Client name"),
+    app: Optional[str] = Query(None, description="App name"),
+    project: Optional[str] = Query(None, description="Project name"),
+) -> dict:
+    """Verify if a specific chat is cached in Redis."""
+    try:
+        from .cache import (
+            get_chat_from_cache,
+            is_redis_available,
+            get_cache_key,
+        )
+        from . import storage
+        from redis_client import get_redis_client
+        
+        client_name, app_name, project_name = _get_project_context(client, app, project)
+        
+        result = {
+            "chat_id": chat_id,
+            "context": {
+                "client": client_name or "default",
+                "app": app_name or "default",
+                "project": project_name or "default",
+            },
+            "redis_available": is_redis_available(),
+        }
+        
+        if not is_redis_available():
+            result["error"] = "Redis is not available"
+            return result
+        
+        # Check cache
+        cache_key = get_cache_key(chat_id, client_name, app_name, project_name)
+        result["cache_key"] = cache_key
+        
+        redis_client = get_redis_client()
+        cached_data = redis_client.get(cache_key)
+        
+        if cached_data:
+            if isinstance(cached_data, bytes):
+                cached_data = cached_data.decode('utf-8')
+            import json
+            data = json.loads(cached_data)
+            result["cached"] = True
+            result["message_count"] = len(data.get("messages", []))
+            result["cache_size_bytes"] = len(cached_data.encode('utf-8'))
+            result["ttl"] = redis_client.ttl(cache_key)
+        else:
+            result["cached"] = False
+            result["message_count"] = 0
+        
+        # Check MinIO
+        minio_data = storage.load_chat(chat_id, client_name, app_name, project_name)
+        if minio_data:
+            result["in_minio"] = True
+            result["minio_message_count"] = len(minio_data.get("messages", []))
+        else:
+            result["in_minio"] = False
+            result["minio_message_count"] = 0
+        
+        return result
+    except Exception as e:
+        return {
+            "error": str(e),
+            "chat_id": chat_id
+        }
 

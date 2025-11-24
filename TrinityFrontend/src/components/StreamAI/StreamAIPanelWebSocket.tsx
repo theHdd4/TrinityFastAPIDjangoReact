@@ -4,7 +4,11 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle } from 'lucide-react';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '@/lib/utils';
+import { Send, X, User, Sparkles, Bot, Plus, Trash2, Settings, Paperclip, Mic, Minus, Square, File, RotateCcw, Clock, MessageCircle, ChevronUp, ChevronDown, Plug, Wrench, Brain } from 'lucide-react';
 import { VALIDATE_API } from '@/lib/api';
 import { useLaboratoryStore } from '../LaboratoryMode/store/laboratoryStore';
 import { getAtomHandler, hasAtomHandler } from '../TrinityAI/handlers';
@@ -15,15 +19,73 @@ import { autoSaveStepResult } from '../TrinityAI/handlers/utils';
 import { listMemoryChats, saveMemoryChat, deleteMemoryChat } from '@/lib/trinityMemory';
 import type { MemoryChatResponse } from '@/lib/trinityMemory';
 import { AgentModeProvider, useAgentMode } from './context/AgentModeContext';
+import VoiceInputButton from './VoiceInputButton';
+import ChatInterface from './ChatInterface';
 
 const BRAND_GREEN = '#50C878';
 const BRAND_PURPLE = '#7C3AED';
 
-// FastAPI base URL - use same logic as api.ts for port detection
+// FastAPI base URL - use same logic as api.ts for port detection and domain routing
 const isDevStack = typeof window !== 'undefined' && window.location.port === '8081';
 const aiPort = import.meta.env.VITE_AI_PORT || (isDevStack ? '8005' : '8002');
 const hostIp = import.meta.env.VITE_HOST_IP || 'localhost';
-const FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL || `http://${hostIp}:${aiPort}`;
+
+// Helper function to check if hostname is a domain name (not an IP address)
+const isDomainName = (hostname: string): boolean => {
+  if (!hostname) return false;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return false;
+  const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (ipPattern.test(hostname)) return false;
+  return true;
+};
+
+// Detect protocol from current page
+const getProtocol = () => {
+  if (typeof window !== 'undefined') {
+    return window.location.protocol === 'https:' ? 'https:' : 'http:';
+  }
+  return 'http:';
+};
+
+const protocol = getProtocol();
+
+// Construct FastAPI base URL with domain detection (same logic as api.ts)
+let FASTAPI_BASE_URL = import.meta.env.VITE_FASTAPI_BASE_URL;
+
+if (!FASTAPI_BASE_URL) {
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname;
+    
+    // If accessing via domain name, use the same domain (without port) for reverse proxy
+    if (isDomainName(hostname)) {
+      // Use domain without port - requests will go through reverse proxy at /trinityai
+      FASTAPI_BASE_URL = window.location.origin;
+    } else if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      // Use localhost with port for local development
+      FASTAPI_BASE_URL = `${protocol}//${hostname}:${aiPort}`;
+    } else {
+      // Use IP address with port for direct IP access
+      FASTAPI_BASE_URL = `${protocol}//${hostIp}:${aiPort}`;
+    }
+  } else {
+    // Server-side fallback
+    FASTAPI_BASE_URL = `http://${hostIp}:${aiPort}`;
+  }
+}
+
+// CRITICAL: If accessing via domain name, ALWAYS use the same domain (without port) for reverse proxy
+// This overrides any hardcoded VITE_FASTAPI_BASE_URL or IP-based configuration
+if (typeof window !== 'undefined' && isDomainName(window.location.hostname)) {
+  const currentOrigin = window.location.origin;
+  if (FASTAPI_BASE_URL !== currentOrigin) {
+    console.warn(`[StreamAI] DOMAIN ACCESS DETECTED: Overriding FASTAPI_BASE_URL`);
+    console.warn(`  From: ${FASTAPI_BASE_URL}`);
+    console.warn(`  To: ${currentOrigin}`);
+    console.warn(`  This enables reverse proxy routing via /trinityai`);
+    FASTAPI_BASE_URL = currentOrigin;
+  }
+}
+
 const MEMORY_API_BASE = `${(FASTAPI_BASE_URL || '').replace(/\/$/, '')}/trinityai`;
 
 // Add CSS for fade-in animation and slow pulse
@@ -102,9 +164,11 @@ interface TrinityAIPanelProps {
   isCollapsed: boolean;
   onToggle: () => void;
   onBackgroundStatusChange?: (status: TrinityAIBackgroundStatus) => void;
+  layout?: 'vertical' | 'horizontal'; // New prop for layout direction
+  onClose?: () => void; // Callback for completely hiding the panel (X button)
 }
 
-const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle, onBackgroundStatusChange }) => {
+const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onToggle, onBackgroundStatusChange, layout: layoutProp, onClose }) => {
   // Chat management
   const [chats, setChats] = useState<Chat[]>([]);
   const [currentChatId, setCurrentChatId] = useState<string>('');
@@ -114,9 +178,23 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [isInitialized, setIsInitialized] = useState(false);
   const [showChatHistory, setShowChatHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false); // For collapsible chat history in horizontal mode
+  const [selectedAgent, setSelectedAgent] = useState('Default'); // For agent selection dropdown
   const [panelWidth, setPanelWidth] = useState(384); // Default 384px (w-96)
+  const [panelHeight, setPanelHeight] = useState(500); // Default height for horizontal mode
   const [isPanelFrozen, setIsPanelFrozen] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const [autoSize, setAutoSize] = useState(false); // Auto-size horizontal panel based on canvas area
+  const [canvasAreaWidth, setCanvasAreaWidth] = useState<number | null>(null); // Canvas area width for auto-sizing
+  const [canvasAreaLeft, setCanvasAreaLeft] = useState<number | null>(null); // Canvas area left position for auto-sizing
+  // Layout preference: 'vertical' (default) or 'horizontal'
+  const [preferredLayout, setPreferredLayout] = useState<'vertical' | 'horizontal'>(() => {
+    const saved = localStorage.getItem('trinity_ai_layout_preference');
+    return (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
+  });
+  
+  // Use preferred layout from settings if layout prop not provided
+  const layout = layoutProp || preferredLayout;
   const [baseFontSize] = useState(14);
   const [smallFontSize] = useState(12);
   const isCompact = panelWidth <= 420;
@@ -391,8 +469,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     };
   }, []);
 
-  const persistChatToMemory = useCallback(async (chat: Chat) => {
+  const persistChatToMemory = useCallback(async (chat: Chat): Promise<MemoryChatResponse | null> => {
     try {
+      console.log(`💾 Persisting chat ${chat.id} with ${chat.messages.length} messages to memory/Redis`);
       const result = await saveMemoryChat(MEMORY_API_BASE, chat.id, {
         messages: chat.messages.map(toSerializableMessage),
         metadata: {
@@ -400,16 +479,21 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           createdAt: chat.createdAt.toISOString(),
           sessionId: chat.sessionId,
         },
-        append: false,
+        append: false, // Replace all messages to ensure consistency
       });
       if (result === null) {
+        console.warn('⚠️ Memory service returned null for chat:', chat.id);
         setMemoryError('Memory service unavailable - chat not persisted.');
+        return null;
       } else {
+        console.log(`✅ Chat ${chat.id} persisted successfully with ${result.totalMessages} messages`);
         setMemoryError(null);
+        return result;
       }
     } catch (error) {
-      console.error('Failed to sync chat history:', error);
+      console.error('❌ Failed to sync chat history:', error);
       setMemoryError('Unable to sync chat history to server.');
+      throw error; // Re-throw so caller knows it failed
     }
   }, [MEMORY_API_BASE, toSerializableMessage]);
   
@@ -436,18 +520,50 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
 
         if (records.length > 0) {
-          const mappedChats: Chat[] = records.map(record => mapRecordToChat(record));
-          memoryPersistSkipRef.current = true;
-          setChats(mappedChats);
-
-          const activeChat = mappedChats[0];
-          setCurrentChatId(activeChat.id);
-          // Only update messages if the loaded chat has messages
-          if (activeChat.messages && activeChat.messages.length > 0) {
-            setMessages(activeChat.messages);
+          // Filter out incomplete/partial chats - validate each chat
+          const validChats: Chat[] = [];
+          for (const record of records) {
+            try {
+              // Validate chat structure
+              if (!record.chatId || typeof record.chatId !== 'string') {
+                console.warn('Skipping chat with invalid ID:', record);
+                continue;
+              }
+              if (!Array.isArray(record.messages)) {
+                console.warn('Skipping chat with invalid messages:', record.chatId);
+                continue;
+              }
+              const mappedChat = mapRecordToChat(record);
+              // Additional validation: ensure chat has valid structure
+              if (!mappedChat.id || !Array.isArray(mappedChat.messages)) {
+                console.warn('Skipping chat with invalid structure:', record.chatId);
+                continue;
+              }
+              validChats.push(mappedChat);
+            } catch (error) {
+              console.warn('Skipping invalid chat record:', error, record);
+              continue;
+            }
           }
-          setCurrentSessionId(activeChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-          memoryPersistSkipRef.current = true;
+          
+          if (validChats.length > 0) {
+            memoryPersistSkipRef.current = true;
+            setChats(validChats);
+
+            const activeChat = validChats[0];
+            setCurrentChatId(activeChat.id);
+            // Only update messages if the loaded chat has messages
+            if (activeChat.messages && activeChat.messages.length > 0) {
+              setMessages(activeChat.messages);
+            }
+            setCurrentSessionId(activeChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+            memoryPersistSkipRef.current = true;
+          } else {
+            // All chats were invalid, create new one
+            createNewChat().catch(err => {
+              console.error('Failed to create new chat:', err);
+            });
+          }
         } else {
           // Create new chat but don't wait - messages already set above
           createNewChat().catch(err => {
@@ -490,16 +606,46 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   }, [messages, currentChatId, currentSessionId]);
 
   // Sync to MinIO memory (non-blocking, doesn't affect UI)
+  // This is a backup sync - primary persistence happens in handleSendMessage
   useEffect(() => {
     if (!isInitialized || !currentChatId || messages.length === 0) return;
     if (memoryPersistSkipRef.current) {
       memoryPersistSkipRef.current = false;
       return;
     }
+    
+    // Use current messages state directly to avoid stale data
     const chat = chats.find(c => c.id === currentChatId);
-    if (!chat) return;
-    persistChatToMemory(chat);
-  }, [chats, currentChatId, isInitialized, persistChatToMemory]);
+    if (!chat) {
+      // Chat doesn't exist, create it with current messages
+      const newChat: Chat = {
+        id: currentChatId,
+        title: messages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || 'Trinity AI Chat',
+        messages: messages,
+        createdAt: new Date(),
+        sessionId: currentSessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      };
+      setChats(prev => [newChat, ...prev]);
+      persistChatToMemory(newChat).catch(err => 
+        console.error('Failed to persist new chat in sync effect:', err)
+      );
+      return;
+    }
+    
+    // Ensure chat has latest messages
+    const updatedChat: Chat = {
+      ...chat,
+      messages: messages, // Use current messages state
+    };
+    
+    // Only persist if messages have changed
+    if (updatedChat.messages.length !== chat.messages.length || 
+        updatedChat.messages[updatedChat.messages.length - 1]?.id !== chat.messages[chat.messages.length - 1]?.id) {
+      persistChatToMemory(updatedChat).catch(err => 
+        console.error('Failed to persist chat in sync effect:', err)
+      );
+    }
+  }, [messages, currentChatId, isInitialized, persistChatToMemory, chats, currentSessionId]);
   
   // Switch to a different chat
   const switchToChat = (chatId: string) => {
@@ -539,30 +685,58 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     } catch (error) {
       console.error('Failed to delete chat history:', error);
       setMemoryError('Unable to delete chat history from server.');
+      return; // Don't proceed with UI update if deletion failed
     }
 
-    const remainingChats = chats.filter(chat => chat.id !== currentChatId);
-    if (remainingChats.length === 0) {
-      await createNewChat();
-      return;
-    }
+    // Reload chats from server to ensure consistency
+    try {
+      const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+      const mappedChats: Chat[] = records.map(record => mapRecordToChat(record));
+      
+      if (mappedChats.length === 0) {
+        await createNewChat();
+        return;
+      }
 
-    memoryPersistSkipRef.current = true;
-    setChats(remainingChats);
-    const nextChat = remainingChats[0];
-    setCurrentChatId(nextChat.id);
-    // Ensure messages are never empty - use chat messages or fallback to initial message
-    const nextMessages = nextChat.messages && nextChat.messages.length > 0 
-      ? nextChat.messages 
-      : [{
-          id: '1',
-          content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
-          sender: 'ai' as const,
-          timestamp: new Date()
-        }];
-    setMessages(nextMessages);
-    setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-  }, [MEMORY_API_BASE, chats, createNewChat, currentChatId]);
+      memoryPersistSkipRef.current = true;
+      setChats(mappedChats);
+      const nextChat = mappedChats[0];
+      setCurrentChatId(nextChat.id);
+      // Ensure messages are never empty - use chat messages or fallback to initial message
+      const nextMessages = nextChat.messages && nextChat.messages.length > 0 
+        ? nextChat.messages 
+        : [{
+            id: '1',
+            content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+            sender: 'ai' as const,
+            timestamp: new Date()
+          }];
+      setMessages(nextMessages);
+      setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+    } catch (error) {
+      console.error('Failed to reload chats after deletion:', error);
+      // Fallback to local state update
+      const remainingChats = chats.filter(chat => chat.id !== currentChatId);
+      if (remainingChats.length === 0) {
+        await createNewChat();
+        return;
+      }
+      memoryPersistSkipRef.current = true;
+      setChats(remainingChats);
+      const nextChat = remainingChats[0];
+      setCurrentChatId(nextChat.id);
+      const nextMessages = nextChat.messages && nextChat.messages.length > 0 
+        ? nextChat.messages 
+        : [{
+            id: '1',
+            content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+            sender: 'ai' as const,
+            timestamp: new Date()
+          }];
+      setMessages(nextMessages);
+      setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+    }
+  }, [MEMORY_API_BASE, chats, createNewChat, currentChatId, mapRecordToChat]);
 
   const clearAllChats = useCallback(async () => {
     if (chats.length === 0) {
@@ -578,15 +752,37 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       if (failed && failed.status === 'rejected') {
         throw failed.reason;
       }
-      setChats([]);
+      
+      // Reload chats from server to ensure consistency
+      const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+      const mappedChats: Chat[] = records.map(record => mapRecordToChat(record));
+      
+      setChats(mappedChats);
       memoryPersistSkipRef.current = true;
-      await createNewChat();
+      
+      if (mappedChats.length === 0) {
+        await createNewChat();
+      } else {
+        // Switch to first remaining chat
+        const firstChat = mappedChats[0];
+        setCurrentChatId(firstChat.id);
+        const firstMessages = firstChat.messages && firstChat.messages.length > 0 
+          ? firstChat.messages 
+          : [{
+              id: '1',
+              content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+              sender: 'ai' as const,
+              timestamp: new Date()
+            }];
+        setMessages(firstMessages);
+        setCurrentSessionId(firstChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+      }
       setMemoryError(null);
     } catch (error) {
       console.error('Failed to clear chat history:', error);
       setMemoryError('Unable to clear chat history from server.');
     }
-  }, [MEMORY_API_BASE, chats, createNewChat]);
+  }, [MEMORY_API_BASE, chats, createNewChat, mapRecordToChat]);
 
   const handleCopyChatId = useCallback(async () => {
     if (!currentChatId || !navigator?.clipboard?.writeText) return;
@@ -597,8 +793,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     }
   }, [currentChatId]);
   
-  // Resize handlers
+  // Resize handlers - for vertical mode (width)
   useEffect(() => {
+    if (layout === 'horizontal') return; // Skip for horizontal mode
+    
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
       const newWidth = window.innerWidth - e.clientX;
@@ -618,7 +816,116 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isResizing]);
+  }, [isResizing, layout]);
+  
+  // Resize handlers - for horizontal mode (height)
+  useEffect(() => {
+    if (layout !== 'horizontal') return; // Only for horizontal mode
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const newHeight = window.innerHeight - e.clientY;
+      setPanelHeight(Math.max(300, Math.min(800, newHeight)));
+    };
+    
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+    
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, layout]);
+
+  // Auto-size: Observe canvas area width and position changes for horizontal layout
+  useEffect(() => {
+    if (layout !== 'horizontal' || !autoSize) {
+      setCanvasAreaWidth(null);
+      setCanvasAreaLeft(null);
+      return;
+    }
+
+    const updateCanvasDimensions = () => {
+      // First, try to find an actual card element to measure its real width
+      const firstCard = document.querySelector('[data-card-id]');
+      if (firstCard) {
+        const cardRect = firstCard.getBoundingClientRect();
+        // Use the actual card width (includes border, matches visual appearance)
+        setCanvasAreaWidth(cardRect.width);
+        setCanvasAreaLeft(cardRect.left);
+        return;
+      }
+
+      // Fallback: measure cards container and calculate card width
+      const cardsContainer = document.querySelector('[data-lab-cards-container="true"]');
+      if (cardsContainer) {
+        const containerRect = cardsContainer.getBoundingClientRect();
+        // Cards are w-full within container, so they match container width
+        // Container already has p-6 padding, so this is the actual card width
+        setCanvasAreaWidth(containerRect.width);
+        setCanvasAreaLeft(containerRect.left);
+        return;
+      }
+
+      // Final fallback: canvas area with padding adjustment
+      const canvasElement = document.querySelector('[data-lab-canvas="true"]');
+      if (!canvasElement) return;
+
+      const rect = canvasElement.getBoundingClientRect();
+      // Account for padding (p-6 = 24px on each side)
+      const padding = 48; // 24px left + 24px right
+      setCanvasAreaWidth(rect.width - padding);
+      setCanvasAreaLeft(rect.left + 24); // Add left padding
+    };
+
+    // Try to find a card element first (most accurate measurement)
+    let targetElement = document.querySelector('[data-card-id]');
+    
+    // Fallback to cards container if no card found
+    if (!targetElement) {
+      targetElement = document.querySelector('[data-lab-cards-container="true"]');
+    }
+    
+    // Final fallback to canvas element
+    if (!targetElement) {
+      targetElement = document.querySelector('[data-lab-canvas="true"]');
+    }
+
+    if (!targetElement) {
+      // Retry after a short delay if element not found
+      const timeoutId = setTimeout(() => {
+        updateCanvasDimensions();
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+
+    // Initial measurement
+    updateCanvasDimensions();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateCanvasDimensions();
+    });
+
+    // Also listen to window resize and scroll to update position
+    const handleResize = () => updateCanvasDimensions();
+    const handleScroll = () => updateCanvasDimensions();
+
+    resizeObserver.observe(targetElement);
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleScroll, true);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [layout, autoSize]);
   
   const handleMouseDown = (e: React.MouseEvent) => {
     if (isPanelFrozen) return;
@@ -669,6 +976,19 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+  
+  // Auto-resize textarea
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      const scrollHeight = textarea.scrollHeight;
+      const newHeight = Math.min(scrollHeight, 200);
+      // Use setProperty with important to ensure it overrides CSS classes
+      textarea.style.setProperty('height', `${newHeight}px`, 'important');
+    }
+  }, [inputValue]);
   
   // Handle workflow approval
   const handleAcceptWorkflow = () => {
@@ -897,6 +1217,9 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
     
+    // Store input value immediately to prevent loss
+    const messageContent = inputValue.trim();
+    
     // CRITICAL: Close any existing WebSocket before creating new one
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
       console.log('🔌 Closing existing WebSocket before new prompt');
@@ -909,13 +1232,92 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     const userMessage: Message = {
       id: `user-${Date.now()}`,
-      content: inputValue,
+      content: messageContent,
       sender: 'user',
       timestamp: new Date()
     };
     
-    setMessages(prev => [...prev, userMessage]);
+    // CRITICAL: Add message to state IMMEDIATELY before any async operations
+    setMessages(prev => {
+      const updated = [...prev, userMessage];
+      return updated;
+    });
+    
+    // CRITICAL: Clear input immediately to prevent double-sending
     setInputValue('');
+    
+    // CRITICAL: Persist user message to memory IMMEDIATELY before WebSocket connection
+    // This ensures the message is never lost even if connection fails
+    // Use a function to get the latest messages state to avoid stale closures
+    try {
+      // Get the latest messages from state (includes the user message we just added)
+      const latestMessages = [...messages, userMessage];
+      
+      // Get current chat or create one if it doesn't exist
+      let currentChat = chats.find(c => c.id === currentChatId);
+      if (!currentChat) {
+        // Chat doesn't exist, create it
+        const newChatId = currentChatId || `stream_chat_${Date.now()}`;
+        const newSessionId = currentSessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        currentChat = {
+          id: newChatId,
+          title: 'New Trinity AI Chat',
+          messages: latestMessages,
+          createdAt: new Date(),
+          sessionId: newSessionId,
+        };
+        setCurrentChatId(newChatId);
+        setCurrentSessionId(newSessionId);
+        setChats(prev => [currentChat!, ...prev]);
+      }
+      
+      // Build updated chat with latest messages
+      const updatedChat: Chat = {
+        ...currentChat,
+        messages: latestMessages, // Use latest messages including the new user message
+        title: latestMessages.find(m => m.sender === 'user')?.content.slice(0, 30) + '...' || currentChat.title,
+      };
+      
+      // Update chats state immediately
+      setChats(prev => prev.map(chat => 
+        chat.id === currentChatId ? updatedChat : chat
+      ));
+      
+      // Persist immediately with await to ensure it completes
+      memoryPersistSkipRef.current = false; // Allow persistence
+      const persistResult = await persistChatToMemory(updatedChat);
+      
+      if (persistResult === null) {
+        console.warn('⚠️ Memory service returned null, message may not be persisted');
+      } else {
+        console.log('✅ User message persisted to memory/Redis before WebSocket connection');
+      }
+    } catch (persistError) {
+      console.error('⚠️ Failed to persist user message immediately:', persistError);
+      // CRITICAL: Even if persistence fails, try again with a retry mechanism
+      // Store in a queue for retry
+      setTimeout(async () => {
+        try {
+          const retryChat = chats.find(c => c.id === currentChatId);
+          if (retryChat) {
+            const retryMessages = [...retryChat.messages];
+            if (!retryMessages.some(m => m.id === userMessage.id)) {
+              retryMessages.push(userMessage);
+            }
+            const retryUpdatedChat: Chat = {
+              ...retryChat,
+              messages: retryMessages,
+            };
+            memoryPersistSkipRef.current = false;
+            await persistChatToMemory(retryUpdatedChat);
+            console.log('✅ User message persisted on retry');
+          }
+        } catch (retryError) {
+          console.error('❌ Retry persistence also failed:', retryError);
+        }
+      }, 1000);
+    }
+    
     setIsLoading(true);
     
     // Create progress message
@@ -975,15 +1377,29 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         // Store original prompt for ADD functionality
         setOriginalPrompt(userMessage.content);
         
-        // Send initial message with available files
-        ws.send(JSON.stringify({
-          message: userMessage.content,
-          available_files: fileNames,  // Use freshly loaded files
-          project_context: projectContext,
-          user_id: 'current_user',
-          session_id: currentSessionId,  // Send session ID for chat context
-          chat_id: currentChatId
-        }));
+        try {
+          // Send initial message with available files
+          ws.send(JSON.stringify({
+            message: userMessage.content,
+            available_files: fileNames,  // Use freshly loaded files
+            project_context: projectContext,
+            user_id: 'current_user',
+            session_id: currentSessionId,  // Send session ID for chat context
+            chat_id: currentChatId
+          }));
+          console.log('✅ Message sent to WebSocket');
+        } catch (sendError) {
+          console.error('❌ Failed to send message to WebSocket:', sendError);
+          // Message is already in state and persisted, so user won't lose it
+          const sendErrorMsg: Message = {
+            id: `send-error-${Date.now()}`,
+            content: '❌ Failed to send message. Your message has been saved. Please try again.',
+            sender: 'ai',
+            timestamp: new Date()
+          };
+          setMessages(prev => [...prev, sendErrorMsg]);
+          setIsLoading(false);
+        }
       };
       
       ws.onmessage = async (event) => {
@@ -1342,15 +1758,46 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             
           case 'workflow_insight':
             console.log('✅ Workflow insight received:', data);
+            const insightContent = data.insight || 'No insight generated';
+            const insightText = `📊 **Workflow Insights**\n\n${insightContent}`;
+            console.log(`📊 Insight message length: ${insightText.length} characters`);
+            
             // Display the insight in a new message
             const insightMessage: Message = {
               id: `insight-${Date.now()}`,
-              content: `📊 **Workflow Insights**\n\n${data.insight || 'No insight generated'}`,
+              content: insightText,
               sender: 'ai',
               timestamp: new Date(),
               type: 'text'
             };
-            setMessages(prev => [...prev, insightMessage]);
+            
+            // CRITICAL: Add insight to messages and persist immediately
+            setMessages(prev => {
+              const updated = [...prev, insightMessage];
+              console.log(`💾 Total messages after insight: ${updated.length}`);
+              
+              // Persist immediately with insight included
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: updated,
+                };
+                memoryPersistSkipRef.current = false;
+                persistChatToMemory(updatedChat).then(result => {
+                  if (result) {
+                    console.log(`✅ Insight persisted successfully. Total messages: ${result.totalMessages}`);
+                  } else {
+                    console.warn('⚠️ Insight persistence returned null');
+                  }
+                }).catch(err => {
+                  console.error('❌ Failed to persist insight:', err);
+                });
+              }
+              
+              return updated;
+            });
+            
             updateProgress('\n\n✅ Insights generated!');
             setIsLoading(false);
             // Now close the connection after insight is received
@@ -1393,20 +1840,100 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       ws.onerror = (error) => {
         console.error('❌ WebSocket error:', error);
         updateProgress('\n\n❌ Connection error');
+        
+        // CRITICAL: Add error message to chat so user knows what happened
+        const errorMsg: Message = {
+          id: `error-${Date.now()}`,
+          content: '❌ Connection error occurred. Your message has been saved. Please try again.',
+          sender: 'ai',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, errorMsg]);
+        
+        // CRITICAL: Ensure user message is persisted even on error
+        try {
+          const currentChat = chats.find(c => c.id === currentChatId);
+          if (currentChat) {
+            const updatedChat: Chat = {
+              ...currentChat,
+              messages: currentChat.messages.some(m => m.id === userMessage.id) 
+                ? currentChat.messages 
+                : [...currentChat.messages, userMessage],
+            };
+            memoryPersistSkipRef.current = false;
+            persistChatToMemory(updatedChat).catch(err => 
+              console.error('Failed to persist on error:', err)
+            );
+          }
+        } catch (persistError) {
+          console.error('Failed to persist message on WebSocket error:', persistError);
+        }
+        
         setIsLoading(false);
         stopAutoRun();
       };
       
-      ws.onclose = () => {
-        console.log('🔌 WebSocket closed');
+      ws.onclose = (event) => {
+        console.log('🔌 WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
         stopAutoRun();
         setWsConnection(null);
+        
+        // CRITICAL: If connection closed unexpectedly (not clean), ensure message is saved
+        if (!event.wasClean && event.code !== 1000) {
+          console.warn('⚠️ WebSocket closed unexpectedly, ensuring message is persisted');
+          try {
+            const currentChat = chats.find(c => c.id === currentChatId);
+            if (currentChat) {
+              const updatedChat: Chat = {
+                ...currentChat,
+                messages: currentChat.messages.some(m => m.id === userMessage.id) 
+                  ? currentChat.messages 
+                  : [...currentChat.messages, userMessage],
+              };
+              memoryPersistSkipRef.current = false;
+              persistChatToMemory(updatedChat).catch(err => 
+                console.error('Failed to persist on close:', err)
+              );
+            }
+          } catch (persistError) {
+            console.error('Failed to persist message on WebSocket close:', persistError);
+          }
+        }
+        
         // 🔧 CRITICAL FIX: Always set loading to false when connection closes
         setIsLoading(false);
       };
       
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ Error in handleSendMessage:', error);
+      
+      // CRITICAL: Ensure user message is persisted even if there's an exception
+      try {
+        const currentChat = chats.find(c => c.id === currentChatId);
+        if (currentChat) {
+          const updatedChat: Chat = {
+            ...currentChat,
+            messages: currentChat.messages.some(m => m.id === userMessage.id) 
+              ? currentChat.messages 
+              : [...currentChat.messages, userMessage],
+          };
+          memoryPersistSkipRef.current = false;
+          await persistChatToMemory(updatedChat);
+          console.log('✅ User message persisted after exception');
+        }
+      } catch (persistError) {
+        console.error('Failed to persist message after exception:', persistError);
+      }
+      
+      // Add error message to chat
+      const errorMsg: Message = {
+        id: `error-${Date.now()}`,
+        content: `❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}. Your message has been saved.`,
+        sender: 'ai',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMsg]);
+      
       setIsLoading(false);
     }
   };
@@ -1417,6 +1944,302 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     return null;
   }
 
+  // For horizontal layout, render with new ChatInterface component
+  if (layout === 'horizontal') {
+    return (
+      <>
+        <ChatInterface
+          messages={messages}
+          inputValue={inputValue}
+          setInputValue={setInputValue}
+          isLoading={isLoading}
+          onSendMessage={handleSendMessage}
+          selectedAgent={selectedAgent}
+          setSelectedAgent={setSelectedAgent}
+          onMinimize={onToggle}
+          onSettings={() => setShowSettings(!showSettings)}
+          onClose={() => {
+            if (wsConnection) {
+              wsConnection.close();
+            }
+            setIsLoading(false);
+            if (onClose) {
+              onClose();
+            } else {
+              onToggle();
+            }
+          }}
+          onToggleCollapse={onToggle}
+          isCollapsed={isCollapsed}
+          onAttachClick={handleAttachClick}
+          onVoiceTranscript={(text) => {
+            setInputValue(prev => prev ? `${prev} ${text}` : text);
+          }}
+          showFilePicker={showFilePicker}
+          availableFiles={availableFiles}
+          loadingFiles={loadingFiles}
+          onFileSelect={(fileName) => {
+            setInputValue(prev => prev ? `${prev} @${fileName}` : `@${fileName}`);
+            setShowFilePicker(false);
+          }}
+          textareaRef={textareaRef}
+          onHistoryClick={() => setShowChatHistory(!showChatHistory)}
+          showChatHistory={showChatHistory}
+          onMemoryClick={() => setShowChatHistory(!showChatHistory)}
+          onConnectorsClick={() => {
+            // TODO: Implement connectors functionality
+            console.log('Connectors clicked');
+          }}
+          onToolsClick={() => {
+            // TODO: Implement tools functionality
+            console.log('Tools clicked');
+          }}
+          onAgentClick={() => {
+            // TODO: Implement agent functionality
+            console.log('Agent clicked');
+          }}
+          onAdvancedReasoningClick={() => {
+            // TODO: Implement advanced reasoning functionality
+            console.log('Advanced Reasoning clicked');
+          }}
+          onWorkflowAccept={() => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+            setIsLoading(true);
+          }
+        }}
+        onWorkflowReject={() => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({ type: 'reject_plan' }));
+            wsConnection.close();
+            setWsConnection(null);
+          }
+          setIsLoading(false);
+        }}
+        onWorkflowAdd={(info) => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({
+              type: 'add_info',
+              step_number: 0,
+              additional_info: info,
+              original_prompt: originalPrompt
+            }));
+            setIsLoading(true);
+          }
+        }}
+        onWorkflowRunAll={() => {
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            startAutoRun();
+            wsConnection.send(JSON.stringify({ type: 'approve_plan' }));
+            setIsLoading(true);
+          }
+        }}
+        onStepAccept={(stepNumber) => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({
+              type: 'approve_step',
+              step_number: stepNumber
+            }));
+            // Find and remove the step approval message
+            setMessages(prev => {
+              const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
+              return msgToRemove ? prev.filter(m => m.id !== msgToRemove.id) : prev;
+            });
+            setIsLoading(true);
+          }
+        }}
+        onStepReject={(stepNumber) => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({
+              type: 'reject_workflow',
+              step_number: stepNumber
+            }));
+            wsConnection.close();
+            setWsConnection(null);
+          }
+          // Find and remove the step approval message
+          setMessages(prev => {
+            const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
+            return msgToRemove ? prev.filter(m => m.id !== msgToRemove.id) : prev;
+          });
+          setIsLoading(false);
+        }}
+        onStepAdd={(stepNumber, info) => {
+          stopAutoRun();
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            wsConnection.send(JSON.stringify({
+              type: 'add_info',
+              step_number: stepNumber,
+              additional_info: info,
+              original_prompt: originalPrompt
+            }));
+            // Find and remove the step approval message
+            setMessages(prev => {
+              const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
+              return msgToRemove ? prev.filter(m => m.id !== msgToRemove.id) : prev;
+            });
+            setIsLoading(true);
+          }
+        }}
+        onStepRunAll={(stepNumber, sequenceId) => {
+          if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+            startAutoRun();
+            // Find and remove the step approval message
+            setMessages(prev => {
+              const msgToRemove = prev.find(m => m.type === 'step_approval' && m.data?.stepNumber === stepNumber);
+              return msgToRemove ? prev.filter(m => m.id !== msgToRemove.id) : prev;
+            });
+            queueAutoApprove(stepNumber, sequenceId);
+            setIsLoading(true);
+          }
+        }}
+        isAutoRunning={isAutoRunning}
+        parseMarkdown={parseMarkdown}
+        autoSize={autoSize}
+        canvasAreaWidth={canvasAreaWidth}
+        canvasAreaLeft={canvasAreaLeft}
+      />
+      
+      {/* Settings Panel for Horizontal Layout */}
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <div 
+            className="fixed inset-0 bg-black/20 backdrop-blur-sm pointer-events-auto"
+            onClick={() => setShowSettings(false)}
+          />
+          <div className="relative w-full max-w-md mx-4 bg-white backdrop-blur-xl border-2 border-gray-200 rounded-2xl shadow-2xl pointer-events-auto max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Settings</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowSettings(false)}
+                  className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            
+            <ScrollArea className="flex-1 p-4">
+              <div className="space-y-6">
+                {/* Panel Settings */}
+                <div className="space-y-3">
+                  <h4 className="font-semibold text-gray-700 mb-3 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Panel Settings</h4>
+                  
+                  {/* Layout Preference Toggle */}
+                  <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>View</h5>
+                        <p className="text-gray-600 font-inter text-xs">Choose between horizontal and vertical layout</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-medium ${preferredLayout === 'vertical' ? 'text-gray-800' : 'text-gray-400'}`}>Vertical</span>
+                        <button
+                          onClick={() => {
+                            const newLayout = preferredLayout === 'vertical' ? 'horizontal' : 'vertical';
+                            setPreferredLayout(newLayout);
+                            localStorage.setItem('trinity_ai_layout_preference', newLayout);
+                            // Dispatch custom event for same-tab updates
+                            window.dispatchEvent(new Event('trinity_ai_layout_changed'));
+                            setShowSettings(false); // Close settings after changing layout
+                          }}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            preferredLayout === 'horizontal' ? '' : 'bg-gray-300'
+                          }`}
+                          style={preferredLayout === 'horizontal' ? { backgroundColor: BRAND_GREEN } : undefined}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            preferredLayout === 'horizontal' ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
+                        </button>
+                        <span className={`text-xs font-medium ${preferredLayout === 'horizontal' ? 'text-gray-800' : 'text-gray-400'}`}>Horizontal</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Auto Size Toggle - Only for horizontal layout */}
+                  {preferredLayout === 'horizontal' && (
+                    <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>Auto Size</h5>
+                          <p className="text-gray-600 font-inter text-xs">Automatically adjust panel width based on canvas area</p>
+                        </div>
+                        <button
+                          onClick={() => setAutoSize(!autoSize)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            autoSize ? '' : 'bg-gray-300'
+                          }`}
+                          style={autoSize ? { backgroundColor: BRAND_GREEN } : undefined}
+                        >
+                          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            autoSize ? 'translate-x-6' : 'translate-x-1'
+                          }`} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Freeze Panel Toggle */}
+                  <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>Freeze Panel Size</h5>
+                        <p className="text-gray-600 font-inter text-xs">Lock panel width and prevent resizing</p>
+                      </div>
+                      <button
+                        onClick={() => setIsPanelFrozen(!isPanelFrozen)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          isPanelFrozen ? '' : 'bg-gray-300'
+                        }`}
+                        style={isPanelFrozen ? { backgroundColor: BRAND_GREEN } : undefined}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          isPanelFrozen ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* WebSocket Connection Status */}
+                  <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm">
+                    <h5 className="font-semibold text-gray-800 mb-2 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Connection Status</h5>
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-3 h-3 rounded-full ${wsConnection ? 'animate-pulse' : ''}`}
+                        style={{ backgroundColor: wsConnection ? BRAND_GREEN : '#D1D5DB' }}
+                      ></div>
+                      <span className="text-gray-600 font-inter" style={{ fontSize: `${smallFontSize}px` }}>
+                        {wsConnection ? 'Connected' : 'Disconnected'}
+                      </span>
+                    </div>
+                    {currentWorkflowMessageId && (
+                      <div className="mt-2">
+                        <p className="text-gray-600 font-inter text-xs">
+                          Active workflow in progress
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </ScrollArea>
+          </div>
+        </div>
+      )}
+      </>
+    );
+  }
+
+  // Original vertical layout
   return (
     <div className={isCollapsed ? 'hidden' : ''} style={{ height: '100%' }}>
     <Card className="h-full bg-white backdrop-blur-xl shadow-[0_20px_70px_rgba(0,0,0,0.3)] border-2 border-gray-200 overflow-hidden flex flex-col relative ring-1 ring-gray-100" style={{ width: `${panelWidth}px` }}>
@@ -1442,6 +2265,60 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               {/* Panel Settings */}
               <div className="space-y-3">
                 <h4 className="font-semibold text-gray-700 mb-3 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Panel Settings</h4>
+                
+                {/* Layout Preference Toggle */}
+                <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>View</h5>
+                      <p className="text-gray-600 font-inter text-xs">Choose between horizontal and vertical layout</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-medium ${preferredLayout === 'vertical' ? 'text-gray-800' : 'text-gray-400'}`}>Vertical</span>
+                      <button
+                        onClick={() => {
+                          const newLayout = preferredLayout === 'vertical' ? 'horizontal' : 'vertical';
+                          setPreferredLayout(newLayout);
+                          localStorage.setItem('trinity_ai_layout_preference', newLayout);
+                          // Dispatch custom event for same-tab updates
+                          window.dispatchEvent(new Event('trinity_ai_layout_changed'));
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          preferredLayout === 'horizontal' ? '' : 'bg-gray-300'
+                        }`}
+                        style={preferredLayout === 'horizontal' ? { backgroundColor: BRAND_GREEN } : undefined}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          preferredLayout === 'horizontal' ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                      <span className={`text-xs font-medium ${preferredLayout === 'horizontal' ? 'text-gray-800' : 'text-gray-400'}`}>Horizontal</span>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Auto Size Toggle - Only for horizontal layout */}
+                {preferredLayout === 'horizontal' && (
+                  <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <h5 className="font-semibold text-gray-800 font-inter mb-1" style={{ fontSize: `${baseFontSize}px` }}>Auto Size</h5>
+                        <p className="text-gray-600 font-inter text-xs">Automatically adjust panel width based on canvas area</p>
+                      </div>
+                      <button
+                        onClick={() => setAutoSize(!autoSize)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          autoSize ? '' : 'bg-gray-300'
+                        }`}
+                        style={autoSize ? { backgroundColor: BRAND_GREEN } : undefined}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          autoSize ? 'translate-x-6' : 'translate-x-1'
+                        }`} />
+                      </button>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Freeze Panel Toggle */}
                 <div className="p-4 bg-white rounded-xl border-2 border-gray-200 shadow-sm hover:shadow-md transition-all duration-200">
@@ -1559,14 +2436,78 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Chat History</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowChatHistory(false)}
-                className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
-              >
-                <X className="w-4 h-4" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    if (chats.length === 0) return;
+                    if (confirm(`Are you sure you want to delete all ${chats.length} chats? This cannot be undone.`)) {
+                      try {
+                        setIsMemoryLoading(true);
+                        const results = await Promise.allSettled(
+                          chats.map(chat => deleteMemoryChat(MEMORY_API_BASE, chat.id))
+                        );
+                        const failed = results.filter(result => result.status === 'rejected');
+                        if (failed.length > 0) {
+                          console.error('Some chats failed to delete:', failed);
+                          setMemoryError(`Failed to delete ${failed.length} chat(s). Please try again.`);
+                        } else {
+                          // Reload chats from server to ensure consistency
+                          const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+                          const mappedChats: Chat[] = records
+                            .filter(record => {
+                              if (!record.chatId || typeof record.chatId !== 'string') return false;
+                              if (!Array.isArray(record.messages)) return false;
+                              return true;
+                            })
+                            .map(record => mapRecordToChat(record));
+                          
+                          setChats(mappedChats);
+                          memoryPersistSkipRef.current = true;
+                          
+                          if (mappedChats.length === 0) {
+                            await createNewChat();
+                          } else {
+                            // Switch to first remaining chat
+                            const firstChat = mappedChats[0];
+                            setCurrentChatId(firstChat.id);
+                            const firstMessages = firstChat.messages && firstChat.messages.length > 0 
+                              ? firstChat.messages 
+                              : [{
+                                  id: '1',
+                                  content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+                                  sender: 'ai' as const,
+                                  timestamp: new Date()
+                                }];
+                            setMessages(firstMessages);
+                            setCurrentSessionId(firstChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                          }
+                          setMemoryError(null);
+                        }
+                      } catch (error) {
+                        console.error('Failed to clear all chats:', error);
+                        setMemoryError('Unable to clear all chats from server.');
+                      } finally {
+                        setIsMemoryLoading(false);
+                      }
+                    }
+                  }}
+                  className="h-6 px-2 text-xs hover:bg-red-100 hover:text-red-600 text-gray-600 rounded-lg transition-colors"
+                  disabled={chats.length === 0 || isMemoryLoading}
+                  title="Clear All Chats"
+                >
+                  Clear All
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowChatHistory(false)}
+                  className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
           </div>
           
@@ -1594,8 +2535,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 chats.map((chat) => (
                   <div
                     key={chat.id}
-                    onClick={() => switchToChat(chat.id)}
-                    className={`p-3 rounded-xl cursor-pointer transition-all duration-200 border-2 ${
+                    className={`p-3 rounded-xl transition-all duration-200 border-2 ${
                       chat.id === currentChatId
                         ? 'shadow-md'
                         : 'bg-gray-50 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
@@ -1610,7 +2550,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                     }
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => switchToChat(chat.id)}
+                      >
                         <h4 className="font-semibold text-gray-800 font-inter text-sm truncate">
                           {chat.title}
                         </h4>
@@ -1618,12 +2561,79 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                           {new Date(chat.createdAt).toLocaleDateString()} • {chat.messages.length} messages
                         </p>
                       </div>
-                      {chat.id === currentChatId && (
-                        <div
-                          className="w-2 h-2 rounded-full flex-shrink-0 mt-1"
-                          style={{ backgroundColor: BRAND_GREEN }}
-                        />
-                      )}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {chat.id === currentChatId && (
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: BRAND_GREEN }}
+                          />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 hover:bg-red-100 hover:text-red-600 text-gray-400 rounded-lg"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            if (confirm(`Are you sure you want to delete "${chat.title}"? This cannot be undone.`)) {
+                              try {
+                                setIsMemoryLoading(true);
+                                console.log('Deleting chat:', chat.id);
+                                await deleteMemoryChat(MEMORY_API_BASE, chat.id);
+                                console.log('Chat deleted successfully, reloading...');
+                                
+                                // Reload chats from server
+                                const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+                                console.log('Reloaded chats:', records.length);
+                                const mappedChats: Chat[] = records
+                                  .filter(record => {
+                                    // Validate chat structure
+                                    if (!record.chatId || typeof record.chatId !== 'string') return false;
+                                    if (!Array.isArray(record.messages)) return false;
+                                    return true;
+                                  })
+                                  .map(record => mapRecordToChat(record));
+                                
+                                memoryPersistSkipRef.current = true;
+                                setChats(mappedChats);
+                                
+                                // If we deleted the current chat, switch to first available or create new
+                                if (chat.id === currentChatId) {
+                                  if (mappedChats.length === 0) {
+                                    await createNewChat();
+                                  } else {
+                                    const nextChat = mappedChats[0];
+                                    setCurrentChatId(nextChat.id);
+                                    const nextMessages = nextChat.messages && nextChat.messages.length > 0 
+                                      ? nextChat.messages 
+                                      : [{
+                                          id: '1',
+                                          content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+                                          sender: 'ai' as const,
+                                          timestamp: new Date()
+                                        }];
+                                    setMessages(nextMessages);
+                                    setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                                  }
+                                }
+                                setMemoryError(null);
+                                console.log('Chat deletion completed successfully');
+                              } catch (error) {
+                                console.error('Failed to delete chat:', error);
+                                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                                setMemoryError(`Unable to delete chat: ${errorMessage}`);
+                                alert(`Failed to delete chat: ${errorMessage}`);
+                              } finally {
+                                setIsMemoryLoading(false);
+                              }
+                            }
+                          }}
+                          title="Delete Chat"
+                          disabled={isMemoryLoading}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 ))
@@ -2108,14 +3118,15 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               </div>
             )}
           </div>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="h-10 w-10 p-0 hover:bg-gray-100 hover:text-gray-800 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
-            title="Voice Input"
-          >
-            <Mic className="w-4 h-4" />
-          </Button>
+          <VoiceInputButton
+            onTranscript={(text) => {
+              setInputValue(prev => prev ? `${prev} ${text}` : text);
+            }}
+            disabled={isLoading}
+            className="h-10 w-10 p-0 transition-all duration-200 rounded-xl hover:scale-110 shadow-sm hover:shadow-md"
+            size="sm"
+            variant="ghost"
+          />
           <Button 
             variant="ghost" 
             size="sm" 
@@ -2130,6 +3141,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         <div className="flex items-end gap-3">
           <div className="relative flex-1">
             <Textarea
+              ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => {

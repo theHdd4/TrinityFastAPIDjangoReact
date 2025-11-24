@@ -9,6 +9,7 @@ import { TRINITY_AI_API } from '@/lib/api';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { atomHandlers, hasAtomData, AtomHandlerContext, Message } from './handlers';
 import { cn } from '@/lib/utils';
+import VoiceInputButton from '../StreamAI/VoiceInputButton';
 
 interface AtomAIChatBotProps {
   atomId: string;
@@ -26,6 +27,7 @@ const ENDPOINTS: Record<string, string> = {
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
   'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
+  'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
 };
 
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
@@ -274,7 +276,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                                  (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
                                  (atomType === 'chart-maker' && data.chart_json) ||
                                  (atomType === 'explore' && data.exploration_config) ||
-                                 (atomType === 'dataframe-operations' && data.dataframe_config);
+                                 (atomType === 'dataframe-operations' && data.dataframe_config) ||
+                                 (atomType === 'data-upload-validate' && data.validate_json);
         
         console.log('🔍 ===== HANDLER ROUTING DEBUG =====');
         console.log('🔍 atomType:', atomType);
@@ -518,6 +521,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         <div className="p-2 border-t border-gray-200 bg-white rounded-b-md">
           <div className="flex space-x-2">
             <Textarea value={inputValue} onChange={e => setInputValue(e.target.value)} onKeyPress={handleKeyPress} placeholder="Ask AI..." className="flex-1 resize-none h-8" />
+            <VoiceInputButton
+              onTranscript={(text) => {
+                setInputValue(prev => prev ? `${prev} ${text}` : text);
+              }}
+              disabled={isLoading}
+              className="h-8 w-8 p-0"
+              size="sm"
+              variant="ghost"
+            />
             <Button onClick={handleSendMessage} disabled={!inputValue.trim() || isLoading} className="h-8 px-2 bg-blue-500 text-white">
               <Send className="w-3 h-3" />
             </Button>

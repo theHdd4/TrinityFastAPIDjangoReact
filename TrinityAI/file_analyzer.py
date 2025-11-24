@@ -439,12 +439,44 @@ class FileAnalyzer:
         datetime_info = {}
         
         try:
-            datetime_info.update({
-                "earliest_date": str(col_data.min()) if not col_data.empty else None,
-                "latest_date": str(col_data.max()) if not col_data.empty else None,
-                "date_range_days": (col_data.max() - col_data.min()).days if not col_data.empty else None,
-                "has_time_component": any(col_data.dt.time != pd.Timestamp('00:00:00').time()) if not col_data.empty else False
-            })
+            if col_data.empty:
+                datetime_info.update({
+                    "earliest_date": None,
+                    "latest_date": None,
+                    "date_range_days": None,
+                    "has_time_component": False
+                })
+            else:
+                # Filter out NaT values before calculating min/max
+                valid_dates = col_data.dropna()
+                
+                if len(valid_dates) > 0:
+                    min_date = valid_dates.min()
+                    max_date = valid_dates.max()
+                    
+                    # Check if min/max are NaT
+                    if pd.notna(min_date) and pd.notna(max_date):
+                        datetime_info.update({
+                            "earliest_date": str(min_date),
+                            "latest_date": str(max_date),
+                            "date_range_days": (max_date - min_date).days,
+                            "has_time_component": any(valid_dates.dt.time != pd.Timestamp('00:00:00').time())
+                        })
+                    else:
+                        datetime_info.update({
+                            "earliest_date": None,
+                            "latest_date": None,
+                            "date_range_days": None,
+                            "has_time_component": False
+                        })
+                else:
+                    # All values are NaT
+                    datetime_info.update({
+                        "earliest_date": None,
+                        "latest_date": None,
+                        "date_range_days": None,
+                        "has_time_component": False
+                    })
         except Exception as e:
             logger.warning(f"Error analyzing datetime column: {str(e)}")
         
@@ -484,8 +516,27 @@ class FileAnalyzer:
         Returns:
             JSON-serializable version of the object
         """
+        # Handle pandas NaT (Not a Time) and NaN values
+        # Check for NaTType specifically (pandas datetime NaT)
+        try:
+            if pd.isna(obj):
+                # Check if it's actually NaT (not just None)
+                if obj is not None and (isinstance(obj, pd.Timestamp) or 
+                                       str(type(obj)).endswith("NaTType'>") or
+                                       str(obj) == 'NaT'):
+                    return None
+                # Regular None or NaN
+                return None
+        except (TypeError, ValueError):
+            # If pd.isna fails, continue with other checks
+            pass
+        
         if hasattr(obj, 'item'):  # numpy scalar
-            return obj.item()
+            try:
+                return obj.item()
+            except (ValueError, OverflowError):
+                # If item() fails, try converting to string
+                return str(obj)
         elif hasattr(obj, 'tolist'):  # numpy array
             return obj.tolist()
         elif isinstance(obj, dict):
@@ -493,6 +544,9 @@ class FileAnalyzer:
         elif isinstance(obj, list):
             return [self._convert_to_json_serializable(item) for item in obj]
         elif isinstance(obj, (pd.Timestamp, pd.Timedelta)):
+            # Check if it's NaT before converting to string
+            if pd.isna(obj):
+                return None
             return str(obj)
         elif hasattr(obj, 'dtype'):  # pandas Series
             return obj.tolist()
@@ -511,7 +565,17 @@ class FileAnalyzer:
             Dictionary with sample data for each column
         """
         sample_df = df.head(n_samples)
-        return {col: sample_df[col].tolist() for col in sample_df.columns}
+        result = {}
+        for col in sample_df.columns:
+            col_data = sample_df[col]
+            # Convert to list, handling NaT values
+            if pd.api.types.is_datetime64_any_dtype(col_data):
+                # For datetime columns, convert NaT to None
+                result[col] = [None if pd.isna(val) else str(val) for val in col_data.tolist()]
+            else:
+                # For other columns, use standard conversion
+                result[col] = [None if pd.isna(val) else val for val in col_data.tolist()]
+        return result
     
     def _get_statistical_summary(self, df: pd.DataFrame) -> Dict[str, Any]:
         """

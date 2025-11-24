@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Send, X, MessageSquare, Bot, User, Sparkles } from 'lucide-react';
 import ChatSuggestions from './ChatSuggestions';
 import { TRINITY_AI_API } from '@/lib/api';
+import VoiceInputButton from '../StreamAI/VoiceInputButton';
 
 interface Message {
   id: string;
@@ -231,6 +232,15 @@ const AIChatBot: React.FC<AIChatBotProps> = ({ cardId, cardTitle, onAddAtom, dis
                 placeholder="Ask AI to..."
                 className="flex-1 min-h-[60px] resize-none border-gray-300 focus:border-blue-500 focus:ring-blue-500"
                 disabled={isLoading}
+              />
+              <VoiceInputButton
+                onTranscript={(text) => {
+                  setInputValue(prev => prev ? `${prev} ${text}` : text);
+                }}
+                disabled={isLoading}
+                className="self-end h-[60px] w-[60px] p-0"
+                size="sm"
+                variant="ghost"
               />
               <Button
                 onClick={handleSendMessage}

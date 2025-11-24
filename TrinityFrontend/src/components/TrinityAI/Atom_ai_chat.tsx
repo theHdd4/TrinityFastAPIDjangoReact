@@ -10,6 +10,7 @@ import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { createColumnHandler } from './handlers/createColumnHandler';
 import { AtomHandlerContext } from './handlers/types';
+import { getAtomHandler } from './handlers';
 
 interface Message {
   id: string;
@@ -34,6 +35,7 @@ const ENDPOINTS: Record<string, string> = {
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
   'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
+  'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
 };
 
 const PERFORM_ENDPOINTS: Record<string, string> = {
@@ -270,7 +272,8 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                                  (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
                                  (atomType === 'chart-maker' && data.chart_json) ||
                                  (atomType === 'explore' && data.exploration_config) ||
-                                 (atomType === 'dataframe-operations' && data.dataframe_config);
+                                 (atomType === 'dataframe-operations' && data.dataframe_config) ||
+                                 (atomType === 'data-upload-validate' && data.validate_json);
         
         console.log('🚨🚨🚨 ===== ATOM_AI_CHAT HANDLER CHECK =====');
         console.log('🚨 atomType:', atomType);
@@ -2257,6 +2260,46 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               exploration_config: data.exploration_config,
               operationCompleted: false
             });
+          }
+        }
+        
+        // 🔧 CRITICAL FIX: Handle data-upload-validate with modular handler system
+        if (atomType === 'data-upload-validate' && data.validate_json) {
+          console.log('🔧 ===== DATA UPLOAD VALIDATE AI RESPONSE =====');
+          console.log('📝 User Prompt:', userMsg.content);
+          console.log('🔧 Validate Config:', JSON.stringify(data.validate_json, null, 2));
+          console.log('🔧 Smart Response:', data.smart_response);
+          
+          try {
+            const handler = getAtomHandler(atomType);
+            if (handler) {
+              const handlerContext: AtomHandlerContext = {
+                atomId,
+                atomType,
+                atomTitle,
+                sessionId,
+                updateAtomSettings,
+                setMessages,
+                isStreamMode: false
+              };
+              
+              if (data.success !== false) {
+                await handler.handleSuccess(data, handlerContext);
+              } else {
+                await handler.handleFailure(data, handlerContext);
+              }
+            } else {
+              console.warn('⚠️ No handler found for data-upload-validate');
+            }
+          } catch (handlerError) {
+            console.error('❌ Error in dfValidateHandler:', handlerError);
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Error processing data validation configuration: ${(handlerError as Error).message || 'Unknown error'}`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
           }
         }
         
