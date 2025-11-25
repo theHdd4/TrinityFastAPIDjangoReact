@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { 
   Pagination,
   PaginationContent,
@@ -51,6 +52,8 @@ import {
   transformColumnCase as apiTransformColumnCase,
   findAndReplace as apiFindAndReplace,
   countMatches as apiCountMatches,
+  convertToPercentage as apiConvertToPercentage,
+  convertFromPercentage as apiConvertFromPercentage,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
@@ -97,6 +100,62 @@ function safeToString(val: any): string {
   } catch {/* empty */
     return '';
   }
+}
+
+function formatCellValue(value: any, column: string, columnFormats?: DataFrameData['columnFormats']): string {
+  // Handle null/undefined/empty values
+  if (value === null || value === undefined || value === '') {
+    return '';
+  }
+  
+  const format = columnFormats?.[column];
+  if (!format) {
+    // No format applied, return as string
+    return safeToString(value);
+  }
+  
+  // Parse numeric value - handle both number and string types
+  let numValue: number;
+  if (typeof value === 'number') {
+    numValue = value;
+  } else if (typeof value === 'string') {
+    // Remove any % signs or other formatting before parsing
+    const cleaned = value.replace(/%/g, '').trim();
+    numValue = parseFloat(cleaned);
+  } else {
+    // Try to convert to number
+    numValue = Number(value);
+  }
+  
+  // If not a valid number, return original string representation
+  if (isNaN(numValue) || !isFinite(numValue)) {
+    return safeToString(value);
+  }
+  
+  if (format.type === 'percentage') {
+    // Value is stored as decimal (e.g., 0.13567 or 1.6), multiply by 100 for display (13.567% or 160%)
+    // Preserve full precision - no decimal limit (user can use round function if needed)
+    const percentageValue = numValue * 100;
+    return `${percentageValue.toLocaleString(undefined, { 
+      useGrouping: true,
+      maximumFractionDigits: 20 // Allow many decimal places
+    })}%`;
+  }
+  
+  if (format.type === 'currency' && format.currency) {
+    const symbols: Record<string, string> = {
+      USD: '$', EUR: '€', GBP: '£', JPY: '¥', INR: '₹',
+      CAD: 'C$', AUD: 'A$', CNY: '¥', CHF: 'Fr', MXN: '$', BRL: 'R$'
+    };
+    const symbol = symbols[format.currency] || '$';
+    // Preserve full precision - no decimal limit (user can use round function if needed)
+    return `${symbol}${numValue.toLocaleString(undefined, { 
+      useGrouping: true,
+      maximumFractionDigits: 20
+    })}`;
+  }
+  
+  return safeToString(value);
 }
 
 const NumberFilterComponent: React.FC<NumberFilterComponentProps> = ({
@@ -619,6 +678,12 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [openDropdown, setOpenDropdown] = useState<null | 'insert' | 'delete' | 'sort' | 'filter' | 'operation' | 'round'>(null);
   const [convertSubmenuOpen, setConvertSubmenuOpen] = useState(false);
   const [caseSubmenuOpen, setCaseSubmenuOpen] = useState(false);
+  const [currencySubmenuOpen, setCurrencySubmenuOpen] = useState(false);
+  const [currencySubmenuPosition, setCurrencySubmenuPosition] = useState<{x: number, y: number} | null>(null);
+  const currencyButtonRef = useRef<HTMLButtonElement>(null);
+  const currencyButtonAllRef = useRef<HTMLButtonElement>(null);
+  const currencySubmenuRef = useRef<HTMLDivElement>(null);
+  const currencySubmenuTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [roundDecimalPlaces, setRoundDecimalPlaces] = useState(2);
   const [unhideSubmenuOpen, setUnhideSubmenuOpen] = useState(false);
   const [selectedHiddenColumns, setSelectedHiddenColumns] = useState<string[]>([]);
@@ -694,6 +759,9 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     return () => {
       if (headerClickTimeoutRef.current) {
         clearTimeout(headerClickTimeoutRef.current);
+      }
+      if (currencySubmenuTimeoutRef.current) {
+        clearTimeout(currencySubmenuTimeoutRef.current);
       }
     };
   }, []);
@@ -1292,6 +1360,51 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     return { x, y };
   }, []);
 
+  const calculateCurrencySubmenuPosition = useCallback((buttonRect: DOMRect) => {
+    const submenuWidth = 140; // min-w-[140px]
+    const submenuHeight = 300; // max-h-[300px] - approximate
+    const padding = CONTEXT_MENU_PADDING;
+    const gap = 4;
+    
+    let x = buttonRect.right + gap;
+    let y = buttonRect.top;
+    
+    // Check right edge - if submenu would go off screen, position to the left
+    if (x + submenuWidth > window.innerWidth - padding) {
+      x = buttonRect.left - submenuWidth - gap;
+      // If still off screen on left, position at right edge with padding
+      if (x < padding) {
+        x = window.innerWidth - submenuWidth - padding;
+      }
+    }
+    
+    // Check bottom edge
+    if (y + submenuHeight > window.innerHeight - padding) {
+      y = window.innerHeight - submenuHeight - padding;
+    }
+    
+    // Check top edge
+    if (y < padding) {
+      y = padding;
+    }
+    
+    // Ensure left edge is visible
+    if (x < padding) {
+      x = padding;
+    }
+    
+    return { x, y };
+  }, []);
+
+  const closeCurrencySubmenu = useCallback(() => {
+    if (currencySubmenuTimeoutRef.current) {
+      clearTimeout(currencySubmenuTimeoutRef.current);
+      currencySubmenuTimeoutRef.current = null;
+    }
+    setCurrencySubmenuOpen(false);
+    setCurrencySubmenuPosition(null);
+  }, []);
+
   const repositionColumnContextMenu = useCallback(() => {
     setContextMenu(prev => {
       if (!prev || !contextMenuRef.current) {
@@ -1665,6 +1778,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   
   // Find and Replace state
   const [findReplaceModalOpen, setFindReplaceModalOpen] = useState(false);
+  const [findReplaceTab, setFindReplaceTab] = useState<'find' | 'replace'>('find');
   const [findText, setFindText] = useState('');
   const [replaceText, setReplaceText] = useState('');
   const [replaceAll, setReplaceAll] = useState(false);
@@ -1674,6 +1788,17 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
   const [matchCountLoading, setMatchCountLoading] = useState(false);
   const [matchesByColumn, setMatchesByColumn] = useState<Record<string, number>>({});
   const [highlightedText, setHighlightedText] = useState('');
+  // Find Next navigation state
+  const [matchLocations, setMatchLocations] = useState<Array<{ rowIndex: number; column: string }>>([]);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState<number>(-1);
+  const [isFindNextMode, setIsFindNextMode] = useState<boolean>(false);
+  // Search context: captures the column selection when modal opens (doesn't change during navigation)
+  const [searchContextColumn, setSearchContextColumn] = useState<string | null>(null);
+  // Draggable modal state
+  const [modalPosition, setModalPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const modalRef = useRef<HTMLDivElement>(null);
   const [historyOperations, setHistoryOperations] = useState<Array<{
     id: string;
     type: string;
@@ -2028,22 +2153,36 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
      // Then preserve column order if we have a tracked order
      const filteredHeaders = preserveColumnOrder(availableHeaders, data?.headers || []);
     
-    const filteredRows = resp.rows.map((row: any) => {
-      const filteredRow: any = {};
-      filteredHeaders.forEach((header: string) => {
-        if (row.hasOwnProperty(header)) {
-          filteredRow[header] = row[header];
-        }
-      });
-      return filteredRow;
-    });
-    
+    // First, get column types
     const columnTypes = normalizeBackendColumnTypes(resp.types, resp.headers);
     const filteredColumnTypes: Record<string, 'text' | 'number' | 'date'> = {};
     filteredHeaders.forEach((header: string) => {
       if (columnTypes[header]) {
         filteredColumnTypes[header] = columnTypes[header];
       }
+    });
+    
+    // Then normalize numeric values in rows
+    const filteredRows = resp.rows.map((row: any) => {
+      const filteredRow: any = {};
+      filteredHeaders.forEach((header: string) => {
+        if (row.hasOwnProperty(header)) {
+          let value = row[header];
+          // Normalize numeric values: convert string numbers to actual numbers for numeric columns
+          const columnType = filteredColumnTypes[header];
+          if (columnType === 'number' && value !== null && value !== undefined && value !== '') {
+            // If it's a string that represents a number, convert it
+            if (typeof value === 'string') {
+              const numValue = parseFloat(value);
+              if (!isNaN(numValue) && isFinite(numValue)) {
+                value = numValue;
+              }
+            }
+          }
+          filteredRow[header] = value;
+        }
+      });
+      return filteredRow;
     });
     
     return {
@@ -2112,6 +2251,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         cellColors: data.cellColors,
         hiddenColumns: data.hiddenColumns || [],
         deletedColumns: data.deletedColumns || [],
+        columnFormats: data.columnFormats || {},
       });
 
       onSettingsChange({
@@ -2467,7 +2607,8 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         pinnedColumns: [],
         frozenColumns: 0,
         cellColors: {},
-        hiddenColumns: []
+        hiddenColumns: [],
+        columnFormats: data?.columnFormats || {}
       };
       setUploadError(null);
       setPermanentlyDeletedRows(new Set()); // Clear deleted rows for new data
@@ -2528,6 +2669,7 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
         cellColors: data.cellColors,
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
+         columnFormats: data.columnFormats || {},
        });
       onSettingsChange({ sortColumns: [{ column, direction }], fileId: resp.df_id });
     } catch (err) {
@@ -2568,7 +2710,24 @@ const commitCellEdit = (rowIndex: number, column: string) => {
   if (data) {
     saveToUndoStack(data);
   }
-  handleCellEdit(rowIndex, column, editingCellValue);
+  
+  // Handle percentage format: convert user input (percentage) back to decimal for storage
+  let valueToSave = editingCellValue;
+  const isPercentageColumn = data.columnFormats?.[column]?.type === 'percentage';
+  
+  if (isPercentageColumn && editingCellValue.trim() !== '') {
+    // Remove % sign if present
+    let numericValue = editingCellValue.trim().replace(/%/g, '');
+    const num = parseFloat(numericValue);
+    
+    if (!isNaN(num)) {
+      // User entered percentage value (e.g., 13.567), convert to decimal (0.13567)
+      valueToSave = (num / 100).toString();
+    }
+    // If not a valid number, pass through as-is (will be handled by backend validation)
+  }
+  
+  handleCellEdit(rowIndex, column, valueToSave);
   setEditingCell(null);
 };
 
@@ -2658,6 +2817,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       cellColors: data.cellColors,
       hiddenColumns: currentHiddenColumns,
       deletedColumns: currentDeletedColumns,
+      columnFormats: data.columnFormats || {},
     });
     
     // Update formulas for the renamed column
@@ -2711,6 +2871,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         cellColors: data.cellColors,
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
+         columnFormats: data.columnFormats || {},
        });
        
        // Close any open filter dropdowns to force refresh when reopened
@@ -2754,6 +2915,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         cellColors: data.cellColors,
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
+         columnFormats: data.columnFormats || {},
        });
        
        // Close any open filter dropdowns to force refresh when reopened
@@ -2801,6 +2963,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
         cellColors: data.cellColors,
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
+         columnFormats: data.columnFormats || {},
        });
       
       // Auto-select the newly added column for formula operations
@@ -2822,7 +2985,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
     const col = selectedCell.col;
     const newRows = [...data.rows];
     if (newRows[idx]) newRows[idx][col] = '';
-    onDataChange({ ...data, rows: newRows });
+    onDataChange({ ...data, rows: newRows, columnFormats: data.columnFormats || {} });
     
     // Close any open filter dropdowns to force refresh when reopened
     setContextMenu(null);
@@ -2852,7 +3015,7 @@ const commitHeaderEdit = async (colIdx: number, value?: string) => {
       const newHeaders = [...headers];
       newHeaders.splice(draggedIndex, 1);
       newHeaders.splice(targetIndex, 0, draggedCol || '');
-      onDataChange({ ...data, headers: newHeaders });
+      onDataChange({ ...data, headers: newHeaders, columnFormats: data.columnFormats || {} });
     }
   };
 
@@ -3270,6 +3433,7 @@ const handleHeaderClick = (header: string) => {
       cellColors: data.cellColors,
       hiddenColumns: currentHiddenColumns,
       deletedColumns: currentDeletedColumns,
+      columnFormats: data.columnFormats || {},
     });
     
     // Close any open filter dropdowns to force refresh when reopened
@@ -3458,6 +3622,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         cellColors: data.cellColors,
         hiddenColumns: data.hiddenColumns,
         deletedColumns: data.deletedColumns,
+        columnFormats: data.columnFormats || {},
       });
       
       // Auto-select the newly inserted column
@@ -3555,6 +3720,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         cellColors: data.cellColors,
         hiddenColumns: updatedHiddenColumns,
         deletedColumns: updatedDeletedColumns,
+        columnFormats: data.columnFormats || {},
       });
       
       // Clear selection
@@ -3646,6 +3812,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         cellColors: data.cellColors,
         hiddenColumns: data.hiddenColumns,
         deletedColumns: data.deletedColumns,
+        columnFormats: data.columnFormats || {},
       });
       
       // Auto-select the newly duplicated column
@@ -3696,6 +3863,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         cellColors: data.cellColors,
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
+         columnFormats: data.columnFormats || {},
        });
       
       // Add to history
@@ -3735,6 +3903,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         cellColors: data.cellColors,
          hiddenColumns: currentHiddenColumns,
          deletedColumns: currentDeletedColumns,
+         columnFormats: data.columnFormats || {},
        });
       
       // Add to history
@@ -3776,6 +3945,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
         hiddenColumns: currentHiddenColumns,
+        columnFormats: data.columnFormats || {},
       };
       
       onDataChange(updatedData);
@@ -3833,6 +4003,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           cellColors: currentData.cellColors,
           hiddenColumns: currentHiddenColumns,
           deletedColumns: currentDeletedColumns,
+          columnFormats: currentData.columnFormats || {},
         };
       }
       
@@ -3852,6 +4023,159 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     } finally {
       setConvertLoading(false);
     }
+  };
+
+  const handleConvertToPercentage = async (col: string) => {
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
+    
+    // Check if percentage is already applied
+    if (data.columnFormats?.[col]?.type === 'percentage') {
+      toast({
+        title: "Percentage Already Applied",
+        description: `Percentage format is already applied to column "${col}"`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    saveToUndoStack(data);
+    
+    setConvertLoading(true);
+    try {
+      console.log('[DataFrameOperations] Convert column to percentage:', col);
+      const resp = await apiConvertToPercentage(activeFileId, col);
+      
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const currentDeletedColumns = data.deletedColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+      
+      const updatedData = {
+        headers: filtered.headers,
+        rows: filtered.rows,
+        fileName: data.fileName,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
+        deletedColumns: currentDeletedColumns,
+        columnFormats: {
+          ...(data.columnFormats || {}),
+          [col]: { type: 'percentage' }
+        }
+      };
+      
+      onDataChange(updatedData);
+      addToHistory('Convert to Percentage', `Column "${col}" converted to percentage`);
+      
+      toast({
+        title: "Column Converted to Percentage",
+        description: `Column "${col}" will display as percentage (values unchanged)`,
+      });
+    } catch (err) {
+      handleApiError('Convert to percentage failed', err);
+      addToHistory('Convert to Percentage', `Failed to convert column "${col}"`, 'error');
+    } finally {
+      setConvertLoading(false);
+    }
+  };
+
+  const handleConvertFromPercentage = async (col: string) => {
+    const activeFileId = settings.fileId || fileId;
+    if (!data || !activeFileId) return;
+    
+    // Check if percentage is not applied
+    if (data.columnFormats?.[col]?.type !== 'percentage') {
+      toast({
+        title: "Percentage Not Applied",
+        description: `Column "${col}" does not have percentage format applied`,
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    saveToUndoStack(data);
+    
+    setConvertLoading(true);
+    try {
+      console.log('[DataFrameOperations] Convert column from percentage:', col);
+      const resp = await apiConvertFromPercentage(activeFileId, col);
+      
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const currentDeletedColumns = data.deletedColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+      
+      // Remove percentage format
+      const updatedFormats = { ...(data.columnFormats || {}) };
+      delete updatedFormats[col];
+      
+      const updatedData = {
+        headers: filtered.headers,
+        rows: filtered.rows,
+        fileName: data.fileName,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
+        deletedColumns: currentDeletedColumns,
+        columnFormats: updatedFormats
+      };
+      
+      onDataChange(updatedData);
+      addToHistory('Convert from Percentage', `Column "${col}" converted back to number`);
+      
+      toast({
+        title: "Column Converted to Number",
+        description: `Column "${col}" percentage display format removed (values unchanged)`,
+      });
+    } catch (err) {
+      handleApiError('Convert from percentage failed', err);
+      addToHistory('Convert from Percentage', `Failed to convert column "${col}"`, 'error');
+    } finally {
+      setConvertLoading(false);
+    }
+  };
+
+  const handleFormatAsCurrency = async (col: string, currency: 'USD' | 'EUR' | 'GBP' | 'JPY' | 'INR' | 'CAD' | 'AUD' | 'CNY' | 'CHF' | 'MXN' | 'BRL') => {
+    if (!data) return;
+    
+    const updatedData = {
+      ...data,
+      columnFormats: {
+        ...(data.columnFormats || {}),
+        [col]: { type: 'currency', currency }
+      }
+    };
+    
+    onDataChange(updatedData);
+    addToHistory('Format as Currency', `Column "${col}" formatted as ${currency}`);
+    
+    toast({
+      title: "Currency Format Applied",
+      description: `Column "${col}" formatted as ${currency}`,
+    });
+  };
+
+  const handleRemoveCurrencyFormat = async (col: string) => {
+    if (!data) return;
+    
+    const updatedFormats = { ...(data.columnFormats || {}) };
+    delete updatedFormats[col];
+    
+    const updatedData = {
+      ...data,
+      columnFormats: updatedFormats
+    };
+    
+    onDataChange(updatedData);
+    addToHistory('Remove Currency Format', `Currency format removed from column "${col}"`);
+    
+    toast({
+      title: "Currency Format Removed",
+      description: `Column "${col}" currency format removed`,
+    });
   };
 
   const handleRoundColumns = async (columns: string[], decimalPlaces: number) => {
@@ -3903,6 +4227,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           cellColors: currentData.cellColors,
           hiddenColumns: currentHiddenColumns,
           deletedColumns: currentDeletedColumns,
+          columnFormats: currentData.columnFormats || {},
         };
       }
       
@@ -3968,6 +4293,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           cellColors: currentData.cellColors,
           hiddenColumns: currentHiddenColumns,
           deletedColumns: currentDeletedColumns,
+          columnFormats: currentData.columnFormats || {},
         };
       }
       
@@ -4002,44 +4328,251 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     });
   };
 
+  // Draggable modal handlers
+  const handleModalMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Only start dragging if clicking on the header itself, not on buttons or interactive elements
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'BUTTON' || target.closest('button') || target.closest('input') || target.closest('select')) {
+      return; // Don't drag if clicking on interactive elements
+    }
+    
+    if (modalRef.current) {
+      const rect = modalRef.current.getBoundingClientRect();
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      });
+      setIsDragging(true);
+    }
+  }, []);
+
+  const handleModalMouseMove = useCallback((e: MouseEvent) => {
+    if (isDragging && containerRef.current) {
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const newX = e.clientX - containerRect.left - dragOffset.x;
+      const newY = e.clientY - containerRect.top - dragOffset.y;
+      
+      // Constrain within container bounds
+      const modalWidth = modalRef.current?.offsetWidth || 0;
+      const modalHeight = modalRef.current?.offsetHeight || 0;
+      
+      const constrainedX = Math.max(0, Math.min(newX, containerRect.width - modalWidth));
+      const constrainedY = Math.max(0, Math.min(newY, containerRect.height - modalHeight));
+      
+      setModalPosition({ x: constrainedX, y: constrainedY });
+    }
+  }, [isDragging, dragOffset]);
+
+  const handleModalMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Set up global mouse event listeners for dragging
+  useEffect(() => {
+    if (isDragging) {
+      document.addEventListener('mousemove', handleModalMouseMove);
+      document.addEventListener('mouseup', handleModalMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleModalMouseMove);
+        document.removeEventListener('mouseup', handleModalMouseUp);
+      };
+    }
+  }, [isDragging, handleModalMouseMove, handleModalMouseUp]);
+
+  // Initialize modal position when it opens (center it initially)
+  useEffect(() => {
+    if (findReplaceModalOpen && containerRef.current) {
+      // Use setTimeout to ensure modal is rendered and we can get its dimensions
+      setTimeout(() => {
+        if (modalRef.current && containerRef.current) {
+          const containerRect = containerRef.current.getBoundingClientRect();
+          const modalWidth = modalRef.current.offsetWidth || 512; // max-w-lg default
+          const modalHeight = modalRef.current.offsetHeight || 500; // approximate
+          
+          setModalPosition({
+            x: Math.max(0, (containerRect.width - modalWidth) / 2),
+            y: Math.max(0, (containerRect.height - modalHeight) / 2)
+          });
+        }
+      }, 0);
+    }
+  }, [findReplaceModalOpen]);
+
+  // Find all match locations in the dataframe
+  const findAllMatchLocations = (
+    searchText: string,
+    caseSensitive: boolean,
+    columnsToSearch?: string[],
+    dataToSearch?: DataFrameData
+  ): Array<{ rowIndex: number; column: string }> => {
+    const searchData = dataToSearch || data;
+    if (!searchData || !searchText || searchText.length === 0) {
+      return [];
+    }
+
+    const locations: Array<{ rowIndex: number; column: string }> = [];
+    const searchLower = caseSensitive ? searchText : searchText.toLowerCase();
+    
+    // Determine which columns to search
+    const columns = columnsToSearch && columnsToSearch.length > 0
+      ? columnsToSearch.filter(col => 
+          searchData.headers.includes(col) && 
+          !(searchData.hiddenColumns || []).includes(col)
+        )
+      : searchData.headers.filter(col => !(searchData.hiddenColumns || []).includes(col));
+
+    // Iterate through all rows
+    searchData.rows.forEach((row, rowIndex) => {
+      // Skip permanently deleted rows (only if using current data, not passed data)
+      if (!dataToSearch && permanentlyDeletedRows.has(rowIndex)) {
+        return;
+      }
+
+      // Check each column
+      columns.forEach(column => {
+        const cellValue = safeToString(row[column]);
+        if (!cellValue) return;
+
+        // Check for match
+        const cellLower = caseSensitive ? cellValue : cellValue.toLowerCase();
+        if (cellLower.includes(searchLower)) {
+          locations.push({ rowIndex, column });
+        }
+      });
+    });
+
+    // Sort by row index, then by column order
+    return locations.sort((a, b) => {
+      if (a.rowIndex !== b.rowIndex) {
+        return a.rowIndex - b.rowIndex;
+      }
+      const aColIdx = searchData.headers.indexOf(a.column);
+      const bColIdx = searchData.headers.indexOf(b.column);
+      return aColIdx - bColIdx;
+    });
+  };
+
+  // Navigate to a specific match location
+  const navigateToMatch = (rowIndex: number, column: string) => {
+    if (!data) return;
+
+    const rowsPerPage = settings.rowsPerPage || 15;
+    const targetPage = Math.floor(rowIndex / rowsPerPage) + 1;
+    
+    // Change page if needed
+    if (targetPage !== currentPage) {
+      setCurrentPage(targetPage);
+    }
+
+    // Select the cell
+    setSelectedCell({ row: rowIndex, col: column });
+    setSelectedColumn(column);
+
+    // Scroll to cell after a short delay to allow page change and React re-render
+    setTimeout(() => {
+      // Try to find the cell element using data attributes
+      const cellElement = document.querySelector(
+        `[data-col="${column}"][data-row-index="${rowIndex}"]`
+      ) as HTMLElement;
+      
+      if (cellElement) {
+        cellElement.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      } else {
+        // Fallback: scroll to approximate position
+        const tableContainer = containerRef.current?.querySelector('.overflow-auto') as HTMLElement;
+        if (tableContainer) {
+          // Calculate approximate scroll position based on row index
+          const rowHeight = 40; // Approximate row height
+          const headerHeight = 40; // Approximate header height
+          const scrollPosition = (rowIndex % rowsPerPage) * rowHeight;
+          tableContainer.scrollTo({ top: scrollPosition + headerHeight, behavior: 'smooth' });
+        }
+      }
+    }, 200); // Increased delay to ensure page change and re-render complete
+  };
+
   const handleCountMatches = async (searchText: string, caseSensitive: boolean) => {
-    if (!data || !settings.fileId || !searchText.trim()) {
+    // Allow spaces and special characters - only block completely empty input
+    if (!data || !settings.fileId || searchText.length === 0) {
       setMatchCount(0);
       setMatchesByColumn({});
       setHighlightedText('');
+      setMatchLocations([]);
+      setCurrentMatchIndex(-1);
       return;
     }
     
     const fileId = settings.fileId;
     
+    // Determine which columns to search: use searchContextColumn (captured when modal opened)
+    // But validate that the context column exists and is not hidden
+    let columnsToSearch: string[] | undefined = undefined;
+    if (searchContextColumn) {
+      // Check if column exists and is not hidden
+      const isHidden = data.hiddenColumns?.includes(searchContextColumn);
+      const exists = data.headers?.includes(searchContextColumn);
+      if (exists && !isHidden) {
+        columnsToSearch = [searchContextColumn];
+      } else {
+        // Column doesn't exist or is hidden, search all columns instead
+        console.warn('[DataFrameOperations] Context column not available, searching all columns:', searchContextColumn);
+        columnsToSearch = undefined;
+      }
+    }
+    
     setMatchCountLoading(true);
     try {
-      const resp = await apiCountMatches(fileId, searchText, caseSensitive);
+      const resp = await apiCountMatches(fileId, searchText, caseSensitive, columnsToSearch);
       setMatchCount(resp.total_matches);
       setMatchesByColumn(resp.matches_by_column);
       setHighlightedText(searchText);
+      
+      // Find all match locations for navigation
+      const locations = findAllMatchLocations(searchText, caseSensitive, columnsToSearch);
+      setMatchLocations(locations);
+      setCurrentMatchIndex(-1); // Reset to -1 (no current match selected)
     } catch (err) {
       console.error('[DataFrameOperations] Count matches error:', err);
       setMatchCount(0);
       setMatchesByColumn({});
       setHighlightedText('');
+      setMatchLocations([]);
+      setCurrentMatchIndex(-1);
     } finally {
       setMatchCountLoading(false);
     }
   };
 
   const handleFindAndReplace = async () => {
-    if (!data || !settings.fileId || !findText.trim()) {
+    // Validation: Block only if input is completely empty (no characters at all)
+    // Allow spaces and special characters - send original findText (with spaces) for exact matching
+    if (!data || !settings.fileId || findText.length === 0) {
       return;
     }
     
     const fileId = settings.fileId;
     
+    // Determine which columns to search: use searchContextColumn (captured when modal opened)
+    // But validate that the context column exists and is not hidden
+    let columnsToSearch: string[] | undefined = undefined;
+    if (searchContextColumn) {
+      // Check if column exists and is not hidden
+      const isHidden = data.hiddenColumns?.includes(searchContextColumn);
+      const exists = data.headers?.includes(searchContextColumn);
+      if (exists && !isHidden) {
+        columnsToSearch = [searchContextColumn];
+      } else {
+        // Column doesn't exist or is hidden, search all columns instead
+        console.warn('[DataFrameOperations] Context column not available, searching all columns:', searchContextColumn);
+        columnsToSearch = undefined;
+      }
+    }
+    
     setFindReplaceLoading(true);
     try {
-      console.log('[DataFrameOperations] Find and replace:', { findText, replaceText, replaceAll, caseSensitive });
+      console.log('[DataFrameOperations] Find and replace:', { findText, replaceText, replaceAll, caseSensitive, columnsToSearch });
       
-      const resp = await apiFindAndReplace(fileId, findText, replaceText, replaceAll, caseSensitive);
+      const resp = await apiFindAndReplace(fileId, findText, replaceText, replaceAll, caseSensitive, columnsToSearch);
       
       // Preserve deleted columns by filtering out columns that were previously deleted
       const currentHiddenColumns = data.hiddenColumns || [];
@@ -4066,14 +4599,361 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         description: `${actionText} occurrences of "${findText}"`,
       });
       
-      // Close modal after successful operation
-      setFindReplaceModalOpen(false);
-      setFindText('');
-      setReplaceText('');
+      // Don't close modal after successful operation (Excel-like behavior - stay open for more operations)
+      // Modal stays open so user can continue finding/replacing
     } catch (err) {
       console.error('[DataFrameOperations] Find and replace error:', err);
       handleApiError('Find and replace failed', err);
       addToHistory('Find and Replace', `Failed to replace "${findText}"`, 'error');
+    } finally {
+      setFindReplaceLoading(false);
+    }
+  };
+
+  // Excel-like Find functions
+  const handleFindAll = async () => {
+    // Find all matches and highlight them
+    if (!data || !settings.fileId || findText.length === 0) {
+      return;
+    }
+    await handleCountMatches(findText, caseSensitive);
+    setIsFindNextMode(false);
+    setCurrentMatchIndex(-1);
+    // Modal stays open
+  };
+
+  const handleFindNext = async () => {
+    if (!data || !settings.fileId || findText.length === 0) {
+      return;
+    }
+
+    // If match locations are empty, find all matches first
+    if (matchLocations.length === 0) {
+      // Find all match locations synchronously
+      const locations = findAllMatchLocations(
+        findText,
+        caseSensitive,
+        searchContextColumn ? [searchContextColumn] : undefined
+      );
+      
+      if (locations.length === 0) {
+        toast({
+          title: "No matches found",
+          description: `No matches found for "${findText}"`,
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Update state and navigate to first match
+      setMatchLocations(locations);
+      setCurrentMatchIndex(0);
+      setIsFindNextMode(true);
+      navigateToMatch(locations[0].rowIndex, locations[0].column);
+      
+      // Also update match count from backend
+      handleCountMatches(findText, caseSensitive);
+      return;
+    }
+
+    // Navigate to next match
+    setIsFindNextMode(true);
+    const nextIndex = currentMatchIndex < matchLocations.length - 1 
+      ? currentMatchIndex + 1 
+      : 0; // Wrap around to first match
+    
+    setCurrentMatchIndex(nextIndex);
+    const nextMatch = matchLocations[nextIndex];
+    navigateToMatch(nextMatch.rowIndex, nextMatch.column);
+
+    // Show toast if wrapped around
+    if (nextIndex === 0 && currentMatchIndex >= 0) {
+      toast({
+        title: "Search wrapped",
+        description: "Reached end of matches, starting from beginning",
+      });
+    }
+  };
+
+  const handleFindPrevious = async () => {
+    if (!data || !settings.fileId || findText.length === 0) {
+      return;
+    }
+
+    // If match locations are empty, find all matches first
+    if (matchLocations.length === 0) {
+      // Find all match locations synchronously
+      const locations = findAllMatchLocations(
+        findText,
+        caseSensitive,
+        searchContextColumn ? [searchContextColumn] : undefined
+      );
+      
+      if (locations.length === 0) {
+        toast({
+          title: "No matches found",
+          description: `No matches found for "${findText}"`,
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Update state and navigate to last match
+      const lastIndex = locations.length - 1;
+      setMatchLocations(locations);
+      setCurrentMatchIndex(lastIndex);
+      setIsFindNextMode(true);
+      navigateToMatch(locations[lastIndex].rowIndex, locations[lastIndex].column);
+      
+      // Also update match count from backend
+      handleCountMatches(findText, caseSensitive);
+      return;
+    }
+
+    // Navigate to previous match
+    setIsFindNextMode(true);
+    const prevIndex = currentMatchIndex > 0 
+      ? currentMatchIndex - 1 
+      : matchLocations.length - 1; // Wrap around to last match
+    
+    setCurrentMatchIndex(prevIndex);
+    const prevMatch = matchLocations[prevIndex];
+    navigateToMatch(prevMatch.rowIndex, prevMatch.column);
+
+    // Show toast if wrapped around
+    if (prevIndex === matchLocations.length - 1 && currentMatchIndex >= 0) {
+      toast({
+        title: "Search wrapped",
+        description: "Reached beginning of matches, starting from end",
+      });
+    }
+  };
+
+  // Single replace - replaces current match (if in Find Next mode) or first match, then moves to next
+  const handleReplace = async () => {
+    if (!data || !settings.fileId || findText.length === 0) {
+      return;
+    }
+    
+    const fileId = settings.fileId;
+    let columnsToSearch: string[] | undefined = undefined;
+    if (searchContextColumn) {
+      const isHidden = data.hiddenColumns?.includes(searchContextColumn);
+      const exists = data.headers?.includes(searchContextColumn);
+      if (exists && !isHidden) {
+        columnsToSearch = [searchContextColumn];
+      } else {
+        columnsToSearch = undefined;
+      }
+    }
+    
+    setFindReplaceLoading(true);
+    try {
+      // First, ensure we have match locations
+      let locationsToUse = matchLocations;
+      if (locationsToUse.length === 0) {
+        // Find all match locations first
+        locationsToUse = findAllMatchLocations(findText, caseSensitive, columnsToSearch);
+        setMatchLocations(locationsToUse);
+      }
+      
+      // Determine which match to replace
+      let matchToReplace: { rowIndex: number; column: string };
+      let matchIndex: number;
+      
+      if (isFindNextMode && currentMatchIndex >= 0 && currentMatchIndex < locationsToUse.length) {
+        // Use current match from Find Next mode
+        matchToReplace = locationsToUse[currentMatchIndex];
+        matchIndex = currentMatchIndex;
+      } else if (locationsToUse.length > 0) {
+        // Use first match
+        matchToReplace = locationsToUse[0];
+        matchIndex = 0;
+        // Start Find Next mode
+        setIsFindNextMode(true);
+        setCurrentMatchIndex(0);
+      } else {
+        // No matches found
+        toast({
+          title: "No matches found",
+          description: `No matches found for "${findText}"`,
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const rowIndex = matchToReplace.rowIndex;
+      const column = matchToReplace.column;
+      
+      // Get the current cell value
+      const currentCellValue = safeToString(data.rows[rowIndex]?.[column] || '');
+      if (!currentCellValue) {
+        throw new Error('Cell value not found');
+      }
+      
+      // Replace ONLY the first occurrence of the text in this specific cell
+      let newCellValue: string;
+      if (caseSensitive) {
+        // Case sensitive: replace first occurrence only
+        newCellValue = currentCellValue.replace(findText, replaceText);
+      } else {
+        // Case insensitive: find first occurrence and replace
+        const findLower = findText.toLowerCase();
+        const cellLower = currentCellValue.toLowerCase();
+        const pos = cellLower.indexOf(findLower);
+        if (pos !== -1) {
+          // Replace only the first occurrence, preserving original case
+          newCellValue = currentCellValue.slice(0, pos) + replaceText + currentCellValue.slice(pos + findText.length);
+        } else {
+          newCellValue = currentCellValue; // No match found (shouldn't happen)
+        }
+      }
+      
+      console.log('[DataFrameOperations] Replacing cell:', { rowIndex, column, oldValue: currentCellValue, newValue: newCellValue });
+      
+      // Use editCell API to replace ONLY this specific cell
+      const resp = await apiEditCell(fileId, rowIndex, column, newCellValue);
+      
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const currentDeletedColumns = data.deletedColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+      
+      onDataChange({
+        headers: filtered.headers,
+        rows: filtered.rows,
+        fileName: data.fileName,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
+        deletedColumns: currentDeletedColumns,
+      });
+      
+      // Recalculate match locations from the updated data
+      const updatedData: DataFrameData = {
+        headers: filtered.headers,
+        rows: filtered.rows,
+        fileName: data.fileName,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
+        deletedColumns: currentDeletedColumns,
+      };
+      const updatedLocations = findAllMatchLocations(findText, caseSensitive, columnsToSearch, updatedData);
+      setMatchLocations(updatedLocations);
+      
+      // Move to next match
+      if (updatedLocations.length > 0) {
+        // Find the next match after the one we just replaced
+        // Since we replaced a match, we need to find the next one in the list
+        let nextIndex = matchIndex;
+        
+        // If the replaced match is no longer in the list, nextIndex might point to the next match
+        // Otherwise, we need to find the next match after the replaced one
+        if (nextIndex >= updatedLocations.length) {
+          // We were at the end, wrap to beginning
+          nextIndex = 0;
+          toast({
+            title: "Search wrapped",
+            description: "Reached end of matches, starting from beginning",
+          });
+        } else {
+          // Check if the current index still points to the same match
+          const currentMatchAtIdx = updatedLocations[nextIndex];
+          if (currentMatchAtIdx && currentMatchAtIdx.rowIndex === rowIndex && currentMatchAtIdx.column === column) {
+            // Same match still exists (shouldn't happen after replace, but handle it)
+            nextIndex = nextIndex + 1;
+            if (nextIndex >= updatedLocations.length) {
+              nextIndex = 0;
+            }
+          }
+          // Otherwise, nextIndex already points to the next match
+        }
+        
+        setCurrentMatchIndex(nextIndex);
+        setIsFindNextMode(true);
+        navigateToMatch(updatedLocations[nextIndex].rowIndex, updatedLocations[nextIndex].column);
+      } else {
+        // No more matches
+        setIsFindNextMode(false);
+        setCurrentMatchIndex(-1);
+        toast({
+          title: "Replace Complete",
+          description: `Replaced "${findText}". No more matches found.`,
+        });
+      }
+      
+      
+      addToHistory('Find and Replace', `Replaced "${findText}" with "${replaceText}"`);
+      toast({
+        title: "Replace Complete",
+        description: `Replaced "${findText}"`,
+      });
+    } catch (err) {
+      console.error('[DataFrameOperations] Replace error:', err);
+      handleApiError('Replace failed', err);
+      addToHistory('Find and Replace', `Failed to replace "${findText}"`, 'error');
+    } finally {
+      setFindReplaceLoading(false);
+    }
+  };
+
+  // Replace all (uses existing handleFindAndReplace with replaceAll=true)
+  const handleReplaceAll = async () => {
+    if (!data || !settings.fileId || findText.length === 0) {
+      return;
+    }
+    
+    const fileId = settings.fileId;
+    let columnsToSearch: string[] | undefined = undefined;
+    if (searchContextColumn) {
+      const isHidden = data.hiddenColumns?.includes(searchContextColumn);
+      const exists = data.headers?.includes(searchContextColumn);
+      if (exists && !isHidden) {
+        columnsToSearch = [searchContextColumn];
+      } else {
+        columnsToSearch = undefined;
+      }
+    }
+    
+    setFindReplaceLoading(true);
+    try {
+      // Replace all (replaceAll = true)
+      const resp = await apiFindAndReplace(fileId, findText, replaceText, true, caseSensitive, columnsToSearch);
+      
+      const currentHiddenColumns = data.hiddenColumns || [];
+      const currentDeletedColumns = data.deletedColumns || [];
+      const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+      
+      onDataChange({
+        headers: filtered.headers,
+        rows: filtered.rows,
+        fileName: data.fileName,
+        columnTypes: filtered.columnTypes,
+        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+        frozenColumns: data.frozenColumns,
+        cellColors: data.cellColors,
+        hiddenColumns: currentHiddenColumns,
+        deletedColumns: currentDeletedColumns,
+      });
+      
+      // Reset Find Next mode after replacing all
+      setIsFindNextMode(false);
+      setCurrentMatchIndex(-1);
+      setMatchLocations([]);
+      
+      addToHistory('Find and Replace', `Replaced all "${findText}" with "${replaceText}"`);
+      toast({
+        title: "Replace All Complete",
+        description: `Replaced all occurrences of "${findText}"`,
+      });
+    } catch (err) {
+      console.error('[DataFrameOperations] Replace All error:', err);
+      handleApiError('Replace All failed', err);
+      addToHistory('Find and Replace', `Failed to replace all "${findText}"`, 'error');
     } finally {
       setFindReplaceLoading(false);
     }
@@ -4140,7 +5020,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Update the data with new frozen columns
     const updatedData = {
       ...data,
-      frozenColumns: newFrozenColumns
+      frozenColumns: newFrozenColumns,
+      columnFormats: data.columnFormats || {},
     };
     
     onDataChange(updatedData);
@@ -4163,7 +5044,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     // Reset frozen columns to 0
     const updatedData = {
       ...data,
-      frozenColumns: 0
+      frozenColumns: 0,
+      columnFormats: data.columnFormats || {},
     };
     
     onDataChange(updatedData);
@@ -4194,7 +5076,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       
       const updatedData = {
         ...data,
-        hiddenColumns: [...(data.hiddenColumns || []), ...columnsToHide]
+        hiddenColumns: [...(data.hiddenColumns || []), ...columnsToHide],
+        columnFormats: data.columnFormats || {},
       };
       
       onDataChange(updatedData);
@@ -4217,7 +5100,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       // Add column to hidden columns list
       const updatedData = {
         ...data,
-        hiddenColumns: [...(data.hiddenColumns || []), col]
+        hiddenColumns: [...(data.hiddenColumns || []), col],
+        columnFormats: data.columnFormats || {},
       };
       
       onDataChange(updatedData);
@@ -4249,7 +5133,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     const updatedHiddenColumns = (data.hiddenColumns || []).filter(c => c !== col);
     const updatedData = {
       ...data,
-      hiddenColumns: updatedHiddenColumns
+      hiddenColumns: updatedHiddenColumns,
+      columnFormats: data.columnFormats || {},
     };
     
     onDataChange(updatedData);
@@ -4481,7 +5366,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         frozenColumns: data.frozenColumns,
         cellColors: data.cellColors,
         hiddenColumns: updatedHiddenColumns,
-        deletedColumns: updatedDeletedColumns
+        deletedColumns: updatedDeletedColumns,
+        columnFormats: data.columnFormats || {},
       };
       
       onDataChange(updatedData);
@@ -4576,6 +5462,9 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'f') {
           e.preventDefault();
+          setFindReplaceTab('find'); // Always open to Find tab
+          // Capture the current column selection as search context (only if column was intentionally selected)
+          setSearchContextColumn(selectedColumn);
           setFindReplaceModalOpen(true);
           return;
         }
@@ -4610,12 +5499,16 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   // Debounced search effect
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      if (findText.trim()) {
-        handleCountMatches(findText, caseSensitive);
+      // Check if input has any content (even just spaces), send original findText
+      if (findText.length > 0) {
+        handleCountMatches(findText, caseSensitive); // Send original with spaces
       } else {
         setMatchCount(0);
         setMatchesByColumn({});
         setHighlightedText('');
+        setMatchLocations([]);
+        setCurrentMatchIndex(-1);
+        setIsFindNextMode(false);
       }
     }, 500);
 
@@ -4882,7 +5775,12 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                   />
                 </div>
                 <button
-                  onClick={() => setFindReplaceModalOpen(true)}
+                  onClick={() => {
+                    setFindReplaceTab('find'); // Always open to Find tab
+                    // Capture the current column selection as search context (only if column was intentionally selected)
+                    setSearchContextColumn(selectedColumn);
+                    setFindReplaceModalOpen(true);
+                  }}
                   className="p-2 mx-1 hover:bg-blue-50 rounded-md transition-colors"
                   title="Find and Replace (Ctrl+F)"
                 >
@@ -5285,23 +6183,34 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     {(data.headers || []).filter(column => !(data.hiddenColumns || []).includes(column)).map((column, colIdx) => {
                       const cellValue = row[column];
                       const isEditing = editingCell?.row === rowIndex && editingCell?.col === column;
+                        // Check if this is the current match in Find Next mode
+                        const isCurrentMatch = isFindNextMode && 
+                          currentMatchIndex >= 0 && 
+                          currentMatchIndex < matchLocations.length &&
+                          matchLocations[currentMatchIndex]?.rowIndex === originalRowIndex &&
+                          matchLocations[currentMatchIndex]?.column === column;
+
                         return (
                           <TableCell
                             key={colIdx}
                             data-col={column}
+                            data-row-index={originalRowIndex}
                             className={`table-cell font-medium border border-gray-200 ${
-                              // 🔧 Excel-like: Four highlighting modes:
-                              // 1. Specific cell selected (active cell - stronger border + blue BG)
-                              selectedCell?.row === originalRowIndex && selectedCell?.col === column 
-                                ? 'border-2 border-blue-500' 
-                                // 2. Entire column selected via header click (no specific cell)
-                                : (!selectedCell && selectedColumn === column)
-                                  ? 'border-blue-400'
-                                  // 3. Multi-selected column (Ctrl+Click headers)
-                                  : multiSelectedColumns.has(column)
+                              // 🔧 Excel-like: Five highlighting modes:
+                              // 1. Current match in Find Next mode (strongest - blue border + yellow highlight)
+                              isCurrentMatch
+                                ? 'border-2 border-blue-600'
+                                // 2. Specific cell selected (active cell - stronger border + blue BG)
+                                : selectedCell?.row === originalRowIndex && selectedCell?.col === column 
+                                  ? 'border-2 border-blue-500' 
+                                  // 3. Entire column selected via header click (no specific cell)
+                                  : (!selectedCell && selectedColumn === column)
                                     ? 'border-blue-400'
-                                    // 4. No highlighting
-                                    : ''
+                                    // 4. Multi-selected column (Ctrl+Click headers)
+                                    : multiSelectedColumns.has(column)
+                                      ? 'border-blue-400'
+                                      // 5. No highlighting
+                                      : ''
                             }`}
                             style={{
                               ...(settings.columnWidths?.[column] ? { 
@@ -5315,6 +6224,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               }),
                               // 🔧 ALL cells get backgroundColor via inline style (overrides template CSS)
                               backgroundColor: (() => {
+                                // Current match gets special highlighting
+                                if (isCurrentMatch) return '#fef3c7'; // yellow-100 for current match
                                 if (isRowSelected) return '#dbeafe'; // blue for row selection
                                 if (selectedCell?.row === originalRowIndex && selectedCell?.col === column) return '#dbeafe'; // blue for active cell
                                 if (!selectedCell && selectedColumn === column) return '#dbeafe'; // blue for column selection
@@ -5357,8 +6268,19 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                             }}
                             onDoubleClick={() => {
                             // Always allow cell editing regardless of enableEditing setting
+                            // For percentage columns, show percentage value (multiply by 100) for editing
+                            // For other columns, show raw value
+                            const rawValue = row[column];
+                            const isPercentageColumn = data.columnFormats?.[column]?.type === 'percentage';
+                            let editValue = safeToString(rawValue);
+                            
+                            if (isPercentageColumn && typeof rawValue === 'number' && !isNaN(rawValue)) {
+                              // Show percentage value (e.g., 13.567) instead of decimal (0.13567)
+                              editValue = (rawValue * 100).toString();
+                            }
+                            
                             setEditingCell({ row: rowIndex, col: column });
-                            setEditingCellValue(safeToString(row[column]));
+                            setEditingCellValue(editValue);
                           }}
                         >
                           {editingCell?.row === rowIndex && editingCell?.col === column ? (
@@ -5389,7 +6311,17 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               }}
                               onDoubleClick={(e) => {
                                 // Always allow cell editing regardless of enableEditing setting
-                                const cellValue = safeToString(row[column]);
+                                // For percentage columns, show percentage value (multiply by 100) for editing
+                                // For other columns, show raw value
+                                const rawValue = row[column];
+                                const isPercentageColumn = data.columnFormats?.[column]?.type === 'percentage';
+                                let cellValue = safeToString(rawValue);
+                                
+                                if (isPercentageColumn && typeof rawValue === 'number' && !isNaN(rawValue)) {
+                                  // Show percentage value (e.g., 13.567) instead of decimal (0.13567)
+                                  cellValue = (rawValue * 100).toString();
+                                }
+                                
                                 const clickPosition = getCursorPositionFromClick(e, cellValue);
                                 setEditingCell({ row: rowIndex, col: column });
                                 setEditingCellValue(cellValue);
@@ -5398,19 +6330,20 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               title={`Double-click to edit cell\nValue: ${safeToString(row[column])}`}
                             >
                               {(() => {
-                                const cellValue = safeToString(row[column]);
-                                if (cellValue === '') return null;
+                                // Format cell value based on column format
+                                const formattedValue = formatCellValue(row[column], column, data.columnFormats);
+                                if (formattedValue === '') return null;
                                 
                                 // Use find and replace highlighting if active
                                 if (highlightedText && findReplaceModalOpen) {
-                                  const highlightedValue = highlightText(cellValue, highlightedText, caseSensitive);
-                                  if (highlightedValue !== cellValue) {
+                                  const highlightedValue = highlightText(formattedValue, highlightedText, caseSensitive);
+                                  if (highlightedValue !== formattedValue) {
                                     return <span dangerouslySetInnerHTML={{ __html: highlightedValue }} />;
                                   }
                                 }
                                 
                                 // Fall back to existing search highlighting
-                                return highlightMatch(cellValue, settings.searchTerm || '');
+                                return highlightMatch(formattedValue, settings.searchTerm || '');
                               })()}
                             </div>
                           )}
@@ -5690,7 +6623,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
               Convert to <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
             </button>
             {convertSubmenuOpen && (
-              <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[140px] max-h-[300px] overflow-y-auto z-50" style={{ scrollbarWidth: 'thin' }}>
+              <div className="absolute left-full top-0 bg-white border border-gray-200 rounded shadow-md min-w-[140px] z-50" style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'visible', scrollbarWidth: 'thin' }}>
                 {multiSelectedColumns.size > 1 ? (
                   <>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>String/Text (All)</button>
@@ -5701,6 +6634,129 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category (All)</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal (All)</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object (All)</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <button 
+                      className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" 
+                      onClick={() => { 
+                        const colsToConvert = Array.from(multiSelectedColumns).filter(col => data.columnFormats?.[col]?.type !== 'percentage');
+                        const alreadyApplied = Array.from(multiSelectedColumns).filter(col => data.columnFormats?.[col]?.type === 'percentage');
+                        
+                        if (alreadyApplied.length > 0) {
+                          toast({
+                            title: "Some Columns Already Have Percentage",
+                            description: `Percentage already applied to: ${alreadyApplied.join(', ')}`,
+                            variant: "destructive",
+                          });
+                        }
+                        
+                        if (colsToConvert.length > 0) {
+                          colsToConvert.forEach(col => handleConvertToPercentage(col));
+                        }
+                        setContextMenu(null); 
+                        setOpenDropdown(null); 
+                        setConvertSubmenuOpen(false); 
+                      }}
+                    >
+                      Percentage (All)
+                    </button>
+                    <button 
+                      className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" 
+                      onClick={() => { 
+                        const colsToConvert = Array.from(multiSelectedColumns).filter(col => data.columnFormats?.[col]?.type === 'percentage');
+                        const notApplied = Array.from(multiSelectedColumns).filter(col => data.columnFormats?.[col]?.type !== 'percentage');
+                        
+                        if (notApplied.length > 0) {
+                          toast({
+                            title: "Some Columns Don't Have Percentage",
+                            description: `Percentage not applied to: ${notApplied.join(', ')}`,
+                            variant: "destructive",
+                          });
+                        }
+                        
+                        if (colsToConvert.length > 0) {
+                          colsToConvert.forEach(col => handleConvertFromPercentage(col));
+                        }
+                        setContextMenu(null); 
+                        setOpenDropdown(null); 
+                        setConvertSubmenuOpen(false); 
+                      }}
+                    >
+                      Number (All)
+                    </button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <div 
+                      className="relative"
+                      onMouseEnter={() => {
+                        // Clear any pending close timeout
+                        if (currencySubmenuTimeoutRef.current) {
+                          clearTimeout(currencySubmenuTimeoutRef.current);
+                          currencySubmenuTimeoutRef.current = null;
+                        }
+                        if (currencyButtonAllRef.current) {
+                          const rect = currencyButtonAllRef.current.getBoundingClientRect();
+                          const position = calculateCurrencySubmenuPosition(rect);
+                          setCurrencySubmenuPosition(position);
+                        }
+                        setCurrencySubmenuOpen(true);
+                      }}
+                      onMouseLeave={(e) => {
+                        // Only close if mouse is not moving to the submenu
+                        const relatedTarget = e.relatedTarget as HTMLElement;
+                        if (!relatedTarget || !relatedTarget.closest('.currency-submenu')) {
+                          // Add small delay to allow mouse to move to submenu
+                          currencySubmenuTimeoutRef.current = setTimeout(() => {
+                            closeCurrencySubmenu();
+                          }, 150);
+                        }
+                      }}
+                    >
+                      <button ref={currencyButtonAllRef} className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100">
+                        Currency (All) <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+                      </button>
+                      {currencySubmenuOpen && currencySubmenuPosition && (
+                        <div 
+                          ref={currencySubmenuRef}
+                          className="currency-submenu fixed bg-white border border-gray-200 rounded shadow-md min-w-[140px] max-h-[300px] overflow-y-auto z-[70]" 
+                          style={{ 
+                            scrollbarWidth: 'thin',
+                            left: `${currencySubmenuPosition.x}px`,
+                            top: `${currencySubmenuPosition.y}px`
+                          }}
+                          onMouseEnter={() => {
+                            // Clear any pending close timeout
+                            if (currencySubmenuTimeoutRef.current) {
+                              clearTimeout(currencySubmenuTimeoutRef.current);
+                              currencySubmenuTimeoutRef.current = null;
+                            }
+                            setCurrencySubmenuOpen(true);
+                          }}
+                          onMouseLeave={() => {
+                            // Add small delay before closing
+                            currencySubmenuTimeoutRef.current = setTimeout(() => {
+                              closeCurrencySubmenu();
+                            }, 150);
+                          }}
+                        >
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { 
+                            Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'USD')); 
+                            setContextMenu(null); 
+                            setOpenDropdown(null); 
+                            setConvertSubmenuOpen(false); 
+                            closeCurrencySubmenu(); 
+                          }}>USD ($) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'EUR')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>EUR (€) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'GBP')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>GBP (£) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'JPY')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>JPY (¥) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'INR')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>INR (₹) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'CAD')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>CAD (C$) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'AUD')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>AUD (A$) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'CNY')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>CNY (¥) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'CHF')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>CHF (Fr) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'MXN')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>MXN ($) (All)</button>
+                          <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { Array.from(multiSelectedColumns).forEach(col => handleFormatAsCurrency(col, 'BRL')); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>BRL (R$) (All)</button>
+                        </div>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <>
@@ -5712,6 +6768,89 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object</button>
+                    <div className="border-t border-gray-100 my-1"></div>
+                    {data.columnFormats?.[contextMenu.col]?.type === 'percentage' ? (
+                      <button className="block w-full text-left px-4 py-2 text-xs bg-gray-50 text-gray-400 cursor-not-allowed" disabled title={`Percentage already applied to column "${contextMenu.col}"`}>Percentage (Already Applied)</button>
+                    ) : (
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleConvertToPercentage(contextMenu.col); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Percentage</button>
+                    )}
+                    {data.columnFormats?.[contextMenu.col]?.type === 'percentage' ? (
+                      <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleConvertFromPercentage(contextMenu.col); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Number</button>
+                    ) : null}
+                    <div className="border-t border-gray-100 my-1"></div>
+                    <div 
+                      className="relative"
+                      onMouseEnter={() => {
+                        // Clear any pending close timeout
+                        if (currencySubmenuTimeoutRef.current) {
+                          clearTimeout(currencySubmenuTimeoutRef.current);
+                          currencySubmenuTimeoutRef.current = null;
+                        }
+                        if (currencyButtonRef.current) {
+                          const rect = currencyButtonRef.current.getBoundingClientRect();
+                          const position = calculateCurrencySubmenuPosition(rect);
+                          setCurrencySubmenuPosition(position);
+                        }
+                        setCurrencySubmenuOpen(true);
+                      }}
+                      onMouseLeave={(e) => {
+                        // Only close if mouse is not moving to the submenu
+                        const relatedTarget = e.relatedTarget as HTMLElement;
+                        if (!relatedTarget || !relatedTarget.closest('.currency-submenu')) {
+                          // Add small delay to allow mouse to move to submenu
+                          currencySubmenuTimeoutRef.current = setTimeout(() => {
+                            closeCurrencySubmenu();
+                          }, 150);
+                        }
+                      }}
+                    >
+                      <button ref={currencyButtonRef} className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100">
+                        Currency <span style={{fontSize:'10px',marginLeft:4}}>▶</span>
+                      </button>
+                      {currencySubmenuOpen && currencySubmenuPosition && (
+                        <div 
+                          ref={currencySubmenuRef}
+                          className="currency-submenu fixed bg-white border border-gray-200 rounded shadow-md min-w-[140px] max-h-[300px] overflow-y-auto z-[70]" 
+                          style={{ 
+                            scrollbarWidth: 'thin',
+                            left: `${currencySubmenuPosition.x}px`,
+                            top: `${currencySubmenuPosition.y}px`
+                          }}
+                          onMouseEnter={() => {
+                            // Clear any pending close timeout
+                            if (currencySubmenuTimeoutRef.current) {
+                              clearTimeout(currencySubmenuTimeoutRef.current);
+                              currencySubmenuTimeoutRef.current = null;
+                            }
+                            setCurrencySubmenuOpen(true);
+                          }}
+                          onMouseLeave={() => {
+                            // Add small delay before closing
+                            currencySubmenuTimeoutRef.current = setTimeout(() => {
+                              closeCurrencySubmenu();
+                            }, 150);
+                          }}
+                        >
+                          {data.columnFormats?.[contextMenu.col]?.type === 'currency' ? (
+                            <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRemoveCurrencyFormat(contextMenu.col); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>Remove Currency Format</button>
+                          ) : (
+                            <>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'USD'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>USD ($)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'EUR'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>EUR (€)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'GBP'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>GBP (£)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'JPY'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>JPY (¥)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'INR'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>INR (₹)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'CAD'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>CAD (C$)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'AUD'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>AUD (A$)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'CNY'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>CNY (¥)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'CHF'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>CHF (Fr)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'MXN'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>MXN ($)</button>
+                              <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleFormatAsCurrency(contextMenu.col, 'BRL'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); closeCurrencySubmenu(); }}>BRL (R$)</button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
@@ -5888,7 +7027,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                           // Unhide all selected columns
                           const updatedData = {
                             ...data,
-                            hiddenColumns: (data.hiddenColumns || []).filter(c => !selectedHiddenColumns.includes(c))
+                            hiddenColumns: (data.hiddenColumns || []).filter(c => !selectedHiddenColumns.includes(c)),
+                            columnFormats: data.columnFormats || {},
                           };
                           saveToUndoStack(data);
                           onDataChange(updatedData);
@@ -6230,155 +7370,309 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
         </div>
       )}
 
-      {/* Find and Replace Modal */}
-      {findReplaceModalOpen && (
+      {/* Find and Replace Modal - Excel-like with Tabs - Draggable */}
+      {findReplaceModalOpen && containerRef.current && (
         <div 
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]"
-          onClick={() => setFindReplaceModalOpen(false)}
+          className="absolute z-[9999]"
+          style={{
+            left: `${modalPosition.x}px`,
+            top: `${modalPosition.y}px`,
+            pointerEvents: 'auto'
+          }}
+          ref={modalRef}
         >
           <div 
-            className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4"
-            onClick={e => e.stopPropagation()}
+            className="bg-white rounded-lg shadow-2xl max-w-lg w-full border-2 border-gray-300"
           >
-            <div className="flex items-center justify-between p-4 border-b border-gray-200">
-              <div className="flex items-center space-x-2">
+            <div 
+              className="flex items-center justify-between p-4 border-b border-gray-200 cursor-move select-none"
+              onMouseDown={handleModalMouseDown}
+            >
+              <div className="flex items-center space-x-2 flex-1">
                 <Search className="w-5 h-5 text-blue-600" />
                 <h3 className="text-lg font-semibold text-gray-900">Find and Replace</h3>
               </div>
               <button
-                onClick={() => setFindReplaceModalOpen(false)}
-                className="p-1 hover:bg-gray-100 rounded-md transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent drag when clicking close
+                  setFindReplaceModalOpen(false);
+                  setFindReplaceTab('find'); // Reset to Find tab on close
+                  setSearchContextColumn(null); // Reset search context when modal closes
+                }}
+                onMouseDown={(e) => e.stopPropagation()} // Prevent drag when clicking close
+                className="p-1 hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5 text-gray-500" />
               </button>
             </div>
             
-            <div className="p-4 space-y-4">
-              {/* Find Text Input */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Find
-                </label>
-                <Input
-                  value={findText}
-                  onChange={(e) => setFindText(e.target.value)}
-                  placeholder="Enter text to find..."
-                  className="w-full"
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && findText.trim()) {
-                      handleFindAndReplace();
-                    }
-                  }}
-                />
-                {/* Match Count Display */}
-                {findText.trim() && (
-                  <div className="mt-2 text-sm">
-                    {matchCountLoading ? (
-                      <div className="flex items-center text-gray-500">
-                        <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mr-2"></div>
-                        Searching...
-                      </div>
-                    ) : (
-                      <div className="text-gray-600">
-                        <span className="font-medium text-blue-600">{matchCount}</span> match{matchCount !== 1 ? 'es' : ''} found
-                        {matchCount > 0 && (
-                          <div className="text-xs text-gray-500 mt-1">
-                            {Object.entries(matchesByColumn)
-                              .filter(([_, count]) => (count as number) > 0)
-                              .slice(0, 3)
-                              .map(([col, count]) => `${col}: ${count}`)
-                              .join(', ')}
-                            {Object.keys(matchesByColumn).filter(col => (matchesByColumn[col] as number) > 0).length > 3 && '...'}
-                          </div>
-                        )}
-                      </div>
-                    )}
+            {/* Column-specific search indicator */}
+            {searchContextColumn && data?.headers?.includes(searchContextColumn) && !data?.hiddenColumns?.includes(searchContextColumn) && (
+              <div className="px-4 py-2 bg-blue-50 border-b border-blue-200">
+                <p className="text-sm text-blue-700 flex items-center">
+                  <Search className="w-4 h-4 mr-2" />
+                  <strong>Searching in column:</strong> <span className="ml-1 font-mono">{searchContextColumn}</span>
+                </p>
+              </div>
+            )}
+            
+            <Tabs value={findReplaceTab} onValueChange={(value) => setFindReplaceTab(value as 'find' | 'replace')} className="w-full">
+              <div className="px-0">
+                <TabsList className="flex h-12 w-full items-center justify-stretch rounded-none bg-gray-100 p-0">
+                  <TabsTrigger value="find" className="flex-1 h-full text-base font-medium rounded-none data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600">Find</TabsTrigger>
+                  <TabsTrigger value="replace" className="flex-1 h-full text-base font-medium rounded-none data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600">Replace</TabsTrigger>
+                </TabsList>
+              </div>
+
+              {/* Find Tab Content */}
+              <TabsContent value="find" className="p-4 space-y-4">
+                {/* Find Text Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Find
+                  </label>
+                  <Input
+                    value={findText}
+                    onChange={(e) => setFindText(e.target.value)}
+                    placeholder="Enter text to find..."
+                    className="w-full"
+                    autoFocus={findReplaceTab === 'find'}
+                  />
+                  {/* Match Count Display */}
+                  {findText.length > 0 && (
+                    <div className="mt-2 text-sm">
+                      {matchCountLoading ? (
+                        <div className="flex items-center text-gray-500">
+                          <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mr-2"></div>
+                          Searching...
+                        </div>
+                      ) : (
+                        <div className="text-gray-600">
+                          {isFindNextMode && currentMatchIndex >= 0 && matchLocations.length > 0 ? (
+                            <div>
+                              <span className="font-medium text-blue-600">
+                                Match {currentMatchIndex + 1} of {matchLocations.length}
+                              </span>
+                              <div className="text-xs text-gray-500 mt-1">
+                                Row {matchLocations[currentMatchIndex].rowIndex + 1}, Column: {matchLocations[currentMatchIndex].column}
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="font-medium text-blue-600">{matchCount}</span> match{matchCount !== 1 ? 'es' : ''} found
+                              {matchCount > 0 && (
+                                <div className="text-xs text-gray-500 mt-1">
+                                  {Object.entries(matchesByColumn)
+                                    .filter(([_, count]) => (count as number) > 0)
+                                    .slice(0, 3)
+                                    .map(([col, count]) => `${col}: ${count}`)
+                                    .join(', ')}
+                                  {Object.keys(matchesByColumn).filter(col => (matchesByColumn[col] as number) > 0).length > 3 && '...'}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Options */}
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="caseSensitiveFind"
+                      checked={caseSensitive}
+                      onChange={(e) => setCaseSensitive(e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <label htmlFor="caseSensitiveFind" className="text-sm text-gray-700">
+                      Case sensitive
+                    </label>
                   </div>
+                </div>
+
+                {/* Action Buttons - Single Row */}
+                <div className="flex space-x-2 pt-4">
+                  <Button
+                    onClick={handleFindAll}
+                    disabled={findText.length === 0 || matchCountLoading}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    Find All
+                  </Button>
+                  <Button
+                    onClick={handleFindNext}
+                    disabled={findText.length === 0 || matchCountLoading || (matchCount === 0 && matchLocations.length === 0)}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    Find Next
+                  </Button>
+                  <Button
+                    onClick={handleFindPrevious}
+                    disabled={findText.length === 0 || matchCountLoading || (matchCount === 0 && matchLocations.length === 0)}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    Find Previous
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setFindReplaceModalOpen(false);
+                      setFindReplaceTab('find');
+                      setSearchContextColumn(null); // Reset search context when modal closes
+                    }}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Close
+                  </Button>
+                </div>
+              </TabsContent>
+
+              {/* Replace Tab Content */}
+              <TabsContent value="replace" className="p-4 space-y-4">
+                {/* Find Text Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Find
+                  </label>
+                  <Input
+                    value={findText}
+                    onChange={(e) => setFindText(e.target.value)}
+                    placeholder="Enter text to find..."
+                    className="w-full"
+                    autoFocus={findReplaceTab === 'replace'}
+                  />
+                  {/* Match Count Display - Same as Find tab with Find Next mode support */}
+                  {findText.length > 0 && (
+                    <div className="mt-2 text-sm">
+                      {matchCountLoading ? (
+                        <div className="flex items-center text-gray-500">
+                          <div className="w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mr-2"></div>
+                          Searching...
+                        </div>
+                      ) : (
+                        <div className="text-gray-600">
+                          {isFindNextMode && currentMatchIndex >= 0 && matchLocations.length > 0 ? (
+                            <div>
+                              <span className="font-medium text-blue-600">
+                                Match {currentMatchIndex + 1} of {matchLocations.length}
+                              </span>
+                              <div className="text-xs text-gray-500 mt-1">
+                                Row {matchLocations[currentMatchIndex].rowIndex + 1}, Column: {matchLocations[currentMatchIndex].column}
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="font-medium text-blue-600">{matchCount}</span> match{matchCount !== 1 ? 'es' : ''} found
+                              {matchCount > 0 && (
+                                <div className="text-xs text-gray-500 mt-1">
+                                  {Object.entries(matchesByColumn)
+                                    .filter(([_, count]) => (count as number) > 0)
+                                    .slice(0, 3)
+                                    .map(([col, count]) => `${col}: ${count}`)
+                                    .join(', ')}
+                                  {Object.keys(matchesByColumn).filter(col => (matchesByColumn[col] as number) > 0).length > 3 && '...'}
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Replace Text Input */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Replace with
+                  </label>
+                  <Input
+                    value={replaceText}
+                    onChange={(e) => setReplaceText(e.target.value)}
+                    placeholder="Enter replacement text..."
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Options */}
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="caseSensitiveReplace"
+                      checked={caseSensitive}
+                      onChange={(e) => setCaseSensitive(e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <label htmlFor="caseSensitiveReplace" className="text-sm text-gray-700">
+                      Case sensitive
+                    </label>
+                  </div>
+                </div>
+
+                {/* Action Buttons - Single Row */}
+                <div className="flex space-x-2 pt-4">
+                  <Button
+                    onClick={handleFindNext}
+                    disabled={findText.length === 0 || matchCountLoading || (matchCount === 0 && matchLocations.length === 0)}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    Find Next
+                  </Button>
+                  <Button
+                    onClick={handleReplace}
+                    disabled={findText.length === 0 || findReplaceLoading}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    {findReplaceLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                        Processing...
+                      </>
+                    ) : (
+                      <>Replace</>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={handleReplaceAll}
+                    disabled={findText.length === 0 || findReplaceLoading}
+                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white"
+                  >
+                    {findReplaceLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
+                        Processing...
+                      </>
+                    ) : (
+                      <>Replace All</>
+                    )}
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setFindReplaceModalOpen(false);
+                      setFindReplaceTab('find');
+                      setSearchContextColumn(null); // Reset search context when modal closes
+                    }}
+                    variant="outline"
+                    className="flex-1"
+                  >
+                    Close
+                  </Button>
+                </div>
+              </TabsContent>
+
+              {/* Help Text */}
+              <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md mx-4 mb-4">
+                <p><strong>Shortcut:</strong> Press Ctrl+F to open this dialog</p>
+                {findReplaceTab === 'replace' && (
+                  <p><strong>Tip:</strong> Leave "Replace with" empty to delete found text</p>
                 )}
               </div>
-              
-              {/* Replace Text Input */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Replace with
-                </label>
-                <Input
-                  value={replaceText}
-                  onChange={(e) => setReplaceText(e.target.value)}
-                  placeholder="Enter replacement text..."
-                  className="w-full"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && findText.trim()) {
-                      handleFindAndReplace();
-                    }
-                  }}
-                />
-              </div>
-              
-              {/* Options */}
-              <div className="space-y-2">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="caseSensitive"
-                    checked={caseSensitive}
-                    onChange={(e) => setCaseSensitive(e.target.checked)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <label htmlFor="caseSensitive" className="text-sm text-gray-700">
-                    Case sensitive
-                  </label>
-                </div>
-                
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="replaceAll"
-                    checked={replaceAll}
-                    onChange={(e) => setReplaceAll(e.target.checked)}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <label htmlFor="replaceAll" className="text-sm text-gray-700">
-                    Replace all occurrences
-                  </label>
-                </div>
-              </div>
-              
-              {/* Action Buttons */}
-              <div className="flex space-x-3 pt-4">
-                <Button
-                  onClick={handleFindAndReplace}
-                  disabled={!findText.trim() || findReplaceLoading}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {findReplaceLoading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div>
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <Replace className="w-4 h-4 mr-2" />
-                      {replaceAll ? 'Replace All' : 'Replace'}
-                    </>
-                  )}
-                </Button>
-                <Button
-                  onClick={() => setFindReplaceModalOpen(false)}
-                  variant="outline"
-                  className="flex-1"
-                >
-                  Cancel
-                </Button>
-              </div>
-              
-              {/* Help Text */}
-              <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-md">
-                <p><strong>Shortcut:</strong> Press Ctrl+F to open this dialog</p>
-                <p><strong>Tip:</strong> Leave "Replace with" empty to delete found text</p>
-              </div>
-            </div>
+            </Tabs>
           </div>
         </div>
       )}

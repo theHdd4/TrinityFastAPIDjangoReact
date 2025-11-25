@@ -23,6 +23,12 @@ export interface DataFrameData {
   cellColors: { [key: string]: string }; // key format: "row-col"
   hiddenColumns: string[]; // Array of hidden column names
   deletedColumns?: string[]; // Track columns removed from the dataset
+  columnFormats?: {
+    [columnName: string]: {
+      type: 'percentage' | 'currency';
+      currency?: 'USD' | 'EUR' | 'GBP' | 'JPY' | 'INR' | 'CAD' | 'AUD' | 'CNY' | 'CHF' | 'MXN' | 'BRL';
+    };
+  };
 }
 
 export interface DataFrameSettings {
@@ -247,6 +253,8 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           frozenColumns: 0,
           cellColors: {},
           hiddenColumns: [],
+          // Preserve existing columnFormats when loading data
+          columnFormats: settings.tableData?.columnFormats || {},
         };
         // Preserve existing pivot settings if they have valid results
         // Only update dataSource and dataSourceColumns, but keep pivot configuration intact

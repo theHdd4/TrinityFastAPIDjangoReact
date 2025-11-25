@@ -1325,6 +1325,34 @@ async def transform_column_case(df_id: str = Body(...), column: str = Body(...),
     return result
 
 
+@router.post("/convert_to_percentage")
+async def convert_to_percentage(df_id: str = Body(...), column: str = Body(...)):
+    """Mark column for percentage display (no data modification - display only)."""
+    df = _get_df(df_id)
+    
+    if column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{column}' not found")
+    
+    # No data modification - percentage is display-only
+    # Frontend will handle multiplying by 100 for display
+    result = _df_payload(df, df_id)
+    return result
+
+
+@router.post("/convert_from_percentage")
+async def convert_from_percentage(df_id: str = Body(...), column: str = Body(...)):
+    """Remove percentage display format (no data modification - display only)."""
+    df = _get_df(df_id)
+    
+    if column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{column}' not found")
+    
+    # No data modification - percentage is display-only
+    # Frontend will handle removing the percentage display format
+    result = _df_payload(df, df_id)
+    return result
+
+
 @router.get("/preview")
 async def preview(df_id: str, n: int = 5):
     df = _get_df(df_id)
@@ -1478,19 +1506,33 @@ async def find_and_replace(
     find_text: str = Body(...), 
     replace_text: str = Body(...),
     replace_all: bool = Body(False),
-    case_sensitive: bool = Body(False)
+    case_sensitive: bool = Body(False),
+    columns: Optional[List[str]] = Body(None)
 ):
     df = _get_df(df_id)
     try:
-        # Search and replace in all columns by converting them to strings
-        all_columns = df.columns
+        # Determine which columns to search
+        # If columns parameter is provided, use only those columns; otherwise search all columns
+        if columns is not None and len(columns) > 0:
+            # Validate that all provided columns exist in the dataframe
+            all_available_columns = df.columns
+            invalid_columns = [col for col in columns if col not in all_available_columns]
+            if invalid_columns:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Columns not found in dataframe: {', '.join(invalid_columns)}"
+                )
+            columns_to_search = columns
+        else:
+            # Search all columns (backward compatibility)
+            columns_to_search = df.columns
         
-        if not all_columns:
+        if not columns_to_search:
             raise HTTPException(status_code=400, detail="No columns found to search")
         
-        # Apply find and replace to all columns
+        # Apply find and replace to selected columns
         expressions = []
-        for col in all_columns:
+        for col in columns_to_search:
             try:
                 # Convert column to string and handle nulls
                 string_col = pl.col(col).cast(pl.Utf8).fill_null("")
@@ -1616,21 +1658,37 @@ async def find_and_replace(
 async def count_matches(
     df_id: str = Body(...), 
     find_text: str = Body(...), 
-    case_sensitive: bool = Body(False)
+    case_sensitive: bool = Body(False),
+    columns: Optional[List[str]] = Body(None)
 ):
     """Count occurrences of text in the dataframe."""
     df = _get_df(df_id)
     try:
-        # Search in all columns by converting them to strings
+        # Store all columns for metadata return (even if we're only searching specific columns)
         all_columns = df.columns
         
-        if not all_columns:
-            return {"total_matches": 0, "matches_by_column": {}, "string_columns": []}
+        # Determine which columns to search
+        # If columns parameter is provided, use only those columns; otherwise search all columns
+        if columns is not None and len(columns) > 0:
+            # Validate that all provided columns exist in the dataframe
+            invalid_columns = [col for col in columns if col not in all_columns]
+            if invalid_columns:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Columns not found in dataframe: {', '.join(invalid_columns)}"
+                )
+            columns_to_search = columns
+        else:
+            # Search all columns (backward compatibility)
+            columns_to_search = df.columns
+        
+        if not columns_to_search:
+            return {"total_matches": 0, "matches_by_column": {}, "string_columns": [], "all_columns": all_columns}
         
         total_matches = 0
         matches_by_column = {}
         
-        for col in all_columns:
+        for col in columns_to_search:
             try:
                 # Convert column to string and handle nulls
                 string_col = pl.col(col).cast(pl.Utf8).fill_null("")
