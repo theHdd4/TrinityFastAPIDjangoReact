@@ -86,7 +86,6 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
   useEffect(() => {
     const key = data.selectedDataframe;
     if (!key) {
-      console.log('EVALUATE FEATURE BASED: Skipping combinations fetch - no dataframe selected');
       setCombinationOptions([]);
       return;
     }
@@ -104,27 +103,16 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
       }
     }
     
-    console.log('EVALUATE FEATURE BASED: Fetching combinations from settings component');
-    console.log('EVALUATE FEATURE BASED: Combinations URL:', url);
-    console.log('EVALUATE FEATURE BASED: Identifier values:', data.selectedIdentifierValues);
-    
     fetch(url)
-      .then(res => {
-        console.log('EVALUATE FEATURE BASED: Combinations response status:', res.status);
-        return res.json();
-      })
+      .then(res => res.json())
       .then(data => {
-        console.log('EVALUATE FEATURE BASED: Combinations response:', data);
         if (data.combinations && Array.isArray(data.combinations)) {
-          console.log('EVALUATE FEATURE BASED: Found', data.combinations.length, 'combinations');
           setCombinationOptions(data.combinations);
         } else {
-          console.warn('EVALUATE FEATURE BASED: No combinations array in response');
           setCombinationOptions([]);
         }
       })
       .catch((error) => {
-        console.error('EVALUATE FEATURE BASED: Error fetching combinations:', error);
         setCombinationOptions([]);
       });
   }, [data.selectedDataframe, data.selectedIdentifierValues]);
@@ -156,15 +144,6 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
         // Combine existing available selections with newly available combinations
         const updatedCombinations = [...availableCombinations, ...newlyAvailableCombinations];
         
-        console.log('Updating selected combinations due to identifier filtering:', {
-          old: data.selectedCombinations,
-          new: updatedCombinations,
-          reason: newlyAvailableCombinations.length > 0 
-            ? 'New combinations available due to identifier changes' 
-            : 'Some combinations no longer match identifier criteria',
-          newlyAvailable: newlyAvailableCombinations
-        });
-        
         onDataChange({ selectedCombinations: updatedCombinations });
       }
     }
@@ -174,25 +153,13 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
     combinationOptions.length > 0 &&
     combinationOptions.every(option => (data.selectedCombinations || []).includes(option));
 
-  // Debug logging for select all checkbox
-  console.log('Select All Debug:', {
-    combinationOptionsLength: combinationOptions.length,
-    selectedCombinations: data.selectedCombinations,
-    selectedCombinationsLength: data.selectedCombinations?.length || 0,
-    allCombinationsSelected,
-    everyCheck: combinationOptions.every(option => (data.selectedCombinations || []).includes(option))
-  });
-
   const handleSelectAllCombinations = (checked: boolean) => {
-    console.log('Select All Handler called:', { checked, combinationOptions });
     if (checked) {
       // Select all combinations
       const allCombinations = combinationOptions;
-      console.log('Selecting all combinations:', allCombinations);
       onDataChange({ selectedCombinations: allCombinations });
     } else {
       // Deselect all combinations
-      console.log('Deselecting all combinations');
       onDataChange({ selectedCombinations: [] });
     }
   };
