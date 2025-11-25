@@ -37,6 +37,7 @@ def main():
 
     print("→ 0) Making sure migrations are generated…")
     call_command("makemigrations", "registry", interactive=False, verbosity=1)
+    call_command("makemigrations", "trinity_v1_agents", interactive=False, verbosity=1)
 
     print("\n→ 1) Applying SHARED (public) migrations…")
     # Run only shared apps into the public schema
@@ -246,6 +247,15 @@ def main():
         print("   ✅ Trinity V1 Atoms data populated in public schema")
     except Exception as exc:
         print(f"   ⚠️  Failed to populate trinity_v1_atoms: {exc}")
+
+    # Sync agents to PostgreSQL trinity_v1_agents table
+    try:
+        call_command("sync_agents_to_postgres", verbosity=1)
+        print("   ✅ Trinity V1 Agents synced to PostgreSQL")
+    except Exception as exc:
+        print(f"   ⚠️  Failed to sync agents to PostgreSQL: {exc}")
+        print("       This is non-critical - agents will sync automatically when registered.")
+        print("       You can manually run: python manage.py sync_agents_to_postgres")
 
     # Update atoms with tags and color data from frontend
     try:

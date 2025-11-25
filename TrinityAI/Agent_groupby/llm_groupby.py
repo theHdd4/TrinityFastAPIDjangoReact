@@ -186,15 +186,26 @@ class SmartGroupByAgent:
             # logger.info(f"Loading files with prefix: {self.prefix}")
             
             # Initialize MinIO client
-            minio_client = Minio(
-                self.file_loader.minio_endpoint,
-                access_key=self.file_loader.minio_access_key,
-                secret_key=self.file_loader.minio_secret_key,
-                secure=False
-            )
+            # Handle different minio library versions
+            try:
+                # Try newer API (all keyword arguments)
+                minio_client = Minio(
+                    endpoint=self.file_loader.minio_endpoint,
+                    access_key=self.file_loader.minio_access_key,
+                    secret_key=self.file_loader.minio_secret_key,
+                    secure=False
+                )
+            except (TypeError, ValueError):
+                # Fallback for older minio versions (endpoint as positional)
+                minio_client = Minio(
+                    self.file_loader.minio_endpoint,
+                    access_key=self.file_loader.minio_access_key,
+                    secret_key=self.file_loader.minio_secret_key,
+                    secure=False
+                )
             
             # List objects in bucket with current prefix
-            objects = minio_client.list_objects(self.file_loader.minio_bucket, prefix=self.prefix, recursive=True)
+            objects = minio_client.list_objects(bucket_name=self.file_loader.minio_bucket, prefix=self.prefix, recursive=True)
             
             files_with_columns = {}
             
@@ -202,7 +213,7 @@ class SmartGroupByAgent:
                 try:
                     if obj.object_name.endswith('.arrow'):
                         # Get Arrow file data
-                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        response = minio_client.get_object(bucket_name=self.file_loader.minio_bucket, object_name=obj.object_name)
                         data = response.read()
                         
                         # Read Arrow file
@@ -215,7 +226,7 @@ class SmartGroupByAgent:
                     
                     elif obj.object_name.endswith(('.csv', '.xlsx', '.xls')):
                         # For CSV/Excel files, try to read headers
-                        response = minio_client.get_object(self.file_loader.minio_bucket, obj.object_name)
+                        response = minio_client.get_object(bucket_name=self.file_loader.minio_bucket, object_name=obj.object_name)
                         data = response.read()
                         
                         if obj.object_name.endswith('.csv'):

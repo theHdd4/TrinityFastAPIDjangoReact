@@ -42,6 +42,11 @@ BACKEND_ROOT = Path(__file__).resolve().parent
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.append(str(BACKEND_ROOT))
 
+# Also add parent directory for TrinityAgent access
+BACKEND_PARENT = BACKEND_ROOT.parent
+if str(BACKEND_PARENT) not in sys.path:
+    sys.path.append(str(BACKEND_PARENT))
+
 BACKEND_REPO = BACKEND_ROOT.parent / "TrinityBackendFastAPI"
 BACKEND_API = BACKEND_REPO / "app"
 
@@ -365,17 +370,17 @@ AGENT_PATH = Path(__file__).resolve().parent / "Agent_fetch_atom"
 sys.path.append(str(AGENT_PATH))
 
 # Include other agents so their APIs can be mounted
-MERGE_PATH = Path(__file__).resolve().parent / "Agent_Merge"
-CONCAT_PATH = Path(__file__).resolve().parent / "Agent_concat"
-CREATE_TRANSFORM_PATH = Path(__file__).resolve().parent / "Agent_create_transform"
+# MERGE_PATH = Path(__file__).resolve().parent / "Agent_Merge"  # DISABLED - Using standardized Agent_Merge from TrinityAgent
+# CONCAT_PATH = Path(__file__).resolve().parent / "Agent_concat"  # DISABLED - Using standardized Agent_Concat from TrinityAgent
+# CREATE_TRANSFORM_PATH = Path(__file__).resolve().parent / "Agent_create_transform"  # DISABLED - Using standardized Agent_CreateTransform from TrinityAgent
 GROUPBY_PATH = Path(__file__).resolve().parent / "Agent_groupby"
 CHARTMAKER_PATH = Path(__file__).resolve().parent / "Agent_chartmaker"
 EXPLORE_PATH = Path(__file__).resolve().parent / "Agent_explore"
 DATAFRAME_OPERATIONS_PATH = Path(__file__).resolve().parent / "Agent_dataframe_operations"
 DF_VALIDATE_PATH = Path(__file__).resolve().parent / "Agent_df_validate"
-sys.path.append(str(MERGE_PATH))
-sys.path.append(str(CONCAT_PATH))
-sys.path.append(str(CREATE_TRANSFORM_PATH))
+# sys.path.append(str(MERGE_PATH))  # DISABLED - Using standardized Agent_Merge from TrinityAgent
+# sys.path.append(str(CONCAT_PATH))  # DISABLED - Using standardized Agent_Concat from TrinityAgent
+# sys.path.append(str(CREATE_TRANSFORM_PATH))  # DISABLED - Using standardized Agent_CreateTransform from TrinityAgent
 sys.path.append(str(GROUPBY_PATH))
 sys.path.append(str(CHARTMAKER_PATH))
 sys.path.append(str(EXPLORE_PATH))
@@ -383,9 +388,300 @@ sys.path.append(str(DATAFRAME_OPERATIONS_PATH))
 sys.path.append(str(DF_VALIDATE_PATH))
 
 from single_llm_processor import SingleLLMProcessor
-from Agent_Merge.main_app import router as merge_router
-from Agent_concat.main_app import router as concat_router
-from Agent_create_transform.main_app import router as create_transform_router
+# from Agent_Merge.main_app import router as merge_router  # DISABLED - Using standardized Agent_Merge from TrinityAgent
+# from Agent_concat.main_app import router as concat_router  # DISABLED - Using standardized Agent_Concat from TrinityAgent
+
+# ============================================================================
+# ============================================================================
+# STANDARDIZED CONCAT, MERGE, AND CREATETRANSFORM AGENTS (NEW) - Using TrinityAgent
+# Import directly like other agents, but use TrinityAgent's connection interface
+# ============================================================================
+concat_router = None
+merge_router = None
+create_transform_router = None
+
+# Use print statements to ensure we see errors even if logger isn't configured
+print("=" * 80)
+print("LOADING CONCAT AGENT FROM TRINITY AGENT")
+print("=" * 80)
+
+try:
+    # In Docker, TrinityAI is at /app, so TrinityAgent should be at /app/TrinityAgent
+    # Other agents are imported directly like: from Agent_Merge.main_app import router
+    # So TrinityAgent should be accessible the same way
+    current_file = Path(__file__).resolve()
+    print(f"Current file: {current_file}")
+    print(f"BACKEND_ROOT (TrinityAI): {BACKEND_ROOT}")
+    print(f"BACKEND_PARENT: {BACKEND_PARENT}")
+    print(f"Current working directory: {Path.cwd()}")
+    
+    # Strategy 1: Same directory as main_api.py (Docker: /app/TrinityAgent)
+    # This matches how other agents work - they're all in /app/
+    TRINITY_AGENT_PATH = BACKEND_ROOT / "TrinityAgent"
+    print(f"Strategy 1 (Same dir as main_api.py) - TrinityAgent path: {TRINITY_AGENT_PATH}")
+    print(f"Strategy 1 - Path exists: {TRINITY_AGENT_PATH.exists()}")
+    
+    # Strategy 2: Sibling of TrinityAI (if TrinityAI is a subdirectory)
+    if not TRINITY_AGENT_PATH.exists():
+        TRINITY_AGENT_PATH = BACKEND_PARENT / "TrinityAgent"
+        print(f"Strategy 2 (Sibling) - TrinityAgent path: {TRINITY_AGENT_PATH}")
+        print(f"Strategy 2 - Path exists: {TRINITY_AGENT_PATH.exists()}")
+    
+    # Strategy 3: Environment variable (for Docker/container setups)
+    if not TRINITY_AGENT_PATH.exists():
+        env_path = os.getenv("TRINITY_AGENT_PATH")
+        if env_path:
+            TRINITY_AGENT_PATH = Path(env_path)
+            print(f"Strategy 3 (Env Var) - TrinityAgent path: {TRINITY_AGENT_PATH}")
+            print(f"Strategy 3 - Path exists: {TRINITY_AGENT_PATH.exists()}")
+    
+    # Strategy 4: Common Docker/container locations
+    if not TRINITY_AGENT_PATH.exists():
+        possible_paths = [
+            Path("/app/TrinityAgent"),  # Docker: same level as other agents
+            Path("/app/TrinityFastAPIDjangoReact/TrinityAgent"),
+            Path.cwd() / "TrinityAgent",
+        ]
+        for possible_path in possible_paths:
+            if possible_path.exists():
+                TRINITY_AGENT_PATH = possible_path
+                print(f"Strategy 4 - Found TrinityAgent at: {TRINITY_AGENT_PATH}")
+                break
+    
+    if not TRINITY_AGENT_PATH.exists():
+        error_msg = f"TrinityAgent directory not found. Searched:\n"
+        error_msg += f"  - {BACKEND_ROOT / 'TrinityAgent'} (Same dir as main_api.py - DOCKER EXPECTED: /app/TrinityAgent)\n"
+        error_msg += f"  - {BACKEND_PARENT / 'TrinityAgent'} (Sibling of TrinityAI)\n"
+        error_msg += f"  - Environment variable TRINITY_AGENT_PATH: {os.getenv('TRINITY_AGENT_PATH', 'Not set')}\n"
+        error_msg += f"Current file: {current_file}\n"
+        error_msg += f"BACKEND_ROOT: {BACKEND_ROOT}\n"
+        error_msg += f"BACKEND_PARENT: {BACKEND_PARENT}\n"
+        error_msg += f"Current working directory: {Path.cwd()}\n"
+        error_msg += f"\nIn Docker, TrinityAgent should be at: /app/TrinityAgent (same level as other Agent_* folders)"
+        print(f"❌ {error_msg}")
+        logger.error(error_msg)
+        raise FileNotFoundError(error_msg)
+    
+    print(f"✅ Using TrinityAgent path: {TRINITY_AGENT_PATH}")
+    logger.info(f"✅ TrinityAgent found at: {TRINITY_AGENT_PATH}")
+    
+    # Add parent directory to path (so we can import as "from TrinityAgent.main_app import ...")
+    # In Docker: /app/TrinityAgent -> add /app to path (like other Agent_* imports)
+    TRINITY_AGENT_PARENT = TRINITY_AGENT_PATH.parent
+    if str(TRINITY_AGENT_PARENT) not in sys.path:
+        sys.path.insert(0, str(TRINITY_AGENT_PARENT))
+        print(f"✅ Added TrinityAgent parent to sys.path: {TRINITY_AGENT_PARENT}")
+        logger.info(f"✅ Added TrinityAgent parent to sys.path: {TRINITY_AGENT_PARENT}")
+    
+    try:
+        # Import like other agents: from TrinityAgent.main_app import ...
+        # This matches: from Agent_Merge.main_app import router
+        print("Attempting import: from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router...")
+        from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router, initialize_trinity_agent
+        print("✅ Successfully imported TrinityAgent.main_app")
+        
+        # Initialize TrinityAgent (this registers all agents)
+        print("Initializing TrinityAgent...")
+        init_results = initialize_trinity_agent()
+        print(f"TrinityAgent initialization results: {init_results}")
+        
+        # Get concat router using the connection interface
+        print("Getting concat router from TrinityAgent...")
+        concat_router = get_concat_router()
+        
+        if concat_router:
+            print("✅✅✅ CONCAT ROUTER RETRIEVED FROM TRINITY AGENT ✅✅✅")
+            print(f"✅ Concat router type: {type(concat_router)}")
+            route_count = len(concat_router.routes)
+            print(f"✅ Concat router has {route_count} routes")
+            for route in concat_router.routes:
+                if hasattr(route, 'path') and hasattr(route, 'methods'):
+                    print(f"  - {list(route.methods)} {route.path}")
+                elif hasattr(route, 'path'):
+                    print(f"  - {route.path}")
+        else:
+            print("❌ Concat router is None from get_concat_router()")
+            raise RuntimeError("Failed to get concat router from TrinityAgent")
+        
+        # Get merge router using the connection interface
+        print("Getting merge router from TrinityAgent...")
+        merge_router = get_merge_router()
+        
+        if merge_router:
+            print("✅✅✅ MERGE ROUTER RETRIEVED FROM TRINITY AGENT ✅✅✅")
+            print(f"✅ Merge router type: {type(merge_router)}")
+            route_count = len(merge_router.routes)
+            print(f"✅ Merge router has {route_count} routes")
+            for route in merge_router.routes:
+                if hasattr(route, 'path') and hasattr(route, 'methods'):
+                    print(f"  - {list(route.methods)} {route.path}")
+                elif hasattr(route, 'path'):
+                    print(f"  - {route.path}")
+        else:
+            print("❌ Merge router is None from get_merge_router()")
+            logger.warning("⚠️ Merge router is None - merge endpoint will not work")
+        
+        # Get create_transform router using the connection interface
+        print("Getting create_transform router from TrinityAgent...")
+        create_transform_router = get_create_transform_router()
+        
+        if create_transform_router:
+            print("✅✅✅ CREATETRANSFORM ROUTER RETRIEVED FROM TRINITY AGENT ✅✅✅")
+            print(f"✅ CreateTransform router type: {type(create_transform_router)}")
+            route_count = len(create_transform_router.routes)
+            print(f"✅ CreateTransform router has {route_count} routes")
+            for route in create_transform_router.routes:
+                if hasattr(route, 'path') and hasattr(route, 'methods'):
+                    print(f"  - {list(route.methods)} {route.path}")
+                elif hasattr(route, 'path'):
+                    print(f"  - {route.path}")
+        else:
+            print("❌ CreateTransform router is None from get_create_transform_router()")
+            logger.warning("⚠️ CreateTransform router is None - create_transform endpoint will not work")
+            
+    except ImportError as import_err:
+        print(f"❌ Failed to import TrinityAgent.main_app: {import_err}")
+        print("Trying alternative import path...")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        
+        # Fallback: try importing from main_app directly (add TrinityAgent to path first)
+        try:
+            print("Trying fallback: adding TrinityAgent to path and importing main_app...")
+            # Add TrinityAgent itself to path for fallback
+            if str(TRINITY_AGENT_PATH) not in sys.path:
+                sys.path.insert(0, str(TRINITY_AGENT_PATH))
+                print(f"✅ Added TrinityAgent to sys.path for fallback: {TRINITY_AGENT_PATH}")
+            from main_app import get_concat_router, get_merge_router, get_create_transform_router, initialize_trinity_agent
+            print("✅ Fallback import successful")
+            init_results = initialize_trinity_agent()
+            concat_router = get_concat_router()
+            merge_router = get_merge_router()
+            create_transform_router = get_create_transform_router()
+            if concat_router:
+                print("✅✅✅ CONCAT ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
+            if merge_router:
+                print("✅✅✅ MERGE ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
+            if create_transform_router:
+                print("✅✅✅ CREATETRANSFORM ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
+        except Exception as fallback_err:
+            print(f"❌ Fallback also failed: {fallback_err}")
+            import traceback
+            print(f"Fallback traceback: {traceback.format_exc()}")
+            raise import_err  # Re-raise original error
+    except Exception as conn_err:
+        print(f"❌ Failed to connect to TrinityAgent: {conn_err}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        raise
+    
+    print("=" * 80)
+    logger.info("=" * 80)
+    logger.info("✅ CONCAT AGENT LOADED SUCCESSFULLY")
+    logger.info("=" * 80)
+    
+except ImportError as e:
+    error_msg = f"❌❌❌ FAILED TO IMPORT AGENT REGISTRY ❌❌❌\nImportError: {e}"
+    print("=" * 80)
+    print(error_msg)
+    import traceback
+    print(f"Full traceback:\n{traceback.format_exc()}")
+    print("=" * 80)
+    logger.error("=" * 80)
+    logger.error(error_msg)
+    logger.error(f"Full traceback:\n{traceback.format_exc()}")
+    logger.error("=" * 80)
+    concat_router = None
+    merge_router = None
+    create_transform_router = None
+except Exception as e:
+    error_msg = f"❌❌❌ ERROR LOADING CONCAT/MERGE/CREATETRANSFORM AGENTS VIA REGISTRY ❌❌❌\nException: {e}"
+    print("=" * 80)
+    print(error_msg)
+    import traceback
+    print(f"Full traceback:\n{traceback.format_exc()}")
+    print("=" * 80)
+    logger.error("=" * 80)
+    logger.error(error_msg)
+    logger.error(f"Full traceback:\n{traceback.format_exc()}")
+    logger.error("=" * 80)
+    concat_router = None
+    merge_router = None
+    create_transform_router = None
+
+# Final check - if still None, try direct import as last resort
+if concat_router is None:
+    print("=" * 80)
+    print("❌❌❌ CONCAT ROUTER IS STILL NONE AFTER REGISTRY LOAD ❌❌❌")
+    print("Attempting direct import as last resort...")
+    print("=" * 80)
+    
+    try:
+        # Last resort: try direct import like other agents
+        # In Docker, everything is at /app/, so try /app/TrinityAgent first
+        TRINITY_AGENT_PATH = BACKEND_ROOT / "TrinityAgent"  # /app/TrinityAgent in Docker
+        
+        # If not found, try sibling location
+        if not TRINITY_AGENT_PATH.exists():
+            TRINITY_AGENT_PATH = BACKEND_PARENT / "TrinityAgent"
+        
+        AGENT_CONCAT_PATH = TRINITY_AGENT_PATH / "Agent_Concat"
+        
+        print(f"Last resort - TRINITY_AGENT_PATH: {TRINITY_AGENT_PATH}")
+        print(f"Last resort - AGENT_CONCAT_PATH: {AGENT_CONCAT_PATH}")
+        print(f"Last resort - AGENT_CONCAT_PATH exists: {AGENT_CONCAT_PATH.exists()}")
+        
+        if AGENT_CONCAT_PATH.exists():
+            if str(TRINITY_AGENT_PATH) not in sys.path:
+                sys.path.insert(0, str(TRINITY_AGENT_PATH))
+            
+            # Try importing main_app to register routes, then get router
+            try:
+                import Agent_Concat.main_app
+                print("✅ Imported main_app directly")
+            except Exception as main_app_err:
+                print(f"⚠️ Could not import main_app: {main_app_err}")
+            
+            # Try to get router
+            try:
+                from Agent_Concat.router import router as concat_router
+                if concat_router:
+                    print(f"✅✅✅ DIRECT IMPORT SUCCESSFUL - Router has {len(concat_router.routes)} routes")
+                else:
+                    print("❌ Router is None from direct import")
+            except Exception as router_err:
+                print(f"❌ Could not import router: {router_err}")
+                # Try standalone_router
+                try:
+                    from Agent_Concat.standalone_router import router as concat_router
+                    if concat_router:
+                        print(f"✅✅✅ STANDALONE ROUTER IMPORTED - Router has {len(concat_router.routes)} routes")
+                except Exception as standalone_err:
+                    print(f"❌ Could not import standalone_router: {standalone_err}")
+        else:
+            print(f"❌ Agent_Concat directory does not exist: {AGENT_CONCAT_PATH}")
+    except Exception as last_resort_err:
+        print(f"❌ Last resort import failed: {last_resort_err}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+    
+    if concat_router is None:
+        error_msg = "❌❌❌ CONCAT ROUTER IS STILL NONE AFTER ALL ATTEMPTS ❌❌❌\nThis means the agent registry could not load the concat agent"
+        print("=" * 80)
+        print(error_msg)
+        print("=" * 80)
+        logger.error("=" * 80)
+        logger.error(error_msg)
+        logger.error("=" * 80)
+    else:
+        print("=" * 80)
+        print("✅✅✅ CONCAT ROUTER LOADED VIA DIRECT IMPORT ✅✅✅")
+        print("=" * 80)
+        logger.info("=" * 80)
+        logger.info("✅ CONCAT ROUTER LOADED VIA DIRECT IMPORT")
+        logger.info("=" * 80)
+
+# from Agent_create_transform.main_app import router as create_transform_router  # DISABLED - Using standardized Agent_CreateTransform from TrinityAgent
 from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
@@ -445,6 +741,40 @@ app = FastAPI(
     description="API endpoint using single LLM for domain checking, query enhancement, and atom extraction",
     version="7.0"
 )
+
+# Import TrinityException for global error handling
+try:
+    from TrinityAgent.BaseAgent.exceptions import TrinityException
+except ImportError:
+    try:
+        from BaseAgent.exceptions import TrinityException
+    except ImportError:
+        # Fallback: define minimal exception if import fails
+        class TrinityException(Exception):
+            def __init__(self, message: str, code: str = "INTERNAL_ERROR"):
+                self.message = message
+                self.code = code
+                super().__init__(self.message)
+
+# Global exception handler for TrinityException
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(TrinityException)
+async def trinity_exception_handler(request: Request, exc: TrinityException):
+    """
+    Global exception handler for Trinity AI exceptions.
+    Ensures consistent JSON error responses across all endpoints.
+    """
+    logger.error(f"TrinityException: {exc.message} (code: {exc.code})")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": exc.message,
+            "code": exc.code
+        }
+    )
 
 # Router with a global prefix for all Trinity AI endpoints
 api_router = APIRouter(prefix="/trinityai")
@@ -592,9 +922,56 @@ app.add_middleware(
 
 # Expose the concat and merge agent APIs alongside the chat endpoints
 # IMPORTANT: Include agent routers BEFORE the main chat endpoints to avoid routing conflicts
-api_router.include_router(merge_router)
-api_router.include_router(concat_router)
-api_router.include_router(create_transform_router)
+if merge_router is not None:
+    api_router.include_router(merge_router, tags=["merge"])
+    logger.info("✅ Merge router included in API")
+else:
+    logger.error("❌ Merge router is None - merge endpoint will not work")
+
+# Include standardized concat router (from TrinityAgent via agent registry)
+logger.info("=" * 80)
+logger.info("INCLUDING CONCAT ROUTER IN API")
+logger.info("=" * 80)
+logger.info(f"concat_router value: {concat_router}")
+logger.info(f"concat_router is None: {concat_router is None}")
+logger.info(f"concat_router type: {type(concat_router) if concat_router else 'N/A'}")
+
+if concat_router is not None:
+    try:
+        logger.info(f"Concat router is not None: {concat_router is not None}")
+        logger.info(f"Concat router type: {type(concat_router)}")
+        
+        # Check if router has routes before including
+        route_count = len(concat_router.routes) if concat_router else 0
+        logger.info(f"Concat router has {route_count} routes before inclusion")
+        
+        if route_count == 0:
+            logger.error("❌❌❌ CONCAT ROUTER HAS NO ROUTES - NOT INCLUDING ❌❌❌")
+            logger.error("The route decorators may not have executed during import")
+        else:
+            api_router.include_router(concat_router, tags=["concat"])
+            logger.info("✅ Concat router included in API")
+            # Log all routes after inclusion
+            try:
+                route_count_after = len(concat_router.routes)
+                logger.info(f"✅ Concat router has {route_count_after} routes after inclusion")
+                for route in concat_router.routes:
+                    if hasattr(route, 'path') and hasattr(route, 'methods'):
+                        logger.info(f"  - {list(route.methods)} {route.path}")
+                    elif hasattr(route, 'path'):
+                        logger.info(f"  - {route.path}")
+            except Exception as e:
+                logger.warning(f"Could not log concat routes: {e}")
+    except Exception as e:
+        logger.error(f"❌ Failed to include concat router: {e}", exc_info=True)
+else:
+    logger.error("❌ Concat router is None - concat endpoint will not work")
+    logger.error("This means the import from Agent_Concat.main_app failed")
+if create_transform_router is not None:
+    api_router.include_router(create_transform_router, tags=["create_transform"])
+    logger.info("✅ CreateTransform router included in API")
+else:
+    logger.error("❌ CreateTransform router is None - create_transform endpoint will not work")
 api_router.include_router(groupby_router)
 api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
@@ -761,6 +1138,17 @@ async def get_environment(
 
 # After defining all endpoints include the router so the app registers them
 app.include_router(api_router)
+
+# Log all registered routes for debugging
+logger.info("=" * 80)
+logger.info("ALL REGISTERED ROUTES IN APP")
+logger.info("=" * 80)
+for route in app.routes:
+    if hasattr(route, 'path') and hasattr(route, 'methods'):
+        logger.info(f"  {list(route.methods)} {route.path}")
+    elif hasattr(route, 'path'):
+        logger.info(f"  {route.path}")
+logger.info("=" * 80)
 
 # Include Trinity AI streaming router
 app.include_router(streamai_router)

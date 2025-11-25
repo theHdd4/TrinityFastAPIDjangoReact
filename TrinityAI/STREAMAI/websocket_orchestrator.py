@@ -1341,7 +1341,49 @@ WORKFLOW PLANNING:
             thought = step_data.get("thought", "")
             
             if not atom_id:
-                raise ValueError("ReAct step planning did not return atom_id")
+                # Log the full step_data for debugging
+                logger.error(f"❌ ReAct step planning did not return atom_id")
+                logger.error(f"   Received step_data keys: {list(step_data.keys())}")
+                logger.error(f"   Full step_data: {json.dumps(step_data, indent=2)}")
+                logger.error(f"   Description: {description}")
+                logger.error(f"   Thought: {thought}")
+                
+                # Try to infer atom_id from description if possible
+                description_lower = description.lower() if description else ""
+                inferred_atom_id = None
+                
+                # Check for common atom keywords in description
+                atom_keywords = {
+                    "merge": ["merge", "combine", "join"],
+                    "concat": ["concat", "concatenate", "append"],
+                    "chart-maker": ["chart", "visualize", "graph", "plot"],
+                    "explore": ["explore", "analyze", "examine"],
+                    "create-column": ["create column", "add column", "transform"],
+                    "dataframe-operations": ["dataframe", "filter", "sort"],
+                    "groupby-wtg-avg": ["group", "aggregate", "average"],
+                    "correlation": ["correlation", "correlate"],
+                    "feature-overview": ["feature", "overview", "summary"],
+                }
+                
+                for candidate_atom, keywords in atom_keywords.items():
+                    if any(keyword in description_lower for keyword in keywords):
+                        if candidate_atom in ATOM_MAPPING:
+                            inferred_atom_id = candidate_atom
+                            logger.warning(f"⚠️ Inferred atom_id '{inferred_atom_id}' from description: '{description}'")
+                            break
+                
+                if inferred_atom_id:
+                    atom_id = inferred_atom_id
+                    logger.info(f"✅ Using inferred atom_id: {atom_id}")
+                else:
+                    # If we can't infer, log detailed error and return None gracefully
+                    logger.error(f"❌ Cannot infer atom_id from description. Available atoms: {list(ATOM_MAPPING.keys())}")
+                    logger.error(f"   This usually means the LLM response format was incorrect.")
+                    logger.error(f"   Expected JSON with 'atom_id' field, but received: {json.dumps(step_data, indent=2)}")
+                    logger.error(f"   Stopping workflow gracefully to prevent further errors.")
+                    # Return None to gracefully stop the workflow instead of crashing
+                    # The calling code will handle None appropriately (mark goal as achieved or stop workflow)
+                    return None
             
             # Store thought in ReAct state
             react_state = self._sequence_react_state.get(sequence_id)

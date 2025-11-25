@@ -62,12 +62,23 @@ class FileAnalyzer:
         self.secure = secure
         
         # Initialize MinIO client
-        self.minio_client = Minio(
-            minio_endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            secure=secure
-        )
+        # Handle different minio library versions
+        try:
+            # Try newer API (all keyword arguments)
+            self.minio_client = Minio(
+                endpoint=minio_endpoint,
+                access_key=access_key,
+                secret_key=secret_key,
+                secure=secure
+            )
+        except (TypeError, ValueError):
+            # Fallback for older minio versions (endpoint as positional)
+            self.minio_client = Minio(
+                minio_endpoint,
+                access_key=access_key,
+                secret_key=secret_key,
+                secure=secure
+            )
         
         # Storage for analyzed files
         self.analyzed_files: Dict[str, Dict[str, Any]] = {}
@@ -93,7 +104,7 @@ class FileAnalyzer:
         try:
             # List all objects in the bucket
             objects = self.minio_client.list_objects(
-                self.bucket, 
+                bucket_name=self.bucket, 
                 prefix=self.prefix, 
                 recursive=True
             )
@@ -198,7 +209,7 @@ class FileAnalyzer:
         """
         try:
             # Download file from MinIO
-            response = self.minio_client.get_object(self.bucket, object_path)
+            response = self.minio_client.get_object(bucket_name=self.bucket, object_name=object_path)
             file_data = response.read()
             response.close()
             response.release_conn()
