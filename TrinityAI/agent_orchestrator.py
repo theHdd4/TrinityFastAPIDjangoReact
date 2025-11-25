@@ -367,23 +367,66 @@ class AgentExecutor:
             
             # Handle /trinityai/create and /trinityai/create-transform endpoints
             elif endpoint == "/trinityai/create" or endpoint == "/trinityai/create-transform":
-                from Agent_create_transform.main_app import agent as create_agent
+                try:
+                    from TrinityAgent.Agent_CreateTransform.main_app import agent as create_agent
+                    from TrinityAgent.BaseAgent.interfaces import AgentContext
+                except ImportError:
+                    logger.error("Failed to import CreateTransformAgent from TrinityAgent - agent may not be available")
+                    return {
+                        "success": False,
+                        "error": "CreateTransformAgent not available",
+                        "agent": endpoint,
+                        "action": action,
+                        "base": "TrinityAI-Internal"
+                    }
                 
                 logger.info(f"📞 Calling {endpoint} agent internally")
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
                 # Extract client context
-                client_name = context.get("client_name", "") if context else ""
-                app_name = context.get("app_name", "") if context else ""
-                project_name = context.get("project_name", "") if context else ""
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
                 
-                result = create_agent.process_request(
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # Check if agent is initialized
+                if create_agent is None:
+                    logger.error("CreateTransformAgent is None - cannot process request")
+                    return {
+                        "success": False,
+                        "error": "CreateTransformAgent not initialized",
+                        "agent": endpoint,
+                        "action": action,
+                        "base": "TrinityAI-Internal"
+                    }
+                
+                # Use BaseAgent's execute method with AgentContext
+                agent_context = AgentContext(
+                    session_id=session_id or f"session_{int(__import__('time').time())}",
                     user_prompt=prompt,
-                    session_id=session_id,
                     client_name=client_name,
                     app_name=app_name,
-                    project_name=project_name
+                    project_name=project_name,
+                    previous_steps={}
                 )
+                
+                # Execute agent
+                agent_result = create_agent.execute(agent_context)
+                
+                # Convert AgentResult to dictionary format expected by orchestrator
+                result = {
+                    "success": agent_result.success,
+                    "data": agent_result.data,
+                    "response": agent_result.data.get("response", ""),
+                    "smart_response": agent_result.message or agent_result.data.get("smart_response", ""),
+                    "error": agent_result.error,
+                    "artifacts": agent_result.artifacts,
+                    "session_id": agent_result.session_id,
+                    "create_transform_json": agent_result.data.get("create_transform_json") or agent_result.data.get("json")
+                }
+                
+                logger.info(f"📊 CreateTransform agent result: success={result.get('success')}, keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 logger.info(f"✅ INTERNAL {endpoint} completed successfully")
                 
                 return {
@@ -396,16 +439,38 @@ class AgentExecutor:
             
             # Handle /trinityai/groupby endpoint
             elif endpoint == "/trinityai/groupby":
-                from Agent_groupby.main_app import agent as groupby_agent
+                # Import from standardized TrinityAgent
+                try:
+                    from TrinityAgent.Agent_GroupBy.main_app import agent as groupby_agent
+                except ImportError:
+                    try:
+                        from Agent_GroupBy.main_app import agent as groupby_agent
+                    except ImportError:
+                        # Fallback to old path if exists
+                        from Agent_groupby.main_app import agent as groupby_agent
                 
                 logger.info("📞 Calling /groupby agent internally")
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
+                # Extract client context from session_context (set by workflow orchestrator)
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
+                
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # Call groupby agent directly (like individual atom execution)
+                # Note: process_request is synchronous, so no await needed
                 result = groupby_agent.process_request(
                     user_prompt=prompt,
-                    session_id=session_id
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
                 )
+                logger.info(f"📊 GroupBy agent result: success={result.get('success')}, keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 logger.info(f"✅ INTERNAL /groupby completed successfully")
+                logger.info(f"📦 Result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 
                 return {
                     "success": True,

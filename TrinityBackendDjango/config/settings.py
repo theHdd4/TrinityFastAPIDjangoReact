@@ -128,6 +128,9 @@ SHARED_APPS = [
     # Trinity V1 Atoms app - stores atom definitions in public schema
     "apps.trinity_v1_atoms",
     
+    # Trinity V1 Agents app - stores agent registry definitions in public schema
+    "apps.trinity_v1_agents",
+    
     # Atoms app - stores atom definitions in public schema
     "apps.atoms",
 

@@ -63,10 +63,17 @@ class CeleryTaskClient:
         )
 
     def _execute_callable(self, dotted_path: str, args: List[Any], kwargs: Dict[str, Any]) -> Any:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("TASK_QUEUE: Executing callable: %s with args=%s, kwargs=%s", dotted_path, args, kwargs)
         callable_obj = import_callable(dotted_path)
+        logger.info("TASK_QUEUE: Callable imported successfully, executing...")
         result = callable_obj(*args, **kwargs)
+        logger.info("TASK_QUEUE: Callable executed, result type: %s", type(result).__name__)
         if asyncio.iscoroutine(result):
+            logger.info("TASK_QUEUE: Result is coroutine, running with asyncio.run()")
             return asyncio.run(result)
+        logger.info("TASK_QUEUE: Callable execution completed successfully")
         return result
 
     def submit_callable(
@@ -87,8 +94,12 @@ class CeleryTaskClient:
         self.result_store.create(task_id, name, task_metadata)
 
         if self.always_eager:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("TASK_QUEUE: always_eager=True, executing callable synchronously: %s", dotted_path)
             try:
                 result = self._execute_callable(dotted_path, args_list, kwargs_dict)
+                logger.info("TASK_QUEUE: Callable executed successfully, marking success for task_id=%s", task_id)
                 self.result_store.mark_success(task_id, result)
                 return TaskSubmission(
                     task_id=task_id,
@@ -97,6 +108,9 @@ class CeleryTaskClient:
                     metadata=task_metadata,
                 )
             except Exception as exc:  # pragma: no cover - relies on runtime behaviour
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error("TASK_QUEUE: Callable execution failed: %s", str(exc), exc_info=True)
                 self.result_store.mark_failure(task_id, str(exc))
                 return TaskSubmission(
                     task_id=task_id,

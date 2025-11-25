@@ -33,12 +33,27 @@ class FileLoader:
         self.object_prefix = object_prefix
         
         # Initialize MinIO client
-        self.minio_client = Minio(
-            minio_endpoint,
-            access_key=minio_access_key,
-            secret_key=minio_secret_key,
-            secure=False
-        )
+        # Handle different minio library versions
+        try:
+            # Try newer API (all keyword arguments)
+            self.minio_client = Minio(
+                endpoint=minio_endpoint,
+                access_key=minio_access_key,
+                secret_key=minio_secret_key,
+                secure=False
+            )
+        except (TypeError, ValueError):
+            # Fallback for older minio versions (endpoint as positional)
+            try:
+                self.minio_client = Minio(
+                    minio_endpoint,
+                    access_key=minio_access_key,
+                    secret_key=minio_secret_key,
+                    secure=False
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize Minio client: {e}")
+                raise
         
         logger.info(f"FileLoader initialized with bucket: {minio_bucket}, prefix: {object_prefix}")
     
@@ -74,7 +89,7 @@ class FileLoader:
             logger.info(f"Loading files with prefix: {self.object_prefix}")
             
             # List objects in bucket with current prefix
-            objects = self.minio_client.list_objects(self.minio_bucket, prefix=self.object_prefix, recursive=True)
+            objects = self.minio_client.list_objects(bucket_name=self.minio_bucket, prefix=self.object_prefix, recursive=True)
             
             files_with_columns = {}
             supported_extensions = (".arrow", ".parquet", ".feather", ".csv")
@@ -87,7 +102,7 @@ class FileLoader:
                 response = None
                 try:
                     # Get object data
-                    response = self.minio_client.get_object(self.minio_bucket, obj.object_name)
+                    response = self.minio_client.get_object(bucket_name=self.minio_bucket, object_name=obj.object_name)
                     data = response.read()
                     columns = self._extract_columns(data, obj.object_name)
 
