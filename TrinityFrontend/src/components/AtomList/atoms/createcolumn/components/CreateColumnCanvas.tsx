@@ -18,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useToast } from '@/hooks/use-toast';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
-import { resolveTaskResponse } from '@/lib/taskQueue';
+import { isTaskEnvelope, resolveTaskResponse } from '@/lib/taskQueue';
 import {
   Pagination,
   PaginationContent,
@@ -221,6 +221,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
   const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
   const [previewPagination, setPreviewPagination] = useState<PaginationInfo | null>(null);
   const [previewPage, setPreviewPage] = useState(1);
+  const [activeTask, setActiveTask] = useState<{ id?: string; status?: string; metadata?: Record<string, any> } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [operationsCollapsed, setOperationsCollapsed] = useState(false);
   const [periodPrompt, setPeriodPrompt] = useState<{ opIdx: number, opType: string } | null>(null);
@@ -529,7 +530,11 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         throw new Error(`Backend error ${res.status}`);
       }
       const raw = await res.json();
+      if (isTaskEnvelope(raw)) {
+        setActiveTask({ id: raw.task_id, status: raw.task_status || raw.status, metadata: raw.metadata as Record<string, any> });
+      }
       const data = await resolveTaskResponse<Record<string, any>>(raw);
+      setActiveTask(null);
       if (data.status && data.status !== 'SUCCESS') {
         if (data.error && data.error.includes('Unsupported or custom frequency')) {
           // Set periodNeeded for all STL ops that don't have a period set
@@ -581,6 +586,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       setError(errorMsg);
       toast({ title: 'Error', description: errorMsg, variant: 'destructive' });
     } finally {
+      setActiveTask(null);
       setLoading(false);
     }
   };
@@ -620,7 +626,11 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       );
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
       const payload = await response.json();
+      if (isTaskEnvelope(payload)) {
+        setActiveTask({ id: payload.task_id, status: payload.task_status || payload.status, metadata: payload.metadata as Record<string, any> });
+      }
       const result = await resolveTaskResponse<{ data: string; pagination: any }>(payload);
+      setActiveTask(null);
       const { headers, rows } = parseCSV(result.data);
       setPreviewData(rows);
       setPreviewHeaders(headers);
@@ -631,6 +641,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       setPreviewHeaders([]);
       setPreviewPagination(null);
     } finally {
+      setActiveTask(null);
       setPreviewLoading(false);
     }
   };
@@ -753,7 +764,11 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         throw new Error(`Save failed: ${response.statusText}`);
       }
       const payload = await response.json();
+      if (isTaskEnvelope(payload)) {
+        setActiveTask({ id: payload.task_id, status: payload.task_status || payload.status, metadata: payload.metadata as Record<string, any> });
+      }
       const result = await resolveTaskResponse<Record<string, any>>(payload);
+      setActiveTask(null);
       setSaveSuccess(true);
       const savedFile = typeof result?.result_file === 'string'
         ? result.result_file
@@ -768,6 +783,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       setSaveError(err instanceof Error ? err.message : 'Failed to save DataFrame');
       toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save DataFrame', variant: 'destructive' });
     } finally {
+      setActiveTask(null);
       setSaveLoading(false);
     }
   };
@@ -886,7 +902,11 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
         throw new Error(`Save failed: ${response.statusText}`);
       }
       const payload = await response.json();
+      if (isTaskEnvelope(payload)) {
+        setActiveTask({ id: payload.task_id, status: payload.task_status || payload.status, metadata: payload.metadata as Record<string, any> });
+      }
       const result = await resolveTaskResponse<Record<string, any>>(payload);
+      setActiveTask(null);
       setSaveSuccess(true);
       const savedFile = typeof result?.result_file === 'string'
         ? result.result_file
@@ -900,6 +920,7 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
       setSaveError(err instanceof Error ? err.message : 'Failed to save DataFrame');
       toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save DataFrame', variant: 'destructive' });
     } finally {
+      setActiveTask(null);
       setSaveLoading(false);
     }
   };
@@ -1287,6 +1308,18 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
 
   return (
     <div className="space-y-6 h-full">
+      {activeTask && (
+        <div className="p-3 rounded-md border border-green-200 bg-green-50 flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-green-800">Processing on worker</p>
+            <p className="text-xs text-green-700">Task ID: {activeTask.id || 'pending'}{activeTask.metadata?.operation ? ` • ${activeTask.metadata.operation}` : ''}</p>
+          </div>
+          <div className="flex items-center gap-2 text-green-700 text-xs">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-green-500"></div>
+            <span>{activeTask.status || 'pending'}</span>
+          </div>
+        </div>
+      )}
       {/* Cardinality View - Show immediately after dataset input */}
       {atom?.settings?.dataSource && (
         <div className="space-y-4">
