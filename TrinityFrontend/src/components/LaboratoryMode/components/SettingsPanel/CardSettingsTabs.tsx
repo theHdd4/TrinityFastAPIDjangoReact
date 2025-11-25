@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +18,15 @@ import {
   CardVariable,
   LayoutCard,
 } from '../../store/laboratoryStore';
+import CardTextBoxCanvas from '../TextBox/CardTextBoxCanvas';
+import CardTextBoxSettingsPanel from '../TextBox/CardTextBoxSettingsPanel';
+import CardTextBoxExhibition from '../TextBox/CardTextBoxExhibition';
+import {
+  CardTextBoxState,
+  defaultCardTextBoxData,
+  defaultCardTextBoxSettings,
+  defaultCardTextBoxState,
+} from '../TextBox/types';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { LABORATORY_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -104,6 +114,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   onToggleVariable,
 }) => {
   const cards = useLaboratoryStore(state => state.cards);
+  const updateCard = useLaboratoryStore(state => state.updateCard);
   const currentVariables = card.variables ?? [];
   const { toast } = useToast();
   const projectContext = useMemo(() => getActiveProjectContext(), []);
@@ -119,6 +130,15 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   const [editNameError, setEditNameError] = useState<string | null>(null);
   const [appendDialogOpen, setAppendDialogOpen] = useState(false);
   const [pendingAppendVariable, setPendingAppendVariable] = useState<AvailableVariable | null>(null);
+
+  const textBoxState: CardTextBoxState = useMemo(() => {
+    const safeState = card.textBox ?? defaultCardTextBoxState;
+    return {
+      enabled: Boolean(safeState.enabled),
+      data: { ...defaultCardTextBoxData, ...(safeState.data ?? {}) },
+      settings: { ...defaultCardTextBoxSettings, ...(safeState.settings ?? {}) },
+    };
+  }, [card.textBox]);
 
   const generateVariableId = () => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -759,12 +779,44 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
     }
   }, [card, tab, loadAvailableVariables]);
 
+  const handleTextBoxToggle = (enabled: boolean) => {
+    updateCard(card.id, {
+      textBox: {
+        ...textBoxState,
+        enabled,
+      },
+    });
+  };
+
+  const handleTextChange = (data: CardTextBoxState['data']) => {
+    updateCard(card.id, {
+      textBox: {
+        ...textBoxState,
+        enabled: true,
+        data,
+      },
+    });
+  };
+
+  const handleTextSettingsChange = (settings: Partial<CardTextBoxState['settings']>) => {
+    updateCard(card.id, {
+      textBox: {
+        ...textBoxState,
+        enabled: true,
+        settings: { ...textBoxState.settings, ...settings },
+      },
+    });
+  };
+
   return (
     <>
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+        <TabsList className="grid w-full grid-cols-4 mx-4 my-4">
           <TabsTrigger value="variables" className="text-xs">
             Variables
+          </TabsTrigger>
+          <TabsTrigger value="text-box" className="text-xs">
+            Text box
           </TabsTrigger>
           <TabsTrigger value="settings" className="text-xs">
             Settings
@@ -885,6 +937,60 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                   </div>
                 )}
               </div>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="text-box" className="space-y-4">
+            <Card className="p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-medium text-gray-900">Text box</h4>
+                  <p className="text-xs text-gray-500">
+                    Insert a formatted text area beneath the atom section of this card.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={textBoxState.enabled}
+                    onCheckedChange={handleTextBoxToggle}
+                    id={`text-box-toggle-${card.id}`}
+                  />
+                  <Label htmlFor={`text-box-toggle-${card.id}`} className="text-xs font-medium text-gray-700">
+                    Insert text box on the card
+                  </Label>
+                </div>
+              </div>
+
+              {!textBoxState.enabled ? (
+                <Card className="p-4 text-sm text-gray-600 bg-gray-50 border-dashed">
+                  Toggle "Insert text box on the card" to add a dedicated text section beneath this card's atoms.
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <Card className="p-3 space-y-3">
+                      <h5 className="text-sm font-semibold text-gray-800">Text content</h5>
+                      <CardTextBoxCanvas
+                        data={textBoxState.data}
+                        settings={textBoxState.settings}
+                        onTextChange={handleTextChange}
+                      />
+                    </Card>
+                    <Card className="p-3 space-y-3">
+                      <h5 className="text-sm font-semibold text-gray-800">Formatting</h5>
+                      <CardTextBoxSettingsPanel
+                        settings={textBoxState.settings}
+                        onSettingsChange={handleTextSettingsChange}
+                      />
+                    </Card>
+                  </div>
+
+                  <Card className="p-3 space-y-3">
+                    <h5 className="text-sm font-semibold text-gray-800">Exhibition</h5>
+                    <CardTextBoxExhibition data={textBoxState.data} />
+                  </Card>
+                </div>
+              )}
             </Card>
           </TabsContent>
 

@@ -74,6 +74,8 @@ import {
   DEFAULT_PIVOT_TABLE_SETTINGS,
   DEFAULT_UNPIVOT_SETTINGS,
 } from '../../store/laboratoryStore';
+import CardTextBoxCanvas from '../TextBox/CardTextBoxCanvas';
+import { defaultCardTextBoxData, defaultCardTextBoxSettings } from '../TextBox/types';
 import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, UnifiedRenderItem } from './helpers';
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
@@ -393,7 +395,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onCardFocus,
   onCardBlur,
 }, ref) => {
-  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen } = useLaboratoryStore();
+  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen, updateCard } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -4311,6 +4313,11 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           : (Array.isArray(card.atoms) && card.atoms.length > 0)
                             ? card.atoms[0].title
                             : 'Card';
+                        const textBoxState = {
+                          enabled: Boolean(card.textBox?.enabled),
+                          data: { ...defaultCardTextBoxData, ...(card.textBox?.data ?? {}) },
+                          settings: { ...defaultCardTextBoxSettings, ...(card.textBox?.settings ?? {}) },
+                        };
                         return (
                         <React.Fragment key={card.id}>
                         <Card
@@ -4525,6 +4532,20 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 ))}
                               </div>
                             )}
+                            {textBoxState.enabled && (
+                              <div className="mt-4">
+                                <h5 className="text-sm font-semibold text-gray-800 mb-2">Text box</h5>
+                                <CardTextBoxCanvas
+                                  data={textBoxState.data}
+                                  settings={textBoxState.settings}
+                                  onTextChange={(data) =>
+                                    updateCard(card.id, {
+                                      textBox: { ...textBoxState, enabled: true, data },
+                                    })
+                                  }
+                                />
+                              </div>
+                            )}
                             {renderAppendedVariables(card)}
                           </div>
                         </Card>
@@ -4597,6 +4618,11 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   : (Array.isArray(card.atoms) && card.atoms.length > 0)
                     ? card.atoms[0].title
                     : 'Card';
+                const textBoxState = {
+                  enabled: Boolean(card.textBox?.enabled),
+                  data: { ...defaultCardTextBoxData, ...(card.textBox?.data ?? {}) },
+                  settings: { ...defaultCardTextBoxSettings, ...(card.textBox?.settings ?? {}) },
+                };
 
                 return (
                   <React.Fragment key={card.id}>
@@ -4804,6 +4830,20 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 )}
                               </AtomBox>
                             ))}
+                          </div>
+                        )}
+                        {textBoxState.enabled && (
+                          <div className="mt-4">
+                            <h5 className="text-sm font-semibold text-gray-800 mb-2">Text box</h5>
+                            <CardTextBoxCanvas
+                              data={textBoxState.data}
+                              settings={textBoxState.settings}
+                              onTextChange={(data) =>
+                                updateCard(card.id, {
+                                  textBox: { ...textBoxState, enabled: true, data },
+                                })
+                              }
+                            />
                           </div>
                         )}
                         {renderAppendedVariables(card)}

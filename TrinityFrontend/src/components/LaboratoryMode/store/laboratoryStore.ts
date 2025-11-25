@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
+import { CardTextBoxState } from "../components/TextBox/types";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -1665,6 +1666,7 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
   variables?: CardVariable[];
+  textBox?: CardTextBoxState;
   order?: number; // For positioning standalone cards between molecules
   afterMoleculeId?: string; // Reference to molecule this card is positioned after
   beforeMoleculeId?: string; // Reference to molecule this card is positioned before
