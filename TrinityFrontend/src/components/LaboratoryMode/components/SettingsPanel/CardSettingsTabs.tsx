@@ -808,6 +808,13 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
     });
   };
 
+  useEffect(() => {
+    const allowedCardTabs = new Set(['variables', 'text-box', 'visual']);
+    if (!allowedCardTabs.has(tab)) {
+      setTab('variables');
+    }
+  }, [setTab, tab]);
+
   return (
     <>
       <Tabs value={tab} onValueChange={setTab} className="w-full">

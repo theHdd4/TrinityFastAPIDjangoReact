@@ -113,15 +113,17 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   useEffect(() => {
     if (!cardExhibited && tab === 'exhibition') {
-      setTab('settings');
+      setTab(selectedAtomId ? 'settings' : 'variables');
     }
-  }, [cardExhibited, tab]);
+  }, [cardExhibited, selectedAtomId, tab]);
 
   useEffect(() => {
     if (selectedAtomId) {
       setTab(current => (current === 'visual' || current === 'exhibition' ? current : 'settings'));
     } else if (selectedCardId) {
-      setTab('variables');
+      setTab(current =>
+        current === 'variables' || current === 'text-box' || current === 'visual' ? current : 'variables',
+      );
     }
   }, [selectedAtomId, selectedCardId]);
 
