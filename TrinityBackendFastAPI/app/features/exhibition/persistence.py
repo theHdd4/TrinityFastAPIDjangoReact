@@ -103,6 +103,7 @@ def _build_document(
     cards: Iterable[Dict[str, Any]],
     slide_objects: Dict[str, Any],
     timestamp: datetime,
+    autosaveEnabled: bool = True,
 ) -> Dict[str, Any]:
     return {
         "client_name": client_name,
@@ -112,6 +113,7 @@ def _build_document(
         "document_type": "layout_snapshot",
         "cards": list(cards),
         "slide_objects": slide_objects,
+        "autosaveEnabled": autosaveEnabled,
         "updated_at": timestamp,
     }
 
@@ -145,6 +147,7 @@ async def save_exhibition_list_configuration(
 
     cards = _normalise_cards(exhibition_config_data.get("cards"))
     slide_objects = _normalise_slide_objects(exhibition_config_data.get("slide_objects"))
+    autosaveEnabled = exhibition_config_data.get("autosaveEnabled", True)
 
     timestamp = datetime.utcnow()
 
@@ -163,6 +166,7 @@ async def save_exhibition_list_configuration(
         cards=cards,
         slide_objects=slide_objects,
         timestamp=timestamp,
+        autosaveEnabled=autosaveEnabled,
     )
 
     try:

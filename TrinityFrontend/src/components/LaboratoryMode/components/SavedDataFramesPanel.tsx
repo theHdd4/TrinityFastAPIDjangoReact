@@ -55,6 +55,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     formatDetecting?: boolean;
     formatFailed?: boolean;
     dropColumn: boolean;
+    classification?: 'identifiers' | 'measures' | 'unclassified';
   }
   interface TreeNode {
     name: string;
@@ -112,6 +113,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFilesQueue, setPendingFilesQueue] = useState<File[]>([]);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [sheetOptions, setSheetOptions] = useState<string[]>([]);
   const [selectedSheet, setSelectedSheet] = useState('');
@@ -580,6 +582,25 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         return;
       }
       await finalizeSave({ file_path: data.file_path, file_name: data.file_name || sanitizedFileName });
+      // Process next file in queue if any - wait for finalizeSave to fully complete first
+      setPendingFilesQueue(prev => {
+        if (prev.length > 0) {
+          const nextFile = prev[0];
+          // Process next file after current one is fully saved
+          setTimeout(() => {
+            setPendingFile(nextFile);
+            setUploadError('');
+            setSheetOptions([]);
+            setSelectedSheet('');
+            setHasMultipleSheets(false);
+            setTempUploadMeta(null);
+            setIsUploadModalOpen(true);
+            void uploadSelectedFile(nextFile);
+          }, 100);
+          return prev.slice(1);
+        }
+        return prev;
+      });
     } catch (err: any) {
       setUploadError(err.message || 'Upload failed');
       setUploadingFile(false);
@@ -596,16 +617,26 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   };
 
   const handleFileInput = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setPendingFile(file);
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    
+    const fileArray = Array.from(files) as File[];
+    const firstFile = fileArray[0];
+    const remainingFiles = fileArray.slice(1);
+    
+    // Store remaining files in queue
+    if (remainingFiles.length > 0) {
+      setPendingFilesQueue(remainingFiles);
+    }
+    
+    setPendingFile(firstFile);
     setUploadError('');
     setSheetOptions([]);
     setSelectedSheet('');
     setHasMultipleSheets(false);
     setTempUploadMeta(null);
     setIsUploadModalOpen(true);
-    void uploadSelectedFile(file);
+    void uploadSelectedFile(firstFile);
     event.target.value = '';
   };
 
@@ -651,6 +682,119 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         throw new Error(txt || 'Failed to load dataframe metadata');
       }
       const data = await res.json();
+      
+      // Load saved config from mongo FIRST (exactly like ColumnClassifierAtom does)
+      // ColumnClassifierAtom uses fetchDimensionMapping, but we'll use get_config directly
+      // to match how it works when dimensions are empty
+      console.log('🔍 [Process Modal] Fetching saved config from mongo FIRST');
+      let savedConfig: { identifiers: string[]; measures: string[] } | null = null;
+      
+      // ColumnClassifierAtom uses savedId which is the object_name (full path), not just filename
+      // So we should use object_name to match what was saved
+      const fileName = frame.object_name || '';
+      console.log('🔍 [Process Modal] Using object_name (full path like ColumnClassifierAtom):', fileName);
+      
+      try {
+        // Use get_config endpoint directly (same endpoint ColumnClassifierAtom uses for saving)
+        const envStr = localStorage.getItem('env');
+        const env = envStr ? JSON.parse(envStr) : {};
+        
+        const queryParams = new URLSearchParams({
+          client_name: env.CLIENT_NAME || '',
+          app_name: env.APP_NAME || '',
+          project_name: env.PROJECT_NAME || '',
+        });
+        if (fileName) {
+          queryParams.append('file_name', fileName);
+        }
+        
+        console.log('🔍 [Process Modal] Calling get_config with:', queryParams.toString());
+        const configRes = await fetch(`${CLASSIFIER_API}/get_config?${queryParams.toString()}`, {
+          credentials: 'include'
+        });
+        
+        if (configRes.ok) {
+          const configData = await configRes.json();
+          console.log('🔍 [Process Modal] get_config response:', configData);
+          if (configData?.data) {
+            savedConfig = {
+              identifiers: Array.isArray(configData.data.identifiers) ? configData.data.identifiers : [],
+              measures: Array.isArray(configData.data.measures) ? configData.data.measures : []
+            };
+            console.log('🔍 [Process Modal] Extracted saved config from mongo:', savedConfig);
+          } else {
+            console.log('🔍 [Process Modal] No data in get_config response');
+          }
+        } else {
+          console.log('🔍 [Process Modal] get_config returned:', configRes.status);
+        }
+      } catch (err) {
+        console.warn('🔍 [Process Modal] Error fetching saved config:', err);
+        // ignore if none (exactly like ColumnClassifierAtom does)
+      }
+      
+      // Only get defaults if no saved config exists (exactly like ColumnClassifierAtom logic)
+      let base: { identifiers: string[]; measures: string[]; unclassified: string[] } | null = null;
+      const hasSavedConfig = savedConfig && (savedConfig.identifiers.length > 0 || savedConfig.measures.length > 0);
+      
+      if (!hasSavedConfig) {
+        console.log('🔍 [Process Modal] No saved config, fetching default classification...');
+        // Check if we have cached classification data
+        if (!classifyData[frame.object_name]) {
+          base = await runClassification(frame.object_name);
+          console.log('🔍 [Process Modal] Default classification result:', base);
+        } else {
+          base = classifyData[frame.object_name];
+          console.log('🔍 [Process Modal] Using cached classification:', base);
+        }
+      } else {
+        console.log('🔍 [Process Modal] Using saved config from mongo, skipping defaults');
+      }
+      
+      // Use saved config if exists, otherwise use defaults (exactly like ColumnClassifierAtom does)
+      const baseSet = base || { identifiers: [], measures: [], unclassified: [] };
+      console.log('🔍 [Process Modal] Base set (defaults):', baseSet);
+      console.log('🔍 [Process Modal] Saved config (mongo):', savedConfig);
+      
+      // Saved config takes precedence (exactly like ColumnClassifierAtom line 147-152)
+      const idSet = new Set<string>(savedConfig?.identifiers || baseSet.identifiers || []);
+      const msSet = new Set<string>(savedConfig?.measures || baseSet.measures || []);
+      console.log('🔍 [Process Modal] Final identifier set:', Array.from(idSet));
+      console.log('🔍 [Process Modal] Final measure set:', Array.from(msSet));
+      
+      const allColumns = (data.columns || []).map((col: any) => col.name || '').filter(Boolean);
+      const classificationMap: Record<string, 'identifiers' | 'measures' | 'unclassified'> = {};
+      
+      // Create case-insensitive lookup maps (column names might have different case)
+      const idMap = new Map<string, string>();
+      const msMap = new Map<string, string>();
+      idSet.forEach(id => {
+        idMap.set(id.toLowerCase(), id);
+      });
+      msSet.forEach(ms => {
+        msMap.set(ms.toLowerCase(), ms);
+      });
+      
+      allColumns.forEach((colName: string) => {
+        const colLower = colName.toLowerCase();
+        // Try exact match first
+        if (idSet.has(colName)) {
+          classificationMap[colName] = 'identifiers';
+        } else if (msSet.has(colName)) {
+          classificationMap[colName] = 'measures';
+        } 
+        // Try case-insensitive match
+        else if (idMap.has(colLower)) {
+          classificationMap[colName] = 'identifiers';
+        } else if (msMap.has(colLower)) {
+          classificationMap[colName] = 'measures';
+        } else {
+          classificationMap[colName] = 'unclassified';
+        }
+      });
+      
+      console.log('🔍 [Process Modal] Final classification map:', classificationMap);
+      
       const cols: ProcessingColumnConfig[] = (data.columns || []).map((col: any) => {
         const dtype = typeof col.dtype === 'string' && col.dtype ? col.dtype : 'object';
         return {
@@ -669,9 +813,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           formatDetecting: false,
           formatFailed: false,
           dropColumn: false,
+          classification: classificationMap[col.name || ''] || 'unclassified',
         };
       });
-      setProcessingColumns(cols);
+      // Sort columns by classification on initial load (identifiers, measures, unclassified)
+      const sortedCols = cols.sort((a, b) => {
+        const rank = { identifiers: 0, measures: 1, unclassified: 2 } as const;
+        const aRank = rank[a.classification || 'unclassified'];
+        const bRank = rank[b.classification || 'unclassified'];
+        return aRank - bRank;
+      });
+      setProcessingColumns(sortedCols);
     } catch (err: any) {
       setProcessingError(err.message || 'Failed to load dataframe metadata');
     } finally {
@@ -804,7 +956,21 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       })
       .filter(inst => Object.keys(inst).length > 1);
 
-    if (!instructions.length) {
+    // Extract identifiers and measures for classification save
+    const identifiers = processingColumns
+      .filter(c => !c.dropColumn && c.classification === 'identifiers')
+      .map(c => c.name);
+    const measures = processingColumns
+      .filter(c => !c.dropColumn && c.classification === 'measures')
+      .map(c => c.name);
+    
+    // Check if there are any changes (processing instructions OR classification changes)
+    const hasProcessingChanges = instructions.length > 0;
+    // Always allow saving classifications if there are columns (user may have changed classifications)
+    // The modal only opens if there are columns, so this allows classification-only saves
+    const canSaveClassifications = processingColumns.length > 0;
+    
+    if (!hasProcessingChanges && !canSaveClassifications) {
       toast({
         title: 'No changes detected',
         description: 'Adjust at least one column before saving.',
@@ -815,24 +981,117 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
     setProcessingSaving(true);
     setProcessingError('');
     try {
-      const res = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          object_name: processingTarget.object_name,
-          instructions,
-        }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        const detail = data?.detail || (typeof data === 'string' ? data : '');
-        throw new Error(detail || 'Failed to process dataframe');
+      // Only process dataframe if there are processing instructions
+      if (hasProcessingChanges) {
+        const res = await fetch(`${VALIDATE_API}/process_saved_dataframe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            object_name: processingTarget.object_name,
+            instructions,
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          const detail = data?.detail || (typeof data === 'string' ? data : '');
+          throw new Error(detail || 'Failed to process dataframe');
+        }
+        toast({
+          title: 'Dataframe processed',
+          description: `${processingTarget.arrow_name || processingTarget.csv_name} updated successfully.`,
+        });
       }
-      toast({
-        title: 'Dataframe processed',
-        description: `${processingTarget.arrow_name || processingTarget.csv_name} updated successfully.`,
-    });
+      
+      // Save classification config (exactly like ColumnClassifierAtom with empty dimensions)
+      // identifiers and measures already extracted above
+      
+      // COMMENTED OUT - dimensions disabled
+      // const dimensions = currentFile.customDimensions;
+      
+      const stored = localStorage.getItem('current-project');
+      const envStr = localStorage.getItem('env');
+      const project = stored ? JSON.parse(stored) : {};
+      const env = envStr ? JSON.parse(envStr) : {};
+      
+      // ColumnClassifierAtom uses savedId which is the object_name (full path), not just filename
+      // So we should use object_name to match what was saved
+      const fileName = processingTarget.object_name || '';
+      const payload: Record<string, any> = {
+        project_id: project.id || null,
+        client_name: env.CLIENT_NAME || '',
+        app_name: env.APP_NAME || '',
+        project_name: env.PROJECT_NAME || '',
+        identifiers,
+        measures,
+        // dimensions: currentFile.customDimensions  // COMMENTED OUT - dimensions disabled
+        dimensions: {}  // Empty dimensions object
+      };
+      if (fileName) {
+        payload.file_name = fileName;
+      }
+      
+      try {
+        const saveRes = await fetch(`${CLASSIFIER_API}/save_config`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          credentials: 'include'
+        });
+        
+        if (saveRes.ok) {
+          toast({ title: 'Configuration Saved Successfully' });
+          localStorage.setItem('column-classifier-config', JSON.stringify(payload));
+          if (user?.id) {
+            const { updateSessionState, addNavigationItem, logSessionState } = await import('@/lib/session');
+            updateSessionState(user.id, {
+              identifiers,
+              measures,
+              // dimensions: currentFile.customDimensions,  // COMMENTED OUT - dimensions disabled
+              dimensions: {},
+            });
+            addNavigationItem(user.id, {
+              atom: 'column-classifier',
+              identifiers,
+              measures,
+              // dimensions: currentFile.customDimensions,  // COMMENTED OUT - dimensions disabled
+              dimensions: {},
+            });
+            logSessionState(user.id);
+          }
+        } else {
+          toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
+          try {
+            const txt = await saveRes.text();
+            console.warn('assignment save error response', txt);
+          } catch (err) {
+            console.warn('assignment save error parse fail', err);
+          }
+          if (user?.id) {
+            const { logSessionState } = await import('@/lib/session');
+            logSessionState(user.id);
+          }
+        }
+      } catch (err) {
+        toast({ title: 'Unable to Save Configuration', variant: 'destructive' });
+        console.warn('assignment save request failed', err);
+        if (user?.id) {
+          const { logSessionState } = await import('@/lib/session');
+          logSessionState(user.id);
+        }
+      }
+      
+      // Sort columns by classification after saving (identifiers, measures, unclassified)
+      setProcessingColumns(prev => {
+        const sorted = [...prev].sort((a, b) => {
+          const rank = { identifiers: 0, measures: 1, unclassified: 2 } as const;
+          const aRank = rank[a.classification || 'unclassified'];
+          const bRank = rank[b.classification || 'unclassified'];
+          return aRank - bRank;
+        });
+        return sorted;
+      });
+      
       closeProcessingModal();
       setReloadToken(prev => prev + 1);
     } catch (err: any) {
@@ -1587,7 +1846,8 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
             </div>
           )}
           <div className="flex items-center space-x-2 ml-2 flex-shrink-0">
-            <button
+            {/* COMMENTED OUT - 'for classification' button/icon */}
+            {/* <button
               type="button"
               title="For Classificaition"
               onClick={() => onToggleExpand(f.object_name)}
@@ -1598,7 +1858,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               ) : (
                 <ChevronDown className="w-4 h-4 text-gray-400 cursor-pointer" />
               )}
-            </button>
+            </button> */}
             <Pencil
               className="w-4 h-4 text-gray-400 cursor-pointer"
               onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)}
@@ -1922,7 +2182,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                             project_name: env.PROJECT_NAME || '',
                             identifiers,
                             measures,
-                            dimensions: dimensionsByObject[f.object_name] || {},
+                            // COMMENTED OUT - dimensions disabled
+                            // dimensions: dimensionsByObject[f.object_name] || {},
+                            dimensions: {},  // Empty dimensions object (same as ColumnClassifierAtom)
                             file_name: f.object_name
                           };
                           const res = await fetch(`${CLASSIFIER_API}/save_config`, {
@@ -1936,8 +2198,32 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                             throw new Error(txt || 'Save failed');
                           }
                           toast({ title: 'Configuration Saved Successfully' });
+                          // Save to localStorage exactly like ColumnClassifierAtom (line 435)
+                          localStorage.setItem('column-classifier-config', JSON.stringify(payload));
+                          // Update session state exactly like ColumnClassifierAtom (lines 436-449)
+                          if (user?.id) {
+                            const { updateSessionState, addNavigationItem, logSessionState } = await import('@/lib/session');
+                            updateSessionState(user.id, {
+                              identifiers,
+                              measures,
+                              // dimensions: currentFile.customDimensions,  // COMMENTED OUT - dimensions disabled
+                              dimensions: {},
+                            });
+                            addNavigationItem(user.id, {
+                              atom: 'column-classifier',
+                              identifiers,
+                              measures,
+                              // dimensions: currentFile.customDimensions,  // COMMENTED OUT - dimensions disabled
+                              dimensions: {},
+                            });
+                            logSessionState(user.id);
+                          }
                         } catch (err: any) {
                           setSaveErrorByObject(prev => ({ ...prev, [f.object_name]: err.message || 'Save failed' }));
+                          if (user?.id) {
+                            const { logSessionState } = await import('@/lib/session');
+                            logSessionState(user.id);
+                          }
                         } finally {
                           setSavingByObject(prev => ({ ...prev, [f.object_name]: false }));
                         }
@@ -2008,6 +2294,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
       ref={fileInputRef}
       className="hidden"
       accept=".csv,.xlsx,.xls"
+      multiple
       onChange={handleFileInput}
     />
   );
@@ -2111,13 +2398,14 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           ) : (
             // File context menu - show all options
             <>
-              <button
+              {/* COMMENTED OUT - 'for classification' context menu item */}
+              {/* <button
                 onClick={() => handleContextMenuAction('classify')}
                 className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
               >
                 <ChevronDown className="w-4 h-4" />
                 <span>Classification</span>
-              </button>
+              </button> */}
               <button
                 onClick={() => handleContextMenuAction('edit')}
                 className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
@@ -2337,18 +2625,24 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                               Strategy
                             </th>
                             <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
+                              Classification
+                            </th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-gray-700 border-b border-gray-200">
                               Drop Column
                             </th>
                           </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {processingColumns.map((col, idx) => {
+                        {processingColumns
+                          .map((col) => {
+                            // Find original index by column name to use in updateProcessingColumn
+                            const originalIdx = processingColumns.findIndex(c => c.name === col.name);
                             const dtypeOptions = getProcessingDtypeOptions(col.originalDtype);
                             const missingOptions = getProcessingMissingOptions(col.selectedDtype);
                             const hasMissingValues = col.missingCount > 0;
                             const inputsDisabled = col.dropColumn;
                             return (
-                              <tr key={`process-${col.name}-${idx}`}>
+                              <tr key={`process-${col.name}-${originalIdx}`}>
                                 <td className="px-3 py-2 align-top">
                                   <div>
                                     <p className="font-medium text-xs text-gray-900">{col.name}</p>
@@ -2363,7 +2657,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                 <td className="px-3 py-2 align-top">
                                   <Input
                                     value={col.newName}
-                                    onChange={e => updateProcessingColumn(idx, { newName: e.target.value })}
+                                    onChange={e => updateProcessingColumn(originalIdx, { newName: e.target.value })}
                                     className="h-7 text-xs"
                                     placeholder="Rename column"
                                     disabled={inputsDisabled}
@@ -2378,7 +2672,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                   <div className={`space-y-2 ${inputsDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
                                     <Select
                                       value={col.selectedDtype}
-                                      onValueChange={value => handleProcessingDtypeChange(idx, value)}
+                                      onValueChange={value => handleProcessingDtypeChange(originalIdx, value)}
                                       disabled={inputsDisabled}
                                     >
                                       <SelectTrigger className="w-full h-7 text-xs">
@@ -2397,7 +2691,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                         <div className="flex items-center space-x-1">
                                           <Select
                                             value={col.datetimeFormat || ''}
-                                            onValueChange={value => updateProcessingColumn(idx, { datetimeFormat: value })}
+                                            onValueChange={value => updateProcessingColumn(originalIdx, { datetimeFormat: value })}
                                             disabled={inputsDisabled || (!!col.datetimeFormat && !col.formatFailed)}
                                             className="flex-1"
                                           >
@@ -2428,7 +2722,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                           {col.datetimeFormat && !col.formatDetecting && (
                                             <button
                                               type="button"
-                                              onClick={() => updateProcessingColumn(idx, { datetimeFormat: '' })}
+                                              onClick={() => updateProcessingColumn(originalIdx, { datetimeFormat: '' })}
                                               className="flex-shrink-0 p-1 hover:bg-gray-100 rounded text-gray-500 hover:text-gray-700 transition-colors"
                                               title="Clear format"
                                               disabled={inputsDisabled}
@@ -2471,7 +2765,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                     <div className={`space-y-1 ${inputsDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
                                       <Select
                                         value={col.missingStrategy}
-                                        onValueChange={value => handleProcessingMissingStrategyChange(idx, value)}
+                                        onValueChange={value => handleProcessingMissingStrategyChange(originalIdx, value)}
                                         disabled={inputsDisabled}
                                       >
                                         <SelectTrigger className="w-full h-7 text-xs">
@@ -2488,7 +2782,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                       {col.missingStrategy === 'custom' && (
                                         <Input
                                           value={col.missingCustomValue}
-                                          onChange={e => handleProcessingMissingCustomChange(idx, e.target.value)}
+                                          onChange={e => handleProcessingMissingCustomChange(originalIdx, e.target.value)}
                                           placeholder="Custom value"
                                           className="h-7 text-xs"
                                           disabled={inputsDisabled}
@@ -2500,12 +2794,34 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                                   )}
                                 </td>
                                 <td className="px-3 py-2 align-top">
+                                  <div className={`${inputsDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
+                                    <Select
+                                      value={col.classification || 'unclassified'}
+                                      onValueChange={(value: 'identifiers' | 'measures' | 'unclassified') => updateProcessingColumn(originalIdx, { classification: value })}
+                                      disabled={inputsDisabled}
+                                    >
+                                      <SelectTrigger className={`w-full h-7 text-xs ${
+                                        col.classification === 'identifiers' ? 'text-blue-600 border-blue-300' :
+                                        col.classification === 'measures' ? 'text-green-600 border-green-300' :
+                                        'text-yellow-600 border-yellow-300'
+                                      }`}>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="identifiers">Identifiers</SelectItem>
+                                        <SelectItem value="measures">Measures</SelectItem>
+                                        <SelectItem value="unclassified">Unclassified</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </td>
+                                <td className="px-3 py-2 align-top">
                                   <label className="flex items-center gap-2 text-xs text-gray-700">
                                     <input
                                       type="checkbox"
                                       className="h-4 w-4 accent-red-600"
                                       checked={col.dropColumn}
-                                      onChange={e => handleProcessingDropToggle(idx, e.target.checked)}
+                                      onChange={e => handleProcessingDropToggle(originalIdx, e.target.checked)}
                                     />
                                     Drop column
                                   </label>

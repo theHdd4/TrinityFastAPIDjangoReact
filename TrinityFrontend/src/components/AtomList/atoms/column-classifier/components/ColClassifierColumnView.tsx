@@ -372,8 +372,8 @@ const ColClassifierColumnView: React.FC<ColClassifierColumnViewProps> = ({
           defaultMinimized={true}
           borderColor={`border-${columnClassifier.color.replace('bg-', '')}`}
           customHeader={{
-            title: "Cardinality View",
-            subtitle: "Click Here to View Data",
+            title: "Data Summary",
+            subtitle: "Data in detail",
             subtitleClickable: !!inputFileName && !!atomId,
             onSubtitleClick: handleViewDataClick
           }}

@@ -11,10 +11,18 @@ import {
   createDebouncer,
   createProgressTracker 
 } from './utils';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 export const chartMakerHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
+    
+    console.log('🔧 ===== CHART MAKER HANDLER CALLED =====');
+    console.log('📦 Full data structure:', JSON.stringify(data, null, 2));
+    console.log('🔍 Data keys:', Object.keys(data));
+    console.log('🔍 Has chart_json:', !!data.chart_json);
+    console.log('🔍 Has file_name:', !!data.file_name);
+    console.log('🔍 Has data_source:', !!data.data_source);
     
     // 🔧 CRITICAL FIX: Show smart_response FIRST (user-friendly message)
     const smartResponseText = processSmartResponse(data);
@@ -30,8 +38,12 @@ export const chartMakerHandler: AtomHandler = {
     }
     
     // 🔧 CRITICAL FIX: Handle non-chart requests (file listing, suggestions, etc.)
-    if (!data.chart_json) {
+    // Check multiple possible locations for chart_json
+    const chartJson = data.chart_json || data.chart_config || null;
+    
+    if (!chartJson) {
       console.log('ℹ️ No chart configuration found - this is likely a file listing or suggestion request');
+      console.log('📦 Available keys:', Object.keys(data));
       return { success: true }; // This is not an error for file listing requests
     }
 
@@ -39,7 +51,8 @@ export const chartMakerHandler: AtomHandler = {
     console.log('📝 User Prompt received for session:', sessionId);
     
     // 🔧 UNIFIED APPROACH: chart_json is always an array
-    const chartsList = Array.isArray(data.chart_json) ? data.chart_json : data.chart_json ? [data.chart_json] : [];
+    // Use the extracted chartJson (which could be from chart_json or chart_config)
+    const chartsList = Array.isArray(chartJson) ? chartJson : chartJson ? [chartJson] : [];
     const numberOfCharts = chartsList.length;
     
     if (numberOfCharts === 0) {
@@ -224,10 +237,15 @@ export const chartMakerHandler: AtomHandler = {
     
     console.log('🔧 Processed charts:', charts.length);
     
+    // 🔧 CRITICAL FIX: Get current settings and merge with new settings
+    const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+    const currentSettings = currentAtom?.settings || {};
+    
     // 🔧 CRITICAL FIX: Update atom settings with the AI configuration
     // Set charts first so component knows something is coming
     // Set fileId even if it's just the filename - component will show loading state
-    updateAtomSettings(atomId, { 
+    const updatedSettings = {
+      ...currentSettings, // Preserve all existing settings 
       aiConfig: data,
       aiMessage: data.message,
       // Add the AI-generated charts to the charts array
@@ -255,9 +273,33 @@ export const chartMakerHandler: AtomHandler = {
       // Include environment context
       envContext,
       lastUpdateTime: Date.now()
+    };
+    
+    console.log('🔄 Updating atom settings with charts:', {
+      atomId,
+      chartsCount: charts.length,
+      dataSource: resolvedDataSource,
+      updatedSettings: {
+        charts: updatedSettings.charts?.length || 0,
+        dataSource: updatedSettings.dataSource,
+        fileId: updatedSettings.fileId
+      }
     });
     
-    console.log('✅ Initial atom settings updated with charts configuration and fileId:', targetFile);
+    updateAtomSettings(atomId, updatedSettings);
+    
+    // Force a small delay to ensure state propagation, then verify
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Verify the update was successful
+    const verifyAtom = useLaboratoryStore.getState().getAtom(atomId);
+    console.log('✅ Atom settings updated with charts configuration:', {
+      atomExists: !!verifyAtom,
+      chartsCount: verifyAtom?.settings?.charts?.length || 0,
+      hasDataSource: !!verifyAtom?.settings?.dataSource,
+      hasFileId: !!verifyAtom?.settings?.fileId,
+      fileId: verifyAtom?.settings?.fileId
+    });
     
     // Connect to file system and load data
     try {

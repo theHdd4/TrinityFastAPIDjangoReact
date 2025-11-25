@@ -246,14 +246,14 @@ def perform_createcolumn_task(
             df[new_col] = result
             new_cols_total.append(new_col)
         elif op == "multiply":
-            new_col = rename_val or "_times_".join(columns)
+            new_col = rename_val or "_x_".join(columns)
             result = df[columns[0]].copy()
             for col in columns[1:]:
                 result *= df[col]
             df[new_col] = result
             new_cols_total.append(new_col)
         elif op == "divide":
-            new_col = rename_val or "_dividedby_".join(columns)
+            new_col = rename_val or "_div_".join(columns)
             result = df[columns[0]].copy()
             for col in columns[1:]:
                 result /= df[col]

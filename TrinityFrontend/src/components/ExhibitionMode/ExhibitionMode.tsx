@@ -1,5 +1,6 @@
 import React, { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 import { ChevronRight, Database, Download, FileText, Grid3x3, Save, Share2, Undo2 } from 'lucide-react';
 import Header from '@/components/Header';
 import {
@@ -179,6 +180,7 @@ const ExhibitionMode = () => {
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('exhibition:edit');
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
+  const [autosaveEnabled, setAutosaveEnabled] = useState(true); // Default to true, will be loaded from MongoDB
 
   // Real-time collaborative synchronization
   const {
@@ -188,7 +190,7 @@ const ExhibitionMode = () => {
     notifyCardFocus,
     notifyCardBlur,
   } = useCollaborativeSyncExhibition({
-    enabled: true,
+    enabled: canEdit && autosaveEnabled, // Only enable for users with edit permissions and when autosave is enabled
     onError: (error) => {
       console.error('[ExhibitionMode] Collaborative sync error:', error);
     },
@@ -1042,6 +1044,7 @@ const ExhibitionMode = () => {
         project_name: context.project_name,
         cards: cardsToPersist,
         slide_objects: slideObjectsToPersist,
+        autosaveEnabled: autosaveEnabled,
       });
       persistCardsLocally(cardsToPersist);
       toast({ title: 'Exhibition saved', description: 'Your exhibition updates have been saved.' });
@@ -1056,7 +1059,132 @@ const ExhibitionMode = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [canEdit, cards, isSaving, persistCardsLocally, slideObjectsByCardId, toast]);
+  }, [canEdit, cards, isSaving, persistCardsLocally, slideObjectsByCardId, autosaveEnabled, toast]);
+
+  // Autosave: Automatically save when cards or slideObjects change
+  const hasInitialCardsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!canEdit || !autosaveEnabled) return;
+    
+    const hasInitialCards = cards && cards.length > 0;
+    
+    // Skip autosave on initial load (wait for cards to be loaded)
+    if (!hasInitialCards) {
+      if (!hasInitialCardsLoadedRef.current) {
+        hasInitialCardsLoadedRef.current = true;
+        return;
+      }
+    } else {
+      if (!hasInitialCardsLoadedRef.current) {
+        hasInitialCardsLoadedRef.current = true;
+        return;
+      }
+    }
+
+    // Debounce autosave to avoid too frequent saves
+    const autosaveTimer = setTimeout(async () => {
+      console.log('🔄 [EXHIBITION AUTOSAVE] Triggering autosave...');
+      
+      try {
+        const context = getActiveProjectContext();
+        if (!context) {
+          console.warn('[EXHIBITION AUTOSAVE] No project context available');
+          return;
+        }
+
+        const cardsToPersist = JSON.parse(JSON.stringify(cards)) as LayoutCard[];
+        const slideObjectsToPersist = cards.reduce<Record<string, any[]>>((acc, card) => {
+          const objects = slideObjectsByCardId[card.id] ?? [];
+          acc[card.id] = JSON.parse(JSON.stringify(objects));
+          return acc;
+        }, {} as Record<string, any[]>);
+
+        await saveExhibitionLayout({
+          client_name: context.client_name,
+          app_name: context.app_name,
+          project_name: context.project_name,
+          cards: cardsToPersist,
+          slide_objects: slideObjectsToPersist,
+          autosaveEnabled: autosaveEnabled,
+        });
+        
+        persistCardsLocally(cardsToPersist);
+        console.log('✅ [EXHIBITION AUTOSAVE] Configuration saved successfully');
+      } catch (error) {
+        console.error('[EXHIBITION AUTOSAVE] Autosave error:', error);
+      }
+    }, 3000); // 3 second debounce for autosave
+
+    return () => {
+      clearTimeout(autosaveTimer);
+    };
+  }, [cards, slideObjectsByCardId, canEdit, autosaveEnabled, persistCardsLocally]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load autosaveEnabled from MongoDB on mount
+  useEffect(() => {
+    const loadAutosaveEnabled = async () => {
+      const context = getActiveProjectContext();
+      if (!context) return;
+
+      try {
+        const { EXHIBITION_PROJECT_STATE_API } = await import('@/lib/api');
+        const requestUrl = `${EXHIBITION_PROJECT_STATE_API}/get/${context.client_name}/${context.app_name}/${context.project_name}`;
+        const response = await fetch(requestUrl, {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === 'ok' && data.autosaveEnabled !== undefined) {
+            setAutosaveEnabled(data.autosaveEnabled);
+            console.info('[Exhibition API] Restored autosaveEnabled:', data.autosaveEnabled);
+          } else if (data.status === 'ok') {
+            // If autosaveEnabled is not in response, default to true
+            setAutosaveEnabled(true);
+          }
+        }
+      } catch (error) {
+        console.warn('[Exhibition API] Failed to load autosaveEnabled, using default:', error);
+      }
+    };
+
+    loadAutosaveEnabled();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Handle Ctrl+S keyboard shortcut for manual save (works regardless of autosave state)
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Check for Ctrl+S (or Cmd+S on Mac)
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        // Don't trigger if user is typing in an input field
+        const target = event.target as HTMLElement;
+        if (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.contentEditable === 'true' ||
+          target.getAttribute('role') === 'textbox'
+        ) {
+          return;
+        }
+
+        // Prevent default and stop propagation to prevent other handlers from running
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        
+        if (canEdit && !isSaving) {
+          handleSave();
+        }
+      }
+    };
+
+    // Use capture phase to ensure this handler runs before others
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [canEdit, isSaving, handleSave]);
 
   const [isShareOpen, setIsShareOpen] = useState(false);
 
@@ -1715,16 +1843,28 @@ const ExhibitionMode = () => {
             <Undo2 className="w-4 h-4 mr-2" />
             Undo
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-border text-foreground/80 font-medium"
-            onClick={handleSave}
-            disabled={!canEdit || isSaving}
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {isSaving ? 'Saving…' : 'Save'}
-          </Button>
+          {canEdit && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-background border border-border">
+              <span className="text-xs text-muted-foreground font-medium">Auto Save</span>
+              <Switch
+                checked={autosaveEnabled}
+                onCheckedChange={setAutosaveEnabled}
+                disabled={!canEdit}
+              />
+            </div>
+          )}
+          {!autosaveEnabled && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-border text-foreground/80 font-medium"
+              onClick={handleSave}
+              disabled={!canEdit || isSaving}
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {isSaving ? 'Saving…' : 'Save'}
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"

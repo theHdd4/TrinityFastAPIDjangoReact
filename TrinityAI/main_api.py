@@ -372,6 +372,7 @@ GROUPBY_PATH = Path(__file__).resolve().parent / "Agent_groupby"
 CHARTMAKER_PATH = Path(__file__).resolve().parent / "Agent_chartmaker"
 EXPLORE_PATH = Path(__file__).resolve().parent / "Agent_explore"
 DATAFRAME_OPERATIONS_PATH = Path(__file__).resolve().parent / "Agent_dataframe_operations"
+DF_VALIDATE_PATH = Path(__file__).resolve().parent / "Agent_df_validate"
 sys.path.append(str(MERGE_PATH))
 sys.path.append(str(CONCAT_PATH))
 sys.path.append(str(CREATE_TRANSFORM_PATH))
@@ -379,6 +380,7 @@ sys.path.append(str(GROUPBY_PATH))
 sys.path.append(str(CHARTMAKER_PATH))
 sys.path.append(str(EXPLORE_PATH))
 sys.path.append(str(DATAFRAME_OPERATIONS_PATH))
+sys.path.append(str(DF_VALIDATE_PATH))
 
 from single_llm_processor import SingleLLMProcessor
 from Agent_Merge.main_app import router as merge_router
@@ -388,6 +390,7 @@ from Agent_groupby.main_app import router as groupby_router
 from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
 from Agent_dataframe_operations.main_app import router as dataframe_operations_router
+from Agent_df_validate.main_app import router as df_validate_router
 from Agent_insight.main_app import router as workflow_insight_router
 from insight import router as insight_router
 from STREAMAI.main_app import router as streamai_router
@@ -596,6 +599,7 @@ api_router.include_router(groupby_router)
 api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
 api_router.include_router(dataframe_operations_router)
+api_router.include_router(df_validate_router)
 api_router.include_router(insight_router)
 api_router.include_router(workflow_insight_router)
 api_router.include_router(workflow_router)

@@ -46,20 +46,21 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     const activeFile = classifierData.files[activeIndex];
     const fileName = activeFile?.fileName || null;
 
-    const ensureToggleState = (enable: boolean, dims: string[]) => {
-      const sortedDims = enable ? [...dims].sort() : [];
-      const currentDims = [...(settings.dimensions || [])].sort();
-      const dimsChanged =
-        sortedDims.length !== currentDims.length ||
-        sortedDims.some((dim, idx) => dim !== currentDims[idx]);
-      const currentToggle = settings.enableDimensionMapping || false;
-      if (dimsChanged || currentToggle !== enable) {
-        updateSettings(atomId, {
-          enableDimensionMapping: enable,
-          dimensions: sortedDims,
-        });
-      }
-    };
+    // COMMENTED OUT - dimensions disabled
+    // const ensureToggleState = (enable: boolean, dims: string[]) => {
+    //   const sortedDims = enable ? [...dims].sort() : [];
+    //   const currentDims = [...(settings.dimensions || [])].sort();
+    //   const dimsChanged =
+    //     sortedDims.length !== currentDims.length ||
+    //     sortedDims.some((dim, idx) => dim !== currentDims[idx]);
+    //   const currentToggle = settings.enableDimensionMapping || false;
+    //   if (dimsChanged || currentToggle !== enable) {
+    //     updateSettings(atomId, {
+    //       enableDimensionMapping: enable,
+    //       dimensions: sortedDims,
+    //     });
+    //   }
+    // };
 
     const fileChanged =
       lastActiveIndexRef.current !== activeIndex ||
@@ -73,9 +74,10 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         pendingMappingRef.current.abort();
         pendingMappingRef.current = null;
       }
-      if ((settings.enableDimensionMapping || false) || (settings.dimensions || []).length) {
-        ensureToggleState(false, []);
-      }
+      // COMMENTED OUT - dimensions disabled
+      // if ((settings.enableDimensionMapping || false) || (settings.dimensions || []).length) {
+      //   ensureToggleState(false, []);
+      // }
       return;
     }
 
@@ -87,7 +89,8 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         pendingMappingRef.current.abort();
         pendingMappingRef.current = null;
       }
-      ensureToggleState(false, []);
+      // COMMENTED OUT - dimensions disabled
+      // ensureToggleState(false, []);
     }
 
     if (!fileName) {
@@ -115,13 +118,15 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
           return;
         }
         processedFileRef.current = fileName;
-        const keys = Object.keys(mapping || {});
-        const sortedKeys = keys.length > 0 ? [...keys].sort() : [];
+        // COMMENTED OUT - dimensions disabled
+        // const keys = Object.keys(mapping || {});
+        // const sortedKeys = keys.length > 0 ? [...keys].sort() : [];
         const store = useLaboratoryStore.getState();
         const atomSnapshot = store.getAtom(atomId);
 
         if (!atomSnapshot) {
-          ensureToggleState(keys.length > 0, sortedKeys);
+          // COMMENTED OUT - dimensions disabled
+          // ensureToggleState(keys.length > 0, sortedKeys);
           return;
         }
 
@@ -133,18 +138,26 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
           snapshotSettings.data || DEFAULT_COLUMN_CLASSIFIER_SETTINGS.data;
 
         if (!snapshotData.files.length) {
-          ensureToggleState(keys.length > 0, sortedKeys);
+          // COMMENTED OUT - dimensions disabled
+          // ensureToggleState(keys.length > 0, sortedKeys);
           return;
         }
 
         const snapshotIndex = snapshotData.activeFileIndex ?? activeIndex;
-        const identifierSet = new Set(
-          Array.isArray(config?.identifiers) ? config?.identifiers : [],
-        );
-        const measureSet = new Set(
-          Array.isArray(config?.measures) ? config?.measures : [],
-        );
-        const syncCategories = identifierSet.size > 0 || measureSet.size > 0;
+        // Create case-insensitive maps for matching (backend converts columns to lowercase)
+        const identifierMap = new Map<string, string>();
+        const measureMap = new Map<string, string>();
+        if (Array.isArray(config?.identifiers)) {
+          config.identifiers.forEach(id => {
+            identifierMap.set(id.toLowerCase(), id);
+          });
+        }
+        if (Array.isArray(config?.measures)) {
+          config.measures.forEach(m => {
+            measureMap.set(m.toLowerCase(), m);
+          });
+        }
+        const syncCategories = identifierMap.size > 0 || measureMap.size > 0;
 
         const updatedFiles = snapshotData.files.map((file, index) => {
           if (index !== snapshotIndex) {
@@ -152,10 +165,11 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
           }
           const updatedColumns = syncCategories
             ? file.columns.map(col => {
-                if (identifierSet.has(col.name)) {
+                const colLower = col.name.toLowerCase();
+                if (identifierMap.has(colLower)) {
                   return { ...col, category: 'identifiers' };
                 }
-                if (measureSet.has(col.name)) {
+                if (measureMap.has(colLower)) {
                   return { ...col, category: 'measures' };
                 }
                 return { ...col, category: 'unclassified' };
@@ -164,14 +178,19 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
           return {
             ...file,
             columns: updatedColumns,
-            customDimensions: keys.length > 0 ? mapping : {},
+            // COMMENTED OUT - dimensions disabled
+            // customDimensions: keys.length > 0 ? mapping : {},
+            customDimensions: {},
           };
         });
 
         store.updateAtomSettings(atomId, {
           data: { ...snapshotData, files: updatedFiles },
-          dimensions: sortedKeys,
-          enableDimensionMapping: keys.length > 0,
+          // COMMENTED OUT - dimensions disabled
+          // dimensions: sortedKeys,
+          // enableDimensionMapping: keys.length > 0,
+          dimensions: [],
+          enableDimensionMapping: false,
           filterColumnViewUnique:
             snapshotSettings.filterColumnViewUnique ?? true,
         });
@@ -200,10 +219,12 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
                 enableDimensionMapping: false,
               });
             } else {
-              ensureToggleState(false, []);
+              // COMMENTED OUT - dimensions disabled
+              // ensureToggleState(false, []);
             }
           } else {
-            ensureToggleState(false, []);
+            // COMMENTED OUT - dimensions disabled
+            // ensureToggleState(false, []);
           }
         }
       } finally {
@@ -220,8 +241,9 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     atomId,
     classifierData.activeFileIndex,
     classifierData.files,
-    settings.dimensions,
-    settings.enableDimensionMapping,
+    // COMMENTED OUT - dimensions disabled
+    // settings.dimensions,
+    // settings.enableDimensionMapping,
     updateSettings,
   ]);
 
@@ -244,12 +266,17 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
             ? 'measures'
             : 'unclassified',
         })),
-        customDimensions: cfg.dimensions || {},
+        // COMMENTED OUT - dimensions disabled
+        // customDimensions: cfg.dimensions || {},
+        customDimensions: {},
       };
       updateSettings(atomId, {
         data: { files: [updatedFile], activeFileIndex: 0 },
-        dimensions: Object.keys(cfg.dimensions || {}),
-        enableDimensionMapping: Object.keys(cfg.dimensions || {}).length > 0,
+        // COMMENTED OUT - dimensions disabled
+        // dimensions: Object.keys(cfg.dimensions || {}),
+        // enableDimensionMapping: Object.keys(cfg.dimensions || {}).length > 0,
+        dimensions: [],
+        enableDimensionMapping: false,
         filterColumnViewUnique: true,
       });
     } catch (err) {
@@ -274,13 +301,14 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       files: classifierData.files.map((file, index) => {
         if (index !== targetFileIndex) return file;
 
-        const updatedCustom = { ...file.customDimensions };
-        // remove from all custom dimensions first
-        columnsToMove.forEach(colName => {
-          Object.keys(updatedCustom).forEach(key => {
-            updatedCustom[key] = updatedCustom[key].filter(col => col !== colName);
-          });
-        });
+        // COMMENTED OUT - dimensions disabled
+        // const updatedCustom = { ...file.customDimensions };
+        // // remove from all custom dimensions first
+        // columnsToMove.forEach(colName => {
+        //   Object.keys(updatedCustom).forEach(key => {
+        //     updatedCustom[key] = updatedCustom[key].filter(col => col !== colName);
+        //   });
+        // });
 
         let updatedColumns = file.columns;
 
@@ -294,21 +322,24 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
             columnsToMove.includes(col.name) ? { ...col, category: newCategory } : col
           );
         } else {
-          // assigning to a dimension: keep identifier category
-          if (!updatedCustom[newCategory]) {
-            updatedCustom[newCategory] = [];
-          }
-          columnsToMove.forEach(colName => {
-            if (!updatedCustom[newCategory].includes(colName)) {
-              updatedCustom[newCategory].push(colName);
-            }
-          });
+          // COMMENTED OUT - dimensions disabled
+          // // assigning to a dimension: keep identifier category
+          // if (!updatedCustom[newCategory]) {
+          //   updatedCustom[newCategory] = [];
+          // }
+          // columnsToMove.forEach(colName => {
+          //   if (!updatedCustom[newCategory].includes(colName)) {
+          //     updatedCustom[newCategory].push(colName);
+          //   }
+          // });
         }
 
         return {
           ...file,
           columns: updatedColumns,
-          customDimensions: updatedCustom
+          // COMMENTED OUT - dimensions disabled
+          // customDimensions: updatedCustom
+          customDimensions: {}
         };
       })
     };
@@ -316,32 +347,33 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     updateSettings(atomId, { data: updated });
   };
 
-  const handleRemoveCustomDimension = (dimensionName: string) => {
-    const dims = (settings.dimensions || []).filter(d => d !== dimensionName);
-    const updatedFiles = classifierData.files.map((file, index) => {
-      if (index !== classifierData.activeFileIndex) return file;
-      const updatedCustom = { ...file.customDimensions };
-      const removedCols = updatedCustom[dimensionName] || [];
-      delete updatedCustom[dimensionName];
-      updatedCustom['unattributed'] = Array.from(
-        new Set([...(updatedCustom['unattributed'] || []), ...removedCols])
-      );
-      return { ...file, customDimensions: updatedCustom };
-    });
-    updateSettings(atomId, {
-      dimensions: dims,
-      data: { ...classifierData, files: updatedFiles },
-    });
-  };
+  // COMMENTED OUT - dimensions disabled
+  // const handleRemoveCustomDimension = (dimensionName: string) => {
+  //   const dims = (settings.dimensions || []).filter(d => d !== dimensionName);
+  //   const updatedFiles = classifierData.files.map((file, index) => {
+  //     if (index !== classifierData.activeFileIndex) return file;
+  //     const updatedCustom = { ...file.customDimensions };
+  //     const removedCols = updatedCustom[dimensionName] || [];
+  //     delete updatedCustom[dimensionName];
+  //     updatedCustom['unattributed'] = Array.from(
+  //       new Set([...(updatedCustom['unattributed'] || []), ...removedCols])
+  //     );
+  //     return { ...file, customDimensions: updatedCustom };
+  //   });
+  //   updateSettings(atomId, {
+  //     dimensions: dims,
+  //     data: { ...classifierData, files: updatedFiles },
+  //   });
+  // };
 
-  const handleDimensionUpdate = (dimensions: Record<string, string[]>) => {
-    const updatedFiles = classifierData.files.map((file, index) =>
-      index === classifierData.activeFileIndex
-        ? { ...file, customDimensions: dimensions }
-        : file
-    );
-    updateSettings(atomId, { data: { ...classifierData, files: updatedFiles } });
-  };
+  // const handleDimensionUpdate = (dimensions: Record<string, string[]>) => {
+  //   const updatedFiles = classifierData.files.map((file, index) =>
+  //     index === classifierData.activeFileIndex
+  //       ? { ...file, customDimensions: dimensions }
+  //       : file
+  //   );
+  //   updateSettings(atomId, { data: { ...classifierData, files: updatedFiles } });
+  // };
 
 
   const handleFilterToggle = (val: boolean) => {
@@ -350,7 +382,12 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
 
 
   const setActiveFile = (fileIndex: number) => {
-    updateSettings(atomId, { data: { ...classifierData, activeFileIndex: fileIndex } });
+    const newActiveFile = classifierData.files[fileIndex];
+    const newFileName = newActiveFile?.fileName || '';
+    updateSettings(atomId, { 
+      data: { ...classifierData, activeFileIndex: fileIndex },
+      validatorId: newFileName  // Update validatorId when active file changes
+    });
   };
 
   const saveAssignments = async () => {
@@ -367,6 +404,9 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     const measures = currentFile.columns
       .filter(c => c.category === 'measures')
       .map(c => c.name);
+    
+    // COMMENTED OUT - dimensions disabled
+    // const dimensions = currentFile.customDimensions;
 
     const payload: Record<string, any> = {
       project_id: project.id || null,
@@ -375,7 +415,8 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
       project_name: env.PROJECT_NAME || '',
       identifiers,
       measures,
-      dimensions: currentFile.customDimensions
+      // dimensions: currentFile.customDimensions  // COMMENTED OUT - dimensions disabled
+      dimensions: {}  // Empty dimensions object
     };
     if (currentFile.fileName) {
       payload.file_name = currentFile.fileName;
@@ -395,13 +436,15 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
         updateSessionState(user?.id, {
           identifiers,
           measures,
-          dimensions: currentFile.customDimensions,
+          // dimensions: currentFile.customDimensions,  // COMMENTED OUT - dimensions disabled
+          dimensions: {},
         });
         addNavigationItem(user?.id, {
           atom: 'column-classifier',
           identifiers,
           measures,
-          dimensions: currentFile.customDimensions,
+          // dimensions: currentFile.customDimensions,  // COMMENTED OUT - dimensions disabled
+          dimensions: {},
         });
         logSessionState(user?.id);
       } else {
@@ -421,15 +464,21 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
     }
   };
 
-  const saveDisabled =
-    !settings.enableDimensionMapping ||
-    !classifierData.files.length ||
-    Object.keys(
-      classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
-    ).length === 0 ||
-    Object.values(
-      classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
-    ).every(c => c.length === 0);
+  // COMMENTED OUT - dimensions disabled, save button enabled when identifiers or measures exist
+  // const saveDisabled =
+  //   !settings.enableDimensionMapping ||
+  //   !classifierData.files.length ||
+  //   Object.keys(
+  //     classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+  //   ).length === 0 ||
+  //   Object.values(
+  //     classifierData.files[classifierData.activeFileIndex]?.customDimensions || {}
+  //   ).every(c => c.length === 0);
+  
+  const currentFileForSave = classifierData.files[classifierData.activeFileIndex];
+  const hasIdentifiers = currentFileForSave?.columns?.some(c => c.category === 'identifiers') || false;
+  const hasMeasures = currentFileForSave?.columns?.some(c => c.category === 'measures') || false;
+  const saveDisabled = !classifierData.files.length || (!hasIdentifiers && !hasMeasures);
 
   return (
     <div className="w-full h-full bg-white flex flex-col">
@@ -450,7 +499,8 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
             )}
           </div>
         </div>
-      {!settings.isLoading && settings.enableDimensionMapping && (
+      {/* COMMENTED OUT - dimensions disabled */}
+      {/* {!settings.isLoading && settings.enableDimensionMapping && (
         <div className="pt-1 px-4 pb-4 overflow-y-auto">
           <ColumnClassifierDimensionMapping
             customDimensions={
@@ -459,6 +509,19 @@ const ColumnClassifierAtom: React.FC<Props> = ({ atomId }) => {
             onRemoveDimension={handleRemoveCustomDimension}
             onDimensionUpdate={handleDimensionUpdate}
           />
+          <Button
+            disabled={saveDisabled}
+            onClick={saveAssignments}
+            className="w-full h-12 text-sm font-semibold bg-gradient-to-r from-gray-800 to-gray-900 hover:from-gray-900 hover:to-black mt-4"
+          >
+            Save Configuration
+          </Button>
+        </div>
+      )} */}
+      
+      {/* Save button shown when identifiers or measures exist */}
+      {!settings.isLoading && classifierData.files.length > 0 && (
+        <div className="pt-1 px-4 pb-4 overflow-y-auto">
           <Button
             disabled={saveDisabled}
             onClick={saveAssignments}

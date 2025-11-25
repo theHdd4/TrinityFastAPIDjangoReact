@@ -1,7 +1,9 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+// import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
+import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -30,6 +32,7 @@ import {
   LAB_ENTRANCE_PREP_DELAY_MS,
 } from '@/utils/projectTransition';
 import { useCollaborativeSync } from '@/hooks/useCollaborativeSync';
+import { TrinityAIPanel } from '@/components/TrinityAI';
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 const useIsomorphicInsertionEffect =
@@ -42,12 +45,46 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
-  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
+  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(false);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
   const [isShareOpen, setIsShareOpen] = useState(false);
+  const [isHeaderMinimized, setIsHeaderMinimized] = useState(false);
+  const [isTrinityAIVisible, setIsTrinityAIVisible] = useState(true); // Track if AI panel should be visible at all
+  const [isHorizontalAICollapsed, setIsHorizontalAICollapsed] = useState(false); // Track collapse state for horizontal view only
+  // Layout preference: 'vertical' (default) or 'horizontal'
+  const [trinityAILayout, setTrinityAILayout] = useState<'vertical' | 'horizontal'>(() => {
+    const saved = localStorage.getItem('trinity_ai_layout_preference');
+    return (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
+  });
+  
+  // Listen for layout preference changes (from settings panel)
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const saved = localStorage.getItem('trinity_ai_layout_preference');
+      const newLayout = (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
+      setTrinityAILayout(newLayout);
+    };
+    
+    // Listen to custom event for same-tab updates
+    const handleCustomStorageChange = () => handleStorageChange();
+    window.addEventListener('trinity_ai_layout_changed', handleCustomStorageChange);
+    
+    // Listen to storage events for cross-tab updates
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'trinity_ai_layout_preference') {
+        handleStorageChange();
+      }
+    });
+    
+    return () => {
+      window.removeEventListener('trinity_ai_layout_changed', handleCustomStorageChange);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
+  const [autosaveEnabled, setAutosaveEnabled] = useState(true); // Default to true, will be loaded from MongoDB
   const { toast } = useToast();
-  const { cards, setCards: setLabCards } = useLaboratoryStore();
+  const { cards, setCards: setLabCards, auxiliaryMenuLeftOpen } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
@@ -61,7 +98,7 @@ const LaboratoryMode = () => {
   
   // Real-time collaborative sync
   const { isConnected: isSyncConnected, activeUsers, cardEditors, notifyCardFocus, notifyCardBlur } = useCollaborativeSync({
-    enabled: canEdit, // Only enable for users with edit permissions
+    enabled: canEdit && autosaveEnabled, // Only enable for users with edit permissions and when autosave is enabled
     debounceMs: 2000, // 2 seconds debounce
     fullSyncIntervalMs: 30000, // 30 seconds full sync
     onError: (error) => {
@@ -173,6 +210,32 @@ const LaboratoryMode = () => {
     if (hasWorkflowData) {
       setShowFloatingNavigationList(false);
     }
+
+    // Load autosaveEnabled from MongoDB
+    const loadAutosaveEnabled = async () => {
+      const projectContext = getActiveProjectContext();
+      if (!projectContext) return;
+
+      try {
+        const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+        const response = await fetch(requestUrl, {
+          method: 'GET',
+          credentials: 'include',
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.status === 'ok' && data.autosaveEnabled !== undefined) {
+            setAutosaveEnabled(data.autosaveEnabled);
+            console.info('[Laboratory API] Restored autosaveEnabled:', data.autosaveEnabled);
+          }
+        }
+      } catch (error) {
+        console.warn('[Laboratory API] Failed to load autosaveEnabled, using default:', error);
+      }
+    };
+
+    loadAutosaveEnabled();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Note: Workflow data loading is now handled entirely by CanvasArea component
@@ -250,25 +313,29 @@ const LaboratoryMode = () => {
     return sortedCards;
   };
 
-  // Autosave: Automatically save and sync when cards change
+  // Autosave: Automatically save and sync when cards or auxiliaryMenuLeftOpen change
   useEffect(() => {
-    if (!canEdit) return;
+    if (!canEdit || !autosaveEnabled) return;
+    
+    const hasInitialCards = cards && cards.length > 0;
     
     // Skip autosave on initial load (wait for cards to be loaded)
-    const hasInitialCards = cards && cards.length > 0;
+    // But allow autosave for auxiliaryMenuLeftOpen changes even if no cards
     if (!hasInitialCards) {
       // Mark that we've checked and there are no cards yet
       if (!hasInitialCardsLoadedRef.current) {
         hasInitialCardsLoadedRef.current = true;
+        // Skip autosave on the very first load (when there are no cards)
+        return;
       }
-      return;
-    }
-    
-    // Mark that initial cards have been loaded
-    if (!hasInitialCardsLoadedRef.current) {
-      hasInitialCardsLoadedRef.current = true;
-      // Skip autosave on the very first load
-      return;
+      // After initial load, allow autosave even without cards (for auxiliaryMenuLeftOpen changes)
+    } else {
+      // Mark that initial cards have been loaded
+      if (!hasInitialCardsLoadedRef.current) {
+        hasInitialCardsLoadedRef.current = true;
+        // Skip autosave on the very first load (when cards are first loaded)
+        return;
+      }
     }
 
     // Debounce autosave to avoid too frequent saves
@@ -323,8 +390,12 @@ const LaboratoryMode = () => {
             project_name: projectContext.project_name,
             cards: sanitized.cards || [],
             workflow_molecules: workflowMoleculesForSave,
+            auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true,
+            autosaveEnabled: autosaveEnabled,
             mode: 'laboratory',
           };
+
+          console.log('🔄 [AUTOSAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
           try {
             const response = await fetch(requestUrl, {
@@ -387,7 +458,7 @@ const LaboratoryMode = () => {
     return () => {
       clearTimeout(autosaveTimer);
     };
-  }, [cards, canEdit, setExhibitionCards, sortCardsInWorkflowOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cards, auxiliaryMenuLeftOpen, canEdit, autosaveEnabled, setExhibitionCards, sortCardsInWorkflowOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUndo = async () => {
     if (!canEdit) return;
@@ -569,8 +640,12 @@ const LaboratoryMode = () => {
           project_name: projectContext.project_name,
           cards: sanitized.cards || [],
           workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
+          auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true, // Include auxiliary menu left state
+          autosaveEnabled: autosaveEnabled, // Include autosave toggle state
           mode: 'laboratory',
         };
+
+        console.log('💾 [MANUAL SAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
         const requestInit: RequestInit = {
           method: 'POST',
@@ -673,6 +748,40 @@ const LaboratoryMode = () => {
     }
   };
 
+  // Handle Ctrl+S keyboard shortcut for manual save (works regardless of autosave state)
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Check for Ctrl+S (or Cmd+S on Mac)
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+        // Don't trigger if user is typing in an input field
+        const target = event.target as HTMLElement;
+        if (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.contentEditable === 'true' ||
+          target.getAttribute('role') === 'textbox'
+        ) {
+          return;
+        }
+
+        // Prevent default and stop propagation to prevent other handlers (like useSearchShortcut) from running
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        
+        if (canEdit) {
+          handleSave();
+        }
+      }
+    };
+
+    // Use capture phase to ensure this handler runs before others
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [canEdit, handleSave]);
+
   return (
     <div
       data-lab-preparing={isPreparingAnimation ? 'true' : undefined}
@@ -681,17 +790,27 @@ const LaboratoryMode = () => {
       <Header />
       
       {/* Laboratory Header */}
-      <div
-        data-lab-header="true"
-        className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm"
-      >
-        <div className="flex items-center justify-between">
-          <div data-lab-header-text="true">
-            <h2 className="text-3xl font-light text-gray-900 mb-2">Laboratory Mode</h2>
-            <p className="text-gray-600 font-light">Build sophisticated applications with modular atoms</p>
-          </div>
+      {isHeaderMinimized ? (
+        /* Minimized State - Small icon button */
+        <div
+          data-lab-header="true"
+          className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-4 py-2 flex-shrink-0 shadow-sm"
+        >
+        </div>
+      ) : (
+        <div
+          data-lab-header="true"
+          className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm"
+        >
+          <div className="flex items-center justify-between">
+            <div data-lab-header-text="true" className="flex items-center gap-3">
+              <div>
+                <h2 className="text-3xl font-light text-gray-900 mb-2">Laboratory Mode</h2>
+                <p className="text-gray-600 font-light">Build sophisticated applications with modular atoms</p>
+              </div>
+            </div>
 
-          <div data-lab-toolbar="true" className="flex items-center space-x-3">
+            <div data-lab-toolbar="true" className="flex items-center space-x-3">
             {canEdit && activeUsers.length > 0 && (
               <div
                 className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-gray-200 shadow-sm"
@@ -735,17 +854,29 @@ const LaboratoryMode = () => {
               <Undo2 className="w-4 h-4 mr-2" />
               Undo
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
-              onClick={handleSave}
-              disabled={!canEdit}
-              data-lab-save="true"
-            >
-              <Save className="w-4 h-4 mr-2" />
-              Save
-            </Button>
+            {canEdit && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-gray-200">
+                <span className="text-xs text-gray-600 font-medium">Auto Save</span>
+                <Switch
+                  checked={autosaveEnabled}
+                  onCheckedChange={setAutosaveEnabled}
+                  disabled={!canEdit}
+                />
+              </div>
+            )}
+            {!autosaveEnabled && (
+              <Button
+                variant="outline"
+                size="sm"
+                className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
+                onClick={handleSave}
+                disabled={!canEdit}
+                data-lab-save="true"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                Save
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -791,8 +922,9 @@ const LaboratoryMode = () => {
           </div>
           </div>
         </div>
+      )}
 
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden relative">
           {/* Atoms Sidebar */}
           <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
             <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
@@ -833,7 +965,25 @@ const LaboratoryMode = () => {
               selectedCardId={selectedCardId}
               cardExhibited={cardExhibited}
               active={auxActive}
-              onActiveChange={setAuxActive}
+              onActiveChange={(newActive) => {
+                setAuxActive(newActive);
+                // If clicking AI icon and panel was hidden, show it again
+                if (newActive === 'trinity' && !isTrinityAIVisible) {
+                  setIsTrinityAIVisible(true);
+                }
+                // In horizontal view, toggle collapse state when AI icon is clicked
+                if (trinityAILayout === 'horizontal' && newActive === 'trinity') {
+                  setIsHorizontalAICollapsed(false); // Expand when AI icon is clicked
+                } else if (trinityAILayout === 'horizontal' && newActive === null && auxActive === 'trinity') {
+                  setIsHorizontalAICollapsed(true); // Collapse when AI icon is clicked again
+                }
+              }}
+              trinityAILayout={trinityAILayout}
+              isTrinityAIVisible={isTrinityAIVisible}
+              onTrinityAIClose={() => {
+                setIsTrinityAIVisible(false);
+                setAuxActive(null);
+              }}
             />
             <FloatingNavigationList
               isVisible={showFloatingNavigationList}
@@ -841,6 +991,38 @@ const LaboratoryMode = () => {
               anchorSelector="[data-lab-header-text]"
             />
           </div>
+
+          {/* Trinity AI Panel - Only for horizontal layout */}
+          {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
+          {/* In horizontal view, panel stays visible and aligned with canvas area */}
+          {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
+            <div 
+              className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
+            >
+              <div className="pointer-events-auto">
+                <TrinityAIPanel
+                  isCollapsed={isHorizontalAICollapsed}
+                  onToggle={() => {
+                    // In horizontal view, toggle between collapsed (sparkle icon) and expanded
+                    // Don't auto-minimize when other panels open - only toggle when AI icon is clicked
+                    setIsHorizontalAICollapsed(prev => !prev);
+                    if (isHorizontalAICollapsed) {
+                      setAuxActive('trinity');
+                    } else {
+                      setAuxActive(null);
+                    }
+                  }}
+                  onClose={() => {
+                    // Only X button calls this - completely hide the panel
+                    setIsTrinityAIVisible(false);
+                    setIsHorizontalAICollapsed(false);
+                    setAuxActive(null);
+                  }}
+                  layout="horizontal"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         <ShareDialog

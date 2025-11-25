@@ -234,12 +234,13 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           
           // Update fileData with categorical columns and column values
           const numericCols = dataframeInfo.numericColumns || [];
-          // Preserve existing selection if valid, otherwise default to all columns
+          // Preserve existing selection if valid, otherwise default to first 15 columns (or all if <= 15)
           const existingSelection = data.selectedNumericColumnsForMatrix || [];
           const validSelection = existingSelection.filter(col => numericCols.includes(col));
+          const defaultSelection = numericCols.length > 15 ? numericCols.slice(0, 15) : numericCols;
           const finalSelection = validSelection.length > 0 && validSelection.length === existingSelection.length 
             ? validSelection 
-            : numericCols;
+            : defaultSelection;
           
           onDataChange({
             fileData: {
@@ -356,12 +357,13 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
         }
         
         const numericCols = dataframeInfo.numericColumns || [];
-        // Preserve existing selection if valid, otherwise default to all columns
+        // Preserve existing selection if valid, otherwise default to first 15 columns (or all if <= 15)
         const existingSelection = data.selectedNumericColumnsForMatrix || [];
         const validSelection = existingSelection.filter(col => numericCols.includes(col));
+        const defaultSelection = numericCols.length > 15 ? numericCols.slice(0, 15) : numericCols;
         const finalSelection = validSelection.length > 0 && validSelection.length === existingSelection.length 
           ? validSelection 
-          : numericCols;
+          : defaultSelection;
         
         onDataChange({
           fileData: {
@@ -499,11 +501,11 @@ const CorrelationSettings: React.FC<CorrelationSettingsProps> = ({ data, onDataC
           columnValues: data.fileData?.columnValues || {},
           isProcessed: true,
         },
-        // Initialize or update selected numeric columns for matrix (default: all selected)
+        // Initialize or update selected numeric columns for matrix (default: first 15 if > 15, else all)
         selectedNumericColumnsForMatrix: data.selectedNumericColumnsForMatrix && 
           data.selectedNumericColumnsForMatrix.every(col => newNumericCols.includes(col))
           ? data.selectedNumericColumnsForMatrix.filter(col => newNumericCols.includes(col))
-          : newNumericCols
+          : (newNumericCols.length > 15 ? newNumericCols.slice(0, 15) : newNumericCols)
       });
 
     } catch (error) {

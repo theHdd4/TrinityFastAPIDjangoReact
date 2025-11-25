@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Grid3X3 } from 'lucide-react';
 import AtomLibrary from '@/components/AtomList/AtomLibrary';
+import { useLaboratoryStore } from '../store/laboratoryStore';
 
 interface Props {
   onAtomDragStart?: (e: React.DragEvent, atomId: string) => void;
 }
 
 const AuxiliaryMenuLeft: React.FC<Props> = ({ onAtomDragStart }) => {
-  const [open, setOpen] = useState(false);
+  const open = useLaboratoryStore((state) => state.auxiliaryMenuLeftOpen);
+  const setOpen = useLaboratoryStore((state) => state.setAuxiliaryMenuLeftOpen);
 
   if (!open) {
     return (

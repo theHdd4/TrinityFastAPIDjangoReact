@@ -113,22 +113,28 @@ async def identifier_options(
         except Exception as exc:
             logger.warning(f"Redis write error for {key}: {exc}")
 
+    # COMMENTED OUT - dimensions disabled
     # Return identifiers that are assigned to dimensions from the classifier config
     # Exclude identifiers assigned to "unattributed" dimension
-    dimension_identifiers: list[str] = []
-    if cfg and isinstance(cfg.get("dimensions"), dict):
-        # Extract identifiers from all dimensions (dimensions is Dict[str, List[str]])
-        # Skip "unattributed" dimension as those columns shouldn't be used for scoping
-        for dimension_name, identifiers in cfg["dimensions"].items():
-            if isinstance(identifiers, list) and dimension_name.lower() != "unattributed":
-                dimension_identifiers.extend(identifiers)
-        # Remove duplicates while preserving order
-        dimension_identifiers = list(dict.fromkeys(dimension_identifiers))
-    elif cfg and isinstance(cfg.get("identifiers"), list):
-        # Fallback to all identifiers if dimensions dict is not available
-        dimension_identifiers = cfg["identifiers"]
+    # dimension_identifiers: list[str] = []
+    # if cfg and isinstance(cfg.get("dimensions"), dict):
+    #     # Extract identifiers from all dimensions (dimensions is Dict[str, List[str]])
+    #     # Skip "unattributed" dimension as those columns shouldn't be used for scoping
+    #     for dimension_name, identifiers in cfg["dimensions"].items():
+    #         if isinstance(identifiers, list) and dimension_name.lower() != "unattributed":
+    #             dimension_identifiers.extend(identifiers)
+    #     # Remove duplicates while preserving order
+    #     dimension_identifiers = list(dict.fromkeys(dimension_identifiers))
+    # elif cfg and isinstance(cfg.get("identifiers"), list):
+    #     # Fallback to all identifiers if dimensions dict is not available
+    #     dimension_identifiers = cfg["identifiers"]
 
-    return {"identifiers": dimension_identifiers}
+    # Return identifiers directly from config (same as feature overview)
+    identifiers: list[str] = []
+    if cfg and isinstance(cfg.get("identifiers"), list):
+        identifiers = cfg["identifiers"]
+
+    return {"identifiers": identifiers}
 
 
 # Initialize settings

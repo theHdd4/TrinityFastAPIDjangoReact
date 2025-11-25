@@ -20,7 +20,7 @@ ATOM_MAPPING = {
     "correlation": {"endpoint": "/trinityai/correlation"},
     "feature-overview": {"endpoint": "/trinityai/feature-overview"},
     "column-classifier": {"endpoint": "/trinityai/column-classifier"},
-    "data-upload-validate": {"endpoint": "/trinityai/upload"},
+    "data-upload-validate": {"endpoint": "/trinityai/df-validate"},
     "scope-selector": {"endpoint": "/trinityai/scope"},
 }
 

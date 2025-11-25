@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Upload, Settings, Eye } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CheckboxTemplate } from '@/templates/checkbox';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 
 import GroupByInputFiles from '../GroupByInputFiles';
@@ -22,6 +23,10 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   const settings = atom?.settings || {};
   // Tab for Input/Settings/Exhibition similar to CreateColumn
   const [tab, setTab] = useState('input');
+  // Track if user has explicitly interacted with selections (to prevent useEffect from resetting)
+  const userHasInteractedRef = useRef(false);
+  // Track previous dataSource to detect file changes
+  const previousDataSourceRef = useRef<string | undefined>(settings.dataSource);
 
   // ------------------------------
   // Initial lists
@@ -53,7 +58,22 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   // ------------------------------
   // Get draggable lists from global store
   // ------------------------------
-  const identifierList = settings.identifierList || fallbackIdentifiers;
+  // Filter identifierList to only include valid identifiers from fallbackIdentifiers
+  const rawIdentifierList = settings.identifierList || fallbackIdentifiers;
+  const identifierList = rawIdentifierList.filter(id => {
+    const isValid = fallbackIdentifiers.includes(id);
+    if (!isValid) {
+      console.log('⚠️ [Filter] Removing invalid identifier from list:', id);
+    }
+    return isValid;
+  });
+  if (rawIdentifierList.length !== identifierList.length) {
+    console.log('🔍 [Filter] Filtered identifierList:', {
+      originalLength: rawIdentifierList.length,
+      filteredLength: identifierList.length,
+      removed: rawIdentifierList.filter(id => !fallbackIdentifiers.includes(id))
+    });
+  }
   const measureList = settings.measureList || fallbackMeasures;
 
   // Keep global lists in sync when fallback arrays change (e.g. after data fetch)
@@ -105,7 +125,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     }
   }, [fallbackMeasures, localSelectedMeasures.length, atomId, updateSettings]);
 
-  // Update selected identifiers when data source changes
+  // Update selected identifiers when data source changes (but NOT when user explicitly changes selection)
   useEffect(() => {
     if (fallbackIdentifiers.length > 0) {
       // Filter selected identifiers to only include those that exist in the new data
@@ -113,18 +133,24 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
         fallbackIdentifiers.includes(id)
       );
       
-      // If no valid identifiers or data source changed, select identifiers with unique_count > 1
-      if (validSelectedIdentifiers.length === 0 || 
-          JSON.stringify(validSelectedIdentifiers) !== JSON.stringify(selectedIdentifiers)) {
-        const uniqueIdentifiers = fallbackIdentifiers.filter(identifier => {
-          const colInfo = (settings.allColumns || []).find((col: any) => col.column === identifier);
-          return colInfo && colInfo.unique_count > 1;
+      // Only set defaults if data source actually changed (fallbackIdentifiers changed)
+      // AND we have invalid identifiers (meaning data source changed)
+      // Do NOT reset if user explicitly set to empty array
+      const hasInvalidIdentifiers = selectedIdentifiers.length > 0 && 
+        selectedIdentifiers.some(id => !fallbackIdentifiers.includes(id));
+      
+      // Only reset if data source changed (has invalid identifiers) and we need to clean up
+      if (hasInvalidIdentifiers) {
+        // Clean up invalid identifiers, keep valid ones
+        console.log('⚙️ [useEffect] Cleaning invalid identifiers after data source change:', {
+          validSelectedIdentifiers: validSelectedIdentifiers,
+          removed: selectedIdentifiers.filter(id => !fallbackIdentifiers.includes(id))
         });
-        const defaultIdentifiers = uniqueIdentifiers.length > 0 ? uniqueIdentifiers : fallbackIdentifiers;
-        updateSettings(atomId, { selectedIdentifiers: defaultIdentifiers });
+        updateSettings(atomId, { selectedIdentifiers: validSelectedIdentifiers });
       }
+      // Don't set defaults here - let the initial load useEffect handle that
     }
-  }, [fallbackIdentifiers, selectedIdentifiers, settings.allColumns, atomId, updateSettings]);
+  }, [fallbackIdentifiers, atomId, updateSettings]); // Removed selectedIdentifiers from deps to prevent reset on user actions
 
   // Update selected measures when data source changes
   useEffect(() => {
@@ -215,9 +241,16 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   // Toggle helpers
   // ------------------------------
   const toggleIdentifier = useCallback((identifier: string) => {
+    userHasInteractedRef.current = true;
     const newSelected = selectedIdentifiers.includes(identifier)
       ? selectedIdentifiers.filter(id => id !== identifier)
       : [...selectedIdentifiers, identifier];
+    console.log('🔄 [Toggle Identifier]:', {
+      identifier,
+      wasSelected: selectedIdentifiers.includes(identifier),
+      newSelected: newSelected,
+      newLength: newSelected.length
+    });
     updateSettings(atomId, { selectedIdentifiers: newSelected });
   }, [selectedIdentifiers, atomId, updateSettings]);
 
@@ -250,9 +283,45 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     { name: 'Group 5', value: 350 },
   ];
 
-  // Default select identifiers with unique_count > 1, and all measures and aggregation methods
+  // Detect file/data source changes and reset interaction flag
   useEffect(() => {
-    if (fallbackIdentifiers.length > 0 && selectedIdentifiers.length === 0) {
+    const currentDataSource = settings.dataSource;
+    const previousDataSource = previousDataSourceRef.current;
+    
+    // If dataSource changed (and it's not the initial render)
+    if (previousDataSource !== undefined && currentDataSource !== previousDataSource) {
+      console.log('🔄 [File Change Detected] Resetting interaction flag and clearing old measures:', {
+        previousDataSource,
+        currentDataSource
+      });
+      userHasInteractedRef.current = false; // Reset so defaults run again
+      // Clear selectedMeasures (complex objects with rename_to from previous file)
+      updateSettings(atomId, { 
+        selectedMeasures: [] // Clear old measure objects with rename_to from previous file
+      });
+    }
+    
+    // Update the ref for next comparison
+    previousDataSourceRef.current = currentDataSource;
+  }, [settings.dataSource, atomId, updateSettings]);
+
+  // Default select identifiers with unique_count > 1, and all measures and aggregation methods
+  // Runs on initial load OR when file/data source changes
+  useEffect(() => {
+    // Check if we have valid selected identifiers for the current file
+    // If selectedIdentifiers exist and are valid, don't reset them (user has made selections)
+    const hasValidSelections = selectedIdentifiers.length > 0 && 
+      selectedIdentifiers.every(id => fallbackIdentifiers.includes(id));
+    
+    // Only set defaults if:
+    // 1. We have identifiers available
+    // 2. User hasn't explicitly interacted yet (or file just changed, which resets the flag)
+    // 3. AND we don't have valid existing selections (to preserve user selections when returning to same file)
+    const shouldSetDefaults = fallbackIdentifiers.length > 0 && 
+                              !userHasInteractedRef.current && 
+                              !hasValidSelections;
+    
+    if (shouldSetDefaults) {
       // Get identifiers with unique_count > 1
       const uniqueIdentifiers = fallbackIdentifiers.filter(identifier => {
         const colInfo = (settings.allColumns || []).find((col: any) => col.column === identifier);
@@ -260,17 +329,43 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
       });
       // If we found identifiers with unique_count > 1, use them, otherwise fallback to all identifiers
       const defaultIdentifiers = uniqueIdentifiers.length > 0 ? uniqueIdentifiers : fallbackIdentifiers;
+      console.log('⚙️ [useEffect Default] Setting default identifiers:', {
+        fallbackIdentifiersLength: fallbackIdentifiers.length,
+        selectedIdentifiersLength: selectedIdentifiers.length,
+        uniqueIdentifiersLength: uniqueIdentifiers.length,
+        defaultIdentifiers: defaultIdentifiers,
+        userHasInteracted: userHasInteractedRef.current,
+        hasValidSelections: hasValidSelections,
+        dataSource: settings.dataSource
+      });
       updateSettings(atomId, { selectedIdentifiers: defaultIdentifiers });
+    } else if (hasValidSelections) {
+      // If we have valid selections, mark as interacted to prevent future resets
+      userHasInteractedRef.current = true;
+      console.log('✅ [useEffect Default] Preserving existing identifier selections:', {
+        selectedIdentifiers: selectedIdentifiers,
+        dataSource: settings.dataSource
+      });
     }
-    if (fallbackMeasures.length > 0 && (!Array.isArray(settings.selectedMeasureNames) || settings.selectedMeasureNames.length === 0)) {
-      updateSettings(atomId, { selectedMeasureNames: fallbackMeasures });
+    // Set default measures if needed (only if user hasn't interacted or file changed)
+    if (fallbackMeasures.length > 0 && !userHasInteractedRef.current) {
+      const hasValidMeasureSelections = localSelectedMeasures.length > 0 && 
+        localSelectedMeasures.every(m => fallbackMeasures.includes(m));
+      if (!hasValidMeasureSelections) {
+        console.log('⚙️ [useEffect Default] Setting default measures:', {
+          fallbackMeasures: fallbackMeasures,
+          dataSource: settings.dataSource
+        });
+        updateSettings(atomId, { selectedMeasureNames: fallbackMeasures });
+      }
     }
+    
     const allAggs = ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'];
     if ((!Array.isArray(settings.selectedAggregationMethods) || settings.selectedAggregationMethods.length === 0)) {
       updateSettings(atomId, { selectedAggregationMethods: allAggs });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fallbackIdentifiers, fallbackMeasures]);
+  }, [fallbackIdentifiers, fallbackMeasures, settings.dataSource]);
 
   return (
     <div className="h-full flex flex-col">
@@ -304,6 +399,47 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
               <CardTitle className="text-lg">Identifiers Selection</CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="flex items-center space-x-2 pb-2 border-b mb-2">
+                <Checkbox
+                  id="select-all-identifiers"
+                  checked={(() => {
+                    const allSelected = identifierList.length > 0 &&
+                      identifierList.every(id => selectedIdentifiers.includes(id));
+                    console.log('🔍 [Identifiers Select All] Debug:', {
+                      identifierListLength: identifierList.length,
+                      selectedIdentifiersLength: selectedIdentifiers.length,
+                      identifierList: identifierList,
+                      selectedIdentifiers: selectedIdentifiers,
+                      allSelected: allSelected,
+                      checkResult: identifierList.every(id => {
+                        const included = selectedIdentifiers.includes(id);
+                        if (!included) {
+                          console.log(`  ❌ Missing: ${id}`);
+                        }
+                        return included;
+                      })
+                    });
+                    return allSelected;
+                  })()}
+                  onCheckedChange={(checked) => {
+                    userHasInteractedRef.current = true;
+                    console.log('🖱️ [Identifiers Select All] Clicked:', {
+                      checked,
+                      identifierList: identifierList,
+                      willSetTo: checked ? [...identifierList] : []
+                    });
+                    updateSettings(atomId, {
+                      selectedIdentifiers: checked ? [...identifierList] : []
+                    });
+                  }}
+                />
+                <label
+                  htmlFor="select-all-identifiers"
+                  className="text-sm font-medium cursor-pointer flex-1"
+                >
+                  Select All
+                </label>
+              </div>
               <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">
                 {identifierList.map((identifier: string) => {
                   const isSelected = selectedIdentifiers.includes(identifier);

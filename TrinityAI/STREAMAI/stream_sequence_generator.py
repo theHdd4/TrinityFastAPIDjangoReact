@@ -192,9 +192,10 @@ class StreamSequenceGenerator:
         if len(files_list) > 10:
             file_context_section += f"\n... and {len(files_list) - 10} more files\n"
         
-        file_context_section += "\n**IMPORTANT**: These files are already loaded in the system. "
-        file_context_section += "If the user mentions any of these files, **DO NOT** include `data-upload-validate` in the sequence. "
-        file_context_section += "Instead, start directly with the operation atoms (merge, concat, groupby, etc.) that use these existing files.\n"
+        file_context_section += "\n**IMPORTANT**: These files are available in MinIO storage. "
+        file_context_section += "If the user mentions any of these files, **ALWAYS** include `data-upload-validate` as the FIRST step to load the file into the data upload atom. "
+        file_context_section += "The `data-upload-validate` atom will load the file and optionally apply dtype changes if the user requests them. "
+        file_context_section += "After loading, proceed with operation atoms (merge, concat, groupby, etc.) that use the loaded file.\n"
         return file_context_section
     
     def _build_sequence_prompt(self, user_query: str, file_context: Optional[Dict[str, Any]] = None) -> str:
@@ -284,7 +285,7 @@ class StreamSequenceGenerator:
             file_context_section += "2. **Reference actual data types** when selecting operations (numeric vs categorical)\n"
             file_context_section += "3. **Use unique values** from categorical columns for filters and groupby operations\n"
             file_context_section += "4. **Check row counts** to understand data size before operations\n"
-            file_context_section += "5. **If files exist above, DO NOT include `data-upload-validate`** - start directly with operations\n"
+            file_context_section += "5. **If user mentions a file, ALWAYS include `data-upload-validate` FIRST** - it will load the file and optionally apply dtype changes if requested\n"
             file_context_section += "6. **Reference files by their exact names** shown in the file details\n"
             # Add column alias map so LLM can resolve abbreviations/synonyms
             alias_section = self._build_column_alias_map(file_details_for_aliases or file_details_loaded)
@@ -315,8 +316,10 @@ Each atom is a data processing step that can be executed in sequence.
 **CRITICAL RULES FOR TOOL SELECTION**:
 
 1. **FILE HANDLING**:
-   - ✅ If files exist in file details above → **SKIP** `data-upload-validate`, start with operations
-   - ✅ If files NOT in saved files OR query mentions "load"/"upload" → Include `data-upload-validate` first
+   - ✅ If user mentions a file → **ALWAYS** include `data-upload-validate` as the FIRST step to load it
+   - ✅ The `data-upload-validate` atom loads files from MinIO and optionally applies dtype changes if user requests them
+   - ✅ If user mentions dtype changes (e.g., "change volume to integer"), include those in the `data-upload-validate` step
+   - ✅ If user doesn't mention dtype changes, `data-upload-validate` will just load the file and move to next step
    - ✅ Use EXACT file names from file details (case-sensitive, with extensions)
 
 2. **TOOL SELECTION LOGIC** (Choose the RIGHT tool for each task):
@@ -806,7 +809,7 @@ Generate the sequence now:"""
     
     def _generate_fallback_sequence(self, user_query: str) -> Dict[str, Any]:
         """
-        Generate a simple fallback sequence using RAG.
+        Generate fallback sequence using RAG (AI-based, not manual).
         
         Args:
             user_query: User's query
@@ -814,32 +817,22 @@ Generate the sequence now:"""
         Returns:
             Dict with fallback sequence
         """
-        logger.info("🔄 Generating fallback sequence from RAG...")
+        logger.info("🔄 Generating fallback sequence from RAG (AI-based)...")
         
         if not self.rag_engine:
-            # Ultra-basic fallback
+            # No manual fallback - return error if RAG unavailable
             return {
                 "success": False,
-                "error": "Could not generate sequence - LLM and RAG unavailable",
+                "error": "Could not generate sequence - AI (RAG) unavailable. Please ensure AI services are running.",
                 "sequence": {
-                    "sequence": [
-                        {
-                            "step": 1,
-                            "atom_id": "data-upload-validate",
-                            "purpose": "Load data",
-                            "prompt": user_query,
-                            "inputs": [],
-                            "output_name": "data",
-                            "endpoint": "/trinityai/upload"
-                        }
-                    ],
-                    "total_atoms": 1,
-                    "estimated_duration": "10-20 seconds",
-                    "reasoning": "Fallback sequence - basic data upload"
+                    "sequence": [],
+                    "total_atoms": 0,
+                    "estimated_duration": "N/A",
+                    "reasoning": "AI generation unavailable - cannot create workflow without AI"
                 }
             }
         
-        # Use RAG to recommend sequence
+        # Use RAG (AI) to recommend sequence - this is still AI-based, not manual
         recommended = self.rag_engine.recommend_atom_sequence(user_query)
         
         sequence = []
@@ -847,7 +840,7 @@ Generate the sequence now:"""
             atom_id = atom_rec["atom_id"]
             
             # Get endpoint
-            endpoint = "/trinityai/upload"
+            endpoint = "/trinityai/df-validate"
             if atom_id in ATOM_MAPPING:
                 endpoint = ATOM_MAPPING[atom_id]["endpoint"]
             

@@ -114,6 +114,7 @@ const LLM_MAP: Record<string, string> = {
   'explore': 'Agent Explore',
   'dataframe-operations': 'Agent DataFrame Operations',
   'pivot-table': 'Agent Pivot Table',
+  'data-upload-validate': 'Agent Data Validation',
 };
 
 const hydrateDroppedAtom = (atom: any): DroppedAtom => {
@@ -207,6 +208,7 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
 const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
   cards: LayoutCard[];
   workflowMolecules: WorkflowMolecule[];
+  autosaveEnabled?: boolean;
 } | null> => {
   try {
     const projectContext = getActiveProjectContext();
@@ -353,7 +355,16 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
         console.log('[Laboratory API] Using workflow molecules from MongoDB (old format, no moleculeIndex):', workflowMolecules);
       }
 
-      return { cards, workflowMolecules };
+      // Restore auxiliaryMenuLeftOpen from backend if available
+      if (data.auxiliaryMenuLeftOpen !== undefined) {
+        useLaboratoryStore.getState().setAuxiliaryMenuLeftOpen(data.auxiliaryMenuLeftOpen);
+        console.info('[Laboratory API] Restored auxiliaryMenuLeftOpen:', data.auxiliaryMenuLeftOpen);
+      }
+
+      // Return autosaveEnabled if available (will be handled by parent component)
+      const autosaveEnabled = data.autosaveEnabled !== undefined ? data.autosaveEnabled : true;
+
+      return { cards, workflowMolecules, autosaveEnabled };
     } else {
       console.warn('[Laboratory API] Invalid response format from MongoDB fetch', data);
       return null;
@@ -382,7 +393,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onCardFocus,
   onCardBlur,
 }, ref) => {
-  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings } = useLaboratoryStore();
+  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen } = useLaboratoryStore();
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -1038,14 +1049,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
     await prefetchDataframe(prev.csv);
     const { mapping: rawMapping } = await fetchDimensionMapping({ objectName: prev.csv });
-    const identifiers = Object.entries(rawMapping || {})
-      .filter(
-        ([k]) =>
-          k.toLowerCase() !== 'unattributed' &&
-          k.toLowerCase() !== 'unattributed_dimensions'
-      )
-      .flatMap(([, v]) => v)
-      .filter(Boolean);
+    // COMMENTED OUT - dimensions disabled, now fetch identifiers directly
+    // const identifiers = Object.entries(rawMapping || {})
+    //   .filter(
+    //     ([k]) =>
+    //       k.toLowerCase() !== 'unattributed' &&
+    //       k.toLowerCase() !== 'unattributed_dimensions'
+    //   )
+    //   .flatMap(([, v]) => v)
+    //   .filter(Boolean);
+    // Fetch identifiers directly from mapping (same as feature overview)
+    const identifiers = rawMapping && rawMapping["identifiers"] 
+      ? Array.isArray(rawMapping["identifiers"]) 
+        ? rawMapping["identifiers"].filter(Boolean)
+        : []
+      : [];
     let allColumns = Array.isArray(prev.summary) ? prev.summary.filter(Boolean) : [];
     if (allColumns.length === 0) {
       const fetched = await fetchColumnSummary(prev.csv, { retries: 1 });
@@ -4189,7 +4207,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         }}
       >
         <div className={canEdit ? '' : 'pointer-events-none'}>
-          <div className="p-6 space-y-6" onClick={(e) => {
+          <div data-lab-cards-container="true" className="p-6 space-y-6" onClick={(e) => {
             // Handle clicks on the empty space in the canvas
             if (e.target === e.currentTarget) {
               if (onOpenSettingsPanel) {
@@ -4281,7 +4299,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
                 {/* Molecule Content */}
                 {!isCollapsed && (
-                <div className="p-6 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
+                <div data-lab-cards-container="true" className="p-6 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
                     {Array.isArray(layoutCards) &&
                       layoutCards
                         .filter(card => card.moleculeId === molecule.moleculeId)
@@ -5032,7 +5050,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
         {/* Layout Cards Container */}
-      <div className="p-6 space-y-6 w-full">
+      <div data-lab-cards-container="true" className="p-6 space-y-6 w-full">
         {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
           const cardTitle = card.moleculeTitle
             ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)

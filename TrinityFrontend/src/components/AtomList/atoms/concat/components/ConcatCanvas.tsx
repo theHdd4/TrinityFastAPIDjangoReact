@@ -895,8 +895,8 @@ const ConcatCanvas: React.FC<ConcatCanvasProps> = ({ atomId, concatId, resultFil
             bodyClassName="max-h-80 overflow-y-auto"
             borderColor={`border-${concat.color.replace('bg-', '')}`}
             customHeader={{
-              title: "Cardinality View",
-              subtitle: "Click Here to View Data",
+              title: "Data Summary",
+              subtitle: "Data in detail",
               subtitleClickable: !!inputFileName && !!atomId,
               onSubtitleClick: handleViewDataClick,
               controls: (

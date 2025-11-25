@@ -81,18 +81,35 @@ class SmartMergeAgent:
             self._load_files()
             self._files_loaded = True
 
-    def _maybe_update_prefix(self) -> None:
-        """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint."""
+    def _maybe_update_prefix(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """Dynamically updates the MinIO prefix using the data_upload_validate API endpoint.
+        
+        Args:
+            client_name: Client name from request (preferred over env vars)
+            app_name: App name from request (preferred over env vars)
+            project_name: Project name from request (preferred over env vars)
+        """
         try:
+            # 🔧 CRITICAL FIX: Use passed parameters first, then fall back to environment variables
+            import requests
+            import os
+            
+            # Use passed parameters if provided, otherwise read from environment
+            if not client_name:
+                client_name = os.getenv("CLIENT_NAME", "")
+            if not app_name:
+                app_name = os.getenv("APP_NAME", "")
+            if not project_name:
+                project_name = os.getenv("PROJECT_NAME", "")
+            
+            # 🔧 CRITICAL FIX: Don't use "default" values - if we don't have real values, log error and return
+            if not client_name or not app_name or not project_name:
+                logger.warning(f"⚠️ Missing project context: client={client_name or 'N/A'}, app={app_name or 'N/A'}, project={project_name or 'N/A'}")
+                logger.warning("⚠️ Cannot update MinIO prefix without valid project context. Files may not be found.")
+                return
+            
             # Method 1: Call the data_upload_validate API endpoint
             try:
-                import requests
-                import os
-                
-                client_name = os.getenv("CLIENT_NAME", "")
-                app_name = os.getenv("APP_NAME", "")
-                project_name = os.getenv("PROJECT_NAME", "")
-                
                 validate_api_url = os.getenv("VALIDATE_API_URL", "http://fastapi:8001")
                 if not validate_api_url.startswith("http"):
                     validate_api_url = f"http://{validate_api_url}"
@@ -128,15 +145,11 @@ class SmartMergeAgent:
             except Exception as e:
                 logger.warning(f"Failed to fetch dynamic path from API: {e}")
             
-            # Method 2: Fallback to environment variables
-            import os
-            client_name = os.getenv("CLIENT_NAME", "default_client")
-            app_name = os.getenv("APP_NAME", "default_app")
-            project_name = os.getenv("PROJECT_NAME", "default_project")
+            # Method 2: Fallback to constructing prefix from context (no "default" values)
             current = f"{client_name}/{app_name}/{project_name}/"
             
             if self.prefix != current:
-                logger.info("MinIO prefix updated from '%s' to '%s' (env fallback)", self.prefix, current)
+                logger.info("MinIO prefix updated from '%s' to '%s' (constructed from context)", self.prefix, current)
                 self.prefix = current
                 self._load_files()
             else:
@@ -242,7 +255,8 @@ class SmartMergeAgent:
         session_id = self.create_session(session_id)
         
         # Check if MinIO prefix needs an update (and files need reloading)
-        self._maybe_update_prefix()
+        # 🔧 CRITICAL FIX: Pass context parameters to _maybe_update_prefix
+        self._maybe_update_prefix(client_name, app_name, project_name)
         
         # Load files lazily only when needed
         self._ensure_files_loaded()

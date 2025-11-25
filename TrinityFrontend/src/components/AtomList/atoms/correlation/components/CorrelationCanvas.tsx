@@ -1637,8 +1637,8 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
               defaultMinimized={true}
               borderColor={`border-${correlation.color.replace('bg-', '')}`}
               customHeader={{
-                title: "Cardinality View",
-                subtitle: "Click Here to View Data",
+                title: "Data Summary",
+                subtitle: "Data in detail",
                 subtitleClickable: !!(data.filteredFilePath || data.selectedFile),
                 onSubtitleClick: () => {
                   const datasetPath = data.filteredFilePath || data.selectedFile;
@@ -1791,7 +1791,7 @@ const CorrelationCanvas: React.FC<CorrelationCanvasProps> = ({
             <svg
               ref={heatmapRef}
               height={isCompactMode ? "260" : "650"}
-              className="block"
+              className="block mx-auto"
             ></svg>
           </div>
         </Card>
