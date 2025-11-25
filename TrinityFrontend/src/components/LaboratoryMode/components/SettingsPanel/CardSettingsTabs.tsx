@@ -811,15 +811,12 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   return (
     <>
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-4 mx-4 my-4">
+        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
           <TabsTrigger value="variables" className="text-xs">
             Variables
           </TabsTrigger>
           <TabsTrigger value="text-box" className="text-xs">
             Text box
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="text-xs">
-            Settings
           </TabsTrigger>
           <TabsTrigger value="visual" className="text-xs">
             Visualisation
@@ -991,13 +988,6 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                   </Card>
                 </div>
               )}
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="settings" className="space-y-4">
-            <Card className="p-4 text-sm text-gray-600">
-              <h4 className="font-medium text-gray-900 mb-2">Card Settings</h4>
-              <p>Global card configuration will appear here. For now, manage variables via the Variable Definition tab.</p>
             </Card>
           </TabsContent>
 

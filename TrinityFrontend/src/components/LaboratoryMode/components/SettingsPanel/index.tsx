@@ -63,7 +63,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   selectedCardId,
   cardExhibited,
 }) => {
-  const [tab, setTab] = useState<'variables' | 'settings' | 'visual' | 'exhibition'>(
+  const [tab, setTab] = useState<'variables' | 'text-box' | 'settings' | 'visual' | 'exhibition'>(
     'variables',
   );
 
