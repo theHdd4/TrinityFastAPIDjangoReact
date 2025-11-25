@@ -113,8 +113,24 @@ def _save_agent_to_postgres_with_retry(
         
     for attempt in range(max_retries):
         try:
+            # Check if executor is shutting down
+            if _postgres_executor._shutdown:
+                logger.debug(f"⚠️ Executor is shutting down, cannot save '{agent_name}' to PostgreSQL")
+                return False
+            
             # Use thread pool executor to run async code
-            future = _postgres_executor.submit(asyncio.run, _save_async())
+            # Create a wrapper function to properly handle the async call
+            def _run_async():
+                try:
+                    return asyncio.run(_save_async())
+                except RuntimeError as e:
+                    # Handle "cannot schedule new futures after interpreter shutdown" gracefully
+                    if "cannot schedule" in str(e) or "interpreter shutdown" in str(e):
+                        logger.debug(f"⚠️ Interpreter shutting down, skipping PostgreSQL save for '{agent_name}'")
+                        return False
+                    raise
+            
+            future = _postgres_executor.submit(_run_async)
             success = future.result(timeout=5)  # Reduced timeout to 5 seconds
             
             if success:
@@ -132,9 +148,13 @@ def _save_agent_to_postgres_with_retry(
                     _sync_status[agent_name] = False
                     return False
                     
-        except TimeoutError:
+        except (TimeoutError, RuntimeError) as e:
+            # Handle shutdown errors gracefully
+            if isinstance(e, RuntimeError) and ("cannot schedule" in str(e) or "interpreter shutdown" in str(e)):
+                logger.debug(f"⚠️ Interpreter shutting down, skipping PostgreSQL save for '{agent_name}'")
+                return False
             # Timeout is not critical - agents will be synced via Django management command
-            logger.debug(f"⚠️ Timeout saving '{agent_name}' to PostgreSQL (attempt {attempt + 1}/{max_retries}). "
+            logger.debug(f"⚠️ Timeout/RuntimeError saving '{agent_name}' to PostgreSQL (attempt {attempt + 1}/{max_retries}). "
                         f"Will be synced via Django management command.")
             if attempt < max_retries - 1:
                 threading.Event().wait(1)
@@ -143,6 +163,10 @@ def _save_agent_to_postgres_with_retry(
                 return False
         except Exception as e:
             # Log but don't fail - agents will be synced via Django management command
+            # Handle shutdown errors gracefully
+            if isinstance(e, RuntimeError) and ("cannot schedule" in str(e) or "interpreter shutdown" in str(e)):
+                logger.debug(f"⚠️ Interpreter shutting down, skipping PostgreSQL save for '{agent_name}'")
+                return False
             if attempt < max_retries - 1:
                 wait_time = 1
                 logger.debug(f"⚠️ Exception saving '{agent_name}' (attempt {attempt + 1}/{max_retries}): {e}, retrying in {wait_time}s...")
@@ -952,8 +976,24 @@ def sync_agents_to_postgres_sync() -> Dict[str, bool]:
         return {}
     
     try:
+        # Check if executor is shutting down
+        if _postgres_executor._shutdown:
+            logger.debug("⚠️ Executor is shutting down, cannot sync to PostgreSQL")
+            return {agent_id: False for agent_id in _agent_routers.keys()}
+        
         # Use thread pool executor to run async code
-        future = _postgres_executor.submit(asyncio.run, sync_registry_to_postgres())
+        # Create a wrapper function to properly handle the async call and shutdown
+        def _run_sync_async():
+            try:
+                return asyncio.run(sync_registry_to_postgres())
+            except RuntimeError as e:
+                # Handle "cannot schedule new futures after interpreter shutdown" gracefully
+                if "cannot schedule" in str(e) or "interpreter shutdown" in str(e):
+                    logger.debug("⚠️ Interpreter shutting down, skipping PostgreSQL sync")
+                    return {agent_id: False for agent_id in _agent_routers.keys()}
+                raise
+        
+        future = _postgres_executor.submit(_run_sync_async)
         results = future.result(timeout=30)  # 30 second timeout
         
         success_count = sum(1 for v in results.values() if v)
@@ -961,6 +1001,13 @@ def sync_agents_to_postgres_sync() -> Dict[str, bool]:
         logger.info(f"✅ Synchronously synced {success_count}/{total_count} agents to PostgreSQL")
         
         return results
+    except (RuntimeError, TimeoutError) as e:
+        # Handle shutdown and timeout errors gracefully
+        if isinstance(e, RuntimeError) and ("cannot schedule" in str(e) or "interpreter shutdown" in str(e)):
+            logger.debug("⚠️ Interpreter shutting down, skipping PostgreSQL sync")
+        else:
+            logger.warning(f"⚠️ Timeout or runtime error syncing to PostgreSQL: {e}")
+        return {agent_id: False for agent_id in _agent_routers.keys()}
     except Exception as e:
         logger.error(f"❌ Failed to sync registry to PostgreSQL (sync): {e}", exc_info=True)
         return {agent_id: False for agent_id in _agent_routers.keys()}

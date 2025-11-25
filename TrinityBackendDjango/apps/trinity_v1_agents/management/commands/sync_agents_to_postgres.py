@@ -333,6 +333,12 @@ class Command(BaseCommand):
                 "description": "Create and apply data transformations",
                 "category": "Transformations",
                 "tags": ["transform", "data", "transformation", "create"]
+            },
+            "group_by": {
+                "name": "Group By",
+                "description": "Group data by specific columns and apply aggregation functions",
+                "category": "Data Operations",
+                "tags": ["group_by", "aggregation", "data", "group", "aggregate"]
             }
         }
         

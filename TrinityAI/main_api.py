@@ -476,8 +476,8 @@ try:
     try:
         # Import like other agents: from TrinityAgent.main_app import ...
         # This matches: from Agent_Merge.main_app import router
-        print("Attempting import: from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router...")
-        from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router, initialize_trinity_agent
+        print("Attempting import: from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router...")
+        from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, initialize_trinity_agent
         print("✅ Successfully imported TrinityAgent.main_app")
         
         # Initialize TrinityAgent (this registers all agents)
@@ -538,6 +538,24 @@ try:
         else:
             print("❌ CreateTransform router is None from get_create_transform_router()")
             logger.warning("⚠️ CreateTransform router is None - create_transform endpoint will not work")
+        
+        # Get group_by router using the connection interface
+        print("Getting group_by router from TrinityAgent...")
+        groupby_router = get_group_by_router()
+        
+        if groupby_router:
+            print("✅✅✅ GROUPBY ROUTER RETRIEVED FROM TRINITY AGENT ✅✅✅")
+            print(f"✅ GroupBy router type: {type(groupby_router)}")
+            route_count = len(groupby_router.routes)
+            print(f"✅ GroupBy router has {route_count} routes")
+            for route in groupby_router.routes:
+                if hasattr(route, 'path') and hasattr(route, 'methods'):
+                    print(f"  - {list(route.methods)} {route.path}")
+                elif hasattr(route, 'path'):
+                    print(f"  - {route.path}")
+        else:
+            print("❌ GroupBy router is None from get_group_by_router()")
+            logger.warning("⚠️ GroupBy router is None - groupby endpoint will not work")
             
     except ImportError as import_err:
         print(f"❌ Failed to import TrinityAgent.main_app: {import_err}")
@@ -552,18 +570,21 @@ try:
             if str(TRINITY_AGENT_PATH) not in sys.path:
                 sys.path.insert(0, str(TRINITY_AGENT_PATH))
                 print(f"✅ Added TrinityAgent to sys.path for fallback: {TRINITY_AGENT_PATH}")
-            from main_app import get_concat_router, get_merge_router, get_create_transform_router, initialize_trinity_agent
+            from main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, initialize_trinity_agent
             print("✅ Fallback import successful")
             init_results = initialize_trinity_agent()
             concat_router = get_concat_router()
             merge_router = get_merge_router()
             create_transform_router = get_create_transform_router()
+            groupby_router = get_group_by_router()
             if concat_router:
                 print("✅✅✅ CONCAT ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
             if merge_router:
                 print("✅✅✅ MERGE ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
             if create_transform_router:
                 print("✅✅✅ CREATETRANSFORM ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
+            if groupby_router:
+                print("✅✅✅ GROUPBY ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
         except Exception as fallback_err:
             print(f"❌ Fallback also failed: {fallback_err}")
             import traceback
@@ -594,6 +615,7 @@ except ImportError as e:
     concat_router = None
     merge_router = None
     create_transform_router = None
+    groupby_router = None
 except Exception as e:
     error_msg = f"❌❌❌ ERROR LOADING CONCAT/MERGE/CREATETRANSFORM AGENTS VIA REGISTRY ❌❌❌\nException: {e}"
     print("=" * 80)
@@ -682,7 +704,8 @@ if concat_router is None:
         logger.info("=" * 80)
 
 # from Agent_create_transform.main_app import router as create_transform_router  # DISABLED - Using standardized Agent_CreateTransform from TrinityAgent
-from Agent_groupby.main_app import router as groupby_router
+# from Agent_groupby.main_app import router as groupby_router  # DISABLED - Using standardized Agent_GroupBy from TrinityAgent
+# groupby_router is now loaded from TrinityAgent above
 from Agent_chartmaker.main_app import router as chartmaker_router
 from Agent_explore.main_app import router as explore_router
 from Agent_dataframe_operations.main_app import router as dataframe_operations_router
@@ -972,7 +995,46 @@ if create_transform_router is not None:
     logger.info("✅ CreateTransform router included in API")
 else:
     logger.error("❌ CreateTransform router is None - create_transform endpoint will not work")
-api_router.include_router(groupby_router)
+
+# Include standardized group_by router (from TrinityAgent via agent registry)
+logger.info("=" * 80)
+logger.info("INCLUDING GROUPBY ROUTER IN API")
+logger.info("=" * 80)
+logger.info(f"groupby_router value: {groupby_router}")
+logger.info(f"groupby_router is None: {groupby_router is None}")
+logger.info(f"groupby_router type: {type(groupby_router) if groupby_router else 'N/A'}")
+
+if groupby_router is not None:
+    try:
+        logger.info(f"GroupBy router is not None: {groupby_router is not None}")
+        logger.info(f"GroupBy router type: {type(groupby_router)}")
+        
+        # Check if router has routes before including
+        route_count = len(groupby_router.routes) if groupby_router else 0
+        logger.info(f"GroupBy router has {route_count} routes before inclusion")
+        
+        if route_count == 0:
+            logger.error("❌❌❌ GROUPBY ROUTER HAS NO ROUTES - NOT INCLUDING ❌❌❌")
+            logger.error("The route decorators may not have executed during import")
+        else:
+            api_router.include_router(groupby_router, tags=["group_by"])
+            logger.info("✅ GroupBy router included in API")
+            # Log all routes after inclusion
+            try:
+                route_count_after = len(groupby_router.routes)
+                logger.info(f"✅ GroupBy router has {route_count_after} routes after inclusion")
+                for route in groupby_router.routes:
+                    if hasattr(route, 'path') and hasattr(route, 'methods'):
+                        logger.info(f"  - {list(route.methods)} {route.path}")
+                    elif hasattr(route, 'path'):
+                        logger.info(f"  - {route.path}")
+            except Exception as e:
+                logger.warning(f"Could not log groupby routes: {e}")
+    except Exception as e:
+        logger.error(f"❌ Failed to include groupby router: {e}", exc_info=True)
+else:
+    logger.error("❌ GroupBy router is None - groupby endpoint will not work")
+    logger.error("This means the import from Agent_GroupBy.main_app failed")
 api_router.include_router(chartmaker_router)
 api_router.include_router(explore_router)
 api_router.include_router(dataframe_operations_router)

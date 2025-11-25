@@ -256,13 +256,8 @@ def main():
         print(f"   ⚠️  Failed to sync agents to PostgreSQL: {exc}")
         print("       This is non-critical - agents will sync automatically when registered.")
         print("       You can manually run: python manage.py sync_agents_to_postgres")
-
-    # Update atoms with tags and color data from frontend
-    try:
-        call_command("update_atoms_from_frontend")
-        print("   ✅ Trinity V1 Atoms updated with tags and color data")
-    except Exception as exc:
-        print(f"   ⚠️  Failed to update atoms from frontend: {exc}")
+to populate trinity_v1_atoms: {exc}")
+e atoms from frontend: {exc}")
 
     # Update available atoms status based on working atoms list
     try:

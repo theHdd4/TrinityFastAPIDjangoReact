@@ -439,16 +439,38 @@ class AgentExecutor:
             
             # Handle /trinityai/groupby endpoint
             elif endpoint == "/trinityai/groupby":
-                from Agent_groupby.main_app import agent as groupby_agent
+                # Import from standardized TrinityAgent
+                try:
+                    from TrinityAgent.Agent_GroupBy.main_app import agent as groupby_agent
+                except ImportError:
+                    try:
+                        from Agent_GroupBy.main_app import agent as groupby_agent
+                    except ImportError:
+                        # Fallback to old path if exists
+                        from Agent_groupby.main_app import agent as groupby_agent
                 
                 logger.info("📞 Calling /groupby agent internally")
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
+                # Extract client context from session_context (set by workflow orchestrator)
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
+                
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # Call groupby agent directly (like individual atom execution)
+                # Note: process_request is synchronous, so no await needed
                 result = groupby_agent.process_request(
                     user_prompt=prompt,
-                    session_id=session_id
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
                 )
+                logger.info(f"📊 GroupBy agent result: success={result.get('success')}, keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 logger.info(f"✅ INTERNAL /groupby completed successfully")
+                logger.info(f"📦 Result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 
                 return {
                     "success": True,
