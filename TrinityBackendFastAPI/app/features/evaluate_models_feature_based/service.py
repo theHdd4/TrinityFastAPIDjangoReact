@@ -85,11 +85,13 @@ def _collect_selected_rows(results_df: pd.DataFrame) -> List[Tuple[str, str]]:
     
     # If selected_models column doesn't exist, use all rows (backward compatibility)
     if not selected_models_col:
+        logger.warning("No selected_models column found in dataset, using all data")
         return [(str(r[combination_col]), str(r[model_name_col])) for _, r in results_df.iterrows()]
 
     truthy = {"selected", "true", "yes", "1", "y"}
     rows = results_df[results_df[selected_models_col].apply(lambda v: str(v).strip().lower() in truthy)]
     if rows.empty:
+        logger.warning("No rows marked as selected; falling back to all models in results file")
         rows = results_df
 
     return [(str(r[combination_col]), str(r[model_name_col])) for _, r in rows.iterrows()]
@@ -586,29 +588,7 @@ def compute_contributions_yoy(
             # Close the MongoDB client for this event loop
             loop_client.close()
     
-    # Run async function - handle both sync and async contexts
-    try:
-        # Check if there's a running event loop
-        loop = asyncio.get_running_loop()
-        # If we get here, there's a running loop, so we need to use a different approach
-        import concurrent.futures
-        import threading
-        
-        def run_in_thread():
-            # Create a new event loop in this thread
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-            try:
-                return new_loop.run_until_complete(_compute())
-            finally:
-                new_loop.close()
-        
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_in_thread)
-            return future.result()
-    except RuntimeError:
-        # No running event loop, safe to use asyncio.run()
-        return asyncio.run(_compute())
+    return _run_async_in_sync_context(_compute())
 
 
 def compute_yoy_growth(
