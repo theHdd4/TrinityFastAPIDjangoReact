@@ -999,7 +999,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={() => adjustFontSize(-1)}
+                      onClick={() => adjustFontSize(-2)}
                       disabled={!textBoxEnabled}
                       className="h-9 w-9"
                     >
@@ -1010,7 +1010,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                       value={textBoxSettings.font_size}
                       onChange={(e) =>
                         handleTextBoxSettingsChange({
-                          font_size: clampFontSize(Number(e.target.value) || textBoxSettings.font_size),
+                          font_size: clampFontSize(Number(e.target.value) || 12),
                         })
                       }
                       disabled={!textBoxEnabled}
@@ -1019,7 +1019,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={() => adjustFontSize(1)}
+                      onClick={() => adjustFontSize(2)}
                       disabled={!textBoxEnabled}
                       className="h-9 w-9"
                     >
@@ -1027,6 +1027,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                     </Button>
                   </div>
                 </div>
+
+                <Separator />
 
                 <div className="space-y-2">
                   <Label className="text-xs font-medium text-muted-foreground">Text Formatting</Label>
@@ -1070,6 +1072,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                   </div>
                 </div>
 
+                <Separator />
+
                 <div className="space-y-2">
                   <Label className="text-xs font-medium text-muted-foreground">Text Alignment</Label>
                   <div className="flex gap-2">
@@ -1112,6 +1116,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                   </div>
                 </div>
 
+                <Separator />
+
                 <div className="space-y-2">
                   <Label className="text-xs font-medium text-muted-foreground">Lists</Label>
                   <div className="flex gap-2">
@@ -1141,6 +1147,50 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                     >
                       <ListOrdered className="h-4 w-4" />
                     </Button>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">Text Color</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="color"
+                      value={textBoxSettings.text_color}
+                      onChange={(e) => handleTextBoxSettingsChange({ text_color: e.target.value })}
+                      className="h-10 w-20 cursor-pointer"
+                      disabled={!textBoxEnabled}
+                    />
+                    <Input
+                      type="text"
+                      value={textBoxSettings.text_color}
+                      onChange={(e) => handleTextBoxSettingsChange({ text_color: e.target.value })}
+                      className="flex-1 font-mono text-sm"
+                      placeholder="#000000"
+                      disabled={!textBoxEnabled}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">Background Color</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="color"
+                      value={textBoxSettings.background_color === 'transparent' ? '#ffffff' : textBoxSettings.background_color}
+                      onChange={(e) => handleTextBoxSettingsChange({ background_color: e.target.value })}
+                      className="h-10 w-20 cursor-pointer"
+                      disabled={!textBoxEnabled}
+                    />
+                    <Input
+                      type="text"
+                      value={textBoxSettings.background_color ?? ''}
+                      onChange={(e) => handleTextBoxSettingsChange({ background_color: e.target.value })}
+                      className="flex-1 font-mono text-sm"
+                      placeholder="transparent"
+                      disabled={!textBoxEnabled}
+                    />
                   </div>
                 </div>
               </div>

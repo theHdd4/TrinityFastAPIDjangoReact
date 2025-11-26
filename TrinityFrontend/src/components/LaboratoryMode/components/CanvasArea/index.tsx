@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
@@ -67,6 +67,7 @@ import {
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_DATA,
+  TextBoxSettings,
   DataUploadSettings,
   ColumnClassifierColumn,
   DEFAULT_EXPLORE_SETTINGS,
@@ -202,6 +203,72 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
     variables: normalizeCardVariables(card.variables, card.id),
   }));
+};
+
+interface CardTextBoxCanvasProps {
+  data: { text: string; html: string };
+  settings: TextBoxSettings;
+  onTextChange: (data: { text: string; html: string }) => void;
+}
+
+const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange }) => {
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== data.html) {
+      editorRef.current.innerHTML = data.html;
+    }
+  }, [data.html]);
+
+  const handleInput = () => {
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      const text = editorRef.current.innerText;
+      onTextChange({ text, html });
+    }
+  };
+
+  const getListStyle = () => {
+    if (settings.list_type === 'bullet') return 'list-disc pl-8';
+    if (settings.list_type === 'number') return 'list-decimal pl-8';
+    return '';
+  };
+
+  const textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+
+  return (
+    <div className="w-full h-full flex items-center justify-center p-8 bg-background">
+      <div className="w-full max-w-4xl">
+        <div
+          ref={editorRef}
+          contentEditable
+          onInput={handleInput}
+          suppressContentEditableWarning
+          className={`
+            w-full min-h-[200px] p-6 
+            border-2 border-dashed border-border rounded-lg
+            focus:outline-none focus:border-primary
+            transition-colors duration-200
+            ${getListStyle()}
+          `}
+          style={{
+            fontFamily: settings.font_family,
+            fontSize: `${settings.font_size}px`,
+            fontWeight: settings.bold ? 'bold' : 'normal',
+            fontStyle: settings.italics ? 'italic' : 'normal',
+            textDecoration,
+            textAlign: settings.text_align,
+            color: settings.text_color,
+            backgroundColor: settings.background_color ?? 'transparent',
+          }}
+        />
+
+        <div className="mt-4 text-sm text-muted-foreground text-center">
+          Click to edit text. Use the properties panel on the right to customize formatting.
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // Function to fetch atom configurations from MongoDB
@@ -489,69 +556,29 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       return null;
     }
 
-    const plainText = card.textBoxContent ?? '';
-    const htmlContent = card.textBoxHtml && card.textBoxHtml.trim()
-      ? card.textBoxHtml
-      : plainText.replace(/\n/g, '<br />');
-
-    const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
-    const lineCount = plainText ? plainText.split('\n').length : 0;
     const textBoxSettings = { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings };
-    const textDecoration = [
-      textBoxSettings.underline ? 'underline' : '',
-      textBoxSettings.strikethrough ? 'line-through' : '',
-    ]
-      .filter(Boolean)
-      .join(' ');
+    const htmlContent = card.textBoxHtml?.trim()?.length
+      ? card.textBoxHtml
+      : (card.textBoxContent ?? '').replace(/\n/g, '<br />');
+    const textData = {
+      text: card.textBoxContent ?? '',
+      html: htmlContent,
+    };
 
-    const listClass =
-      textBoxSettings.list_type === 'bullet'
-        ? 'list-disc pl-6'
-        : textBoxSettings.list_type === 'number'
-        ? 'list-decimal pl-6'
-        : '';
+    const handleTextChange = (data: { text: string; html: string }) => {
+      if (!Array.isArray(layoutCards)) return;
+      setLayoutCards(
+        layoutCards.map(existing =>
+          existing.id === card.id
+            ? { ...existing, textBoxContent: data.text, textBoxHtml: data.html }
+            : existing,
+        ),
+      );
+    };
 
     return (
       <div className="mt-6">
-        <div className="border border-gray-200 bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-            <div className="space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Text box</p>
-              <h4 className="text-base font-semibold text-gray-900">Card notes</h4>
-              <p className="text-xs text-gray-500">Displayed beneath this card's atoms on the canvas.</p>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-[11px] text-gray-600">
-              <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200 text-right">
-                <div className="text-[10px] uppercase tracking-wide text-gray-500">Chars</div>
-                <div className="text-sm font-semibold text-gray-900">{plainText.length}</div>
-              </div>
-              <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200 text-right">
-                <div className="text-[10px] uppercase tracking-wide text-gray-500">Words</div>
-                <div className="text-sm font-semibold text-gray-900">{wordCount}</div>
-              </div>
-              <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200 text-right">
-                <div className="text-[10px] uppercase tracking-wide text-gray-500">Lines</div>
-                <div className="text-sm font-semibold text-gray-900">{lineCount}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="p-5 bg-gray-50/60">
-            <div
-              className={`prose prose-sm max-w-none text-gray-900 ${listClass}`}
-              style={{
-                fontFamily: textBoxSettings.font_family,
-                fontSize: textBoxSettings.font_size,
-                fontWeight: textBoxSettings.bold ? 'bold' : 'normal',
-                fontStyle: textBoxSettings.italics ? 'italic' : 'normal',
-                textDecoration,
-                textAlign: textBoxSettings.text_align,
-                color: textBoxSettings.text_color,
-              }}
-              dangerouslySetInnerHTML={{ __html: htmlContent || '<p class="text-gray-500">No text provided.</p>' }}
-            />
-          </div>
-        </div>
+        <CardTextBoxCanvas data={textData} settings={textBoxSettings} onTextChange={handleTextChange} />
       </div>
     );
   };

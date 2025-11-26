@@ -28,6 +28,7 @@ export interface TextBoxSettings {
   font_size: number;
   font_family: string;
   text_color: string;
+  background_color?: string;
   bold: boolean;
   italics: boolean;
   underline: boolean;
@@ -48,6 +49,7 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
   font_size: 14,
   font_family: "Inter",
   text_color: "#000000",
+  background_color: "transparent",
   bold: false,
   italics: false,
   underline: false,
