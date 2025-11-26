@@ -11,6 +11,16 @@ export interface TaskEnvelope<T> {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export async function fetchTaskStatus<T = any>(taskId: string): Promise<TaskEnvelope<T>> {
+  const response = await fetch(`${TASK_QUEUE_API}/${taskId}`, {
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch task status (${response.status})`);
+  }
+  return (await response.json()) as TaskEnvelope<T>;
+}
+
 export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>, maxAttempts: number = 60, timeoutMs: number = 300000): Promise<T> {
   const initialStatus = (initial.task_status || initial.status || '').toLowerCase();
   if (initialStatus === 'success') {
@@ -38,13 +48,7 @@ export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>, maxAt
     attempt += 1;
 
     try {
-      const response = await fetch(`${TASK_QUEUE_API}/${taskId}`, {
-        credentials: 'include',
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch task status (${response.status})`);
-      }
-      const payload: TaskEnvelope<T> = await response.json();
+      const payload = await fetchTaskStatus<T>(taskId);
       const status = (payload.status || payload.task_status || '').toLowerCase();
       if (status === 'success') {
         if (payload.result && typeof payload.result === 'object') {
