@@ -58,6 +58,12 @@ const getCellReference = (rowIndex: number, columnIndex: number) => {
 
 type FormulaCategory = 'math' | 'statistical' | 'logical' | 'text' | 'date' | 'mapping' | 'nulls';
 
+interface FunctionArgument {
+  name: string;        // "number1", "colA", "digits"
+  optional: boolean;   // true if [number2]
+  isVariadic: boolean; // true if ...
+}
+
 interface FormulaItem {
   key: string;
   name: string;
@@ -67,6 +73,7 @@ interface FormulaItem {
   category: FormulaCategory;
   matcher: (value: string) => boolean;
   priority: number;
+  arguments?: FunctionArgument[]; // Parsed arguments for signature helper
 }
 
 const normalizeFormula = (value: string) => {
@@ -76,6 +83,87 @@ const normalizeFormula = (value: string) => {
     uppercase: trimmed.toUpperCase(),
     condensed: trimmed.replace(/\s+/g, ''),
   };
+};
+
+// Normalize function names to uppercase (e.g., =sum( -> =SUM(), =Sum -> =SUM)
+// Only normalizes words that are followed by '(' (possibly with whitespace)
+// Preserves column names, strings, numbers, and other identifiers
+const normalizeFunctionNames = (formula: string): string => {
+  if (!formula || !formula.startsWith('=')) {
+    return formula;
+  }
+
+  const result: string[] = [];
+  let i = 1; // Start after '='
+  const length = formula.length;
+  let inString = false;
+  let stringChar = '';
+
+  while (i < length) {
+    const char = formula[i];
+    const prevChar = i > 0 ? formula[i - 1] : '';
+
+    // Handle string literals (preserve as-is)
+    if ((char === '"' || char === "'") && prevChar !== '\\') {
+      if (!inString) {
+        inString = true;
+        stringChar = char;
+        result.push(char);
+        i++;
+        continue;
+      } else if (char === stringChar) {
+        inString = false;
+        stringChar = '';
+        result.push(char);
+        i++;
+        continue;
+      }
+    }
+
+    if (inString) {
+      result.push(char);
+      i++;
+      continue;
+    }
+
+    // Detect potential function names (alphanumeric + underscore)
+    if (/[A-Za-z_]/.test(char)) {
+      const start = i;
+      // Collect the identifier
+      while (i < length && /[A-Za-z0-9_]/.test(formula[i])) {
+        i++;
+      }
+      const identifier = formula.slice(start, i);
+      
+      // Check if this is followed by '(' (possibly with whitespace)
+      let j = i;
+      while (j < length && /\s/.test(formula[j])) {
+        j++;
+      }
+      
+      if (j < length && formula[j] === '(') {
+        // This is a function name - normalize to uppercase
+        result.push(identifier.toUpperCase());
+        // Add any whitespace between function name and '('
+        if (j > i) {
+          result.push(formula.slice(i, j));
+        }
+        // Continue from j (the '(' will be added in next iteration)
+        i = j;
+        continue;
+      } else {
+        // Not a function - preserve original case (could be a column name)
+        result.push(identifier);
+        continue;
+      }
+    }
+
+    // All other characters (operators, parentheses, numbers, etc.) - preserve as-is
+    result.push(char);
+    i++;
+  }
+
+  return '=' + result.join('');
 };
 
 const createFunctionMatcher = (fn: string) => (value: string) => {
@@ -189,7 +277,14 @@ interface ValidationResult {
   isValid: boolean;
   error: string | null;
   suggestions: string[];
-  errorType: 'syntax' | 'column' | 'operation' | 'parenthesis' | null;
+  errorType: 'syntax' | 'column' | 'operation' | 'parenthesis' | 'backend' | null;
+  severity?: 'warning' | 'error'; // 'warning' = yellow (non-blocking), 'error' = red (blocking)
+  errorDetails?: {
+    invalidColumns?: string[];
+    availableColumns?: string[];
+    functionName?: string;
+    position?: number;
+  };
 }
 
 // Helper function to find similar column names (fuzzy matching)
@@ -237,6 +332,198 @@ const levenshteinDistance = (str1: string, str2: string): number => {
   return matrix[str2.length][str1.length];
 };
 
+// Parse function signature to extract structured arguments
+const parseFunctionSignature = (syntax: string): FunctionArgument[] => {
+  // Extract function name and arguments part
+  // Example: "SUM(colA, colB, ...)" -> "colA, colB, ..."
+  const match = syntax.match(/^[A-Z_]+\s*\((.*)\)$/i);
+  if (!match) return [];
+  
+  const argsString = match[1].trim();
+  if (!argsString) return [];
+  
+  // Handle variadic functions with ...
+  if (argsString === '...') {
+    return [{ name: '...', optional: false, isVariadic: true }];
+  }
+  
+  // Split by comma, but be careful with nested parentheses and brackets
+  const args: FunctionArgument[] = [];
+  let currentArg = '';
+  let depth = 0;
+  let inBrackets = false;
+  
+  for (let i = 0; i < argsString.length; i++) {
+    const char = argsString[i];
+    
+    if (char === '[') {
+      inBrackets = true;
+      currentArg += char;
+    } else if (char === ']') {
+      inBrackets = false;
+      currentArg += char;
+    } else if (char === '(') {
+      depth++;
+      currentArg += char;
+    } else if (char === ')') {
+      depth--;
+      currentArg += char;
+    } else if (char === ',' && depth === 0 && !inBrackets) {
+      // Found an argument separator
+      const trimmed = currentArg.trim();
+      if (trimmed) {
+        const isOptional = trimmed.startsWith('[') && trimmed.endsWith(']');
+        const argName = isOptional ? trimmed.slice(1, -1).trim() : trimmed;
+        const isVariadic = argName === '...' || trimmed.endsWith('...');
+        
+        args.push({
+          name: isVariadic ? '...' : argName,
+          optional: isOptional,
+          isVariadic: isVariadic
+        });
+      }
+      currentArg = '';
+    } else {
+      currentArg += char;
+    }
+  }
+  
+  // Add the last argument
+  if (currentArg.trim()) {
+    const trimmed = currentArg.trim();
+    const isOptional = trimmed.startsWith('[') && trimmed.endsWith(']');
+    const argName = isOptional ? trimmed.slice(1, -1).trim() : trimmed;
+    const isVariadic = argName === '...' || trimmed.endsWith('...');
+    
+    args.push({
+      name: isVariadic ? '...' : argName,
+      optional: isOptional,
+      isVariadic: isVariadic
+    });
+  }
+  
+  return args;
+};
+
+// Detect active function at cursor position
+const detectActiveFunction = (
+  formula: string,
+  cursorPos: number
+): { functionName: string; startPos: number; openParenPos: number } | null => {
+  if (cursorPos < 1 || !formula.startsWith('=')) return null;
+  
+  const beforeCursor = formula.slice(0, cursorPos);
+  const afterCursor = formula.slice(cursorPos);
+  
+  // Walk backwards from cursor to find the innermost function
+  let parenDepth = 0;
+  let lastOpenParen = -1;
+  let functionStart = -1;
+  let functionName = '';
+  
+  // Find the innermost opening parenthesis before cursor
+  for (let i = cursorPos - 1; i >= 0; i--) {
+    const char = formula[i];
+    
+    if (char === ')') {
+      parenDepth++;
+    } else if (char === '(') {
+      parenDepth--;
+      if (parenDepth < 0) {
+        // Found an opening parenthesis
+        lastOpenParen = i;
+        
+        // Now find the function name before this parenthesis
+        let j = i - 1;
+        // Skip whitespace
+        while (j >= 0 && /\s/.test(formula[j])) j--;
+        
+        // Find the end of function name
+        let nameEnd = j;
+        // Find the start of function name (alphanumeric or underscore)
+        while (j >= 0 && /[A-Za-z0-9_]/.test(formula[j])) j--;
+        
+        if (j < nameEnd) {
+          functionStart = j + 1;
+          functionName = formula.slice(functionStart, nameEnd + 1).toUpperCase();
+          
+          // Verify it starts with = or is after a comma/parenthesis
+          const beforeFunc = formula.slice(0, functionStart);
+          if (beforeFunc.endsWith('=') || /[,\s\(]/.test(beforeFunc[beforeFunc.length - 1])) {
+            // Check if cursor is still inside this function's parentheses
+            // Count parentheses from openParen to cursor
+            // Allow cursor to be right after opening parenthesis (depth = 1)
+            let depth = 1;
+            for (let k = lastOpenParen + 1; k < cursorPos; k++) {
+              if (formula[k] === '(') depth++;
+              if (formula[k] === ')') depth--;
+              if (depth === 0) {
+                // Cursor is outside this function
+                return null;
+              }
+            }
+            
+            // Cursor is inside this function (including right after opening paren)
+            // depth should be >= 1 (1 means cursor is right after opening paren, which is valid)
+            return {
+              functionName,
+              startPos: functionStart,
+              openParenPos: lastOpenParen + 1 // Position after opening parenthesis
+            };
+          }
+        }
+        break;
+      }
+    }
+  }
+  
+  return null;
+};
+
+// Get current argument index (0-based)
+const getCurrentArgumentIndex = (
+  formula: string,
+  cursorPos: number,
+  openParenPos: number
+): number => {
+  const betweenParens = formula.slice(openParenPos, cursorPos);
+  
+  let argIndex = 0;
+  let depth = 0;
+  let inString = false;
+  let stringChar = '';
+  
+  for (let i = 0; i < betweenParens.length; i++) {
+    const char = betweenParens[i];
+    
+    // Handle string literals
+    if ((char === '"' || char === "'") && (i === 0 || betweenParens[i - 1] !== '\\')) {
+      if (!inString) {
+        inString = true;
+        stringChar = char;
+      } else if (char === stringChar) {
+        inString = false;
+        stringChar = '';
+      }
+      continue;
+    }
+    
+    if (inString) continue;
+    
+    // Track nested parentheses
+    if (char === '(') {
+      depth++;
+    } else if (char === ')') {
+      depth--;
+    } else if (char === ',' && depth === 0) {
+      // Found an argument separator at top level
+      argIndex++;
+    }
+  }
+  
+  return argIndex;
+};
+
 // Enhanced syntax validation
 const validateFormulaSyntax = (expression: string): ValidationResult => {
   const trimmed = expression.trim();
@@ -247,22 +534,13 @@ const validateFormulaSyntax = (expression: string): ValidationResult => {
       isValid: false,
       error: 'Formula must start with =',
       suggestions: ['Add = at the beginning'],
-      errorType: 'syntax'
+      errorType: 'syntax',
+      severity: 'error' // Error: required syntax
     };
   }
   
-  // Check for balanced parentheses
-  const openParens = (trimmed.match(/\(/g) || []).length;
-  const closeParens = (trimmed.match(/\)/g) || []).length;
-  if (openParens !== closeParens) {
-    const missing = openParens > closeParens ? 'closing' : 'opening';
-    return {
-      isValid: false,
-      error: `Missing ${missing} parenthesis`,
-      suggestions: [openParens > closeParens ? 'Add ) to close the function' : 'Add ( to open the function'],
-      errorType: 'parenthesis'
-    };
-  }
+  // Check for balanced parentheses - REMOVED: No longer showing warning for unbalanced parentheses
+  // Users can type freely and the backend will handle validation
   
   // Check for basic syntax errors - but allow == for comparison operators
   // This regex looks for 3 or more consecutive = signs, or == at the beginning of the formula
@@ -271,7 +549,8 @@ const validateFormulaSyntax = (expression: string): ValidationResult => {
       isValid: false,
       error: 'Multiple = signs not allowed',
       suggestions: ['Remove extra = signs'],
-      errorType: 'syntax'
+      errorType: 'syntax',
+      severity: 'error' // Error: invalid syntax
     };
   }
   
@@ -283,7 +562,8 @@ const validateFormulaSyntax = (expression: string): ValidationResult => {
       isValid: false,
       error: 'Invalid character after =',
       suggestions: ['Start with a function name or column reference'],
-      errorType: 'syntax'
+      errorType: 'syntax',
+      severity: 'error' // Error: invalid syntax
     };
   }
   
@@ -314,7 +594,7 @@ const validateFormulaColumns = (expression: string, availableColumns: string[]):
   const matches = sanitizedExpression.match(columnPattern) || [];
   
   // Filter out function names, numbers, and other non-column references
-  const functionNames = ['SUM', 'AVG', 'MAX', 'MIN', 'DIV', 'PROD', 'ABS', 'ROUND', 'FLOOR', 'CEIL', 'EXP', 'LOG', 'SQRT', 'MEAN', 'CORR', 'COV', 'ZSCORE', 'NORM', 'COUNT', 'MEDIAN', 'PERCENTILE', 'STD', 'VAR', 'CUMSUM', 'CUMPROD', 'CUMMAX', 'CUMMIN', 'DIFF', 'PCT_CHANGE', 'LAG', 'IF', 'ISNULL', 'LOWER', 'UPPER', 'LEN', 'SUBSTR', 'STR_REPLACE', 'YEAR', 'MONTH', 'DAY', 'WEEKDAY', 'DATE_DIFF', 'MAP', 'FILLNA', 'FILLBLANK', 'BIN', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE'];
+  const functionNames = ['SUM', 'AVG', 'MAX', 'MIN', 'DIV', 'PROD', 'ABS', 'ROUND', 'FLOOR', 'CEIL', 'EXP', 'LOG', 'SQRT', 'MEAN', 'CORR', 'COV', 'ZSCORE', 'NORM', 'COUNT', 'MEDIAN', 'PERCENTILE', 'STD', 'VAR', 'CUMSUM', 'CUMPROD', 'CUMMAX', 'CUMMIN', 'DIFF', 'PCT_CHANGE', 'LAG', 'ROLLINGSUM', 'IF', 'ISNULL', 'LOWER', 'UPPER', 'LEN', 'SUBSTR', 'STR_REPLACE', 'YEAR', 'MONTH', 'DAY', 'WEEKDAY', 'QUARTER', 'DATE_DIFF', 'MAP', 'FILLNA', 'FILLBLANK', 'BIN', 'AND', 'OR', 'NOT', 'TRUE', 'FALSE'];
   
   const columnReferences = matches.filter(match => 
     !functionNames.includes(match.toUpperCase()) && 
@@ -341,14 +621,23 @@ const validateFormulaColumns = (expression: string, availableColumns: string[]):
       const similar = findSimilarColumns(invalidCol, availableColumns);
       if (similar.length > 0) {
         suggestions.push(`Did you mean: ${similar.join(', ')}?`);
+      } else {
+        suggestions.push(`Column "${invalidCol}" not found. Available columns: ${availableColumns.slice(0, 5).join(', ')}${availableColumns.length > 5 ? '...' : ''}`);
       }
     });
     
     return {
       isValid: false,
-      error: `Invalid columns: ${invalidColumns.join(', ')}`,
+      error: invalidColumns.length === 1 
+        ? `Column "${invalidColumns[0]}" not found`
+        : `Invalid columns: ${invalidColumns.join(', ')}`,
       suggestions,
-      errorType: 'column'
+      errorType: 'column',
+      severity: 'error', // Error: invalid column reference (but only show on Apply, not while typing)
+      errorDetails: {
+        invalidColumns,
+        availableColumns
+      }
     };
   }
   
@@ -370,27 +659,30 @@ const validateFormulaOperation = (expression: string): ValidationResult => {
       isValid: false,
       error: 'Multiple operators in sequence',
       suggestions: ['Remove duplicate operators'],
-      errorType: 'operation'
+      errorType: 'operation',
+      severity: 'warning' // Warning: user might still be typing
     };
   }
-  
+
   // Check for operators at the beginning or end
   if (trimmed.match(/^[+\-*/]/) || trimmed.match(/[+\-*/]$/)) {
     return {
       isValid: false,
       error: 'Operator at beginning or end of formula',
       suggestions: ['Add operands before/after operators'],
-      errorType: 'operation'
+      errorType: 'operation',
+      severity: 'warning' // Warning: user might still be typing
     };
   }
-  
+
   // Check for division by zero patterns
   if (trimmed.match(/\/\s*0/)) {
     return {
       isValid: false,
       error: 'Division by zero',
       suggestions: ['Use a non-zero divisor'],
-      errorType: 'operation'
+      errorType: 'operation',
+      severity: 'error' // Error: critical logic error
     };
   }
   
@@ -410,6 +702,21 @@ const validateFormula = (expression: string, availableColumns: string[]): Valida
     return syntaxResult;
   }
 
+  // Check for balanced parentheses - Only on Apply (not while typing)
+  const trimmed = expression.trim();
+  const openParens = (trimmed.match(/\(/g) || []).length;
+  const closeParens = (trimmed.match(/\)/g) || []).length;
+  if (openParens !== closeParens) {
+    const missing = openParens > closeParens ? 'closing' : 'opening';
+    return {
+      isValid: false,
+      error: `Missing ${missing} parenthesis`,
+      suggestions: [openParens > closeParens ? 'Add ) to close the function' : 'Add ( to open the function'],
+      errorType: 'parenthesis',
+      severity: 'error' // Error: blocking on Apply
+    };
+  }
+
   const disallowedRowFunctions = ['IF', 'AND', 'OR', 'NOT'];
   const disallowedPattern = new RegExp(`\\b(${disallowedRowFunctions.join('|')})\\s*\\(`, 'i');
   if (disallowedPattern.test(expression)) {
@@ -417,7 +724,8 @@ const validateFormula = (expression: string, availableColumns: string[]): Valida
       isValid: false,
       error: 'Row-level functions like IF/AND/OR are not supported yet. Please use column-level formulas.',
       suggestions: [],
-      errorType: 'operation'
+      errorType: 'operation',
+      severity: 'error' // Error: not supported
     };
   }
   
@@ -454,108 +762,133 @@ const isValidFormulaInput = (value: string) => {
   return trimmed.length > 1;
 };
 
+// Helper to create formula with pre-parsed arguments
+const createFormula = (
+  key: string,
+  name: string,
+  syntax: string,
+  description: string,
+  example: string,
+  category: FormulaCategory,
+  matcher: (value: string) => boolean,
+  priority: number
+): FormulaItem => {
+  const args = parseFunctionSignature(syntax);
+  return {
+    key,
+    name,
+    syntax,
+    description,
+    example,
+    category,
+    matcher,
+    priority,
+    arguments: args
+  };
+};
+
 const formulaLibrary: FormulaItem[] = [
   // Math & aggregations
-  {
-    key: 'sum',
-    name: 'Sum',
-    syntax: 'SUM(colA, colB, ...)',
-    description: 'Adds the supplied columns row-wise.',
-    example: '=SUM(colA,colB)',
-    category: 'math',
-    matcher: createFunctionMatcher('SUM'),
-    priority: 10,
-  },
-  {
-    key: 'product',
-    name: 'Product',
-    syntax: 'PROD(colA, colB, ...)',
-    description: 'Multiplies values across the row.',
-    example: '=PROD(colA,colB)',
-    category: 'math',
-    matcher: createFunctionMatcher('PROD'),
-    priority: 10,
-  },
-  {
-    key: 'division',
-    name: 'Division',
-    syntax: 'DIV(colA, colB, ...)',
-    description: 'Sequentially divides the provided values.',
-    example: '=DIV(colA,colB)',
-    category: 'math',
-    matcher: createFunctionMatcher('DIV'),
-    priority: 10,
-  },
-  {
-    key: 'absolute',
-    name: 'Absolute Value',
-    syntax: 'ABS(number)',
-    description: 'Returns the absolute value for a column.',
-    example: '=ABS(colA)',
-    category: 'math',
-    matcher: createFunctionMatcher('ABS'),
-    priority: 10,
-  },
-  {
-    key: 'round',
-    name: 'Round',
-    syntax: 'ROUND(number, digits)',
-    description: 'Rounds a number using the specified precision.',
-    example: '=ROUND(colA, 2)',
-    category: 'math',
-    matcher: createFunctionMatcher('ROUND'),
-    priority: 10,
-  },
-  {
-    key: 'floor',
-    name: 'Floor',
-    syntax: 'FLOOR(number)',
-    description: 'Rounds a number down to the nearest integer.',
-    example: '=FLOOR(colA)',
-    category: 'math',
-    matcher: createFunctionMatcher('FLOOR'),
-    priority: 10,
-  },
-  {
-    key: 'ceiling',
-    name: 'Ceiling',
-    syntax: 'CEIL(number)',
-    description: 'Rounds a number up to the nearest integer.',
-    example: '=CEIL(colA)',
-    category: 'math',
-    matcher: createFunctionMatcher('CEIL'),
-    priority: 10,
-  },
-  {
-    key: 'exponential',
-    name: 'Exponential',
-    syntax: 'EXP(number)',
-    description: "Returns Euler's number raised to the value.",
-    example: '=EXP(colA)',
-    category: 'math',
-    matcher: createFunctionMatcher('EXP'),
-    priority: 10,
-  },
-  {
-    key: 'natural-log',
-    name: 'Natural Logarithm',
-    syntax: 'LOG(number)',
-    description: 'Computes the natural log of the column value.',
-    example: '=LOG(colA)',
-    category: 'math',
-    matcher: createFunctionMatcher('LOG'),
-    priority: 10,
-  },
-  {
-    key: 'square-root',
-    name: 'Square Root',
-    syntax: 'SQRT(number)',
-    description: 'Returns the square root for numeric columns.',
-    example: '=SQRT(colA)',
-    category: 'math',
-    matcher: createFunctionMatcher('SQRT'),
-    priority: 10,
-  },
+  createFormula(
+    'sum',
+    'Sum',
+    'SUM(colA, colB, ...)',
+    'Adds the supplied columns row-wise.',
+    '=SUM(colA,colB,...)',
+    'math',
+    createFunctionMatcher('SUM'),
+    10
+  ),
+  createFormula(
+    'product',
+    'Product',
+    'PROD(colA, colB, ...)',
+    'Multiplies values across the row.',
+    '=PROD(colA,colB,...)',
+    'math',
+    createFunctionMatcher('PROD'),
+    10
+  ),
+  createFormula(
+    'division',
+    'Division',
+    'DIV(colA, colB, ...)',
+    'Sequentially divides the provided values.',
+    '=DIV(colA,colB,...)',
+    'math',
+    createFunctionMatcher('DIV'),
+    10
+  ),
+  createFormula(
+    'absolute',
+    'Absolute Value',
+    'ABS(colA)',
+    'Returns the absolute value for a column.',
+    '=ABS(colA)',
+    'math',
+    createFunctionMatcher('ABS'),
+    10
+  ),
+  createFormula(
+    'round',
+    'Round',
+    'ROUND(colA, digits)',
+    'Rounds a number using the specified precision.',
+    '=ROUND(colA, 2)',
+    'math',
+    createFunctionMatcher('ROUND'),
+    10
+  ),
+  createFormula(
+    'floor',
+    'Floor',
+    'FLOOR(colA)',
+    'Rounds a number down to the nearest integer.',
+    '=FLOOR(colA)',
+    'math',
+    createFunctionMatcher('FLOOR'),
+    10
+  ),
+  createFormula(
+    'ceiling',
+    'Ceiling',
+    'CEIL(colA)',
+    'Rounds a number up to the nearest integer.',
+    '=CEIL(colA)',
+    'math',
+    createFunctionMatcher('CEIL'),
+    10
+  ),
+  createFormula(
+    'exponential',
+    'Exponential',
+    'EXP(colA)',
+    "Returns Euler's number raised to the value.",
+    '=EXP(colA)',
+    'math',
+    createFunctionMatcher('EXP'),
+    10
+  ),
+  createFormula(
+    'natural-log',
+    'Natural Logarithm',
+    'LOG(colA)',
+    'Computes the natural log of the column value.',
+    '=LOG(colA)',
+    'math',
+    createFunctionMatcher('LOG'),
+    10
+  ),
+  createFormula(
+    'square-root',
+    'Square Root',
+    'SQRT(colA)',
+    'Returns the square root for numeric columns.',
+    '=SQRT(colA)',
+    'math',
+    createFunctionMatcher('SQRT'),
+    10
+  ),
   {
     key: 'square',
     name: 'Square',
@@ -586,217 +919,229 @@ const formulaLibrary: FormulaItem[] = [
     priority: 25,
   },
   // Statistical
-  {
-    key: 'average',
-    name: 'Average',
-    syntax: 'AVG(colA, colB, ...)',
-    description: 'Returns the average of the supplied values.',
-    example: '=AVG(colA,colB)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('AVG'),
-    priority: 10,
-  },
-  {
-    key: 'mean',
-    name: 'Mean',
-    syntax: 'MEAN(colA, colB, ...)',
-    description: 'Alias for AVG to average row values.',
-    example: '=MEAN(colA,colB,colC)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('MEAN'),
-    priority: 10,
-  },
-  {
-    key: 'median',
-    name: 'Median',
-    syntax: 'MEDIAN(column)',
-    description: 'Returns the median value for the specified column.',
-    example: '=MEDIAN(Sales)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('MEDIAN'),
-    priority: 11,
-  },
-  {
-    key: 'percentile',
-    name: 'Percentile',
-    syntax: 'PERCENTILE(column, quantile)',
-    description: 'Computes a quantile (0-1) for the column.',
-    example: '=PERCENTILE(Sales, 0.9)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('PERCENTILE'),
-    priority: 12,
-  },
-  {
-    key: 'count',
-    name: 'Count (Non-null)',
-    syntax: 'COUNT(column)',
-    description: 'Counts the number of non-null values in a column.',
-    example: '=COUNT(colA)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('COUNT'),
-    priority: 11,
-  },
-  {
-    key: 'maximum',
-    name: 'Maximum',
-    syntax: 'MAX(colA, colB, ...)',
-    description: 'Finds the maximum value for each row.',
-    example: '=MAX(colA,colB)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('MAX'),
-    priority: 10,
-  },
-  {
-    key: 'minimum',
-    name: 'Minimum',
-    syntax: 'MIN(colA, colB, ...)',
-    description: 'Finds the minimum value for each row.',
-    example: '=MIN(colA,colB)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('MIN'),
-    priority: 10,
-  },
-  {
-    key: 'correlation',
-    name: 'Correlation',
-    syntax: 'CORR(colX, colY)',
-    description: 'Computes Pearson correlation between two columns.',
-    example: '=CORR(colA,colB)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('CORR'),
-    priority: 10,
-  },
-  {
-    key: 'zscore',
-    name: 'Z-Score (Normalize)',
-    syntax: 'ZSCORE(column)',
-    description: 'Standardizes a numeric column by subtracting the mean and dividing by the standard deviation.',
-    example: '=ZSCORE(colA)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('ZSCORE'),
-    priority: 12,
-  },
-  {
-    key: 'normalize',
-    name: 'Normalize (Alias)',
-    syntax: 'NORM(column)',
-    description: 'Alias of ZSCORE that produces the same standardized values for the selected column.',
-    example: '=NORM(colA)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('NORM'),
-    priority: 13,
-  },
-  {
-    key: 'std',
-    name: 'Standard Deviation',
-    syntax: 'STD(column)',
-    description: 'Population standard deviation (ddof = 0).',
-    example: '=STD(colA)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('STD'),
-    priority: 14,
-  },
-  {
-    key: 'var',
-    name: 'Variance',
-    syntax: 'VAR(column)',
-    description: 'Population variance (ddof = 0) for the column.',
-    example: '=VAR(colA)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('VAR'),
-    priority: 15,
-  },
-  {
-    key: 'cov',
-    name: 'Covariance',
-    syntax: 'COV(colX, colY)',
-    description: 'Calculates covariance between two numeric columns.',
-    example: '=COV(colA,colB)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('COV'),
-    priority: 16,
-  },
-  {
-    key: 'corr',
-    name: 'Correlation',
-    syntax: 'CORR(colX, colY)',
-    description: 'Computes Pearson correlation between two columns.',
-    example: '=CORR(colA,colB)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('CORR'),
-    priority: 17,
-  },
-  {
-    key: 'cumsum',
-    name: 'Cumulative Sum',
-    syntax: 'CUMSUM(column)',
-    description: 'Running total down the column based on current row order.',
-    example: '=CUMSUM(Sales)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('CUMSUM'),
-    priority: 18,
-  },
-  {
-    key: 'cumprod',
-    name: 'Cumulative Product',
-    syntax: 'CUMPROD(column)',
-    description: 'Running product of the column values.',
-    example: '=CUMPROD(GrowthFactor)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('CUMPROD'),
-    priority: 19,
-  },
-  {
-    key: 'cummax',
-    name: 'Cumulative Max',
-    syntax: 'CUMMAX(column)',
-    description: 'Tracks the maximum observed so far down the column.',
-    example: '=CUMMAX(Margin)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('CUMMAX'),
-    priority: 20,
-  },
-  {
-    key: 'cummin',
-    name: 'Cumulative Min',
-    syntax: 'CUMMIN(column)',
-    description: 'Tracks the minimum observed so far down the column.',
-    example: '=CUMMIN(Margin)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('CUMMIN'),
-    priority: 21,
-  },
-  {
-    key: 'diff',
-    name: 'Difference',
-    syntax: 'DIFF(column, periods)',
-    description: 'Subtracts the value from a previous row (default 1 period).',
-    example: '=DIFF(Sales)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('DIFF'),
-    priority: 22,
-  },
-  {
-    key: 'pct-change',
-    name: 'Percent Change',
-    syntax: 'PCT_CHANGE(column, periods)',
-    description: 'Computes the percentage change vs. a prior row (default 1).',
-    example: '=PCT_CHANGE(Sales)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('PCT_CHANGE'),
-    priority: 23,
-  },
-  {
-    key: 'lag',
-    name: 'Lag',
-    syntax: 'LAG(column, periods)',
-    description: 'Shifts the column down by N rows (default 1).',
-    example: '=LAG(Sales, 1)',
-    category: 'statistical',
-    matcher: createFunctionMatcher('LAG'),
-    priority: 24,
-  },
+  createFormula(
+    'average',
+    'Average',
+    'AVG(colA, colB, ...)',
+    'Returns the average of the supplied values.',
+    '=AVG(colA,colB,...)',
+    'statistical',
+    createFunctionMatcher('AVG'),
+    10
+  ),
+  createFormula(
+    'mean',
+    'Mean',
+    'MEAN(colA, colB, ...)',
+    'Alias for AVG to average row values.',
+    '=MEAN(colA,colB,...)',
+    'statistical',
+    createFunctionMatcher('MEAN'),
+    10
+  ),
+  createFormula(
+    'median',
+    'Median',
+    'MEDIAN(colA)',
+    'Returns the median value for the specified column.',
+    '=MEDIAN(colA)',
+    'statistical',
+    createFunctionMatcher('MEDIAN'),
+    11
+  ),
+  createFormula(
+    'percentile',
+    'Percentile',
+    'PERCENTILE(colA, quantile)',
+    'Computes a quantile (0-1) for the column.',
+    '=PERCENTILE(colA, 0.9)',
+    'statistical',
+    createFunctionMatcher('PERCENTILE'),
+    12
+  ),
+  createFormula(
+    'count',
+    'Count (Non-null)',
+    'COUNT(colA)',
+    'Counts the number of non-null values in a column.',
+    '=COUNT(colA)',
+    'statistical',
+    createFunctionMatcher('COUNT'),
+    11
+  ),
+  createFormula(
+    'maximum',
+    'Maximum',
+    'MAX(colA, colB, ...)',
+    'Finds the maximum value for each row.',
+    '=MAX(colA,colB,...)',
+    'statistical',
+    createFunctionMatcher('MAX'),
+    10
+  ),
+  createFormula(
+    'minimum',
+    'Minimum',
+    'MIN(colA, colB, ...)',
+    'Finds the minimum value for each row.',
+    '=MIN(colA,colB,...)',
+    'statistical',
+    createFunctionMatcher('MIN'),
+    10
+  ),
+  createFormula(
+    'correlation',
+    'Correlation',
+    'CORR(colA, colB)',
+    'Computes Pearson correlation between two columns.',
+    '=CORR(colA,colB)',
+    'statistical',
+    createFunctionMatcher('CORR'),
+    10
+  ),
+  createFormula(
+    'zscore',
+    'Z-Score (Normalize)',
+    'ZSCORE(colA)',
+    'Standardizes a numeric column by subtracting the mean and dividing by the standard deviation.',
+    '=ZSCORE(colA)',
+    'statistical',
+    createFunctionMatcher('ZSCORE'),
+    12
+  ),
+  createFormula(
+    'normalize',
+    'Normalize (Alias)',
+    'NORM(colA)',
+    'Alias of ZSCORE that produces the same standardized values for the selected column.',
+    '=NORM(colA)',
+    'statistical',
+    createFunctionMatcher('NORM'),
+    13
+  ),
+  createFormula(
+    'std',
+    'Standard Deviation',
+    'STD(colA)',
+    'Population standard deviation (ddof = 0).',
+    '=STD(colA)',
+    'statistical',
+    createFunctionMatcher('STD'),
+    14
+  ),
+  createFormula(
+    'var',
+    'Variance',
+    'VAR(colA)',
+    'Population variance (ddof = 0) for the column.',
+    '=VAR(colA)',
+    'statistical',
+    createFunctionMatcher('VAR'),
+    15
+  ),
+  createFormula(
+    'cov',
+    'Covariance',
+    'COV(colA, colB)',
+    'Calculates covariance between two numeric columns.',
+    '=COV(colA,colB)',
+    'statistical',
+    createFunctionMatcher('COV'),
+    16
+  ),
+  createFormula(
+    'corr',
+    'Correlation',
+    'CORR(colA, colB)',
+    'Computes Pearson correlation between two columns.',
+    '=CORR(colA,colB)',
+    'statistical',
+    createFunctionMatcher('CORR'),
+    17
+  ),
+  createFormula(
+    'cumsum',
+    'Cumulative Sum',
+    'CUMSUM(colA)',
+    'Running total down the column based on current row order.',
+    '=CUMSUM(colA)',
+    'statistical',
+    createFunctionMatcher('CUMSUM'),
+    18
+  ),
+  createFormula(
+    'cumprod',
+    'Cumulative Product',
+    'CUMPROD(colA)',
+    'Running product of the column values.',
+    '=CUMPROD(colA)',
+    'statistical',
+    createFunctionMatcher('CUMPROD'),
+    19
+  ),
+  createFormula(
+    'cummax',
+    'Cumulative Max',
+    'CUMMAX(colA)',
+    'Tracks the maximum observed so far down the column.',
+    '=CUMMAX(colA)',
+    'statistical',
+    createFunctionMatcher('CUMMAX'),
+    20
+  ),
+  createFormula(
+    'cummin',
+    'Cumulative Min',
+    'CUMMIN(colA)',
+    'Tracks the minimum observed so far down the column.',
+    '=CUMMIN(colA)',
+    'statistical',
+    createFunctionMatcher('CUMMIN'),
+    21
+  ),
+  createFormula(
+    'diff',
+    'Difference',
+    'DIFF(colA, [periods])',
+    'Subtracts the value from a previous row (default 1 period).',
+    '=DIFF(colA)',
+    'statistical',
+    createFunctionMatcher('DIFF'),
+    22
+  ),
+  createFormula(
+    'pct-change',
+    'Percent Change',
+    'PCT_CHANGE(colA, [periods])',
+    'Computes the percentage change vs. a prior row (default 1).',
+    '=PCT_CHANGE(colA)',
+    'statistical',
+    createFunctionMatcher('PCT_CHANGE'),
+    23
+  ),
+  createFormula(
+    'lag',
+    'Lag',
+    'LAG(colA, [periods])',
+    'Shifts the column down by N rows (default 1).',
+    '=LAG(colA, 1)',
+    'statistical',
+    createFunctionMatcher('LAG'),
+    24
+  ),
+  createFormula(
+    'rolling-sum',
+    'Rolling Sum',
+    'ROLLINGSUM(colA, window)',
+    'Calculates rolling sum with specified window size. First (window-1) rows are blank.',
+    '=ROLLINGSUM(colA, 12)',
+    'statistical',
+    createFunctionMatcher('ROLLINGSUM'),
+    25
+  ),
   // Logical & binning
+  // Note: IF functions are complex and don't follow standard argument patterns
+  // They are kept as-is since they require special handling
   {
     key: 'if-isnull',
     name: 'Null via IF',
@@ -806,6 +1151,11 @@ const formulaLibrary: FormulaItem[] = [
     category: 'nulls',
     matcher: createIfMatcher(({ uppercase }) => uppercase.includes('ISNULL(')),
     priority: 5,
+    arguments: [
+      { name: 'condition', optional: false, isVariadic: false },
+      { name: 'true_value', optional: false, isVariadic: false },
+      { name: 'false_value', optional: false, isVariadic: false }
+    ]
   },
   {
     key: 'if-equal',
@@ -816,6 +1166,11 @@ const formulaLibrary: FormulaItem[] = [
     category: 'logical',
     matcher: createIfMatcher(({ uppercase }) => uppercase.includes('==')),
     priority: 12,
+    arguments: [
+      { name: 'condition', optional: false, isVariadic: false },
+      { name: 'true_value', optional: false, isVariadic: false },
+      { name: 'false_value', optional: false, isVariadic: false }
+    ]
   },
   {
     key: 'if-nested',
@@ -826,6 +1181,11 @@ const formulaLibrary: FormulaItem[] = [
     category: 'logical',
     matcher: createIfMatcher(({ uppercase }) => countToken(uppercase, 'IF(') > 1),
     priority: 15,
+    arguments: [
+      { name: 'condition', optional: false, isVariadic: false },
+      { name: 'true_value', optional: false, isVariadic: false },
+      { name: 'false_value', optional: false, isVariadic: false }
+    ]
   },
   {
     key: 'if-relative',
@@ -839,6 +1199,11 @@ const formulaLibrary: FormulaItem[] = [
       return nestedCount === 1 && hasQuotes(trimmed) && !uppercase.includes('ISNULL') && !uppercase.includes('==');
     }),
     priority: 20,
+    arguments: [
+      { name: 'condition', optional: false, isVariadic: false },
+      { name: 'true_value', optional: false, isVariadic: false },
+      { name: 'false_value', optional: false, isVariadic: false }
+    ]
   },
   {
     key: 'if-basic',
@@ -854,150 +1219,165 @@ const formulaLibrary: FormulaItem[] = [
       return true;
     }),
     priority: 100,
+    arguments: [
+      { name: 'condition', optional: false, isVariadic: false },
+      { name: 'true_value', optional: false, isVariadic: false },
+      { name: 'false_value', optional: false, isVariadic: false }
+    ]
   },
-  {
-    key: 'bin',
-    name: 'Custom Binning',
-    syntax: 'BIN(column, [bounds])',
-    description: 'Buckets numeric values using explicit boundaries.',
-    example: '=BIN(colA, [0, 50, 100])',
-    category: 'logical',
-    matcher: createFunctionMatcher('BIN'),
-    priority: 25,
-  },
+  createFormula(
+    'bin',
+    'Custom Binning',
+    'BIN(colA, [bounds])',
+    'Buckets numeric values using explicit boundaries.',
+    '=BIN(colA, [0, 50, 100])',
+    'logical',
+    createFunctionMatcher('BIN'),
+    25
+  ),
   // Text
-  {
-    key: 'lower',
-    name: 'Lowercase',
-    syntax: 'LOWER(text)',
-    description: 'Converts text to lowercase.',
-    example: '=LOWER(colA)',
-    category: 'text',
-    matcher: createFunctionMatcher('LOWER'),
-    priority: 10,
-  },
-  {
-    key: 'upper',
-    name: 'Uppercase',
-    syntax: 'UPPER(text)',
-    description: 'Converts text to uppercase.',
-    example: '=UPPER(colA)',
-    category: 'text',
-    matcher: createFunctionMatcher('UPPER'),
-    priority: 10,
-  },
-  {
-    key: 'length',
-    name: 'Length',
-    syntax: 'LEN(text)',
-    description: 'Returns the string length.',
-    example: '=LEN(colA)',
-    category: 'text',
-    matcher: createFunctionMatcher('LEN'),
-    priority: 10,
-  },
-  {
-    key: 'substring',
-    name: 'Substring',
-    syntax: 'SUBSTR(text, start, end)',
-    description: 'Extracts characters between the start and end index.',
-    example: '=SUBSTR(colA, 0, 5)',
-    category: 'text',
-    matcher: createFunctionMatcher('SUBSTR'),
-    priority: 10,
-  },
-  {
-    key: 'str-replace',
-    name: 'Replace Text',
-    syntax: 'STR_REPLACE(text, "old", "new")',
-    description: 'Replaces a substring within the text.',
-    example: '=STR_REPLACE(colA, "old", "new")',
-    category: 'text',
-    matcher: createFunctionMatcher('STR_REPLACE'),
-    priority: 10,
-  },
+  createFormula(
+    'lower',
+    'Lowercase',
+    'LOWER(colA)',
+    'Converts text to lowercase.',
+    '=LOWER(colA)',
+    'text',
+    createFunctionMatcher('LOWER'),
+    10
+  ),
+  createFormula(
+    'upper',
+    'Uppercase',
+    'UPPER(colA)',
+    'Converts text to uppercase.',
+    '=UPPER(colA)',
+    'text',
+    createFunctionMatcher('UPPER'),
+    10
+  ),
+  createFormula(
+    'length',
+    'Length',
+    'LEN(colA)',
+    'Returns the string length.',
+    '=LEN(colA)',
+    'text',
+    createFunctionMatcher('LEN'),
+    10
+  ),
+  createFormula(
+    'substring',
+    'Substring',
+    'SUBSTR(colA, start, end)',
+    'Extracts characters between the start and end index.',
+    '=SUBSTR(colA, 0, 5)',
+    'text',
+    createFunctionMatcher('SUBSTR'),
+    10
+  ),
+  createFormula(
+    'str-replace',
+    'Replace Text',
+    'STR_REPLACE(colA, old_text, new_text)',
+    'Replaces a substring within the text.',
+    '=STR_REPLACE(colA, "old", "new")',
+    'text',
+    createFunctionMatcher('STR_REPLACE'),
+    10
+  ),
   // Date
-  {
-    key: 'year',
-    name: 'Year',
-    syntax: 'YEAR(date)',
-    description: 'Extracts the year from a date value.',
-    example: '=YEAR(colDate)',
-    category: 'date',
-    matcher: createFunctionMatcher('YEAR'),
-    priority: 10,
-  },
-  {
-    key: 'month',
-    name: 'Month',
-    syntax: 'MONTH(date)',
-    description: 'Extracts the month from a date value.',
-    example: '=MONTH(colDate)',
-    category: 'date',
-    matcher: createFunctionMatcher('MONTH'),
-    priority: 10,
-  },
-  {
-    key: 'day',
-    name: 'Day',
-    syntax: 'DAY(date)',
-    description: 'Extracts the day of the month from a date value.',
-    example: '=DAY(colDate)',
-    category: 'date',
-    matcher: createFunctionMatcher('DAY'),
-    priority: 10,
-  },
-  {
-    key: 'weekday',
-    name: 'Weekday',
-    syntax: 'WEEKDAY(date)',
-    description: 'Returns the textual weekday (Monday, Tuesday, ...).',
-    example: '=WEEKDAY(colDate)',
-    category: 'date',
-    matcher: createFunctionMatcher('WEEKDAY'),
-    priority: 10,
-  },
-  {
-    key: 'date-diff',
-    name: 'Date Difference',
-    syntax: 'DATE_DIFF(end, start)',
-    description: 'Calculates the day difference between two dates.',
-    example: '=DATE_DIFF(colEnd, colStart)',
-    category: 'date',
-    matcher: createFunctionMatcher('DATE_DIFF'),
-    priority: 10,
-  },
+  createFormula(
+    'year',
+    'Year',
+    'YEAR(colA)',
+    'Extracts the year from a date value.',
+    '=YEAR(colDate)',
+    'date',
+    createFunctionMatcher('YEAR'),
+    10
+  ),
+  createFormula(
+    'month',
+    'Month',
+    'MONTH(colA)',
+    'Extracts the month from a date value.',
+    '=MONTH(colDate)',
+    'date',
+    createFunctionMatcher('MONTH'),
+    10
+  ),
+  createFormula(
+    'day',
+    'Day',
+    'DAY(colA)',
+    'Extracts the day of the month from a date value.',
+    '=DAY(colDate)',
+    'date',
+    createFunctionMatcher('DAY'),
+    10
+  ),
+  createFormula(
+    'weekday',
+    'Weekday',
+    'WEEKDAY(colA)',
+    'Returns the textual weekday (Monday, Tuesday, ...).',
+    '=WEEKDAY(colDate)',
+    'date',
+    createFunctionMatcher('WEEKDAY'),
+    10
+  ),
+  createFormula(
+    'quarter',
+    'Quarter',
+    'QUARTER(colDate)',
+    'Extracts quarter from date (JFM, AMJ, JAS, OND).',
+    '=QUARTER(colDate)',
+    'date',
+    createFunctionMatcher('QUARTER'),
+    10
+  ),
+  createFormula(
+    'date-diff',
+    'Date Difference',
+    'DATE_DIFF(colA, colB)',
+    'Calculates the day difference between two dates.',
+    '=DATE_DIFF(colDate1, colDate2)',
+    'date',
+    createFunctionMatcher('DATE_DIFF'),
+    10
+  ),
   // Mapping & null handling
-  {
-    key: 'map',
-    name: 'Map Categories',
-    syntax: 'MAP(column, {"key": "value"})',
-    description: 'Replaces values based on a mapping object.',
-    example: '=MAP(colA, {"M": "Male", "F": "Female"})',
-    category: 'mapping',
-    matcher: createFunctionMatcher('MAP'),
-    priority: 10,
-  },
-  {
-    key: 'fillna',
-    name: 'Fill Nulls',
-    syntax: 'FILLNA(column, replacement)',
-    description: 'Shortcut helper for replacing null values.',
-    example: '=FILLNA(colA, 0)',
-    category: 'nulls',
-    matcher: createFunctionMatcher('FILLNA'),
-    priority: 10,
-  },
-  {
-    key: 'fillblank',
-    name: 'Fill Blanks',
-    syntax: 'FILLBLANK(column, "value")',
-    description: 'Fill all blank cells (NULL, empty strings, whitespace) with a value.',
-    example: '=FILLBLANK(Col1, "Unknown")',
-    category: 'nulls',
-    matcher: createFunctionMatcher('FILLBLANK'),
-    priority: 5,
-  },
+  createFormula(
+    'map',
+    'Map Categories',
+    'MAP(colA, mapping_dict)',
+    'Replaces values based on a mapping object.',
+    '=MAP(colA, {"M": "Male", "F": "Female"})',
+    'mapping',
+    createFunctionMatcher('MAP'),
+    10
+  ),
+  createFormula(
+    'fillna',
+    'Fill Nulls',
+    'FILLNA(colA, replacement)',
+    'Shortcut helper for replacing null values.',
+    '=FILLNA(colA, 0)',
+    'nulls',
+    createFunctionMatcher('FILLNA'),
+    10
+  ),
+  createFormula(
+    'fillblank',
+    'Fill Blanks',
+    'FILLBLANK(colA, value)',
+    'Fill all blank cells (NULL, empty strings, whitespace) with a value.',
+    '=FILLBLANK(colA, "Unknown")',
+    'nulls',
+    createFunctionMatcher('FILLBLANK'),
+    5
+  ),
 ];
 
 const formulaMatchers = formulaLibrary.slice().sort((a, b) => a.priority - b.priority);
@@ -1078,6 +1458,14 @@ const FormularBar: React.FC<FormularBarProps> = ({
   // Track last interaction source to control when autocomplete appears
   const lastInputSourceRef = useRef<'keyboard' | 'mouse' | null>(null);
   
+  // State for function signature helper (Excel-like)
+  const [activeFunctionSignature, setActiveFunctionSignature] = useState<{
+    functionName: string;
+    arguments: FunctionArgument[];
+    currentArgumentIndex: number;
+    formulaItem: FormulaItem | null;
+  } | null>(null);
+  
   // Real-time validation state
   const [validationResult, setValidationResult] = useState<ValidationResult>({
     isValid: true,
@@ -1089,7 +1477,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
   const [autoCompleteSuggestions, setAutoCompleteSuggestions] = useState<SuggestionItem[]>([]);
   const [showAutoComplete, setShowAutoComplete] = useState(false);
   const [cursorPosition, setCursorPosition] = useState(0);
-  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1); // -1 = no selection, requires Down Arrow to activate
   const isColumnSelected = Boolean(selectedColumn);
   
   // Custom undo/redo system
@@ -1179,6 +1567,19 @@ const FormularBar: React.FC<FormularBarProps> = ({
   // Real-time validation effect
   useEffect(() => {
     const trimmed = formulaInput.trim();
+    
+    // If there's a backend error from formulaValidationError prop, show it
+    if (formulaValidationError && !trimmed) {
+      setValidationResult({
+        isValid: false,
+        error: formulaValidationError,
+        suggestions: [],
+        errorType: 'backend',
+        severity: 'error'
+      });
+      return;
+    }
+    
     if (!trimmed) {
       setSelectedFormula(null);
       setActiveTab('all');
@@ -1186,30 +1587,111 @@ const FormularBar: React.FC<FormularBarProps> = ({
         isValid: true,
         error: null,
         suggestions: [],
-        errorType: null
+        errorType: null,
+        severity: undefined
       });
       setShowSuggestions(false);
       onValidationError?.(null);
       return;
     }
     
-    // Run validation
+    // Run validation - but SKIP column validation while typing (only validate on Apply)
     const availableColumns = data?.headers || [];
-    const result = validateFormula(trimmed, availableColumns);
-    setValidationResult(result);
     
-    // Show suggestions for column errors
-    if (!result.isValid && result.errorType === 'column' && result.suggestions.length > 0) {
-      setShowSuggestions(true);
-    } else {
+    // First check syntax and operations (these show warnings/errors while typing)
+    const syntaxResult = validateFormulaSyntax(trimmed);
+    if (!syntaxResult.isValid) {
+      setValidationResult(syntaxResult);
+      // Only show error to parent if it's a blocking error, not a warning
+      if (syntaxResult.severity === 'error') {
+        onValidationError?.(syntaxResult.error);
+      } else {
+        onValidationError?.(null);
+      }
       setShowSuggestions(false);
+      // Update selected formula
+      const match = matchFormula(trimmed);
+      if (match) {
+        setSelectedFormula(match);
+        setActiveTab(match.category);
+      } else {
+        setSelectedFormula(null);
+      }
+      return;
     }
     
-    // Update parent component with validation error
-    if (!result.isValid) {
-      onValidationError?.(result.error);
-    } else {
-      onValidationError?.(null);
+    // Check for disallowed functions
+    const disallowedRowFunctions = ['IF', 'AND', 'OR', 'NOT'];
+    const disallowedPattern = new RegExp(`\\b(${disallowedRowFunctions.join('|')})\\s*\\(`, 'i');
+    if (disallowedPattern.test(trimmed)) {
+      const disallowedResult = {
+        isValid: false,
+        error: 'Row-level functions like IF/AND/OR are not supported yet. Please use column-level formulas.',
+        suggestions: [],
+        errorType: 'operation' as const,
+        severity: 'error' as const
+      };
+      setValidationResult(disallowedResult);
+      onValidationError?.(disallowedResult.error);
+      setShowSuggestions(false);
+      const match = matchFormula(trimmed);
+      if (match) {
+        setSelectedFormula(match);
+        setActiveTab(match.category);
+      } else {
+        setSelectedFormula(null);
+      }
+      return;
+    }
+    
+    // Check operations (warnings/errors)
+    const operationResult = validateFormulaOperation(trimmed);
+    if (!operationResult.isValid) {
+      setValidationResult(operationResult);
+      // Only show error to parent if it's a blocking error, not a warning
+      if (operationResult.severity === 'error') {
+        onValidationError?.(operationResult.error);
+      } else {
+        onValidationError?.(null);
+      }
+      setShowSuggestions(false);
+      // Update selected formula
+      const match = matchFormula(trimmed);
+      if (match) {
+        setSelectedFormula(match);
+        setActiveTab(match.category);
+      } else {
+        setSelectedFormula(null);
+      }
+      return;
+    }
+    
+    // SKIP column validation while typing - only validate on Apply
+    // Set as valid for now (column validation will happen on Apply)
+    setValidationResult({
+      isValid: true,
+      error: null,
+      suggestions: [],
+      errorType: null,
+      severity: undefined
+    });
+    onValidationError?.(null);
+    setShowSuggestions(false);
+    
+    // If there's a backend error, prioritize it over frontend validation
+    if (formulaValidationError) {
+      setValidationResult({
+        isValid: false,
+        error: formulaValidationError,
+        suggestions: [
+          'This error occurred when the formula was evaluated on the server',
+          'Check the formula syntax and column references',
+          'Verify that all functions are used correctly'
+        ],
+        errorType: 'backend',
+        severity: 'error'
+      });
+      onValidationError?.(formulaValidationError);
     }
     
     // Update selected formula
@@ -1220,7 +1702,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
     } else {
       setSelectedFormula(null);
     }
-  }, [formulaInput, data?.headers, onValidationError]);
+  }, [formulaInput, data?.headers, onValidationError, formulaValidationError]);
 
   const columnIndex = selectedCell && data ? data.headers.indexOf(selectedCell.col) : -1;
   const cellReference = selectedCell && columnIndex >= 0 ? getCellReference(selectedCell.row, columnIndex) : '';
@@ -1267,7 +1749,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
     setActiveTab(formula.category);
     const expression = formatExampleExpression(formula);
     // Replace placeholder columns with Col1, Col2, etc. for Excel-like behavior
-    const expressionWithColNumbers = replacePlaceholdersWithColNumbers(expression);
+    let expressionWithColNumbers = replacePlaceholdersWithColNumbers(expression);
+    // Normalize function names (handles case-insensitive function names)
+    expressionWithColNumbers = normalizeFunctionNames(expressionWithColNumbers);
     
     // Update all states together to prevent conflicts
     onFormulaInputChange(expressionWithColNumbers);
@@ -1382,6 +1866,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
     label: string;
     insertText: string;
     description?: string;
+    syntax?: string;
+    example?: string;
+    category?: FormulaCategory;
   }
 
   const getFunctionSuggestions = (query: string): SuggestionItem[] => {
@@ -1394,7 +1881,10 @@ const FormularBar: React.FC<FormularBarProps> = ({
           type: 'function' as const,
           label: item.name,
           insertText: canonicalName,
-          description: item.syntax,
+          description: item.description,
+          syntax: item.syntax,
+          example: item.example,
+          category: item.category,
           keywords: [
             item.name.toLowerCase(),
             canonicalName.toLowerCase(),
@@ -1406,16 +1896,24 @@ const FormularBar: React.FC<FormularBarProps> = ({
       })
       .filter(item => {
         if (!search) return true;
-        return item.keywords.some(keyword => keyword.startsWith(search));
+        return item.keywords.some(keyword => keyword.startsWith(search) || keyword.includes(search));
       })
-      .map(({ type, label, insertText, description }) => ({ type, label, insertText, description }));
+      .map(({ type, label, insertText, description, syntax, example, category }) => ({ 
+        type, 
+        label, 
+        insertText, 
+        description,
+        syntax,
+        example,
+        category
+      }));
   };
 
   const getColumnSuggestions = (query: string): SuggestionItem[] => {
     const columns = data?.headers || [];
     const search = query.trim().toLowerCase();
     return columns
-      .filter(col => !search || col.toLowerCase().startsWith(search))
+      .filter(col => !search || col.toLowerCase().includes(search))
       .map(col => ({
         type: 'column' as const,
         label: col,
@@ -1448,6 +1946,55 @@ const FormularBar: React.FC<FormularBarProps> = ({
       return;
     }
 
+    // Detect active function for signature helper (real-time)
+    const activeFunc = detectActiveFunction(value, cursorPosition);
+    if (activeFunc) {
+      // Find matching formula in library - try multiple ways
+      const formulaItem = formulaLibrary.find(f => {
+        // Try matching by function name from syntax
+        const funcNameFromSyntax = f.syntax.match(/^([A-Z_]+)/i)?.[1]?.toUpperCase();
+        if (funcNameFromSyntax === activeFunc.functionName) return true;
+        
+        // Try matching by matcher function name
+        const matcherStr = f.matcher.toString();
+        const matcherMatch = matcherStr.match(/['"]([A-Z_]+)['"]/i);
+        if (matcherMatch && matcherMatch[1].toUpperCase() === activeFunc.functionName) return true;
+        
+        return false;
+      });
+      
+      if (formulaItem) {
+        // Parse arguments if not already parsed
+        let args = formulaItem.arguments;
+        if (!args || args.length === 0) {
+          args = parseFunctionSignature(formulaItem.syntax);
+        }
+        
+        // Only show if we have arguments
+        if (args && args.length > 0) {
+          // Get current argument index
+          const currentArgIndex = getCurrentArgumentIndex(value, cursorPosition, activeFunc.openParenPos);
+          
+          // Clamp currentArgIndex to valid range
+          const clampedArgIndex = Math.min(currentArgIndex, args.length - 1);
+          
+          // Update signature state
+          setActiveFunctionSignature({
+            functionName: activeFunc.functionName,
+            arguments: args,
+            currentArgumentIndex: clampedArgIndex,
+            formulaItem
+          });
+        } else {
+          setActiveFunctionSignature(null);
+        }
+      } else {
+        setActiveFunctionSignature(null);
+      }
+    } else {
+      setActiveFunctionSignature(null);
+    }
+
     const trimmedStart = value.trimStart();
     const leadingEquals = trimmedStart.startsWith('=');
     const justFirstEquals = trimmedStart === '='; // only the initial =
@@ -1476,6 +2023,11 @@ const FormularBar: React.FC<FormularBarProps> = ({
     const wordMatch = beforeCursor.match(/([A-Za-z_][A-Za-z0-9_]*)$/);
     const hasPartialToken = Boolean(wordMatch && wordMatch[1]?.length > 0);
 
+    // Normalize function names (only affects identifiers followed by '(')
+    // This is safe to call on every change since it only uppercases function names, preserving length
+    const normalizedValue = normalizeFunctionNames(value);
+    // Cursor position stays the same since normalization only changes case (not length)
+
     // Only show autocomplete when typing from keyboard, while editing, and
     // either user is typing a partial token OR they just typed the very first '='
     if (
@@ -1485,23 +2037,36 @@ const FormularBar: React.FC<FormularBarProps> = ({
     ) {
       setShowAutoComplete(false);
       setAutoCompleteSuggestions([]);
-      setSelectedSuggestionIndex(0);
+      setSelectedSuggestionIndex(-1); // Reset to no selection
     } else {
-      const suggestions = getAutoCompleteSuggestions(value, cursorPosition);
+      const suggestions = getAutoCompleteSuggestions(normalizedValue, cursorPosition);
       if (suggestions.length > 0) {
         setAutoCompleteSuggestions(suggestions);
         setShowAutoComplete(true);
-        setSelectedSuggestionIndex(0); // Reset selection
+        setSelectedSuggestionIndex(-1); // No auto-selection - user must press Down Arrow to select
       } else {
         setShowAutoComplete(false);
         setAutoCompleteSuggestions([]);
-        setSelectedSuggestionIndex(0);
+        setSelectedSuggestionIndex(-1);
       }
     }
     
     
-    // Normal input handling
-    onFormulaInputChange(value);
+    // Normal input handling - use normalized value
+    // Only update if normalization actually changed something to avoid unnecessary re-renders
+    if (normalizedValue !== value) {
+      onFormulaInputChange(normalizedValue);
+      // Cursor position should remain the same (normalization only changes case)
+      if (inputElement) {
+        setTimeout(() => {
+          if (inputElement) {
+            inputElement.setSelectionRange(cursorPosition, cursorPosition);
+          }
+        }, 0);
+      }
+    } else {
+      onFormulaInputChange(value);
+    }
     onFormulaModeChange(true);
   };
 
@@ -1520,10 +2085,13 @@ const FormularBar: React.FC<FormularBarProps> = ({
       ? `${suggestion.insertText.toUpperCase()}()`
       : suggestion.insertText;
 
-    const newValue =
+    let newValue =
       formulaInput.slice(0, wordStart) +
       insertText +
       formulaInput.slice(wordStart + partialWord.length);
+
+    // Normalize function names after insertion (handles case-insensitive function names)
+    newValue = normalizeFunctionNames(newValue);
 
     onFormulaInputChange(newValue);
     onEditingStateChange(true);
@@ -1532,10 +2100,52 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
     setTimeout(() => {
       const newCursorPosition = suggestion.type === 'function'
-        ? wordStart + insertText.length - 1
+        ? wordStart + insertText.length - 1  // Position inside parentheses: SUM(|)
         : wordStart + insertText.length;
       inputElement.setSelectionRange(newCursorPosition, newCursorPosition);
       inputElement.focus();
+      
+      // If function was inserted, immediately detect and show signature helper
+      if (suggestion.type === 'function') {
+        // Trigger signature helper detection with new formula and cursor position
+        const activeFunc = detectActiveFunction(newValue, newCursorPosition);
+        if (activeFunc) {
+          // Find matching formula in library
+          const formulaItem = formulaLibrary.find(f => {
+            const funcNameFromSyntax = f.syntax.match(/^([A-Z_]+)/i)?.[1]?.toUpperCase();
+            if (funcNameFromSyntax === activeFunc.functionName) return true;
+            
+            const matcherStr = f.matcher.toString();
+            const matcherMatch = matcherStr.match(/['"]([A-Z_]+)['"]/i);
+            if (matcherMatch && matcherMatch[1].toUpperCase() === activeFunc.functionName) return true;
+            
+            return false;
+          });
+          
+          if (formulaItem) {
+            // Parse arguments if not already parsed
+            let args = formulaItem.arguments;
+            if (!args || args.length === 0) {
+              args = parseFunctionSignature(formulaItem.syntax);
+            }
+            
+            // Only show if we have arguments
+            if (args && args.length > 0) {
+              // Get current argument index (should be 0 when cursor is right after opening paren)
+              const currentArgIndex = getCurrentArgumentIndex(newValue, newCursorPosition, activeFunc.openParenPos);
+              const clampedArgIndex = Math.min(currentArgIndex, args.length - 1);
+              
+              // Update signature state immediately
+              setActiveFunctionSignature({
+                functionName: activeFunc.functionName,
+                arguments: args,
+                currentArgumentIndex: clampedArgIndex,
+                formulaItem
+              });
+            }
+          }
+        }
+      }
     }, 0);
   };
 
@@ -1574,7 +2184,10 @@ const FormularBar: React.FC<FormularBarProps> = ({
 
     const expression = formatExampleExpression(completion);
     // Replace placeholder columns with Col1, Col2, etc. for Excel-like behavior
-    const expressionWithColNumbers = replacePlaceholdersWithColNumbers(expression);
+    let expressionWithColNumbers = replacePlaceholdersWithColNumbers(expression);
+    // Normalize function names (handles case-insensitive function names)
+    expressionWithColNumbers = normalizeFunctionNames(expressionWithColNumbers);
+    
     if (expressionWithColNumbers === formulaInput) {
       return false;
     }
@@ -1610,10 +2223,25 @@ const FormularBar: React.FC<FormularBarProps> = ({
       return;
     }
 
-    // Check validation result
-    if (!validationResult.isValid) {
-      console.error('[FormularBar] ❌ BLOCKED: Validation failed:', validationResult.error);
-      onValidationError?.(validationResult.error);
+    // Normalize function names before validation and submission
+    const normalizedFormula = normalizeFunctionNames(formulaInput.trim());
+    
+    // Update the input with normalized formula if it changed
+    if (normalizedFormula !== formulaInput.trim()) {
+      onFormulaInputChange(normalizedFormula);
+    }
+
+    // Run FULL validation including column validation on Apply
+    const trimmed = normalizedFormula;
+    const availableColumns = data?.headers || [];
+    const fullValidationResult = validateFormula(trimmed, availableColumns);
+    
+    // Check validation result (including column validation)
+    if (!fullValidationResult.isValid) {
+      console.error('[FormularBar] ❌ BLOCKED: Validation failed:', fullValidationResult.error);
+      // Update validation result to show column errors
+      setValidationResult(fullValidationResult);
+      onValidationError?.(fullValidationResult.error);
       return;
     }
 
@@ -1869,8 +2497,8 @@ const FormularBar: React.FC<FormularBarProps> = ({
                       : 'Select a column to start writing formulas'
                   }
                   className={`h-8 shadow-sm pl-10 font-mono transition-all duration-200 w-full min-w-0 focus:ring-2 ${
-                    !validationResult.isValid
-                      ? validationResult.errorType === 'column'
+                    !validationResult.isValid && validationResult.severity
+                      ? validationResult.severity === 'warning'
                         ? 'border-yellow-500 bg-yellow-50 focus:ring-yellow-200 focus:border-yellow-500'
                         : 'border-red-500 bg-red-50 focus:ring-red-200 focus:border-red-500'
                       : formulaValidationError 
@@ -1884,7 +2512,7 @@ const FormularBar: React.FC<FormularBarProps> = ({
                   if (e.key === ',') {
                     setShowAutoComplete(false);
                     setAutoCompleteSuggestions([]);
-                    setSelectedSuggestionIndex(0);
+                    setSelectedSuggestionIndex(-1);
                   }
                   if (!isColumnSelected || !isEditingFormula) {
                     e.preventDefault();
@@ -1894,30 +2522,46 @@ const FormularBar: React.FC<FormularBarProps> = ({
                   if (showAutoComplete && autoCompleteSuggestions.length > 0) {
                     if (e.key === 'ArrowDown') {
                       e.preventDefault();
-                      setSelectedSuggestionIndex(prev => 
-                        prev < autoCompleteSuggestions.length - 1 ? prev + 1 : 0
-                      );
+                      setSelectedSuggestionIndex(prev => {
+                        // If no selection (-1), go to first item (0)
+                        // Otherwise, cycle through items
+                        if (prev === -1) {
+                          return 0;
+                        }
+                        return prev < autoCompleteSuggestions.length - 1 ? prev + 1 : 0;
+                      });
                       return;
                     }
                     if (e.key === 'ArrowUp') {
                       e.preventDefault();
-                      setSelectedSuggestionIndex(prev => 
-                        prev > 0 ? prev - 1 : autoCompleteSuggestions.length - 1
-                      );
+                      setSelectedSuggestionIndex(prev => {
+                        // If at first item (0), go to no selection (-1)
+                        // Otherwise, go to previous item
+                        if (prev === 0) {
+                          return -1;
+                        }
+                        return prev > 0 ? prev - 1 : autoCompleteSuggestions.length - 1;
+                      });
                       return;
                     }
                     if (e.key === 'Enter' || e.key === 'Tab') {
-                      e.preventDefault();
-                      const selected = autoCompleteSuggestions[selectedSuggestionIndex];
-                      if (selected) {
-                        selectAutoCompleteSuggestion(selected);
+                      // Only insert if user has explicitly selected an item (index >= 0)
+                      if (selectedSuggestionIndex >= 0 && selectedSuggestionIndex < autoCompleteSuggestions.length) {
+                        e.preventDefault();
+                        const selected = autoCompleteSuggestions[selectedSuggestionIndex];
+                        if (selected) {
+                          selectAutoCompleteSuggestion(selected);
+                        }
+                        return;
                       }
-                      return;
+                      // If no selection, let Enter proceed normally (submit formula)
+                      // Don't preventDefault here - let it fall through to handleSubmit
                     }
                     if (e.key === 'Escape') {
                       e.preventDefault();
                       setShowAutoComplete(false);
                       setAutoCompleteSuggestions([]);
+                      setSelectedSuggestionIndex(-1);
                       return;
                     }
                   }
@@ -1965,59 +2609,166 @@ const FormularBar: React.FC<FormularBarProps> = ({
                 />
               </div>
               {/* Enhanced error message and suggestions display */}
-              {(formulaValidationError || !validationResult.isValid) && (
+              {/* Only show warnings/errors while typing (not column errors - those show on Apply) */}
+              {(formulaValidationError || (!validationResult.isValid && validationResult.severity && validationResult.errorType !== 'column')) && (
                 <div className="absolute top-full left-0 right-0 mt-1 z-[1300]">
-                  <div className={`px-3 py-2 rounded-lg border shadow-lg ${
-                    validationResult.errorType === 'column' 
-                      ? 'bg-yellow-50 border-yellow-200 text-yellow-800'
-                      : 'bg-red-50 border-red-200 text-red-700'
+                  <div className={`px-3 py-2.5 rounded-lg border shadow-lg max-w-full ${
+                    validationResult.severity === 'warning'
+                      ? 'bg-yellow-50 border-yellow-300 text-yellow-900'
+                      : validationResult.errorType === 'backend'
+                      ? 'bg-red-50 border-red-300 text-red-900'
+                      : 'bg-red-50 border-red-300 text-red-900'
                   }`}>
-                    <div className="text-xs font-medium mb-1">
-                      {validationResult.error || formulaValidationError}
-                    </div>
-                    {validationResult.suggestions.length > 0 && (
-                      <div className="text-xs space-y-1">
-                        {validationResult.suggestions.map((suggestion, index) => (
-                          <div key={index} className="flex items-center space-x-1">
-                            <span className="text-yellow-600">💡</span>
-                            <span>{suggestion}</span>
+                    <div className="flex items-start space-x-2">
+                      <span className="text-base mt-0.5">
+                        {validationResult.severity === 'warning' ? '⚠️' : '❌'}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold mb-1.5 break-words">
+                          {validationResult.error || formulaValidationError}
+                        </div>
+                        {validationResult.suggestions.length > 0 && (
+                          <div className="text-xs space-y-1.5 mt-2 pt-2 border-t border-current/20">
+                            {validationResult.suggestions.map((suggestion, index) => (
+                              <div key={index} className="flex items-start space-x-1.5">
+                                <span className="text-current/70 mt-0.5">💡</span>
+                                <span className="flex-1">{suggestion}</span>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
                       </div>
-                    )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* Show column errors only on Apply (when severity is set and errorType is column) */}
+              {!validationResult.isValid && validationResult.errorType === 'column' && validationResult.severity && (
+                <div className="absolute top-full left-0 right-0 mt-1 z-[1300]">
+                  <div className="px-3 py-2.5 rounded-lg border shadow-lg max-w-full bg-red-50 border-red-300 text-red-900">
+                    <div className="flex items-start space-x-2">
+                      <span className="text-base mt-0.5">❌</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-semibold mb-1.5 break-words">
+                          {validationResult.error}
+                        </div>
+                        {validationResult.suggestions.length > 0 && (
+                          <div className="text-xs space-y-1.5 mt-2 pt-2 border-t border-current/20">
+                            {validationResult.suggestions.map((suggestion, index) => (
+                              <div key={index} className="flex items-start space-x-1.5">
+                                <span className="text-current/70 mt-0.5">💡</span>
+                                <span className="flex-1">{suggestion}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {validationResult.errorDetails?.invalidColumns && validationResult.errorDetails.availableColumns && (
+                          <div className="text-xs mt-2 pt-2 border-t border-current/20">
+                            <div className="font-medium mb-1">Available columns:</div>
+                            <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+                              {validationResult.errorDetails.availableColumns.slice(0, 20).map((col, idx) => (
+                                <span 
+                                  key={idx}
+                                  className="px-1.5 py-0.5 bg-current/10 rounded text-xs cursor-pointer hover:bg-current/20"
+                                  onClick={() => handleColumnInsert(col)}
+                                  title={`Click to insert "${col}"`}
+                                >
+                                  {col}
+                                </span>
+                              ))}
+                              {validationResult.errorDetails.availableColumns.length > 20 && (
+                                <span className="px-1.5 py-0.5 text-xs opacity-70">
+                                  +{validationResult.errorDetails.availableColumns.length - 20} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
               
-              {/* Auto-completion dropdown */}
+              {/* Function Signature Helper - Excel-like */}
+              {activeFunctionSignature && isEditingFormula && activeFunctionSignature.arguments && activeFunctionSignature.arguments.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 z-[1301]">
+                  <div className="px-2.5 py-1.5 bg-gray-100 rounded border border-gray-300 shadow-sm">
+                    <div className="text-xs font-mono text-gray-800">
+                      <span className="font-semibold">{activeFunctionSignature.functionName}</span>
+                      <span>(</span>
+                      {activeFunctionSignature.arguments.map((arg, idx) => {
+                        const isCurrentArg = idx === activeFunctionSignature.currentArgumentIndex;
+                        return (
+                          <span key={idx}>
+                            {isCurrentArg ? (
+                              <span className="font-bold text-blue-700">{arg.name}</span>
+                            ) : (
+                              <span>
+                                {arg.optional ? `[${arg.name}]` : arg.name}
+                              </span>
+                            )}
+                            {arg.isVariadic && !arg.name.includes('...') && <span className="text-gray-500">...</span>}
+                            {idx < activeFunctionSignature.arguments.length - 1 && <span>, </span>}
+                          </span>
+                        );
+                      })}
+                      <span>)</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Enhanced Auto-completion dropdown - One-line format */}
               {showAutoComplete && autoCompleteSuggestions.length > 0 && (
                 isEditingFormula && (
-                <div className="absolute top-full left-0 right-0 mt-1 z-[1300]">
-                  <div className="bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                <div className={`absolute top-full left-0 right-0 z-[1300] ${
+                  activeFunctionSignature && activeFunctionSignature.arguments && activeFunctionSignature.arguments.length > 0
+                    ? 'mt-10' // Push down when signature helper is visible (signature helper height ~36px + mt-1 = ~40px)
+                    : 'mt-1'  // Normal spacing when no signature helper
+                }`}>
+                  <div className="bg-white border border-gray-300 rounded-lg shadow-xl max-h-64 overflow-y-auto">
                     {autoCompleteSuggestions.map((item, index) => (
                       <div
                         key={`${item.type}-${item.insertText}-${index}`}
-                        className={`px-3 py-2 text-sm cursor-pointer flex items-center justify-between hover:bg-gray-100 ${
-                          index === selectedSuggestionIndex ? 'bg-blue-100 text-blue-800' : 'text-gray-700'
+                        className={`px-3 py-2 text-sm cursor-pointer border-b border-gray-100 last:border-b-0 ${
+                          index === selectedSuggestionIndex 
+                            ? 'bg-blue-50 border-blue-200 text-blue-900' 
+                            : 'hover:bg-gray-50 text-gray-700'
                         }`}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => selectAutoCompleteSuggestion(item)}
+                        onClick={() => {
+                          setSelectedSuggestionIndex(index); // Set selection on click
+                          selectAutoCompleteSuggestion(item);
+                        }}
+                        onMouseEnter={() => setSelectedSuggestionIndex(index)}
                       >
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs font-semibold ${item.type === 'function' ? 'text-purple-600' : 'text-slate-500'}`}>
-                            {item.type === 'function' ? 'fx' : '#'}
-                          </span>
-                          <span className="font-mono">
-                            {item.type === 'function' ? item.insertText.toUpperCase() : item.insertText}
-                          </span>
+                        <div className="flex items-center justify-between gap-3 w-full">
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className={`flex-shrink-0 w-5 h-5 rounded flex items-center justify-center text-xs font-bold ${
+                              item.type === 'function' 
+                                ? 'bg-purple-100 text-purple-700' 
+                                : 'bg-slate-100 text-slate-600'
+                            }`}>
+                              {item.type === 'function' ? 'fx' : '#'}
+                            </div>
+                            <span className="font-mono font-semibold whitespace-nowrap">
+                              {item.type === 'function' ? item.insertText.toUpperCase() : item.insertText}
+                            </span>
+                          </div>
+                          {item.example && (
+                            <span className="font-mono text-xs text-gray-600 whitespace-nowrap flex-shrink-0 ml-auto">
+                              {item.example}
+                            </span>
+                          )}
                         </div>
-                        {item.description && item.type === 'function' && (
-                          <span className="text-xs text-slate-500 ml-4 truncate max-w-[200px]">
-                            {item.description}
-                          </span>
-                        )}
                       </div>
                     ))}
+                    {autoCompleteSuggestions.length > 5 && (
+                      <div className="px-3 py-2 text-xs text-gray-500 bg-gray-50 border-t border-gray-200">
+                        Use ↑↓ to navigate, Enter/Tab to select, Esc to close
+                      </div>
+                    )}
                   </div>
                 </div>
                 )
@@ -2033,9 +2784,9 @@ const FormularBar: React.FC<FormularBarProps> = ({
             size='sm'
             className='h-8 px-3 shadow-sm'
             onClick={handleSubmit}
-            disabled={!selectedColumn || !validationResult.isValid || !formulaInput.trim()}
+            disabled={!selectedColumn || (!validationResult.isValid && validationResult.severity === 'error') || !formulaInput.trim()}
             title={!selectedColumn ? 'Select a target column first' : 
-                   !validationResult.isValid ? validationResult.error || 'Fix formula errors' : 
+                   (!validationResult.isValid && validationResult.severity === 'error') ? validationResult.error || 'Fix formula errors' : 
                    !formulaInput.trim() ? 'Enter a formula' : 'Apply formula'}
           >
             <Check className='w-4 h-4 mr-1' />

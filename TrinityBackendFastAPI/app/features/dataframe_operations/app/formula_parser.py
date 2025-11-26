@@ -343,6 +343,18 @@ class _FunctionRegistry:
             raise FormulaEvaluationError("LAG periods must be an integer.") from exc
         return series.shift(lag)
 
+    def func_rolling_sum(self, value: Any, window: Any) -> pd.Series:
+        series = self._to_series(value).astype(float)
+        try:
+            window_size = int(float(window))
+        except (TypeError, ValueError) as exc:
+            raise FormulaEvaluationError("ROLLINGSUM window must be an integer.") from exc
+        if window_size < 1:
+            raise FormulaEvaluationError("ROLLINGSUM window must be >= 1.")
+        # min_periods=window_size ensures first (window-1) rows are NaN
+        result = series.rolling(window=window_size, min_periods=window_size).sum()
+        return result
+
     def func_count(self, value: Any) -> Any:
         series = self._to_series(value)
         return int(series.count())
@@ -511,6 +523,19 @@ class _FunctionRegistry:
         series = pd.to_datetime(self._to_series(value), errors="coerce")
         return series.dt.day_name()
 
+    def func_quarter(self, value: Any) -> pd.Series:
+        series = pd.to_datetime(self._to_series(value), errors="coerce")
+        month = series.dt.month
+        # Map months to quarter codes: JFM, AMJ, JAS, OND
+        quarter_map = {
+            1: "JFM", 2: "JFM", 3: "JFM",  # Jan, Feb, Mar
+            4: "AMJ", 5: "AMJ", 6: "AMJ",  # Apr, May, Jun
+            7: "JAS", 8: "JAS", 9: "JAS",  # Jul, Aug, Sep
+            10: "OND", 11: "OND", 12: "OND"  # Oct, Nov, Dec
+        }
+        result = month.map(quarter_map)
+        return result
+
     def func_fillblank(self, value: Any, replacement: Any) -> pd.Series:
         series = self._to_series(value)
         string_series = series.astype("string")
@@ -550,6 +575,7 @@ class FormulaEngine:
         "DIFF": "DIFF",
         "PCT_CHANGE": "PCT_CHANGE",
         "LAG": "LAG",
+        "ROLLINGSUM": "ROLLINGSUM",
         "COUNT": "COUNT",
         "ROUND": "ROUND",
         "ZSCORE": "ZSCORE",
@@ -570,6 +596,7 @@ class FormulaEngine:
         "MONTH": "MONTH",
         "DAY": "DAY",
         "WEEKDAY": "WEEKDAY",
+        "QUARTER": "QUARTER",
     }
 
     _string_pattern = re.compile(r'("([^"\\]|\\.)*"|\'([^\'\\]|\\.)*\')')
@@ -628,10 +655,14 @@ class FormulaEngine:
                 candidate = f"{base.upper()}_{counter}"
             return candidate
 
-        sorted_columns = sorted([col for col in columns if col], key=len, reverse=True)
+        # Exclude function names from column matching to prevent functions from being treated as columns
+        function_names = set(self._function_aliases.keys())
+        sorted_columns = sorted([col for col in columns if col and col.upper() not in function_names], key=len, reverse=True)
         if sorted_columns:
+            # Pattern: word boundary, column name, not followed by ( or alphanumeric
+            # The negative lookahead (?![A-Za-z0-9_(]) already prevents matching function calls
             pattern = re.compile(
-                r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(col) for col in sorted_columns) + r")(?![A-Za-z0-9_])"
+                r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(col) for col in sorted_columns) + r")(?![A-Za-z0-9_(])"
             )
 
             def _replace(match: re.Match[str]) -> str:
@@ -643,6 +674,7 @@ class FormulaEngine:
             without_strings = pattern.sub(_replace, without_strings)
 
         restored = without_strings
+        # Restore string literals
         for placeholder, value in placeholders.items():
             restored = restored.replace(placeholder, value)
 
@@ -686,6 +718,7 @@ class FormulaEngine:
             "DIFF": registry.func_diff,
             "PCT_CHANGE": registry.func_pct_change,
             "LAG": registry.func_lag,
+            "ROLLINGSUM": registry.func_rolling_sum,
             "COUNT": registry.func_count,
             "ROUND": registry.func_round,
             "ZSCORE": registry.func_zscore,
@@ -706,6 +739,7 @@ class FormulaEngine:
             "MONTH": registry.func_month,
             "DAY": registry.func_day,
             "WEEKDAY": registry.func_weekday,
+            "QUARTER": registry.func_quarter,
         }
 
         env.update(function_map)

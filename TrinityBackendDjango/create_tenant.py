@@ -257,7 +257,6 @@ def main():
         print("       This is non-critical - agents will sync automatically when registered.")
         print("       You can manually run: python manage.py sync_agents_to_postgres")
 
-
     # Update available atoms status based on working atoms list
     try:
         call_command("update_available_atoms")
