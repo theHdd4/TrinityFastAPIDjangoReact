@@ -79,6 +79,26 @@ import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, Uni
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 
+const normalizeTextBoxPlaceholder = (value?: string) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+const normalizeTextBoxValue = (value?: string) =>
+  normalizeTextBoxPlaceholder(
+    value
+      ?.replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<[^>]+>/g, ' '),
+  );
+
+const TEXTBOX_PLACEHOLDER_LINES = [
+  'Text box',
+  '',
+  'Insert text box on the card',
+  "Control typography for the text box rendered beneath this card's atoms.",
+];
+
+const TEXTBOX_PLACEHOLDER = TEXTBOX_PLACEHOLDER_LINES.join('\n');
+const TEXTBOX_PLACEHOLDER_NORMALIZED = normalizeTextBoxPlaceholder(TEXTBOX_PLACEHOLDER);
+const isPlaceholderContent = (value?: string) => normalizeTextBoxValue(value) === TEXTBOX_PLACEHOLDER_NORMALIZED;
+
 
 interface CanvasAreaProps {
   onAtomSelect?: (atomId: string) => void;
@@ -557,11 +577,14 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     }
 
     const textBoxSettings = { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings };
-    const htmlContent = card.textBoxHtml?.trim()?.length
-      ? card.textBoxHtml
-      : (card.textBoxContent ?? '').replace(/\n/g, '<br />');
+    const rawTextContent = card.textBoxContent ?? '';
+    const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
+    const rawHtmlContent = card.textBoxHtml?.trim()?.length ? card.textBoxHtml : '';
+    const htmlContent = rawHtmlContent && !isPlaceholderContent(rawHtmlContent)
+      ? rawHtmlContent
+      : textContent.replace(/\n/g, '<br />');
     const textData = {
-      text: card.textBoxContent ?? '',
+      text: textContent,
       html: htmlContent,
     };
 

@@ -50,6 +50,18 @@ import { LABORATORY_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { getActiveProjectContext } from '@/utils/projectEnv';
 
+const normalizeTextBoxPlaceholder = (value?: string) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+const TEXTBOX_PLACEHOLDER_LINES = [
+  'Text box',
+  '',
+  'Insert text box on the card',
+  "Control typography for the text box rendered beneath this card's atoms.",
+];
+
+const TEXTBOX_PLACEHOLDER = TEXTBOX_PLACEHOLDER_LINES.join('\n');
+const TEXTBOX_PLACEHOLDER_NORMALIZED = normalizeTextBoxPlaceholder(TEXTBOX_PLACEHOLDER);
+
 interface CardSettingsTabsProps {
   card: LayoutCard;
   tab: string;
@@ -811,7 +823,14 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   }, [card, tab, loadAvailableVariables]);
 
   const handleToggleTextBox = (enabled: boolean) => {
-    onUpdateCard(card.id, { textBoxEnabled: enabled });
+    const updates: Partial<LayoutCard> = { textBoxEnabled: enabled };
+
+    if (enabled && card.textBoxContent && normalizeTextBoxPlaceholder(card.textBoxContent) === TEXTBOX_PLACEHOLDER_NORMALIZED) {
+      updates.textBoxContent = '';
+      updates.textBoxHtml = '';
+    }
+
+    onUpdateCard(card.id, updates);
   };
 
   const handleTextBoxSettingsChange = (updates: Partial<TextBoxSettingsType>) => {
