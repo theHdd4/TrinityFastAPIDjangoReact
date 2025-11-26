@@ -1872,10 +1872,32 @@ export const DEFAULT_UNPIVOT_SETTINGS: UnpivotSettings = {
   computationTime: 0,
 };
 
+export interface MetricsOperation {
+  id: string;
+  type: string;
+  name: string;
+  columns?: string[];
+  rename?: string;
+  param?: string | number | Record<string, any>;
+}
+
+export interface MetricsInputSettings {
+  dataSource: string;
+  operations: MetricsOperation[];
+  currentTab: 'input' | 'variables' | 'column-operations' | 'exhibition';
+}
+
+export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
+  dataSource: '',
+  operations: [],
+  currentTab: 'input',
+};
+
 interface LaboratoryStore {
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;
   auxiliaryMenuLeftOpen: boolean;
+  metricsInputs: MetricsInputSettings;
   setCards: (cards: LayoutCard[]) => void;
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   setAuxiliaryMenuLeftOpen: (open: boolean) => void;
@@ -1890,6 +1912,10 @@ interface LaboratoryStore {
   ) => void;
   deleteCardVariable: (cardId: string, variableId: string) => void;
   toggleCardVariableAppend: (cardId: string, variableId: string, appended: boolean) => void;
+  updateMetricsInputs: (updates: Partial<MetricsInputSettings>) => void;
+  addMetricsOperation: (operation: MetricsOperation) => void;
+  updateMetricsOperation: (operationId: string, updates: Partial<MetricsOperation>) => void;
+  removeMetricsOperation: (operationId: string) => void;
   reset: () => void;
 }
 
@@ -1897,6 +1923,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   cards: [],
   auxPanelActive: null,
   auxiliaryMenuLeftOpen: true,
+  metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
   setCards: (cards: LayoutCard[]) => {
     // FIX: Ensure cards is always an array
     if (!Array.isArray(cards)) {
@@ -2033,7 +2060,45 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
     }));
   },
 
+  updateMetricsInputs: (updates: Partial<MetricsInputSettings>) => {
+    set(state => ({
+      metricsInputs: {
+        ...state.metricsInputs,
+        ...updates,
+      },
+    }));
+  },
+
+  addMetricsOperation: (operation: MetricsOperation) => {
+    set(state => ({
+      metricsInputs: {
+        ...state.metricsInputs,
+        operations: [...state.metricsInputs.operations, operation],
+      },
+    }));
+  },
+
+  updateMetricsOperation: (operationId: string, updates: Partial<MetricsOperation>) => {
+    set(state => ({
+      metricsInputs: {
+        ...state.metricsInputs,
+        operations: state.metricsInputs.operations.map(op =>
+          op.id === operationId ? { ...op, ...updates } : op
+        ),
+      },
+    }));
+  },
+
+  removeMetricsOperation: (operationId: string) => {
+    set(state => ({
+      metricsInputs: {
+        ...state.metricsInputs,
+        operations: state.metricsInputs.operations.filter(op => op.id !== operationId),
+      },
+    }));
+  },
+
   reset: () => {
-    set({ cards: [] });
+    set({ cards: [], metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS });
   },
 }));

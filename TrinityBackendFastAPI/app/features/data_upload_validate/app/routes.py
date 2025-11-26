@@ -2398,26 +2398,30 @@ async def _auto_classify_and_save_file(
             all_columns_set = set(all_columns)
             new_columns = all_columns_set - existing_all
             
-            if not new_columns:
-                return
+            # Filter existing classification to only include columns that still exist in the file
+            # This removes columns that were deleted from the file
+            existing_identifiers = existing_identifiers & all_columns_set
+            existing_measures = existing_measures & all_columns_set
+            existing_unclassified = existing_unclassified & all_columns_set
             
-            # Classify only new columns
+            # Classify only new columns (if any)
             new_identifiers = []
             new_measures = []
             new_unclassified = []
             
-            for col in new_columns:
-                col_type = column_types.get(col, "string")
-                classification = _classify_column(col, col_type, identifier_keywords, measure_keywords)
-                
-                if classification == "identifiers":
-                    new_identifiers.append(col)
-                elif classification == "measures":
-                    new_measures.append(col)
-                else:
-                    new_unclassified.append(col)
+            if new_columns:
+                for col in new_columns:
+                    col_type = column_types.get(col, "string")
+                    classification = _classify_column(col, col_type, identifier_keywords, measure_keywords)
+                    
+                    if classification == "identifiers":
+                        new_identifiers.append(col)
+                    elif classification == "measures":
+                        new_measures.append(col)
+                    else:
+                        new_unclassified.append(col)
             
-            # Merge with existing classification
+            # Merge with existing classification (existing columns are already filtered to only those in current file)
             final_identifiers = list(existing_identifiers | set(new_identifiers))
             final_measures = list(existing_measures | set(new_measures))
             final_unclassified = list(existing_unclassified | set(new_unclassified))
@@ -3158,9 +3162,10 @@ def _cast_series_dtype(series: pd.Series, dtype: str, datetime_format: str | Non
     if dtype_lower in {"datetime", "timestamp", "datetime64"}:
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
-        # IMPORTANT: Always use auto-detection for datetime64 to avoid null values
-        # Even if format is provided, ignore it and use auto-detection for consistency
-        return pd.to_datetime(normalized_series, errors="coerce")
+        # Normalize format string if provided (replace '/' and '.' with '-') to match normalized data
+        normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
+        # Use the provided format if available, otherwise fall back to auto-detection
+        return pd.to_datetime(normalized_series, format=normalized_format, errors="coerce")
     if dtype_lower == "date":
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)

@@ -1818,7 +1818,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
         <div
           key={node.path}
           style={{ marginLeft: level * 12 }}
-          className="flex items-center justify-between border p-2 rounded hover:bg-gray-50 mt-1 overflow-hidden"
+          className="flex items-center justify-between border p-1.5 rounded hover:bg-gray-50 mt-0.5 overflow-hidden"
         >
           {renameTarget === f.object_name ? (
             <Input
@@ -1831,14 +1831,14 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   commitRename(f.object_name);
                 }
               }}
-              className="h-6 text-xs flex-1 mr-2 min-w-0"
+              className="h-5 text-xs flex-1 mr-2 min-w-0"
             />
           ) : (
             <div className="flex-1 min-w-0 mr-2">
               <button
                 onClick={() => handleOpen(f.object_name)}
                 onContextMenu={(e) => handleContextMenu(e, f)}
-                className="text-sm text-blue-600 hover:underline text-left w-full truncate overflow-hidden text-ellipsis whitespace-nowrap"
+                className="text-xs text-blue-600 hover:underline text-left w-full truncate overflow-hidden text-ellipsis whitespace-nowrap"
                 title={f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
               >
                 {f.arrow_name ? f.arrow_name.split('/').pop() : f.csv_name.split('/').pop()}
@@ -1860,17 +1860,17 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               )}
             </button> */}
             <Pencil
-              className="w-4 h-4 text-gray-400 cursor-pointer"
+              className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
               onClick={() => startRename(f.object_name, f.arrow_name || f.csv_name)}
             />
             <SlidersHorizontal
-              className="w-4 h-4 text-gray-400 cursor-pointer"
+              className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
               onClick={() => openProcessingModal(f)}
               title="Process columns"
             />
             {hasMultipleSheetsByFile[f.object_name] && (
               <Layers
-                className="w-4 h-4 text-gray-400 cursor-pointer"
+                className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
                 onClick={() => openSheetChangeModal(f)}
                 title="Change default sheet"
               />
@@ -1883,7 +1883,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                   onClick={(e) => e.stopPropagation()}
                 >
                   <Download
-                    className="w-4 h-4 text-gray-400 cursor-pointer hover:text-blue-600"
+                    className="w-3.5 h-3.5 text-gray-400 cursor-pointer hover:text-blue-600"
                     title="Download dataframe"
                   />
                 </button>
@@ -1904,7 +1904,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
               </DropdownMenuContent>
             </DropdownMenu>
             <Trash2
-              className="w-4 h-4 text-gray-400 cursor-pointer"
+              className="w-3.5 h-3.5 text-gray-400 cursor-pointer"
               onClick={() => promptDeleteOne(f.object_name)}
             />
           </div>
@@ -2255,13 +2255,13 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
                 folderPath: node.path
               });
             }}
-            className="flex items-center text-sm text-gray-700"
+            className="flex items-center text-xs text-gray-700"
           >
-            {isOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+            {isOpen ? <ChevronDown className="w-3.5 h-3.5 mr-1" /> : <ChevronRight className="w-3.5 h-3.5 mr-1" />}
             {node.name}
           </button>
           <Trash2
-            className="w-4 h-4 text-gray-400 cursor-pointer ml-2"
+            className="w-3.5 h-3.5 text-gray-400 cursor-pointer ml-2"
             onClick={(e) => {
               e.stopPropagation();
               promptDeleteFolder(node.path);
@@ -2302,9 +2302,9 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
   return (
     <div className={`w-80 bg-white flex flex-col h-full ${borderClass}`}>
       {fileInput}
-      <div className="p-3 border-b border-gray-200 flex items-center justify-between">
-        <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
-          <Database className="w-4 h-4" />
+      <div className="p-2 border-b border-gray-200 flex items-center justify-between">
+        <h3 className="text-sm font-medium text-gray-900 flex items-center space-x-2">
+          <Database className="w-3.5 h-3.5" />
           <span>Saved DataFrames</span>
         </h3>
         <div className="flex items-center space-x-2">
@@ -2331,7 +2331,7 @@ const SavedDataFramesPanel: React.FC<Props> = ({ isOpen, onToggle, collapseDirec
           </Button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-3 text-sm">
         {loading ? (
           <div className="flex flex-col items-center justify-center h-full text-center text-gray-700">
             <div className="w-20 h-20 rounded-full bg-white/60 backdrop-blur-sm flex items-center justify-center mx-auto mb-4 shadow-inner">

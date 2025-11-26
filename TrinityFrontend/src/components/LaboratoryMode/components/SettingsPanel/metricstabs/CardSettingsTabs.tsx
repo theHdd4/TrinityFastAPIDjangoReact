@@ -11,16 +11,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreHorizontal, Trash2, Pencil, Layers } from 'lucide-react';
+import { Plus, MoreHorizontal, Trash2, Pencil, Layers, Upload } from 'lucide-react';
 import {
   useLaboratoryStore,
   CardVariable,
   LayoutCard,
-} from '../../store/laboratoryStore';
+} from '../../../store/laboratoryStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { LABORATORY_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import MetricsInputFiles from './MetricsInputFiles';
+import MetricsColOps from './MetricsColOps';
 
 interface CardSettingsTabsProps {
   card: LayoutCard;
@@ -748,10 +750,9 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   }, [projectContext, toast]);
 
   useEffect(() => {
-    setTab('variables');
     setIsAdding(false);
     setEditingVariableId(null);
-  }, [card.id, setTab]);
+  }, [card.id]);
 
   useEffect(() => {
     if (card && tab === 'variables') {
@@ -762,19 +763,24 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   return (
     <>
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="input" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
           <TabsTrigger value="variables" className="text-xs">
             Variables
           </TabsTrigger>
-          <TabsTrigger value="settings" className="text-xs">
-            Settings
-          </TabsTrigger>
-          <TabsTrigger value="visual" className="text-xs">
-            Visualisation
+          <TabsTrigger value="column-operations" className="text-xs">
+            Column Ops
           </TabsTrigger>
         </TabsList>
 
-        <div className="px-4">
+        <div>
+          <TabsContent value="input" className="space-y-4">
+            <MetricsInputFiles cardId={card.id} />
+          </TabsContent>
+
           <TabsContent value="variables" className="space-y-4">
             <Card className="p-4 space-y-4">
               <div className="flex items-center justify-between">
@@ -888,18 +894,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
             </Card>
           </TabsContent>
 
-          <TabsContent value="settings" className="space-y-4">
-            <Card className="p-4 text-sm text-gray-600">
-              <h4 className="font-medium text-gray-900 mb-2">Card Settings</h4>
-              <p>Global card configuration will appear here. For now, manage variables via the Variable Definition tab.</p>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="visual" className="space-y-4">
-            <Card className="p-4 text-sm text-gray-600">
-              <h4 className="font-medium text-gray-900 mb-2">Visualisation</h4>
-              <p>Visual settings for this card will be available soon.</p>
-            </Card>
+          <TabsContent value="column-operations" className="flex flex-col h-full">
+            <MetricsColOps />
           </TabsContent>
         </div>
       </Tabs>

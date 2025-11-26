@@ -204,7 +204,7 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="space-y-4 p-2">
+    <div className="space-y-4 px-2 pb-2">
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 6px;

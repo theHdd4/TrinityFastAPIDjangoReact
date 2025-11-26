@@ -270,6 +270,16 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
     setError(null);
   }, [operations]);
 
+  // Helper function to filter out date-related columns
+  const filterDateColumns = (columns: string[]): string[] => {
+    const dateKeywords = ['date', 'dates', 'year', 'month', 'week', 'day', 'day_name', 'month_name'];
+    return columns.filter(id => {
+      const idLower = (id || '').trim().toLowerCase();
+      // Exclude exact matches for date keywords
+      return !dateKeywords.includes(idLower);
+    });
+  };
+
   // 🔧 CRITICAL FIX: Sync selectedIdentifiers from atom settings (set by AI handler)
   React.useEffect(() => {
     if (atom?.settings?.selectedIdentifiers && Array.isArray(atom.settings.selectedIdentifiers)) {
@@ -299,10 +309,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
           if (resp.ok) {
             const data = await resp.json();
             if (Array.isArray(data.identifiers) && data.identifiers.length > 0) {
-              // Filter out 'date' from MongoDB/Redis identifiers (case-insensitive)
-              const filteredIdentifiers = (data.identifiers || []).filter(
-                (id: string) => id.toLowerCase() !== 'date'
-              );
+              // Filter out all date-related columns from MongoDB/Redis identifiers
+              const filteredIdentifiers = filterDateColumns(data.identifiers || []);
               setMongoIdentifiers(filteredIdentifiers);
               setSelectedIdentifiers(filteredIdentifiers);
               setShowCatSelector(false);
@@ -318,18 +326,18 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
           const raw = await res.json();
           const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
           const summary = (data.summary || []).filter(Boolean);
-          // Exclude 'date' (case-insensitive) from selectable identifiers
+          // Get categorical columns and filter out date-related columns
           const cats = summary.filter((c: any) =>
             c.data_type && (
               c.data_type.toLowerCase().includes('object') ||
               c.data_type.toLowerCase().includes('string') ||
               c.data_type.toLowerCase().includes('category')
-            ) &&
-            c.column.toLowerCase() !== 'date'
-          ).map((c: any) => c.column);
-          setCatColumns(cats);
+            )
+          ).map((c: any) => (c.column || '').trim());
+          const filteredCats = filterDateColumns(cats);
+          setCatColumns(filteredCats);
           setShowCatSelector(true);
-          setSelectedIdentifiers(cats);
+          setSelectedIdentifiers(filteredCats);
         }
       } catch {}
     }
@@ -1441,8 +1449,8 @@ const CreateColumnCanvas: React.FC<CreateColumnCanvasProps> = ({
               defaultMinimized={true}
               borderColor={`border-${createColumn.color.replace('bg-', '')}`}
               customHeader={{
-                title: "Cardinality View",
-                subtitle: "Click Here to View Data",
+                title: "Data Summary",
+                subtitle: "Data in detail",
                 subtitleClickable: !!inputFileName && !!atomId,
                 onSubtitleClick: handleViewDataClick
               }}

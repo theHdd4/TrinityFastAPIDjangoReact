@@ -4207,7 +4207,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         }}
       >
         <div className={canEdit ? '' : 'pointer-events-none'}>
-          <div data-lab-cards-container="true" className="p-6 space-y-6" onClick={(e) => {
+          <div data-lab-cards-container="true" className="p-2 space-y-6" onClick={(e) => {
             // Handle clicks on the empty space in the canvas
             if (e.target === e.currentTarget) {
               if (onOpenSettingsPanel) {
@@ -4299,7 +4299,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
                 {/* Molecule Content */}
                 {!isCollapsed && (
-                <div data-lab-cards-container="true" className="p-6 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
+                <div data-lab-cards-container="true" className="p-2 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
                     {Array.isArray(layoutCards) &&
                       layoutCards
                         .filter(card => card.moleculeId === molecule.moleculeId)
@@ -4339,18 +4339,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             handleDrop(e, card.id); // Keep existing functionality
                           }}
                         >
-                          <div className="flex items-center justify-between p-4 border-b border-gray-100">
-                            <div className="flex items-center space-x-2">
+                          <div className="flex items-center justify-between py-1.5 px-2 border-b border-gray-100">
+                            <div className="flex items-center space-x-1.5">
                               {canEdit && (
                                 <div 
-                                  className="cursor-move p-1 hover:bg-gray-100 rounded"
+                                  className="cursor-move p-0.5 hover:bg-gray-100 rounded"
                                   onMouseDown={(e) => e.stopPropagation()}
                                   title="Drag to reorder"
                                 >
                                   <GripVertical className="w-3 h-3 text-gray-400" />
                                 </div>
                               )}
-                              <span className="text-sm font-medium text-gray-700">
+                              <span className="text-xs font-medium text-gray-700">
                                 {cardTitle}
                               </span>
                               <AIChatBot
@@ -4361,63 +4361,63 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               />
                               <button
                                 onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                                className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                                 title="Card Settings"
                                 disabled={!canEdit}
                               >
-                                <Settings className="w-4 h-4 text-gray-400" />
+                                <Settings className="w-3.5 h-3.5 text-gray-400" />
                               </button>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
                                   refreshCardAtoms(card.id);
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded"
+                                className="p-0.5 hover:bg-gray-100 rounded"
                                 title="Refresh Atom"
                               >
-                                <RefreshCcw className="w-4 h-4 text-gray-400" />
+                                <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
                               </button>
                             </div>
-                            <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-1.5">
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
                                   handleDeleteCardClick(card.id, cardTitle);
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded"
+                                className="p-0.5 hover:bg-gray-100 rounded"
                               >
-                                <Trash2 className="w-4 h-4 text-gray-400" />
+                                <Trash2 className="w-3.5 h-3.5 text-gray-400" />
                               </button>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
                                   toggleCardExpand(card.id);
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded"
+                                className="p-0.5 hover:bg-gray-100 rounded"
                                 title="Expand Card"
                               >
-                                <Maximize2 className="w-4 h-4 text-gray-400" />
+                                <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
                               </button>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
                                   toggleCardCollapse(card.id);
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded"
+                                className="p-0.5 hover:bg-gray-100 rounded"
                                 title="Toggle Card"
                               >
                                 {collapsedCards[card.id] ? (
-                                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                                  <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                                 ) : (
-                                  <Minus className="w-4 h-4 text-gray-400" />
+                                  <Minus className="w-3.5 h-3.5 text-gray-400" />
                                 )}
                               </button>
                             </div>
                           </div>
 
-                          <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                          <div className={`flex-1 flex flex-col p-3 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                             {card.atoms.length === 0 ? (
-                              <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
+                              <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                                 <AtomSuggestion
                                   cardId={card.id}
                                   isVisible={true}
@@ -4616,9 +4616,9 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                       onDragLeave={handleDragLeave}
                       onDrop={(e) => handleDrop(e, card.id)}
                     >
-                      <div className="flex items-center justify-between p-4 border-b border-gray-100">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm font-medium text-gray-700">
+                      <div className="flex items-center justify-between py-1.5 px-2 border-b border-gray-100">
+                        <div className="flex items-center space-x-1.5">
+                          <span className="text-xs font-medium text-gray-700">
                             {cardTitle}
                           </span>
                           <AIChatBot
@@ -4629,63 +4629,63 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           />
                           <button
                             onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                            className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Card Settings"
                             disabled={!canEdit}
                           >
-                            <Settings className="w-4 h-4 text-gray-400" />
+                            <Settings className="w-3.5 h-3.5 text-gray-400" />
                           </button>
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               refreshCardAtoms(card.id);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-0.5 hover:bg-gray-100 rounded"
                             title="Refresh Atom"
                           >
-                            <RefreshCcw className="w-4 h-4 text-gray-400" />
+                            <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
                           </button>
                         </div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-1.5">
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               handleDeleteCardClick(card.id, cardTitle);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-0.5 hover:bg-gray-100 rounded"
                           >
-                            <Trash2 className="w-4 h-4 text-gray-400" />
+                            <Trash2 className="w-3.5 h-3.5 text-gray-400" />
                           </button>
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               toggleCardExpand(card.id);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-0.5 hover:bg-gray-100 rounded"
                             title="Expand Card"
                           >
-                            <Maximize2 className="w-4 h-4 text-gray-400" />
+                            <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
                           </button>
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               toggleCardCollapse(card.id);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-0.5 hover:bg-gray-100 rounded"
                             title="Toggle Card"
                           >
                             {collapsedCards[card.id] ? (
-                              <ChevronDown className="w-4 h-4 text-gray-400" />
+                              <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                             ) : (
-                              <Minus className="w-4 h-4 text-gray-400" />
+                              <Minus className="w-3.5 h-3.5 text-gray-400" />
                             )}
                           </button>
                         </div>
                       </div>
 
-                      <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                      <div className={`flex-1 flex flex-col p-3 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                         {card.atoms.length === 0 ? (
-                          <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
+                          <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                             <AtomSuggestion
                               cardId={card.id}
                               isVisible={true}
@@ -5050,7 +5050,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
         {/* Layout Cards Container */}
-      <div data-lab-cards-container="true" className="p-6 space-y-6 w-full">
+      <div data-lab-cards-container="true" className="p-2 space-y-6 w-full">
         {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
           const cardTitle = card.moleculeTitle
             ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
@@ -5100,9 +5100,9 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               </div>
             )}
             
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <div className="flex items-center space-x-2">
-                <span className="text-sm font-medium text-gray-700">
+            <div className="flex items-center justify-between py-1.5 px-2 border-b border-gray-100">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-xs font-medium text-gray-700">
                   {cardTitle}
                 </span>
                 <AIChatBot
@@ -5113,65 +5113,65 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 />
                           <button
                             onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                            className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Card Settings"
                             disabled={!canEdit}
                           >
-                  <Settings className="w-4 h-4 text-gray-400" />
+                  <Settings className="w-3.5 h-3.5 text-gray-400" />
                 </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     refreshCardAtoms(card.id);
                   }}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  className="p-0.5 hover:bg-gray-100 rounded"
                   title="Refresh Atom"
                 >
-                  <RefreshCcw className="w-4 h-4 text-gray-400" />
+                  <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
                 </button>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-1.5">
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     const cardTitle = card.moleculeTitle || (Array.isArray(card.atoms) && card.atoms.length > 0 ? card.atoms[0]?.title : undefined) || 'Card';
                     handleDeleteCardClick(card.id, cardTitle);
                   }}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  className="p-0.5 hover:bg-gray-100 rounded"
                 >
-                  <Trash2 className="w-4 h-4 text-gray-400" />
+                  <Trash2 className="w-3.5 h-3.5 text-gray-400" />
                 </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     toggleCardExpand(card.id);
                   }}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  className="p-0.5 hover:bg-gray-100 rounded"
                   title="Expand Card"
                 >
-                  <Maximize2 className="w-4 h-4 text-gray-400" />
+                  <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
                 </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     toggleCardCollapse(card.id);
                   }}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  className="p-0.5 hover:bg-gray-100 rounded"
                   title="Toggle Card"
                 >
                   {collapsedCards[card.id] ? (
-                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                   ) : (
-                    <Minus className="w-4 h-4 text-gray-400" />
+                    <Minus className="w-3.5 h-3.5 text-gray-400" />
                   )}
                 </button>
               </div>
             </div>
 
             {/* Card Content */}
-            <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+            <div className={`flex-1 flex flex-col p-3 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
               {card.atoms.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
+                <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                   <AtomSuggestion
                     cardId={card.id}
                     isVisible={true}
@@ -5206,7 +5206,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           />
                           <button
                             onClick={e => handleAtomSettingsClick(e, atom.id)}
-                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110 hidden"
                             title="Atom Settings"
                           >
                             <Settings className="w-4 h-4 text-gray-400" />

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { atomCategories } from '@/components/AtomCategory/data/atomCategories';
 import type { LucideIcon } from 'lucide-react';
-import { ChevronDown, ChevronRight, FolderKanban, GalleryHorizontal, Loader2, Play, Send } from 'lucide-react';
+import { ChevronDown, ChevronLeft, FolderKanban, GalleryHorizontal, Loader2, Play, Send } from 'lucide-react';
 import FeatureOverviewExhibition, {
   FeatureOverviewExhibitionHandle,
 } from '@/components/AtomList/atoms/feature-overview/components/FeatureOverviewExhibition';
@@ -276,21 +276,21 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
   }, [atomPanels, totalSelections]);
 
   return (
-    <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-80">
-      <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+    <div className="bg-white border-r border-gray-200 transition-all duration-300 flex flex-col h-full w-72">
+      <div className="p-2 border-b border-gray-200 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <GalleryHorizontal className="w-4 h-4 text-gray-700" />
-          <h3 className="font-semibold text-gray-900">Exhibition</h3>
-          <Badge variant="secondary" className="ml-1">
+          <GalleryHorizontal className="w-3.5 h-3.5 text-gray-700" />
+          <h3 className="text-sm font-medium text-gray-900">Exhibition</h3>
+          <Badge variant="secondary" className="ml-1 text-xs">
             {totalSelections} {totalSelections === 1 ? 'item' : 'items'}
           </Badge>
         </div>
         <Button variant="ghost" size="sm" onClick={onToggle} className="p-1 h-8 w-8">
-          <ChevronRight className="w-4 h-4" />
+          <ChevronLeft className="w-4 h-4" />
         </Button>
       </div>
 
-      <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 p-3 space-y-3 text-sm">
         {atomPanels.length === 0 ? (
           <div className="text-sm text-gray-600">
             Stage components for exhibition from the laboratory to view them here.
@@ -310,22 +310,22 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
                 <div className="flex items-center justify-between gap-2">
                   <button
                     type="button"
-                    className="flex flex-1 items-center gap-3 px-4 py-3 text-left"
+                    className="flex flex-1 items-center gap-2 px-3 py-2 text-left"
                     onClick={() =>
                       setExpandedAtomKey((current) => (current === panel.key ? null : panel.key))
                     }
                   >
                     <span
                       className={clsx(
-                        'flex h-10 w-10 items-center justify-center rounded-full text-white shadow-sm',
+                        'flex h-8 w-8 items-center justify-center rounded-full text-white shadow-sm',
                         panel.info.color,
                       )}
                     >
-                      <Icon className="h-5 w-5" />
+                      <Icon className="h-4 w-4" />
                     </span>
                     <span>
-                      <span className="block text-sm font-semibold text-gray-900">{panel.info.title}</span>
-                      <span className="text-xs text-gray-500">{totalLabel}</span>
+                      <span className="block text-xs font-medium text-gray-900">{panel.info.title}</span>
+                      <span className="text-[10px] text-gray-500">{totalLabel}</span>
                     </span>
                   </button>
                   <div className="flex items-center gap-1 pr-3">
@@ -366,7 +366,7 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
 
                 <div
                   className={clsx(
-                    'space-y-4 border-t border-gray-200 bg-white/80 px-4 py-4',
+                    'space-y-3 border-t border-gray-200 bg-white/80 px-3 py-3',
                     !isExpanded && 'hidden',
                   )}
                   id={`${panel.key}-exhibition-list`}
@@ -435,22 +435,22 @@ const ExhibitionPanel: React.FC<ExhibitionPanelProps> = ({ onToggle }) => {
         )}
       </div>
 
-      <div className="border-t border-gray-200 bg-white/90 p-4 space-y-2">
+      <div className="border-t border-gray-200 bg-white/90 p-3 space-y-2">
         <Button
           type="button"
           className="w-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-emerald-700"
-          size="lg"
+          size="sm"
           onClick={() => void handleExhibitAll()}
           disabled={totalSelections === 0 || isExhibitingAll}
         >
           {isExhibitingAll ? (
             <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
               Exhibiting…
             </>
           ) : (
             <>
-              <Send className="mr-2 h-4 w-4" />
+              <Send className="mr-2 h-3.5 w-3.5" />
               Exhibit all
             </>
           )}
