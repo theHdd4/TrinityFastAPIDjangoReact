@@ -52,10 +52,8 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 
 const normalizeTextBoxPlaceholder = (value?: string) => (value ?? '').replace(/\s+/g, ' ').trim();
 
-const TEXTBOX_PLACEHOLDER_LINES: string[] = [];
-
-const TEXTBOX_PLACEHOLDER = TEXTBOX_PLACEHOLDER_LINES.join('\n');
-const TEXTBOX_PLACEHOLDER_NORMALIZED = normalizeTextBoxPlaceholder(TEXTBOX_PLACEHOLDER);
+const TEXTBOX_PLACEHOLDER = '';
+const TEXTBOX_PLACEHOLDER_NORMALIZED = '';
 
 interface CardSettingsTabsProps {
   card: LayoutCard;

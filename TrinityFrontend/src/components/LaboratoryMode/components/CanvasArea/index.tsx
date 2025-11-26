@@ -88,10 +88,8 @@ const normalizeTextBoxValue = (value?: string) =>
       .replace(/<[^>]+>/g, ' '),
   );
 
-const TEXTBOX_PLACEHOLDER_LINES: string[] = [];
-
-const TEXTBOX_PLACEHOLDER = TEXTBOX_PLACEHOLDER_LINES.join('\n');
-const TEXTBOX_PLACEHOLDER_NORMALIZED = normalizeTextBoxPlaceholder(TEXTBOX_PLACEHOLDER);
+const TEXTBOX_PLACEHOLDER = '';
+const TEXTBOX_PLACEHOLDER_NORMALIZED = '';
 const isPlaceholderContent = (value?: string) => normalizeTextBoxValue(value) === TEXTBOX_PLACEHOLDER_NORMALIZED;
 
 
