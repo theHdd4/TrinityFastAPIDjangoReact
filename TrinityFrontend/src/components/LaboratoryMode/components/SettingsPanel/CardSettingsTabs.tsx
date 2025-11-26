@@ -956,18 +956,9 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
 
           <TabsContent value="textbox" className="space-y-4">
             <Card className="p-4 space-y-6">
-              <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Text box</p>
-                  <h4 className="font-medium text-gray-900">Insert text box on the card</h4>
-                  <p className="text-xs text-gray-500">
-                    Control typography for the text box rendered beneath this card's atoms.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Insert text box</span>
-                  <Switch checked={textBoxEnabled} onCheckedChange={handleToggleTextBox} />
-                </div>
+              <div className="flex items-center justify-between w-full">
+                <span className="text-sm font-medium text-gray-900">Insert text box</span>
+                <Switch checked={textBoxEnabled} onCheckedChange={handleToggleTextBox} />
               </div>
 
               <Separator />
