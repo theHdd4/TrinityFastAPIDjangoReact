@@ -52,12 +52,7 @@ import { getActiveProjectContext } from '@/utils/projectEnv';
 
 const normalizeTextBoxPlaceholder = (value?: string) => (value ?? '').replace(/\s+/g, ' ').trim();
 
-const TEXTBOX_PLACEHOLDER_LINES = [
-  'Text box',
-  '',
-  'Insert text box on the card',
-  "Control typography for the text box rendered beneath this card's atoms.",
-];
+const TEXTBOX_PLACEHOLDER_LINES: string[] = [];
 
 const TEXTBOX_PLACEHOLDER = TEXTBOX_PLACEHOLDER_LINES.join('\n');
 const TEXTBOX_PLACEHOLDER_NORMALIZED = normalizeTextBoxPlaceholder(TEXTBOX_PLACEHOLDER);
