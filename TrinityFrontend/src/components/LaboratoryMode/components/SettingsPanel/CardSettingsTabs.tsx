@@ -798,7 +798,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
             Variables
           </TabsTrigger>
           <TabsTrigger value="textbox" className="text-xs">
-            Text Box
+            Text-box
           </TabsTrigger>
           <TabsTrigger value="visual" className="text-xs">
             Visualisation
