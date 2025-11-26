@@ -22,6 +22,39 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas
 from PIL import Image
 
+# Helper function to convert PNG screenshot to JPG if needed
+def _convert_png_to_jpg(png_bytes: bytes, quality: int = 95) -> bytes:
+    """Convert PNG screenshot bytes to JPG format.
+    
+    This ensures the same screenshot is used for both JPG and PDF exports.
+    The PNG is captured once, then converted to JPG when needed.
+    
+    Args:
+        png_bytes: PNG image bytes from screenshot
+        quality: JPG quality (1-100, default 95)
+    
+    Returns:
+        JPG image bytes
+    """
+    try:
+        img = Image.open(io.BytesIO(png_bytes))
+        # Convert RGBA to RGB if needed (JPG doesn't support transparency)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=quality, optimize=True)
+        return output.getvalue()
+    except Exception as exc:
+        logger.warning('Failed to convert PNG to JPG, using PNG instead: %s', exc)
+        return png_bytes  # Fallback to PNG if conversion fails
+
 try:  # pragma: no cover - optional dependency for SVG rasterisation
     import cairosvg  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover - optional dependency missing or misconfigured
@@ -1764,20 +1797,44 @@ def _request_slide_screenshots(
 def _attempt_server_screenshots(
     payload: ExhibitionExportRequest, slides: Sequence[SlideExportPayload]
 ) -> None:
+    """Attempt server-side screenshots, but skip if client-side screenshots are already available.
+    
+    NEW APPROACH: Frontend now captures visible exhibition slides directly as images.
+    Server-side screenshots are only used as fallback when client-side captures are missing.
+    """
     if not slides:
         return
 
+    # NEW APPROACH: Skip server-side rendering if slides already have client-side screenshots
+    # These are captured directly from visible exhibition, so they're already complete
+    slides_with_screenshots = [
+        slide for slide in slides 
+        if slide.screenshot and isinstance(slide.screenshot, SlideScreenshotPayload) and slide.screenshot.data_url
+    ]
+    
+    if len(slides_with_screenshots) == len(slides):
+        logger.info('All slides have client-side screenshots from visible exhibition, skipping server-side rendering')
+        return
+
+    # Only attempt server-side for slides missing screenshots
     styles = payload.document_styles
     if not isinstance(styles, DocumentStylesPayload):
+        logger.debug('Document styles missing, cannot perform server-side rendering')
         return
 
     candidates = [
         slide
         for slide in slides
-        if isinstance(slide.dom_snapshot, SlideDomSnapshotPayload) and slide.dom_snapshot.html
+        if not (slide.screenshot and isinstance(slide.screenshot, SlideScreenshotPayload) and slide.screenshot.data_url)
+        and isinstance(slide.dom_snapshot, SlideDomSnapshotPayload) 
+        and slide.dom_snapshot.html
     ]
+    
     if not candidates:
+        logger.debug('No slides need server-side rendering')
         return
+
+    logger.info('Attempting server-side rendering for %d slide(s) missing client-side screenshots', len(candidates))
 
     try:
         screenshots = _request_slide_screenshots(candidates, styles, strict=False)
@@ -1791,6 +1848,7 @@ def _attempt_server_screenshots(
             continue
         try:
             slide.screenshot = SlideScreenshotPayload.model_validate(data)
+            logger.info('Slide %s: Server-side screenshot captured', slide.id)
         except Exception as exc:  # pragma: no cover - validation edge cases
             logger.warning('Skipping invalid renderer screenshot for slide %s: %s', slide.id, exc)
 
@@ -1897,7 +1955,7 @@ def build_pdf_bytes(payload: ExhibitionExportRequest) -> bytes:
     for index, slide in enumerate(ordered_slides):
         width, height = _resolve_slide_dimensions(slide)
         page_width = _px_to_pt(width)
-        page_height = _px_to_pt(height)
+        page_height = _px_to_pt(height) 
         pdf.setPageSize((page_width, page_height))
 
         screenshot = slide.screenshot
