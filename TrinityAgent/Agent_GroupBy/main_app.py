@@ -590,15 +590,24 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
             # 🔧 ALIGNMENT: Backend expects "identifiers" (not "group_by_columns") and "aggregations" (not "aggregation_functions")
             # group_by_columns = identifiers = "levels" in UI terminology
             # 🔧 CRITICAL: LLM-provided values overwrite defaults - use what LLM provided (already normalized by _normalize_result)
+            # 🔧 CRITICAL: UI MUST show AI-selected identifiers even if backend rejects them (e.g., "year" as numeric)
+            # Backend validation happens later when user clicks "Perform", but UI should always display AI's selection
             group_by_columns = group_by_json.get("group_by_columns", [])
             aggregation_functions = group_by_json.get("aggregation_functions", {})
             
-            # 🔧 CRITICAL: Values from _normalize_result are already lowercase, but ensure normalization
-            # (This handles edge cases where normalization might not have been applied)
+            # 🔧 CRITICAL: Preserve ALL LLM-provided identifiers exactly as provided (normalized to lowercase for backend)
+            # Do NOT filter based on backend's predefined list - UI will show them and user can adjust if needed
+            # Values from _normalize_result are already lowercase, but ensure normalization for safety
             normalized_identifiers = [
                 col.strip().lower() if isinstance(col, str) else str(col).strip().lower() 
                 for col in group_by_columns
             ]
+            # 🔧 CRITICAL: Remove any empty strings or None values, but keep all valid identifiers
+            normalized_identifiers = [col for col in normalized_identifiers if col and col.strip()]
+            
+            logger.info(f"🔧 PRESERVING ALL LLM-PROVIDED IDENTIFIERS (will be shown in UI regardless of backend validation):")
+            logger.info(f"  - Original from LLM: {group_by_columns}")
+            logger.info(f"  - Normalized (for UI/backend): {normalized_identifiers}")
             
             # Convert aggregation_functions to backend-expected format
             # Backend expects: { "field_name": { "agg": "sum", "weight_by": "", "rename_to": "" } }
@@ -653,14 +662,16 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
             # Frontend handler expects: data.groupby_json.identifiers (array) and data.groupby_json.aggregations (object)
             # 🔧 CRITICAL: This MUST be at top level of response (like concat_json, merge_json) for frontend handler
             # 🔧 CRITICAL: Frontend handler does: const cfg = data.groupby_json; const aiSelectedIdentifiers = cfg.identifiers || [];
-            # So identifiers MUST be an array (even if empty) and MUST contain the LLM-provided values (normalized to lowercase)
+            # 🔧 CRITICAL: UI MUST display ALL AI-selected identifiers, even if backend rejects them (e.g., "year" as numeric)
+            # Backend validation happens when user clicks "Perform", but UI should always show AI's selection
+            # So identifiers MUST be an array containing ALL LLM-provided values (normalized to lowercase)
             groupby_json_for_frontend = {
                 "bucket_name": group_by_json.get("bucket_name", "trinity"),
                 "object_names": file,  # Full path - backend expects this in /run endpoint
                 "file_name": file_name_only,  # Just filename for frontend display
                 "file_key": file_name_only,   # Just filename - backend expects this in /run endpoint
-                "identifiers": normalized_identifiers if normalized_identifiers else [],  # 🔧 CRITICAL: Must be array (these are the "levels" in UI)
-                "aggregations": normalized_aggregations if normalized_aggregations else {}  # 🔧 CRITICAL: Must be object
+                "identifiers": normalized_identifiers if normalized_identifiers else [],  # 🔧 CRITICAL: ALL AI-selected identifiers (UI "levels") - no backend filtering
+                "aggregations": normalized_aggregations if normalized_aggregations else {}  # 🔧 CRITICAL: ALL AI-selected aggregations (UI "measures")
             }
             
             # Set at top level (frontend expects data.groupby_json)
@@ -670,11 +681,14 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
             if "data" in response and isinstance(response["data"], dict):
                 response["data"]["groupby_json"] = groupby_json_for_frontend
             
-            logger.info(f"🔧 SET groupby_json at top level with:")
-            logger.info(f"  - identifiers (array): {groupby_json_for_frontend['identifiers']}")
-            logger.info(f"  - aggregations (object): {list(groupby_json_for_frontend['aggregations'].keys())}")
+            logger.info(f"🔧 SET groupby_json at top level (UI will display ALL AI-selected identifiers):")
+            logger.info(f"  - identifiers (array, UI 'levels'): {groupby_json_for_frontend['identifiers']}")
+            logger.info(f"  - identifiers count: {len(groupby_json_for_frontend['identifiers'])}")
+            logger.info(f"  - aggregations (object, UI 'measures'): {list(groupby_json_for_frontend['aggregations'].keys())}")
+            logger.info(f"  - aggregations count: {len(groupby_json_for_frontend['aggregations'])}")
             logger.info(f"  - object_names: {groupby_json_for_frontend['object_names']}")
             logger.info(f"  - file_key: {groupby_json_for_frontend['file_key']}")
+            logger.info(f"  - NOTE: UI will show these identifiers even if backend rejects them during 'Perform'")
             
             # 🔧 ALIGNED STRUCTURE 3: group_by_config (compatibility layer with both naming conventions)
             response["group_by_config"] = {
@@ -710,8 +724,15 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
         logger.info(f"Has groupby_json (frontend/backend format): {'groupby_json' in response}")
         if "groupby_json" in response:
             groupby_cfg = response["groupby_json"]
-            logger.info(f"🔧 ALIGNED STRUCTURE - groupby_json (for backend):")
-            logger.info(f"  - identifiers (levels/group_by_columns): {groupby_cfg.get('identifiers')}")
+            logger.info(f"🔧 FINAL groupby_json structure (UI will use this to display levels):")
+            logger.info(f"  - identifiers (UI 'levels', ALL AI-selected): {groupby_cfg.get('identifiers', [])}")
+            logger.info(f"  - identifiers type: {type(groupby_cfg.get('identifiers', []))}, length: {len(groupby_cfg.get('identifiers', []))}")
+            logger.info(f"  - aggregations (UI 'measures'): {list(groupby_cfg.get('aggregations', {}).keys())}")
+            logger.info(f"  - object_names: {groupby_cfg.get('object_names')}")
+            logger.info(f"  - file_key: {groupby_cfg.get('file_key')}")
+            logger.info(f"🔧 CRITICAL: Frontend handler extracts cfg.identifiers and sets as selectedIdentifiers")
+            logger.info(f"🔧 CRITICAL: UI will display ALL identifiers even if backend rejects them during 'Perform'")
+            logger.info(f"🔧 Full groupby_json: {json.dumps(groupby_cfg, indent=2)}")
             logger.info(f"  - aggregations (fields): {list(groupby_cfg.get('aggregations', {}).keys())}")
             logger.info(f"  - object_names (full path): {groupby_cfg.get('object_names')}")
             logger.info(f"  - file_key (filename): {groupby_cfg.get('file_key')}")

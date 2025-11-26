@@ -637,6 +637,46 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           const aiSelectedIdentifiers = cfg.identifiers || [];
           const aiSelectedMeasures = [];
           
+          // 🔧 HELPER: Move AI-selected identifiers from measures to identifiers list (like manual drag-and-drop)
+          // 🔧 CRITICAL: Also ensure AI-selected identifiers are added even if they're not in current lists
+          const moveIdentifiersToIdentifierList = (selectedIds: string[]) => {
+            const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+            const currentIdentifiers = currentAtom?.settings?.identifiers || currentAtom?.settings?.identifierList || [];
+            const currentMeasures = currentAtom?.settings?.measures || currentAtom?.settings?.measureList || [];
+            const allColumns = currentAtom?.settings?.allColumns || [];
+            
+            // 🔧 CRITICAL: Get all available column names from allColumns
+            const allColumnNames = allColumns.map((col: any) => 
+              typeof col === 'string' ? col : (col.column || col.name || col)
+            );
+            
+            // 🔧 CRITICAL: Add AI-selected identifiers to identifiers list
+            // Even if they're not in currentIdentifiers or currentMeasures, add them if they exist in allColumns
+            const identifiersToAdd = selectedIds.filter(id => {
+              // Check if column exists in allColumns (case-insensitive)
+              const existsInColumns = allColumnNames.some((col: string) => 
+                col.toLowerCase() === id.toLowerCase()
+              );
+              return existsInColumns && !currentIdentifiers.includes(id);
+            });
+            
+            // Move selected identifiers from measures to identifiers, and add new ones
+            const newIdentifiers = [...new Set([...currentIdentifiers, ...selectedIds])];
+            const newMeasures = currentMeasures.filter(m => !selectedIds.includes(m));
+            
+            console.log('🔧 MOVE IDENTIFIERS DEBUG:', {
+              selectedIds,
+              currentIdentifiers,
+              currentMeasures,
+              allColumnNames: allColumnNames.slice(0, 10), // First 10 for logging
+              identifiersToAdd,
+              newIdentifiers,
+              newMeasures
+            });
+            
+            return { newIdentifiers, newMeasures };
+          };
+          
           // 🔧 FIX: Ensure we have a single file, not multiple files
           let singleFileName = '';
           
@@ -680,10 +720,18 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               };
               setMessages(prev => [...prev, errorMsg]);
               
+              // 🔧 CRITICAL: Move AI-selected identifiers from measures to identifiers list
+              const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+              
               updateAtomSettings(atomId, { 
                 aiConfig: cfg,
                 aiMessage: data.message,
                 operationCompleted: false,
+                // 🔧 CRITICAL: Update identifier and measure lists (like manual drag-and-drop)
+                identifiers: newIdentifiers,
+                identifierList: newIdentifiers,
+                measures: newMeasures,
+                measureList: newMeasures,
                 selectedIdentifiers: aiSelectedIdentifiers,
                 selectedMeasures: aiSelectedMeasures,
                 selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -766,15 +814,53 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             return; // Don't proceed with the operation
           }
           
+          // 🔧 CRITICAL FIX: Move AI-selected identifiers from measures to identifiers list (like manual drag-and-drop)
+          const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+          
+          // Also ensure selectedMeasureNames doesn't include identifiers that were moved
+          const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+          const currentSelectedMeasureNames = currentAtom?.settings?.selectedMeasureNames || [];
+          const newSelectedMeasureNames = aiSelectedMeasures.map(m => m.field).filter(
+            field => !aiSelectedIdentifiers.includes(field)
+          );
+          
+          console.log('🔧 MOVING AI-SELECTED IDENTIFIERS FROM MEASURES TO IDENTIFIERS:', {
+            aiSelectedIdentifiers,
+            newIdentifiers,
+            newMeasures,
+            movedFromMeasures: (currentAtom?.settings?.measures || currentAtom?.settings?.measureList || []).filter(
+              (m: string) => aiSelectedIdentifiers.includes(m)
+            )
+          });
+          
+          // 🔧 CRITICAL: Update identifiers FIRST, then selectedIdentifiers in a single update
+          // This ensures fallbackIdentifiers includes all AI-selected identifiers before filtering
+          console.log('🔧 UPDATING ATOM SETTINGS WITH AI IDENTIFIERS:', {
+            aiSelectedIdentifiers,
+            newIdentifiers,
+            newMeasures,
+            willUpdateIdentifiers: true,
+            willUpdateSelectedIdentifiers: true
+          });
+          
           // Update atom settings with the AI configuration and auto-populated options
+          // 🔧 CRITICAL: Update identifiers and identifierList FIRST, then selectedIdentifiers
+          // This ensures the component's fallbackIdentifiers calculation includes all AI-selected identifiers
           updateAtomSettings(atomId, { 
             aiConfig: cfg,
             aiMessage: data.message,
             operationCompleted: false,
-            // Auto-populate the interface
-            selectedIdentifiers: aiSelectedIdentifiers,
+            // 🔧 CRITICAL: Update identifier and measure lists FIRST (like manual drag-and-drop)
+            // This ensures fallbackIdentifiers = identifiers includes all AI-selected ones
+            identifiers: newIdentifiers,
+            identifierList: newIdentifiers,
+            measures: newMeasures,
+            measureList: newMeasures,
+            // 🔧 CRITICAL: Set selectedIdentifiers AFTER updating identifiers list
+            // This ensures they're not filtered out because they're now in fallbackIdentifiers
+            selectedIdentifiers: aiSelectedIdentifiers, // These are now in identifiers list above
             selectedMeasures: aiSelectedMeasures,
-            selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+            selectedMeasureNames: newSelectedMeasureNames.length > 0 ? newSelectedMeasureNames : aiSelectedMeasures.map(m => m.field),
             // Set default aggregation methods
             selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
             // Set data source if available - use single file only
@@ -782,6 +868,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             // Set bucket name
             bucketName: cfg.bucket_name || 'trinity'
           });
+          
+          console.log('✅ ATOM SETTINGS UPDATED - identifiers now includes:', newIdentifiers);
+          console.log('✅ selectedIdentifiers set to:', aiSelectedIdentifiers);
           
           // Add AI success message with operation completion
           const aiSuccessMsg: Message = {
@@ -915,7 +1004,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                         });
                         
                         // ✅ REAL RESULTS AVAILABLE - Update atom settings with actual data
+                        // 🔧 CRITICAL: Ensure identifiers are in identifiers list (not measures)
+                        const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+                        
                         updateAtomSettings(atomId, {
+                          // 🔧 CRITICAL: Update identifier and measure lists
+                          identifiers: newIdentifiers,
+                          identifierList: newIdentifiers,
+                          measures: newMeasures,
+                          measureList: newMeasures,
                           selectedIdentifiers: aiSelectedIdentifiers,
                           selectedMeasures: aiSelectedMeasures,
                           selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -952,7 +1049,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                     console.error('❌ Error fetching results from saved file:', fetchError);
                     
                     // ⚠️ File saved but couldn't retrieve results - still mark as successful
+                    // 🔧 CRITICAL: Ensure identifiers are in identifiers list
+                    const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+                    
                     updateAtomSettings(atomId, {
+                      // 🔧 CRITICAL: Update identifier and measure lists
+                      identifiers: newIdentifiers,
+                      identifierList: newIdentifiers,
+                      measures: newMeasures,
+                      measureList: newMeasures,
                       selectedIdentifiers: aiSelectedIdentifiers,
                       selectedMeasures: aiSelectedMeasures,
                       selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -982,7 +1087,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   // ❌ Backend operation failed
                   console.error('❌ GroupBy backend operation failed:', result);
                   
+                  // 🔧 CRITICAL: Ensure identifiers are in identifiers list
+                  const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+                  
                   updateAtomSettings(atomId, {
+                    // 🔧 CRITICAL: Update identifier and measure lists
+                    identifiers: newIdentifiers,
+                    identifierList: newIdentifiers,
+                    measures: newMeasures,
+                    measureList: newMeasures,
                     selectedIdentifiers: aiSelectedIdentifiers,
                     selectedMeasures: aiSelectedMeasures,
                     selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -1020,7 +1133,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 };
                 setMessages(prev => [...prev, errorMsg]);
                 
+                // 🔧 CRITICAL: Ensure identifiers are in identifiers list
+                const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+                
                 updateAtomSettings(atomId, {
+                  // 🔧 CRITICAL: Update identifier and measure lists
+                  identifiers: newIdentifiers,
+                  identifierList: newIdentifiers,
+                  measures: newMeasures,
+                  measureList: newMeasures,
                   selectedIdentifiers: aiSelectedIdentifiers,
                   selectedMeasures: aiSelectedMeasures,
                   selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -1041,7 +1162,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             };
             setMessages(prev => [...prev, errorMsg]);
             
+            // 🔧 CRITICAL: Ensure identifiers are in identifiers list
+            const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+            
             updateAtomSettings(atomId, {
+              // 🔧 CRITICAL: Update identifier and measure lists
+              identifiers: newIdentifiers,
+              identifierList: newIdentifiers,
+              measures: newMeasures,
+              measureList: newMeasures,
               selectedIdentifiers: aiSelectedIdentifiers,
               selectedMeasures: aiSelectedMeasures,
               selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
