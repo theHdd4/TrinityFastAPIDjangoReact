@@ -808,26 +808,25 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
     });
   };
 
+  const cardTabs = useMemo(() => ['variables', 'text-box', 'visual'] as const, []);
+  const cardTabSet = useMemo(() => new Set(cardTabs), [cardTabs]);
+  const activeTab = cardTabSet.has(tab) ? tab : 'variables';
+
   useEffect(() => {
-    const allowedCardTabs = new Set(['variables', 'text-box', 'visual']);
-    if (!allowedCardTabs.has(tab)) {
+    if (!cardTabSet.has(tab)) {
       setTab('variables');
     }
-  }, [setTab, tab]);
+  }, [cardTabSet, setTab, tab]);
 
   return (
     <>
-      <Tabs value={tab} onValueChange={setTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={setTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
-          <TabsTrigger value="variables" className="text-xs">
-            Variables
-          </TabsTrigger>
-          <TabsTrigger value="text-box" className="text-xs">
-            Text box
-          </TabsTrigger>
-          <TabsTrigger value="visual" className="text-xs">
-            Visualisation
-          </TabsTrigger>
+          {cardTabs.map(value => (
+            <TabsTrigger key={value} value={value} className="text-xs">
+              {value === 'variables' ? 'Variables' : value === 'text-box' ? 'Text box' : 'Visualisation'}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
         <div className="px-4">
