@@ -28,7 +28,7 @@ python-dotenv
 gunicorn
 whitenoise
 requests>=2.28.0
-minio
+minio==7.2.0
 pandas
 polars>=0.20.0
 fastexcel>=0.15.1

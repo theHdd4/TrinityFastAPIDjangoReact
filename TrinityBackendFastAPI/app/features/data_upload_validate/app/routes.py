@@ -9,7 +9,6 @@ import io
 import os
 import openpyxl
 import pyarrow as pa
-import pyarrow.ipc as ipc
 from time import perf_counter
 from app.core.utils import get_env_vars
 from pathlib import Path
@@ -148,13 +147,6 @@ from app.DataStorageRetrieval.minio_utils import (
 from pathlib import Path
 import asyncio
 import os
-from urllib.parse import quote
-
-# Import column classifier functions for auto-classification
-from app.features.column_classifier.database import (
-    get_classifier_config_from_mongo,
-    save_classifier_config_to_mongo,
-)
 
 
 redis_client = feature_cache.router("data_upload_validate")
@@ -2280,243 +2272,6 @@ async def latest_project_dataframe(
     return response
 
 
-# =============================================================================
-# AUTO-CLASSIFICATION HELPER FUNCTIONS
-# =============================================================================
-
-async def _file_has_classification(
-    object_name: str,
-    client_name: str,
-    app_name: str,
-    project_name: str,
-) -> tuple[bool, dict | None]:
-    """Check if a file already has classification in MongoDB. Returns (has_classification, config_dict)."""
-    try:
-        config = get_classifier_config_from_mongo(
-            client_name, app_name, project_name, file_name=object_name
-        )
-        return (config is not None, config)
-    except Exception as e:
-        logger.warning(f"Error checking classification for {object_name}: {e}")
-        return (False, None)
-
-
-def _classify_column(
-    col: str,
-    col_type: str,
-    identifier_keywords: list[str],
-    measure_keywords: list[str],
-) -> str:
-    """Classify a single column. Returns 'identifiers', 'measures', or 'unclassified'."""
-    col_lower = col.lower()
-    
-    if any(keyword in col_lower for keyword in identifier_keywords):
-        return "identifiers"
-    elif any(keyword in col_lower for keyword in measure_keywords):
-        return "measures"
-    elif col_type in ["object", "category", "string"]:
-        return "identifiers"
-    elif "int" in col_type.lower() or "float" in col_type.lower() or col_type in ["numeric", "integer", "float64", "float32", "int64", "int32"]:
-        return "measures"
-    else:
-        return "unclassified"
-
-
-async def _auto_classify_and_save_file(
-    object_name: str,
-    client_name: str,
-    app_name: str,
-    project_name: str,
-    project_id: int | None = None,
-    existing_config: dict | None = None,
-) -> None:
-    """Auto-classify a file and save to MongoDB (same as column classifier atom).
-    
-    If existing_config is provided, only classifies new columns and merges with existing.
-    """
-    try:
-        # Load dataframe from MinIO
-        if not object_name.endswith(".arrow"):
-            return
-        
-        try:
-            response = minio_client.get_object(MINIO_BUCKET, object_name)
-            content = response.read()
-        except S3Error as e:
-            code = getattr(e, "code", "")
-            if code in {"NoSuchKey", "NoSuchBucket"}:
-                logger.warning(f"File not found for classification: {object_name}")
-                return
-            raise
-        
-        # Parse Arrow file
-        reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
-        df = reader.read_all().to_pandas()
-        
-        # Normalize column names to lowercase
-        df.columns = [str(c).strip().lower() for c in df.columns]
-        all_columns = df.columns.tolist()
-        column_types = {c: str(df[c].dtype) for c in df.columns}
-        
-        # AUTO-CLASSIFY keywords (same as classify_columns endpoint)
-        # identifier_keywords = [
-        #     'id', 'name', 'brand', 'market', 'category', 'region', 'channel', 
-        #     'date', 'time', 'year', 'week', 'month', 'variant', 'ppg', 'type', 
-        #     'code', 'packsize', 'packtype'
-        # ]
-        # measure_keywords = [
-        #     'sales', 'revenue', 'volume', 'amount', 'value', 'price', 'cost', 
-        #     'profit', 'units', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 
-        #     'salesvalue', 'baseprice', 'promoprice'
-        # ]
-
-        identifier_keywords = [
-            'id', 'name', 'brand', 'market', 'category', 'region', 'channel', 
-            'date', 'time', 'year', 'week', 'month', 'variant', 'ppg', 'type', 
-            'code', 'packsize', 'packtype',"sku","product",
-            "segment","subsegment","subchannel","zone","state","city","cluster","store","retailer","distributor","partner","account",
-            "customer","consumer","household","respondent","wave","period","quarter","day"]
-
-
-        measure_keywords = [
-            'sales', 'revenue', 'volume', 'amount', 'value', 'price', 'cost', 
-            'profit', 'units', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 
-            'salesvalue', 'baseprice', 'promoprice',
-            "sale","qty","quantity", "mrp","nrv","margin","loss","rate","spend","impressions","clicks","carts","orders","views","shares","likes",
-            "comments","ratings","scores","awareness","consideration","preference","nps","penetration","frequency","reach","trps","grps","weight","index","share"]
-        
-        # If existing config exists, merge with existing classification
-        if existing_config:
-            # Normalize existing classification columns to lowercase (same as column classifier atom)
-            existing_identifiers = set([str(c).strip().lower() for c in existing_config.get("identifiers", [])])
-            existing_measures = set([str(c).strip().lower() for c in existing_config.get("measures", [])])
-            # Unclassified might not exist in old configs, so default to empty set
-            existing_unclassified = set([str(c).strip().lower() for c in existing_config.get("unclassified", [])])
-            existing_all = existing_identifiers | existing_measures | existing_unclassified
-            
-            # Find new columns (all_columns are already normalized to lowercase)
-            all_columns_set = set(all_columns)
-            new_columns = all_columns_set - existing_all
-            
-            if not new_columns:
-                return
-            
-            # Classify only new columns
-            new_identifiers = []
-            new_measures = []
-            new_unclassified = []
-            
-            for col in new_columns:
-                col_type = column_types.get(col, "string")
-                classification = _classify_column(col, col_type, identifier_keywords, measure_keywords)
-                
-                if classification == "identifiers":
-                    new_identifiers.append(col)
-                elif classification == "measures":
-                    new_measures.append(col)
-                else:
-                    new_unclassified.append(col)
-            
-            # Merge with existing classification
-            final_identifiers = list(existing_identifiers | set(new_identifiers))
-            final_measures = list(existing_measures | set(new_measures))
-            final_unclassified = list(existing_unclassified | set(new_unclassified))
-        else:
-            # Full classification for new file
-            final_identifiers = []
-            final_measures = []
-            final_unclassified = []
-            
-            for col in all_columns:
-                col_type = column_types.get(col, "string")
-                classification = _classify_column(col, col_type, identifier_keywords, measure_keywords)
-                
-                if classification == "identifiers":
-                    final_identifiers.append(col)
-                elif classification == "measures":
-                    final_measures.append(col)
-                else:
-                    final_unclassified.append(col)
-        
-        # Save to MongoDB using same pattern as column classifier atom
-        config_data = {
-            "project_id": project_id,
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-            "identifiers": final_identifiers,
-            "measures": final_measures,
-            "dimensions": {},  # Empty dimensions object (same as column classifier)
-            "file_name": object_name,
-        }
-        
-        # Get environment variables (same as save_config endpoint)
-        env = await get_env_vars(
-            client_name=client_name,
-            app_name=app_name,
-            project_name=project_name,
-        )
-        if env:
-            config_data["env"] = env
-        
-        # Save to MongoDB
-        mongo_result = save_classifier_config_to_mongo(config_data)
-            
-    except Exception as e:
-        pass
-
-
-async def _background_auto_classify_files(
-    files: list[dict],
-    env: dict,
-    client_name: str,
-    app_name: str,
-    project_name: str,
-) -> None:
-    """Background task to auto-classify files that don't have classification."""
-    try:
-        project_id = None
-        try:
-            project_id_str = env.get("PROJECT_ID")
-            if project_id_str:
-                project_id = int(project_id_str)
-        except (ValueError, TypeError):
-            pass
-        
-        for file_entry in files:
-            object_name = file_entry.get("object_name")
-            if not object_name:
-                continue
-            
-            # Check if file already has classification
-            has_classification, existing_config = await _file_has_classification(
-                object_name, client_name, app_name, project_name
-            )
-            
-            if has_classification:
-                # Check for new columns and classify only those
-                await _auto_classify_and_save_file(
-                    object_name,
-                    client_name,
-                    app_name,
-                    project_name,
-                    project_id,
-                    existing_config=existing_config,
-                )
-            else:
-                # Auto-classify in background (full classification)
-                await _auto_classify_and_save_file(
-                    object_name,
-                    client_name,
-                    app_name,
-                    project_name,
-                    project_id,
-                    existing_config=None,
-                )
-    except Exception as e:
-        pass
-
-
 @router.get("/list_saved_dataframes")
 async def list_saved_dataframes(
     client_name: str = "",
@@ -2575,26 +2330,6 @@ async def list_saved_dataframes(
             if isinstance(size, int):
                 entry["size"] = size
             files.append(entry)
-        
-        # Trigger background auto-classification for files without classification
-        # This runs asynchronously and doesn't block the response
-        resolved_client = env.get("CLIENT_NAME", client_name or "default_client")
-        resolved_app = env.get("APP_NAME", app_name or "default_app")
-        resolved_project = env.get("PROJECT_NAME", project_name or "default_project")
-        
-        try:
-            asyncio.create_task(
-                _background_auto_classify_files(
-                    files,
-                    env,
-                    resolved_client,
-                    resolved_app,
-                    resolved_project,
-                )
-            )
-        except Exception:
-            pass
-        
         return {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
@@ -3158,9 +2893,10 @@ def _cast_series_dtype(series: pd.Series, dtype: str, datetime_format: str | Non
     if dtype_lower in {"datetime", "timestamp", "datetime64"}:
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
-        # IMPORTANT: Always use auto-detection for datetime64 to avoid null values
-        # Even if format is provided, ignore it and use auto-detection for consistency
-        return pd.to_datetime(normalized_series, errors="coerce")
+        # Normalize format string if provided (replace '/' and '.' with '-') to match normalized data
+        normalized_format = datetime_format.replace('/', '-').replace('.', '-') if datetime_format else None
+        # Use the provided format if available, otherwise fall back to auto-detection
+        return pd.to_datetime(normalized_series, format=normalized_format, errors="coerce")
     if dtype_lower == "date":
         # Normalize separators: replace all '/', '.' with '-' to handle mixed separators
         normalized_series = series.astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
@@ -3658,19 +3394,12 @@ async def apply_data_transformations(request: Request):
                 elif new_dtype == "object":
                     df[col_name] = df[col_name].astype(str)
                 elif new_dtype == "datetime64":
-                    # Normalize separators: replace all '/' and '.' with '-' to handle mixed separators
-                    # Convert to string first, then normalize separators
-                    df[col_name] = df[col_name].astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
-                    
-                    # IMPORTANT: For datetime64, ALWAYS use auto-detection to avoid null values
-                    # Even if format is provided (from AI or manual), ignore it and use auto-detection
-                    # This ensures consistent behavior and prevents null values from format mismatches
-                    logger.info(f"Converting column '{col_name}' to datetime64 with auto-detection (ignoring any provided format to ensure compatibility)")
-                    
-                    # Use pd.to_datetime without format parameter to enable auto-detection
-                    # pandas will automatically infer the format from the data, preventing null values
-                    # This works for both AI-sent and manually-sent datetime64 conversions
-                    df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
+                    # Mirror process_saved_dataframe behavior: single-step conversion with optional format
+                    if datetime_format:
+                        df[col_name] = pd.to_datetime(df[col_name], format=datetime_format, errors='coerce')
+                    else:
+                        logger.info(f"Converting column '{col_name}' to datetime64 without specific format")
+                        df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
                 elif new_dtype == "bool":
                     df[col_name] = df[col_name].astype(bool)
             except Exception as e:

@@ -45,7 +45,7 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
-  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
+  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(false);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isHeaderMinimized, setIsHeaderMinimized] = useState(false);

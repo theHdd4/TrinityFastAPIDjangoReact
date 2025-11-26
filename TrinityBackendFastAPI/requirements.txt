@@ -9,7 +9,7 @@ numpy
 polars>=0.20.0
 fastexcel>=0.15.1
 numba
-minio
+minio==7.2.0
 motor
 python-multipart
 pyarrow>=15.0.0

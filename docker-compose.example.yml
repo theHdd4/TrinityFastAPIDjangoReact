@@ -220,6 +220,7 @@ services:
     volumes:
       - ./TrinityBackendDjango:/code
       - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+      - ./TrinityAgent:/app/TrinityAgent:ro
     env_file:
       - ./TrinityBackendDjango/.env
     ports:
@@ -261,6 +262,7 @@ services:
     volumes:
       - ./TrinityBackendDjango:/code
       - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+      - ./TrinityAgent:/app/TrinityAgent:ro
     env_file:
       - ./TrinityBackendDjango/.env
     depends_on:
@@ -288,6 +290,7 @@ services:
     volumes:
       - ./TrinityBackendDjango:/code
       - ./TrinityBackendFastAPI:/code/TrinityBackendFastAPI
+      - ./TrinityAgent:/app/TrinityAgent:ro
     env_file:
       - ./TrinityBackendDjango/.env
     environment:
@@ -348,6 +351,7 @@ services:
       REDIS_LOG_SERVICE: trinity-ai
     volumes:
       - ./TrinityBackendFastAPI/app/DataStorageRetrieval:/app/DataStorageRetrieval:ro
+      - ./TrinityAgent:/app/TrinityAgent:ro
     ports:
       - "8002:8002"
     networks:

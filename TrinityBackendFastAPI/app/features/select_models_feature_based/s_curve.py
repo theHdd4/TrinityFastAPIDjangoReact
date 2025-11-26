@@ -8,9 +8,8 @@ import io
 from .database import client
 
 logger = logging.getLogger(__name__)
-# Enable logging for debugging S-curve issues
-# Use INFO level to see combination/model matching logs
-logger.setLevel(logging.INFO)
+# Disable logging for S-curve
+logger.disabled = True
 
 def generate_scaled_media_series(recent_series: List[float], x_range: List[float]) -> Tuple[List[List[float]], List[float]]:
     """

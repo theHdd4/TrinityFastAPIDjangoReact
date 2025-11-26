@@ -147,6 +147,110 @@ def _load_dataframe(file_key: str) -> pd.DataFrame | None:
     return None
 
 
+def _selected_models_column(frame: pd.DataFrame) -> str | None:
+    for column in frame.columns:
+        if column.lower() == "selected_models":
+            return column
+    return None
+
+
+def _write_dataframe_to_minio(frame: pd.DataFrame, file_key: str) -> None:
+    if not minio_client:
+        raise RuntimeError("MinIO connection is not available")
+
+    lower_key = file_key.lower()
+    data: bytes
+    content_type: str
+
+    if lower_key.endswith(".csv"):
+        buffer = io.StringIO()
+        frame.to_csv(buffer, index=False)
+        data = buffer.getvalue().encode("utf-8")
+        content_type = "text/csv"
+    elif lower_key.endswith(".xlsx"):
+        buffer = io.BytesIO()
+        frame.to_excel(buffer, index=False)
+        data = buffer.getvalue()
+        content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif lower_key.endswith(".arrow") or lower_key.endswith(".feather"):
+        import pyarrow as pa
+        import pyarrow.ipc as ipc
+
+        table = pa.Table.from_pandas(frame)
+        buffer = io.BytesIO()
+        with ipc.new_file(buffer, table.schema) as writer:
+            writer.write_table(table)
+        data = buffer.getvalue()
+        content_type = "application/octet-stream"
+    else:
+        raise ValueError(f"Unsupported file type for writing: {file_key}")
+
+    minio_client.put_object(
+        MINIO_BUCKET,
+        file_key,
+        io.BytesIO(data),
+        len(data),
+        content_type=content_type,
+    )
+
+
+def _update_selected_models_flag(file_key: str, combination_id: str | None, model_name: str) -> bool:
+    normalised_key = _normalise_file_key(file_key)
+    if not normalised_key:
+        logger.warning("Cannot update selected_models flag: empty file key")
+        return False
+
+    frame = _load_dataframe(normalised_key)
+    if frame is None or frame.empty:
+        logger.warning("Cannot update selected_models flag: dataframe empty for %s", normalised_key)
+        return False
+
+    combination_column = _detect_combination_column(frame)
+    model_column = _detect_model_name_column(frame)
+    if not model_column:
+        logger.warning("Cannot update selected_models flag: model column not found in %s", normalised_key)
+        return False
+
+    selected_column = _selected_models_column(frame)
+    if not selected_column:
+        selected_column = "selected_models"
+        frame[selected_column] = "no"
+    else:
+        frame[selected_column] = frame[selected_column].fillna("no").astype(str)
+
+    mask = frame[model_column].astype(str) == str(model_name)
+
+    if combination_column and combination_id is not None:
+        combo_mask = frame[combination_column].astype(str) == str(combination_id)
+        if combo_mask.any():
+            frame.loc[combo_mask, selected_column] = "no"
+        mask &= combo_mask
+
+    if not mask.any():
+        logger.warning(
+            "No rows matched for selected_models update (file=%s, combination=%s, model=%s)",
+            normalised_key,
+            combination_id,
+            model_name,
+        )
+        return False
+
+    frame.loc[mask, selected_column] = "yes"
+
+    try:
+        _write_dataframe_to_minio(frame, normalised_key)
+        logger.info(
+            "Updated selected_models flag for %s (combination=%s, model=%s)",
+            normalised_key,
+            combination_id,
+            model_name,
+        )
+        return True
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error("Failed to persist selected_models flag for %s: %s", normalised_key, exc)
+        return False
+
+
 def _detect_combination_column(frame: pd.DataFrame) -> str | None:
     for column in frame.columns:
         col_lower = column.lower()
@@ -1304,6 +1408,25 @@ def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
     SAVED_MODELS[model_id] = saved_entry
+
+    target_combination = combination_id or record.combination_id
+    try:
+        updated = _update_selected_models_flag(request.file_key, target_combination, request.model_name)
+        if not updated:
+            logger.warning(
+                "Selected model flag not updated for file=%s combination=%s model=%s",
+                request.file_key,
+                target_combination,
+                request.model_name,
+            )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(
+            "Failed to update selected_models column for file=%s combination=%s model=%s: %s",
+            request.file_key,
+            target_combination,
+            request.model_name,
+            exc,
+        )
 
     return {
         "model_id": model_id,
