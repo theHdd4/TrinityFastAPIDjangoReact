@@ -40,6 +40,14 @@ export interface TextBoxSettings {
   lock_content: boolean;
 }
 
+export interface TextBoxConfig {
+  id: string;
+  title?: string;
+  content?: string;
+  html?: string;
+  settings?: Partial<TextBoxSettings>;
+}
+
 export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
   format: "plain",
   content: "",
@@ -1675,6 +1683,7 @@ export interface LayoutCard {
   textBoxContent?: string;
   textBoxHtml?: string;
   textBoxSettings?: TextBoxSettings;
+  textBoxes?: TextBoxConfig[];
   order?: number; // For positioning standalone cards between molecules
   afterMoleculeId?: string; // Reference to molecule this card is positioned after
   beforeMoleculeId?: string; // Reference to molecule this card is positioned before

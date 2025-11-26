@@ -60,6 +60,7 @@ import {
   DroppedAtom,
   CardVariable,
   DEFAULT_TEXTBOX_SETTINGS,
+  TextBoxConfig,
   createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
@@ -91,6 +92,35 @@ const normalizeTextBoxValue = (value?: string) =>
 const TEXTBOX_PLACEHOLDER = '';
 const TEXTBOX_PLACEHOLDER_NORMALIZED = '';
 const isPlaceholderContent = (value?: string) => normalizeTextBoxValue(value) === TEXTBOX_PLACEHOLDER_NORMALIZED;
+
+const normalizeTextBoxes = (card: any): TextBoxConfig[] => {
+  const incoming = card?.textBoxes ?? card?.text_boxes;
+  const parsed = Array.isArray(incoming) ? incoming : [];
+
+  if (parsed.length > 0) {
+    return parsed.map((box: any, index: number) => ({
+      id: box.id ?? `text-box-${index + 1}`,
+      title: box.title ?? `Text Box ${index + 1}`,
+      content: box.content ?? box.text ?? card?.textBoxContent ?? '',
+      html: box.html ?? card?.textBoxHtml ?? '',
+      settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? box) },
+    }));
+  }
+
+  if (card?.textBoxEnabled ?? card?.text_box_enabled) {
+    return [
+      {
+        id: 'text-box-1',
+        title: 'Text Box 1',
+        content: card?.textBoxContent ?? card?.text_box_content ?? '',
+        html: card?.textBoxHtml ?? card?.text_box_html ?? '',
+        settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(card?.textBoxSettings ?? card?.text_box_settings ?? {}) },
+      },
+    ];
+  }
+
+  return [];
+};
 
 
 interface CanvasAreaProps {
@@ -215,6 +245,15 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
     beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
     variables: normalizeCardVariables(card.variables, card.id),
+    textBoxEnabled: card.textBoxEnabled ?? card.text_box_enabled ?? false,
+    textBoxContent: card.textBoxContent ?? card.text_box_content,
+    textBoxHtml: card.textBoxHtml ?? card.text_box_html,
+    textBoxSettings: card.textBoxSettings
+      ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }
+      : card.text_box_settings
+      ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.text_box_settings }
+      : undefined,
+    textBoxes: normalizeTextBoxes(card),
   }));
 };
 
@@ -366,6 +405,15 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
           afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
           beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
           variables: normalizeCardVariables(card.variables, card.id),
+          textBoxEnabled: card.textBoxEnabled ?? card.text_box_enabled ?? false,
+          textBoxContent: card.textBoxContent ?? card.text_box_content,
+          textBoxHtml: card.textBoxHtml ?? card.text_box_html,
+          textBoxSettings: card.textBoxSettings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }
+            : card.text_box_settings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.text_box_settings }
+            : undefined,
+          textBoxes: normalizeTextBoxes(card),
         };
 
         // Validation: Log warning if we expected moleculeId but it's missing
@@ -569,32 +617,83 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       return null;
     }
 
-    const textBoxSettings = { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings };
-    const rawTextContent = card.textBoxContent ?? '';
-    const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
-    const rawHtmlContent = card.textBoxHtml?.trim()?.length ? card.textBoxHtml : '';
-    const htmlContent = rawHtmlContent && !isPlaceholderContent(rawHtmlContent)
-      ? rawHtmlContent
-      : textContent.replace(/\n/g, '<br />');
-    const textData = {
-      text: textContent,
-      html: htmlContent,
+    const normalizedTextBoxes = (Array.isArray(card.textBoxes) && card.textBoxes.length > 0
+      ? card.textBoxes
+      : normalizeTextBoxes(card))
+      .map((box, index) => ({
+        ...box,
+        id: box.id ?? `text-box-${index + 1}`,
+        title: box.title ?? `Text Box ${index + 1}`,
+        content: box.content ?? '',
+        html: box.html ?? '',
+        settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? {}) },
+      }));
+
+    if (normalizedTextBoxes.length === 0) {
+      return null;
+    }
+
+    const syncLegacyFields = (boxes: TextBoxConfig[]) => {
+      const primary = boxes[0];
+
+      return {
+        textBoxes: boxes,
+        textBoxContent: primary?.content ?? '',
+        textBoxHtml: primary?.html ?? '',
+        textBoxSettings: primary?.settings
+          ? { ...DEFAULT_TEXTBOX_SETTINGS, ...primary.settings }
+          : card.textBoxSettings,
+      };
     };
 
-    const handleTextChange = (data: { text: string; html: string }) => {
+    const updateCardTextBoxes = (updater: (boxes: TextBoxConfig[]) => TextBoxConfig[]) => {
       if (!Array.isArray(layoutCards)) return;
+
       setLayoutCards(
-        layoutCards.map(existing =>
-          existing.id === card.id
-            ? { ...existing, textBoxContent: data.text, textBoxHtml: data.html }
-            : existing,
-        ),
+        layoutCards.map(existing => {
+          if (existing.id !== card.id) return existing;
+
+          const nextBoxes = updater(normalizedTextBoxes);
+          return {
+            ...existing,
+            ...syncLegacyFields(nextBoxes),
+          };
+        }),
       );
     };
 
     return (
-      <div className="mt-6">
-        <CardTextBoxCanvas data={textData} settings={textBoxSettings} onTextChange={handleTextChange} />
+      <div className="mt-6 space-y-6">
+        {normalizedTextBoxes.map(box => {
+          const rawTextContent = box.content ?? '';
+          const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
+          const rawHtmlContent = box.html?.trim()?.length ? box.html : '';
+          const htmlContent = rawHtmlContent && !isPlaceholderContent(rawHtmlContent)
+            ? rawHtmlContent
+            : textContent.replace(/\n/g, '<br />');
+          const textData = { text: textContent, html: htmlContent };
+
+          return (
+            <Card key={box.id} className="p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-gray-900">{box.title}</h4>
+              </div>
+              <CardTextBoxCanvas
+                data={textData}
+                settings={box.settings as TextBoxSettings}
+                onTextChange={(data) =>
+                  updateCardTextBoxes((boxes) =>
+                    boxes.map(existing =>
+                      existing.id === box.id
+                        ? { ...existing, content: data.text, html: data.html }
+                        : existing,
+                    ),
+                  )
+                }
+              />
+            </Card>
+          );
+        })}
       </div>
     );
   };
