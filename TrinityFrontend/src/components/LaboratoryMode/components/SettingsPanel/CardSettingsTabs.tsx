@@ -968,7 +968,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
 
           <TabsContent value="textbox" className="space-y-4">
             <Card className="p-4 space-y-6">
-              <div className="flex items-center justify-end w-full">
+              <div className="flex items-center justify-between w-full">
+                <span className="text-sm font-medium text-gray-900">Insert text box</span>
                 <Switch checked={textBoxEnabled} onCheckedChange={handleToggleTextBox} />
               </div>
 
