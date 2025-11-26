@@ -6,16 +6,23 @@ from fastapi.responses import Response
 import io
 import json
 from datetime import datetime
-import numpy as np
 import pandas as pd
 
-from app.core.task_queue import celery_task_client, format_task_response
+from app.core.task_queue import format_task_response
 from app.features.data_upload_validate.app.routes import get_object_prefix
-from .deps import get_minio_df, minio_client, MINIO_BUCKET, redis_client
+from .deps import minio_client, MINIO_BUCKET, redis_client
 from .mongodb_saver import (
     save_create_data_settings,
     save_createandtransform_configs,
     get_createandtransform_config_from_mongo,
+)
+from .task_service import (
+    submit_cached_dataframe_task,
+    submit_cardinality_task,
+    submit_classification_task,
+    submit_perform_task,
+    submit_results_task,
+    submit_save_task,
 )
 
 router = APIRouter()
@@ -140,25 +147,15 @@ async def perform_create(
         project_name=project_name,
     )
 
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.perform",
-        dotted_path="app.features.createcolumn.service.perform_createcolumn_task",
-        kwargs={
-            "bucket_name": bucket_name,
-            "object_name": object_names,
-            "object_prefix": prefix,
-            "identifiers": identifiers,
-            "form_items": form_items,
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "perform",
-            "object_name": object_names,
-            "bucket": bucket_name,
-        },
+    submission = submit_perform_task(
+        bucket_name=bucket_name,
+        object_name=object_names,
+        object_prefix=prefix,
+        identifiers=identifiers,
+        form_items=form_items,
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
     )
 
     if submission.status == "failure":
@@ -174,23 +171,20 @@ async def get_create_data(
     object_names: str = Query(...),
     bucket_name: str = Query(...)
 ):
-    try:
-        # 🔧 CRITICAL FIX: Resolve the full MinIO object path
-        prefix = await get_object_prefix()
-        full_object_path = f"{prefix}{object_names}" if not object_names.startswith(prefix) else object_names
-        create_key = f"{full_object_path}_create.csv"
-        
-        print(f"🔧 File path resolution for results: original={object_names}, prefix={prefix}, full_path={full_object_path}, create_key={create_key}")
-        
-        create_obj = minio_client.get_object(bucket_name, create_key)
-        create_df = pd.read_csv(io.BytesIO(create_obj.read()))
-        clean_df = create_df.replace({np.nan: None, np.inf: None, -np.inf: None})
-        return {
-            "row_count": len(create_df),
-            "create_data": clean_df.to_dict(orient="records")
-        }
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Unable to fetch create data: {str(e)}")
+    prefix = await get_object_prefix()
+    submission = submit_results_task(
+        bucket_name=bucket_name,
+        object_name=object_names,
+        object_prefix=prefix,
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=400,
+            detail=submission.detail or "Unable to fetch create data",
+        )
+
+    return format_task_response(submission)
 
 
 
@@ -212,27 +206,17 @@ async def save_createcolumn_dataframe(
         project_name=project_name or "",
     )
 
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.save",
-        dotted_path="app.features.createcolumn.service.save_dataframe_task",
-        kwargs={
-            "csv_data": csv_data,
-            "filename": filename,
-            "object_prefix": prefix,
-            "overwrite_original": overwrite_original,
-            "client_name": client_name,
-            "app_name": app_name,
-            "project_name": project_name,
-            "user_id": user_id,
-            "project_id": project_id,
-            "operation_details": operation_details,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "save",
-            "filename": filename,
-            "overwrite_original": overwrite_original,
-        },
+    submission = submit_save_task(
+        csv_data=csv_data,
+        filename=filename,
+        object_prefix=prefix,
+        overwrite_original=overwrite_original,
+        client_name=client_name,
+        app_name=app_name,
+        project_name=project_name,
+        user_id=user_id,
+        project_id=project_id,
+        operation_details=operation_details,
     )
 
     if submission.status == "failure":
@@ -249,21 +233,8 @@ async def cached_dataframe(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     page_size: int = Query(50, ge=1, le=1000, description="Number of rows per page")
 ):
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.cached_dataframe",
-        dotted_path="app.features.createcolumn.service.cached_dataframe_task",
-        kwargs={
-            "object_name": object_name,
-            "page": page,
-            "page_size": page_size,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "cached_dataframe",
-            "object_name": object_name,
-            "page": page,
-            "page_size": page_size,
-        },
+    submission = submit_cached_dataframe_task(
+        object_name=object_name, page=page, page_size=page_size
     )
 
     if submission.status == "failure":
@@ -354,19 +325,8 @@ async def get_column_classification(
     validator_atom_id: str = Query(...),
     file_key: str = Query(...)
 ):
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.classification",
-        dotted_path="app.features.createcolumn.service.classification_task",
-        kwargs={
-            "validator_atom_id": validator_atom_id,
-            "file_key": file_key,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "classification",
-            "validator_atom_id": validator_atom_id,
-            "file_key": file_key,
-        },
+    submission = submit_classification_task(
+        validator_atom_id=validator_atom_id, file_key=file_key
     )
 
     if submission.status == "failure":
@@ -446,18 +406,8 @@ async def get_createcolumn_configuration(
 async def get_cardinality_data(
     object_name: str = Query(..., description="Object name/path of the dataframe"),
 ):
-    submission = celery_task_client.submit_callable(
-        name="createcolumn.cardinality",
-        dotted_path="app.features.createcolumn.service.cardinality_task",
-        kwargs={
-            "bucket_name": MINIO_BUCKET,
-            "object_name": object_name,
-        },
-        metadata={
-            "atom": "createcolumn",
-            "operation": "cardinality",
-            "object_name": object_name,
-        },
+    submission = submit_cardinality_task(
+        bucket_name=MINIO_BUCKET, object_name=object_name
     )
 
     if submission.status == "failure":
