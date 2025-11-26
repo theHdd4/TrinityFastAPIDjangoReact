@@ -1197,13 +1197,70 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           
           // 🔧 GET TARGET FILE: Use the exact keys from LLM response
           let targetFile = '';
+          let targetFileObjectName = ''; // Store the object_name format for dataSource dropdown
           
           // Priority 1: Use AI-provided file name (exact keys from LLM)
           if (data.file_name) {
             targetFile = data.file_name;
+            // Extract object_name format (remove .arrow extension if present, keep path structure)
+            targetFileObjectName = targetFile.replace(/\.arrow$/, '');
             console.log('🎯 Using AI-provided file name:', targetFile);
+            console.log('🎯 Extracted object_name for dataSource:', targetFileObjectName);
+          } else if (chartsList.length > 0 && chartsList[0].file) {
+            // Fallback: Try to get file from first chart
+            const chartFile = Array.isArray(chartsList[0].file) ? chartsList[0].file[0] : chartsList[0].file;
+            if (chartFile) {
+              targetFile = chartFile;
+              // Extract object_name format (remove .arrow extension if present, keep path structure)
+              targetFileObjectName = chartFile.replace(/\.arrow$/, '');
+              console.log('🎯 Using file from chart config:', targetFile);
+              console.log('🎯 Extracted object_name for dataSource:', targetFileObjectName);
+            }
           } else {
             console.log('⚠️ No file name found in AI response');
+          }
+          
+          // 🔧 CRITICAL: Fetch frames list and match to correct object_name for dropdown
+          // This ensures the dropdown shows the selected file correctly
+          let matchedObjectName = targetFileObjectName;
+          try {
+            const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+            const framesData = await framesResponse.json();
+            const frames = Array.isArray(framesData.files) ? framesData.files : [];
+            
+            // Try to find matching object_name in frames list
+            const matchingFrame = frames.find((f: any) => {
+              if (!f.object_name || !f.arrow_name) return false;
+              
+              // Exact match
+              if (f.object_name === targetFileObjectName) return true;
+              
+              // Match by basename (filename without path)
+              const targetBasename = targetFileObjectName.split('/').pop()?.replace(/\.arrow$/, '');
+              const frameBasename = f.object_name.split('/').pop()?.replace(/\.arrow$/, '');
+              if (targetBasename && frameBasename && targetBasename === frameBasename) return true;
+              
+              // Match by arrow_name basename
+              const arrowBasename = f.arrow_name.split('/').pop()?.replace(/\.arrow$/, '');
+              if (targetBasename && arrowBasename && targetBasename === arrowBasename) return true;
+              
+              // Match by full arrow_name path
+              const arrowNameWithoutExt = f.arrow_name.replace(/\.arrow$/, '');
+              if (arrowNameWithoutExt === targetFileObjectName || arrowNameWithoutExt.endsWith('/' + targetFileObjectName)) return true;
+              
+              return false;
+            });
+            
+            if (matchingFrame) {
+              matchedObjectName = matchingFrame.object_name;
+              console.log('✅ Matched file to object_name:', targetFileObjectName, '->', matchedObjectName);
+            } else {
+              console.log('⚠️ Could not match file to frames list, using original:', targetFileObjectName);
+              console.log('Available frames:', frames.map((f: any) => ({ object_name: f.object_name, arrow_name: f.arrow_name })));
+            }
+          } catch (error) {
+            console.error('Failed to fetch frames list for matching:', error);
+            // Continue with original targetFileObjectName
           }
           
           if (!targetFile) {
@@ -1270,13 +1327,14 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           console.log('🔧 Processed charts:', charts.length);
           
           // 🔧 CRITICAL FIX: Update atom settings with the AI configuration AND load data
+          // Use object_name format (without .arrow) for dataSource to match dropdown format
           updateAtomSettings(atomId, { 
             aiConfig: data,
             aiMessage: data.message,
             // Add the AI-generated charts to the charts array
             charts: charts,
-            // 🔧 CRITICAL: Set proper data source and file ID for chart rendering
-            dataSource: targetFile,
+            // 🔧 CRITICAL: Set proper data source using matched object_name for dropdown visibility
+            dataSource: matchedObjectName || targetFileObjectName || targetFile.replace(/\.arrow$/, ''),
             fileId: targetFile,
             // Set the first chart as active
             currentChart: charts[0],
@@ -1292,7 +1350,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             yAxisColumn: charts[0].yAxis,
             // 🔧 CRITICAL: Set chart rendering state to trigger data loading
             chartRendered: false,
-            chartLoading: false
+            chartLoading: false,
+            // 🔧 AUTO-RENDER FLAG: Set flag to auto-trigger render after file loads
+            autoRenderAfterLoad: true
           });
           
           // 🔧 CRITICAL FIX: Connect to actual file system and load real data
@@ -1314,8 +1374,10 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               console.log('✅ File data loaded successfully:', fileData);
               
               // 🔧 STEP 2: Update atom settings with REAL file data
+              // Use object_name format (without .arrow) for dataSource to match dropdown format
+              // 🔧 CRITICAL: Don't clear charts here - preserve them so they don't disappear
               updateAtomSettings(atomId, {
-                dataSource: targetFile,
+                dataSource: matchedObjectName || targetFileObjectName || targetFile.replace(/\.arrow$/, ''),
                 fileId: fileData.file_id,
                 uploadedData: {
                   columns: fileData.columns,
@@ -1326,8 +1388,14 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   file_id: fileData.file_id,
                   row_count: fileData.row_count
                 },
-                chartRendered: false, // Will be rendered when chart is generated
-                chartLoading: false
+                // 🔧 CRITICAL: Don't reset chartRendered - keep existing chart state
+                // chartRendered will be updated after charts are generated
+                chartLoading: true, // Set to true to prevent useEffect from interfering
+                // 🔧 AUTO-RENDER FLAG: Keep flag to auto-trigger render
+                autoRenderAfterLoad: true,
+                // 🔧 CRITICAL: Preserve existing charts - don't clear them
+                // Charts will be updated in STEP 4 after generation
+                charts: charts  // Explicitly preserve charts here to prevent clearing
               });
               
               // 🔧 STEP 3: Generate charts using the backend - UNIFIED APPROACH
@@ -1507,7 +1575,11 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 charts: generatedCharts,
                 currentChart: generatedCharts[0] || charts[0],
                 chartRendered: generatedCharts.some(chart => chart.chartRendered),
-                chartLoading: false
+                chartLoading: false,
+                // 🔧 Clear auto-render flag after charts are generated
+                autoRenderAfterLoad: false,
+                // 🔧 Ensure dataSource is set using matched object_name for dropdown visibility
+                dataSource: matchedObjectName || targetFileObjectName || targetFile.replace(/\.arrow$/, '')
               });
               
               console.log('🎉 Charts processed:', generatedCharts.length);

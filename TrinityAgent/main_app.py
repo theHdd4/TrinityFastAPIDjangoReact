@@ -224,6 +224,68 @@ def get_group_by_router() -> Optional[APIRouter]:
         return None
 
 
+def get_chart_maker_router() -> Optional[APIRouter]:
+    """
+    Get the chart_maker agent router.
+    This is the main connection point for external systems.
+    
+    Returns:
+        APIRouter for chart_maker agent, or None if not available
+    """
+    try:
+        # Ensure agents are initialized
+        initialize_all_agents()
+        
+        # Get chart_maker router from registry
+        router = get_agent_router("chart_maker")
+        
+        if router:
+            # Ensure main_app is imported to register routes
+            route_count_before = len(router.routes)
+            try:
+                # Try multiple import strategies to ensure routes are registered
+                try:
+                    import Agent_ChartMaker.main_app
+                except ImportError:
+                    try:
+                        from Agent_ChartMaker import main_app
+                    except ImportError:
+                        # Try absolute import
+                        import sys
+                        from pathlib import Path
+                        agent_dir = Path(__file__).resolve().parent
+                        if str(agent_dir) not in sys.path:
+                            sys.path.insert(0, str(agent_dir))
+                        import Agent_ChartMaker.main_app
+                
+                route_count_after = len(router.routes)
+                logger.info(f"✅ ChartMaker router retrieved successfully")
+                logger.info(f"  Routes before main_app import: {route_count_before}")
+                logger.info(f"  Routes after main_app import: {route_count_after}")
+                if route_count_after == 0:
+                    logger.warning("⚠️ Router has no routes after importing main_app!")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import main_app to register routes: {e}")
+                route_count = len(router.routes)
+                logger.info(f"✅ ChartMaker router retrieved (has {route_count} routes)")
+        else:
+            logger.warning("⚠️ ChartMaker router not found in registry - will be auto-discovered")
+            # ChartMaker should be auto-discovered, but if not found, try to ensure it's registered
+            # by importing the module
+            try:
+                import Agent_ChartMaker.main_app
+                router = get_agent_router("chart_maker")
+                if router:
+                    logger.info("✅ ChartMaker router registered and retrieved after import")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import ChartMaker main_app: {e}")
+        
+        return router
+    except Exception as e:
+        logger.error(f"❌ Failed to get chart_maker router: {e}", exc_info=True)
+        return None
+
+
 def get_all_agent_routers() -> Dict[str, APIRouter]:
     """
     Get all registered agent routers.
@@ -279,6 +341,7 @@ __all__ = [
     "get_merge_router",
     "get_create_transform_router",
     "get_group_by_router",
+    "get_chart_maker_router",
     "get_all_agent_routers",
     "initialize_trinity_agent",
     "get_agent_router",

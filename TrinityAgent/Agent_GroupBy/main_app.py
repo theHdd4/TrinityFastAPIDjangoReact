@@ -245,32 +245,84 @@ if BaseAgent is not None:
             if "group_by_json" in result:
                 group_by_json = result["group_by_json"]
                 
-                # 🔧 CRITICAL: LLM-provided values overwrite defaults - use exactly what LLM provided
-                # Normalize group_by_columns (identifiers/levels) to lowercase for backend compatibility
+                # Get original values from LLM
                 group_by_columns = group_by_json.get("group_by_columns", [])
-                # 🔧 Backend requires lowercase: "Year" -> "year", "Volume" -> "volume"
-                normalized_columns = [
-                    col.strip().lower() if isinstance(col, str) else str(col).strip().lower()
-                    for col in group_by_columns
-                ]
-                
-                # 🔧 CRITICAL: LLM-provided aggregation_functions (measures) overwrite defaults
-                # Normalize aggregation_functions field names to lowercase for backend compatibility
                 aggregation_functions = group_by_json.get("aggregation_functions", {})
-                # 🔧 Backend requires lowercase: "SalesValue" -> "salesvalue", "Volume" -> "volume"
+                
+                # Get file path
+                file = group_by_json.get("file", [])
+                if isinstance(file, list):
+                    file = file[0] if file else ""
+                elif not isinstance(file, str):
+                    file = str(file)
+                
+                # 🔧 CRITICAL: Validate columns exist in file first (case-insensitive matching)
+                # This ensures 100% guarantee that columns exist in actual file data
+                validation_errors = []
+                column_mapping = {}  # Maps user input -> original case from file
+                
+                if file and self.data_validator:
+                    # Validate using case-insensitive matching, get original case from file
+                    is_valid, errors, col_mapping = self.data_validator.validate_groupby_config(
+                        group_by_columns, aggregation_functions, file, "GroupBy"
+                    )
+                    
+                    if not is_valid:
+                        validation_errors.extend(errors)
+                        logger.error(f"❌ VALIDATION FAILED: {errors}")
+                    else:
+                        # Store column mapping
+                        column_mapping = col_mapping
+                        logger.info("✅ VALIDATION PASSED for GroupBy configuration")
+                    
+                    if validation_errors:
+                        error_msg = "Data validation failed. " + "; ".join(validation_errors)
+                        logger.error(f"❌ GROUPBY VALIDATION ERRORS: {error_msg}")
+                        # Set success to False and add detailed error message
+                        normalized["success"] = False
+                        normalized["smart_response"] = (
+                            f"I found some issues with the GroupBy configuration: {error_msg}. "
+                            "Please check that all column names exist in the file."
+                        )
+                        normalized["validation_errors"] = validation_errors
+                elif file:
+                    logger.warning("⚠️ DataValidator not available - skipping validation")
+                
+                # 🔧 CRITICAL: Apply column mapping to get original case from file, then normalize to lowercase
+                # Backend requires lowercase: "Year" -> "year", "Volume" -> "volume"
+                if column_mapping:
+                    # Use mapped columns (original case from file), then normalize to lowercase
+                    mapped_columns = [column_mapping.get(col, col) for col in group_by_columns]
+                    normalized_columns = [col.lower() for col in mapped_columns]
+                    logger.info(f"✅ Applied column case correction: {group_by_columns} -> {mapped_columns} -> {normalized_columns}")
+                else:
+                    # Fallback: normalize directly to lowercase
+                    normalized_columns = [
+                        col.strip().lower() if isinstance(col, str) else str(col).strip().lower()
+                        for col in group_by_columns
+                    ]
+                
+                # Normalize aggregation_functions: get original case, then normalize to lowercase
                 normalized_agg_funcs = {}
                 for field, agg_func in aggregation_functions.items():
-                    normalized_field = field.strip().lower() if isinstance(field, str) else str(field).strip().lower()
-                    # Normalize aggregation function name to lowercase if it's a string
-                    # "Sum" -> "sum", "Count" -> "count"
+                    # Get original case from file if mapping available
+                    if column_mapping and field in column_mapping:
+                        mapped_field = column_mapping[field]
+                    else:
+                        mapped_field = field
+                    # Normalize to lowercase for backend
+                    normalized_field = mapped_field.lower()
                     normalized_agg = agg_func.lower() if isinstance(agg_func, str) else str(agg_func).lower()
                     normalized_agg_funcs[normalized_field] = normalized_agg
+                
+                if column_mapping:
+                    logger.info(f"✅ Applied aggregation column case correction: {list(aggregation_functions.keys())} -> {list(normalized_agg_funcs.keys())}")
                 
                 # 🔧 CRITICAL: Store normalized values - LLM values overwrite any defaults
                 # All column names are lowercase for backend compatibility
                 normalized["group_by_json"] = {
                     "bucket_name": group_by_json.get("bucket_name", "trinity"),
-                    "file": group_by_json.get("file", []),
+                    "file": file,
                     "group_by_columns": normalized_columns,  # 🔧 Normalized to lowercase (e.g., "Year" -> "year")
                     "aggregation_functions": normalized_agg_funcs  # 🔧 All keys normalized to lowercase (e.g., "SalesValue" -> "salesvalue")
                 }

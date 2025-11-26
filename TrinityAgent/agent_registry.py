@@ -637,9 +637,9 @@ def _sync_agents_after_init():
             if success_count == total_count and total_count > 0:
                 logger.info(f"✅✅✅ All {success_count} agents synced to PostgreSQL on startup ✅✅✅")
             elif success_count > 0:
-                logger.warning(f"⚠️ Only {success_count}/{total_count} agents synced to PostgreSQL on startup")
+                logger.debug(f"⚠️ Only {success_count}/{total_count} agents synced to PostgreSQL on startup (Django command will handle full sync)")
             else:
-                logger.error(f"❌ Failed to sync any agents to PostgreSQL on startup")
+                logger.debug(f"⚠️ Failed to sync any agents to PostgreSQL on startup (non-critical: Django management command will handle sync)")
             
             logger.info("=" * 80)
         except Exception as e:

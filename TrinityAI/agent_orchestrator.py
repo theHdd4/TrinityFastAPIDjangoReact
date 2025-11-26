@@ -301,11 +301,20 @@ class AgentExecutor:
                     "base": "TrinityAI-Internal"
                 }
             
-            # Handle /trinityai/chart and /trinityai/chart-maker endpoints
+            # Handle /trinityai/chart and /trinityai/chart-maker endpoints (OLD - replaced by standardized handler below)
+            # This handler is kept for backward compatibility but will be replaced
             elif endpoint == "/trinityai/chart" or endpoint == "/trinityai/chart-maker":
-                from Agent_chartmaker.main_app import agent as chartmaker_agent
+                # Try new standardized path first
+                try:
+                    from TrinityAgent.Agent_ChartMaker.main_app import agent as chartmaker_agent
+                except ImportError:
+                    try:
+                        from Agent_ChartMaker.main_app import agent as chartmaker_agent
+                    except ImportError:
+                        # Fallback to old path for backward compatibility
+                        from Agent_chartmaker.main_app import agent as chartmaker_agent
                 
-                logger.info(f"📞 Calling {endpoint} agent internally")
+                logger.info(f"📞 Calling {endpoint} agent internally (standardized)")
                 logger.info(f"🔍 Processing prompt: '{prompt}'")
                 
                 # Extract client context
@@ -315,8 +324,8 @@ class AgentExecutor:
                 
                 logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
                 
-                # 🔧 FIX: ChartMakerAgent uses .process() not .process_request()
-                result = chartmaker_agent.process(
+                # Use process_request (standardized BaseAgent method)
+                result = chartmaker_agent.process_request(
                     user_prompt=prompt,
                     session_id=session_id,
                     client_name=client_name,
@@ -470,6 +479,48 @@ class AgentExecutor:
                 )
                 logger.info(f"📊 GroupBy agent result: success={result.get('success')}, keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 logger.info(f"✅ INTERNAL /groupby completed successfully")
+                logger.info(f"📦 Result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
+                
+                return {
+                    "success": True,
+                    "result": result,
+                    "agent": endpoint,
+                    "action": action,
+                    "base": "TrinityAI-Internal"
+                }
+            
+            # Handle /trinityai/chartmaker endpoint
+            elif endpoint == "/trinityai/chartmaker" or endpoint == "/trinityai/chart-maker":
+                # Import from standardized TrinityAgent
+                try:
+                    from TrinityAgent.Agent_ChartMaker.main_app import agent as chartmaker_agent
+                except ImportError:
+                    try:
+                        from Agent_ChartMaker.main_app import agent as chartmaker_agent
+                    except ImportError:
+                        # Fallback to old path if exists
+                        from Agent_chartmaker.main_app import agent as chartmaker_agent
+                
+                logger.info("📞 Calling /chartmaker agent internally")
+                logger.info(f"🔍 Processing prompt: '{prompt}'")
+                
+                # Extract client context from session_context (set by workflow orchestrator)
+                client_name = context.get("client_name", "") if context else self.session_context.get("client_name", "")
+                app_name = context.get("app_name", "") if context else self.session_context.get("app_name", "")
+                project_name = context.get("project_name", "") if context else self.session_context.get("project_name", "")
+                
+                logger.info(f"🔧 Using project context: client={client_name}, app={app_name}, project={project_name}")
+                
+                # Note: process_request is synchronous, so no await needed
+                result = chartmaker_agent.process_request(
+                    user_prompt=prompt,
+                    session_id=session_id,
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
+                )
+                logger.info(f"📊 ChartMaker agent result: success={result.get('success')}, keys={list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
+                logger.info(f"✅ INTERNAL /chartmaker completed successfully")
                 logger.info(f"📦 Result keys: {list(result.keys()) if isinstance(result, dict) else 'non-dict'}")
                 
                 return {

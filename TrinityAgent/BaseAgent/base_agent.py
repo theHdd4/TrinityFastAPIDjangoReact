@@ -23,6 +23,7 @@ from .exceptions import (
 )
 from .json_handler import JSONHandler
 from .validator import Validator
+from .data_validator import DataValidator
 from .memory_storage import MemoryStorage
 from .file_reader import FileReader
 
@@ -87,6 +88,7 @@ class BaseAgent(BaseAgentInterface, ABC):
         
         self.json_handler = JSONHandler()
         self.validator = Validator()
+        self.data_validator: Optional[DataValidator] = None  # Initialized after files are loaded
         
         # File state management
         self.files_with_columns: Dict[str, Any] = {}
@@ -127,6 +129,20 @@ class BaseAgent(BaseAgentInterface, ABC):
             )
             self._files_loaded = True
             logger.info(f"Loaded {len(self.files_with_columns)} files from MinIO")
+            
+            # Initialize data validator after files are loaded
+            try:
+                from minio import Minio
+                self.data_validator = DataValidator(
+                    minio_client=self.file_reader.minio_client,
+                    bucket=self.bucket,
+                    files_with_columns=self.files_with_columns,
+                    prefix=self.file_reader.prefix
+                )
+                logger.info("✅ DataValidator initialized for robust data validation")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize DataValidator: {e}")
+                self.data_validator = None
         except Exception as e:
             logger.error(f"Error loading files: {e}")
             self.files_with_columns = {}

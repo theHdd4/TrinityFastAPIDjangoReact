@@ -73,6 +73,15 @@ if trinity_agent_path and trinity_agent_path.exists() and str(trinity_agent_path
 AGENT_REGISTRY_AVAILABLE = False
 _import_error_msg = None
 
+# Initialize functions as None - will be set if import succeeds
+get_all_routers = None
+sync_agents_to_postgres_sync = None
+initialize_all_agents = None
+set_agent_metadata = None
+verify_registry_sync_sync = None
+get_sync_status = None
+create_trinity_v1_agents_table = None
+
 # Try importing as package first (TrinityAgent.agent_registry)
 try:
     from TrinityAgent.agent_registry import (
@@ -103,14 +112,22 @@ except ImportError as e1:
             
             try:
                 from agent_registry import (
-                    get_all_routers,
-                    sync_agents_to_postgres_sync,
-                    initialize_all_agents,
-                    set_agent_metadata,
-                    verify_registry_sync_sync,
-                    get_sync_status,
+                    get_all_routers as _get_all_routers,
+                    sync_agents_to_postgres_sync as _sync_agents_to_postgres_sync,
+                    initialize_all_agents as _initialize_all_agents,
+                    set_agent_metadata as _set_agent_metadata,
+                    verify_registry_sync_sync as _verify_registry_sync_sync,
+                    get_sync_status as _get_sync_status,
                 )
-                from BaseAgent.agent_registry_db import create_trinity_v1_agents_table
+                from BaseAgent.agent_registry_db import create_trinity_v1_agents_table as _create_trinity_v1_agents_table
+                # Assign to module-level variables
+                get_all_routers = _get_all_routers
+                sync_agents_to_postgres_sync = _sync_agents_to_postgres_sync
+                initialize_all_agents = _initialize_all_agents
+                set_agent_metadata = _set_agent_metadata
+                verify_registry_sync_sync = _verify_registry_sync_sync
+                get_sync_status = _get_sync_status
+                create_trinity_v1_agents_table = _create_trinity_v1_agents_table
                 AGENT_REGISTRY_AVAILABLE = True
             finally:
                 # Restore path if we added it
@@ -189,14 +206,22 @@ def _retry_import_with_path_search():
             # Try import
             try:
                 from TrinityAgent.agent_registry import (
-                    get_all_routers,
-                    sync_agents_to_postgres_sync,
-                    initialize_all_agents,
-                    set_agent_metadata,
-                    verify_registry_sync_sync,
-                    get_sync_status,
+                    get_all_routers as _get_all_routers,
+                    sync_agents_to_postgres_sync as _sync_agents_to_postgres_sync,
+                    initialize_all_agents as _initialize_all_agents,
+                    set_agent_metadata as _set_agent_metadata,
+                    verify_registry_sync_sync as _verify_registry_sync_sync,
+                    get_sync_status as _get_sync_status,
                 )
-                from TrinityAgent.BaseAgent.agent_registry_db import create_trinity_v1_agents_table
+                from TrinityAgent.BaseAgent.agent_registry_db import create_trinity_v1_agents_table as _create_trinity_v1_agents_table
+                # Assign to module-level variables
+                get_all_routers = _get_all_routers
+                sync_agents_to_postgres_sync = _sync_agents_to_postgres_sync
+                initialize_all_agents = _initialize_all_agents
+                set_agent_metadata = _set_agent_metadata
+                verify_registry_sync_sync = _verify_registry_sync_sync
+                get_sync_status = _get_sync_status
+                create_trinity_v1_agents_table = _create_trinity_v1_agents_table
                 AGENT_REGISTRY_AVAILABLE = True
                 _import_error_msg = None
                 return True
@@ -220,6 +245,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        global AGENT_REGISTRY_AVAILABLE
         # Try one more time to import (in case paths changed)
         if not AGENT_REGISTRY_AVAILABLE:
             self.stdout.write("→ Attempting to locate TrinityAgent...")
@@ -255,15 +281,25 @@ class Command(BaseCommand):
                         # Try import
                         try:
                             from TrinityAgent.agent_registry import (
-                                get_all_routers,
-                                sync_agents_to_postgres_sync,
-                                initialize_all_agents,
-                                set_agent_metadata,
-                                verify_registry_sync_sync,
-                                get_sync_status,
+                                get_all_routers as _get_all_routers,
+                                sync_agents_to_postgres_sync as _sync_agents_to_postgres_sync,
+                                initialize_all_agents as _initialize_all_agents,
+                                set_agent_metadata as _set_agent_metadata,
+                                verify_registry_sync_sync as _verify_registry_sync_sync,
+                                get_sync_status as _get_sync_status,
                             )
-                            from TrinityAgent.BaseAgent.agent_registry_db import create_trinity_v1_agents_table
-                            global AGENT_REGISTRY_AVAILABLE
+                            from TrinityAgent.BaseAgent.agent_registry_db import create_trinity_v1_agents_table as _create_trinity_v1_agents_table
+                            # Assign to module-level variables
+                            global get_all_routers, sync_agents_to_postgres_sync, initialize_all_agents
+                            global set_agent_metadata, verify_registry_sync_sync, get_sync_status
+                            global create_trinity_v1_agents_table
+                            get_all_routers = _get_all_routers
+                            sync_agents_to_postgres_sync = _sync_agents_to_postgres_sync
+                            initialize_all_agents = _initialize_all_agents
+                            set_agent_metadata = _set_agent_metadata
+                            verify_registry_sync_sync = _verify_registry_sync_sync
+                            get_sync_status = _get_sync_status
+                            create_trinity_v1_agents_table = _create_trinity_v1_agents_table
                             AGENT_REGISTRY_AVAILABLE = True
                             self.stdout.write(self.style.SUCCESS(f"   ✅ Found and imported TrinityAgent from {resolved}!"))
                             break
@@ -290,6 +326,10 @@ class Command(BaseCommand):
         self.stdout.write("=" * 80)
         
         # Ensure agents are initialized
+        if initialize_all_agents is None:
+            self.stdout.write(self.style.ERROR("   ❌ initialize_all_agents is not available. Agent registry import failed."))
+            return
+            
         if options['force']:
             self.stdout.write("→ Re-initializing all agents...")
             try:
@@ -303,11 +343,17 @@ class Command(BaseCommand):
             self.stdout.write("→ Using existing agent registry...")
         
         # Get all registered agents
+        if get_all_routers is None:
+            self.stdout.write(self.style.ERROR("   ❌ get_all_routers is not available. Agent registry import failed."))
+            return
+        
         try:
             routers = get_all_routers()
             self.stdout.write(f"→ Found {len(routers)} registered agents: {list(routers.keys())}")
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"   ❌ Error getting routers: {e}"))
+            import traceback
+            self.stdout.write(traceback.format_exc())
             return
         
         if not routers:
@@ -339,16 +385,23 @@ class Command(BaseCommand):
                 "description": "Group data by specific columns and apply aggregation functions",
                 "category": "Data Operations",
                 "tags": ["group_by", "aggregation", "data", "group", "aggregate"]
+            },
+            "chart_maker": {
+                "name": "Chart Maker",
+                "description": "Create charts and visualizations (bar, line, area, pie, scatter) from data files",
+                "category": "Visualization",
+                "tags": ["chart", "visualization", "graph", "plot", "bar", "line", "pie", "scatter"]
             }
         }
         
-        for agent_id, metadata in agent_metadata.items():
-            if agent_id in routers:
-                try:
-                    set_agent_metadata(agent_id, metadata)
-                    self.stdout.write(f"   ✅ Set metadata for {agent_id}")
-                except Exception as e:
-                    self.stdout.write(self.style.WARNING(f"   ⚠️  Error setting metadata for {agent_id}: {e}"))
+        if set_agent_metadata is not None:
+            for agent_id, metadata in agent_metadata.items():
+                if agent_id in routers:
+                    try:
+                        set_agent_metadata(agent_id, metadata)
+                        self.stdout.write(f"   ✅ Set metadata for {agent_id}")
+                    except Exception as e:
+                        self.stdout.write(self.style.WARNING(f"   ⚠️  Error setting metadata for {agent_id}: {e}"))
         
         # Use Django ORM directly instead of asyncpg (more reliable in Django context)
         self.stdout.write("→ Syncing agents to PostgreSQL using Django ORM...")
