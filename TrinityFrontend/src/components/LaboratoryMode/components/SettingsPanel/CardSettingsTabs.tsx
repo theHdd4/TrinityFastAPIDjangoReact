@@ -8,16 +8,42 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreHorizontal, Trash2, Pencil, Layers } from 'lucide-react';
+import {
+  Plus,
+  MoreHorizontal,
+  Trash2,
+  Pencil,
+  Layers,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  List,
+  ListOrdered,
+  Minus,
+} from 'lucide-react';
 import {
   useLaboratoryStore,
   CardVariable,
   LayoutCard,
+  TextBoxSettings as TextBoxSettingsType,
+  DEFAULT_TEXTBOX_SETTINGS,
 } from '../../store/laboratoryStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { LABORATORY_API } from '@/lib/api';
@@ -125,16 +151,25 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   const [pendingAppendVariable, setPendingAppendVariable] = useState<AvailableVariable | null>(null);
 
   const textBoxEnabled = card.textBoxEnabled ?? false;
-  const textBoxContent = card.textBoxContent ?? '';
-  const previewHtml = useMemo(() => {
-    const customHtml = card.textBoxHtml ?? '';
-    if (customHtml.trim()) {
-      return customHtml;
-    }
-    return textBoxContent ? textBoxContent.replace(/\n/g, '<br />') : '';
-  }, [card.textBoxHtml, textBoxContent]);
-  const wordCount = textBoxContent.trim() ? textBoxContent.trim().split(/\s+/).length : 0;
-  const lineCount = textBoxContent ? textBoxContent.split('\n').length : 0;
+  const textBoxSettings = useMemo(
+    () => ({ ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }),
+    [card.textBoxSettings],
+  );
+  const fontFamilies = useMemo(
+    () => [
+      'Open Sauce',
+      'Arial',
+      'Helvetica',
+      'Times New Roman',
+      'Georgia',
+      'Courier New',
+      'Verdana',
+      'Trebuchet MS',
+      'Comic Sans MS',
+      'Impact',
+    ],
+    [],
+  );
 
   const generateVariableId = () => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -779,15 +814,15 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
     onUpdateCard(card.id, { textBoxEnabled: enabled });
   };
 
-  const handleTextBoxContentChange = (value: string) => {
-    onUpdateCard(card.id, {
-      textBoxContent: value,
-      ...(card.textBoxHtml ? {} : { textBoxHtml: value.replace(/\n/g, '<br />') }),
-    });
+  const handleTextBoxSettingsChange = (updates: Partial<TextBoxSettingsType>) => {
+    const mergedSettings = { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings, ...updates };
+    onUpdateCard(card.id, { textBoxSettings: mergedSettings });
   };
 
-  const handleTextBoxHtmlChange = (value: string) => {
-    onUpdateCard(card.id, { textBoxHtml: value });
+  const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
+
+  const adjustFontSize = (delta: number) => {
+    handleTextBoxSettingsChange({ font_size: clampFontSize(textBoxSettings.font_size + delta) });
   };
 
   return (
@@ -920,96 +955,195 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
           </TabsContent>
 
           <TabsContent value="textbox" className="space-y-4">
-            <Card className="p-4 space-y-4">
+            <Card className="p-4 space-y-6">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Text box</p>
-                  <h4 className="font-medium text-gray-900">Add contextual notes</h4>
+                  <h4 className="font-medium text-gray-900">Insert text box on the card</h4>
                   <p className="text-xs text-gray-500">
-                    Toggle the text box to overlay guidance beneath the atom section on this card.
+                    Control typography for the text box rendered beneath this card's atoms.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500">Insert text box on the card</span>
+                  <span className="text-xs text-gray-500">Insert text box</span>
                   <Switch checked={textBoxEnabled} onCheckedChange={handleToggleTextBox} />
                 </div>
               </div>
 
-              {textBoxEnabled ? (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-muted-foreground">Text content</Label>
-                    <Textarea
-                      rows={4}
-                      value={textBoxContent}
-                      onChange={e => handleTextBoxContentChange(e.target.value)}
-                      placeholder="Type notes, instructions, or a narrative for this card"
-                    />
-                  </div>
+              <Separator />
 
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-muted-foreground">Custom HTML (optional)</Label>
-                    <Textarea
-                      rows={4}
-                      value={card.textBoxHtml ?? ''}
-                      onChange={e => handleTextBoxHtmlChange(e.target.value)}
-                      placeholder="Paste formatted HTML to render inside the text box"
-                    />
-                  </div>
+              <div className={`space-y-5 ${textBoxEnabled ? '' : 'opacity-60'}`}>
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">Font Family</Label>
+                  <Select
+                    value={textBoxSettings.font_family}
+                    onValueChange={(value) => handleTextBoxSettingsChange({ font_family: value })}
+                    disabled={!textBoxEnabled}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {fontFamilies.map(font => (
+                        <SelectItem key={font} value={font} style={{ fontFamily: font }}>
+                          {font}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-                  <Separator />
-
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium text-muted-foreground">Preview</Label>
-                    <div className="p-4 border border-border rounded-md bg-muted/10">
-                      <div
-                        className="prose prose-sm max-w-none"
-                        dangerouslySetInnerHTML={{ __html: previewHtml }}
-                      />
-                    </div>
-                  </div>
-
-                  <Separator />
-
-                  <div className="flex flex-wrap gap-2">
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">Font Size</Label>
+                  <div className="flex items-center gap-2">
                     <Button
                       variant="outline"
-                      size="sm"
-                      className="justify-start"
-                      onClick={() => void navigator.clipboard?.writeText(textBoxContent)}
+                      size="icon"
+                      onClick={() => adjustFontSize(-1)}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
                     >
-                      Copy text
+                      <Minus className="h-4 w-4" />
                     </Button>
+                    <Input
+                      type="number"
+                      value={textBoxSettings.font_size}
+                      onChange={(e) =>
+                        handleTextBoxSettingsChange({
+                          font_size: clampFontSize(Number(e.target.value) || textBoxSettings.font_size),
+                        })
+                      }
+                      disabled={!textBoxEnabled}
+                      className="text-center font-medium"
+                    />
                     <Button
                       variant="outline"
-                      size="sm"
-                      className="justify-start"
-                      onClick={() => void navigator.clipboard?.writeText(previewHtml)}
+                      size="icon"
+                      onClick={() => adjustFontSize(1)}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
                     >
-                      Copy HTML
+                      <Plus className="h-4 w-4" />
                     </Button>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-xs text-gray-600">
-                    <div className="flex justify-between rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
-                      <span>Characters</span>
-                      <span className="font-semibold text-gray-900">{textBoxContent.length}</span>
-                    </div>
-                    <div className="flex justify-between rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
-                      <span>Words</span>
-                      <span className="font-semibold text-gray-900">{wordCount}</span>
-                    </div>
-                    <div className="flex justify-between rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
-                      <span>Lines</span>
-                      <span className="font-semibold text-gray-900">{lineCount}</span>
-                    </div>
                   </div>
                 </div>
-              ) : (
-                <Card className="p-4 text-xs text-gray-600 bg-gray-50 border-dashed">
-                  Turn on the toggle above to add a text box beneath this card's atom content.
-                </Card>
-              )}
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">Text Formatting</Label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant={textBoxSettings.bold ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() => handleTextBoxSettingsChange({ bold: !textBoxSettings.bold })}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <Bold className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={textBoxSettings.italics ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() => handleTextBoxSettingsChange({ italics: !textBoxSettings.italics })}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <Italic className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={textBoxSettings.underline ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() => handleTextBoxSettingsChange({ underline: !textBoxSettings.underline })}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <Underline className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={textBoxSettings.strikethrough ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() => handleTextBoxSettingsChange({ strikethrough: !textBoxSettings.strikethrough })}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <Strikethrough className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">Text Alignment</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={textBoxSettings.text_align === 'left' ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() => handleTextBoxSettingsChange({ text_align: 'left' })}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <AlignLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={textBoxSettings.text_align === 'center' ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() => handleTextBoxSettingsChange({ text_align: 'center' })}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <AlignCenter className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={textBoxSettings.text_align === 'right' ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() => handleTextBoxSettingsChange({ text_align: 'right' })}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <AlignRight className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={textBoxSettings.text_align === 'justify' ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() => handleTextBoxSettingsChange({ text_align: 'justify' })}
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <AlignJustify className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">Lists</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      variant={textBoxSettings.list_type === 'bullet' ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() =>
+                        handleTextBoxSettingsChange({
+                          list_type: textBoxSettings.list_type === 'bullet' ? 'none' : 'bullet',
+                        })
+                      }
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <List className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant={textBoxSettings.list_type === 'number' ? 'default' : 'outline'}
+                      size="icon"
+                      onClick={() =>
+                        handleTextBoxSettingsChange({
+                          list_type: textBoxSettings.list_type === 'number' ? 'none' : 'number',
+                        })
+                      }
+                      disabled={!textBoxEnabled}
+                      className="h-9 w-9"
+                    >
+                      <ListOrdered className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </Card>
           </TabsContent>
 

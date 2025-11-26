@@ -496,6 +496,20 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
     const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
     const lineCount = plainText ? plainText.split('\n').length : 0;
+    const textBoxSettings = { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings };
+    const textDecoration = [
+      textBoxSettings.underline ? 'underline' : '',
+      textBoxSettings.strikethrough ? 'line-through' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    const listClass =
+      textBoxSettings.list_type === 'bullet'
+        ? 'list-disc pl-6'
+        : textBoxSettings.list_type === 'number'
+        ? 'list-decimal pl-6'
+        : '';
 
     return (
       <div className="mt-6">
@@ -524,7 +538,16 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
           <div className="p-5 bg-gray-50/60">
             <div
-              className="prose prose-sm max-w-none text-gray-900"
+              className={`prose prose-sm max-w-none text-gray-900 ${listClass}`}
+              style={{
+                fontFamily: textBoxSettings.font_family,
+                fontSize: textBoxSettings.font_size,
+                fontWeight: textBoxSettings.bold ? 'bold' : 'normal',
+                fontStyle: textBoxSettings.italics ? 'italic' : 'normal',
+                textDecoration,
+                textAlign: textBoxSettings.text_align,
+                color: textBoxSettings.text_color,
+              }}
               dangerouslySetInnerHTML={{ __html: htmlContent || '<p class="text-gray-500">No text provided.</p>' }}
             />
           </div>

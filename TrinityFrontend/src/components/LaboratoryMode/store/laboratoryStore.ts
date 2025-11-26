@@ -31,6 +31,8 @@ export interface TextBoxSettings {
   bold: boolean;
   italics: boolean;
   underline: boolean;
+  strikethrough?: boolean;
+  list_type?: "none" | "bullet" | "number";
   headline: string;
   slide_layout: "full" | "sidebar" | "note-callout";
   transition_effect: "none" | "fade" | "typewriter";
@@ -49,6 +51,8 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
   bold: false,
   italics: false,
   underline: false,
+  strikethrough: false,
+  list_type: "none",
   headline: "",
   slide_layout: "full",
   transition_effect: "none",
@@ -1668,6 +1672,7 @@ export interface LayoutCard {
   textBoxEnabled?: boolean;
   textBoxContent?: string;
   textBoxHtml?: string;
+  textBoxSettings?: TextBoxSettings;
   order?: number; // For positioning standalone cards between molecules
   afterMoleculeId?: string; // Reference to molecule this card is positioned after
   beforeMoleculeId?: string; // Reference to molecule this card is positioned before
