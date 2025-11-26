@@ -256,8 +256,6 @@ def main():
         print(f"   ⚠️  Failed to sync agents to PostgreSQL: {exc}")
         print("       This is non-critical - agents will sync automatically when registered.")
         print("       You can manually run: python manage.py sync_agents_to_postgres")
-to populate trinity_v1_atoms: {exc}")
-e atoms from frontend: {exc}")
 
     # Update available atoms status based on working atoms list
     try:

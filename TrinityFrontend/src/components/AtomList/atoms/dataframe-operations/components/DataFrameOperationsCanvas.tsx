@@ -19,7 +19,7 @@ import {
   PaginationEllipsis,
 } from '@/components/ui/pagination';
 import {
-  Upload, Download, Search, Filter, ArrowUpDown, Pin, Palette, Trash2, Plus, 
+  Upload, Download, Search, Filter, ArrowUpDown, ArrowUp, ArrowDown, Pin, Palette, Trash2, Plus, 
   GripVertical, RotateCcw, FileText, Check, AlertCircle, Info, Edit2,
   ChevronDown, ChevronUp, X, PlusCircle, MinusCircle, Save, Replace,
   AlignLeft, AlignCenter, AlignRight, Grid3x3
@@ -52,8 +52,9 @@ import {
   transformColumnCase as apiTransformColumnCase,
   findAndReplace as apiFindAndReplace,
   countMatches as apiCountMatches,
-  convertToPercentage as apiConvertToPercentage,
-  convertFromPercentage as apiConvertFromPercentage,
+  // COMMENTED OUT: Percentage conversion functions
+  // convertToPercentage as apiConvertToPercentage,
+  // convertFromPercentage as apiConvertFromPercentage,
 } from '../services/dataframeOperationsApi';
 import { toast } from '@/components/ui/use-toast';
 import '@/templates/tables/table.css';
@@ -93,13 +94,186 @@ interface NumberFilterComponentProps {
   onClose: () => void;
 }
 
+/**
+ * Smart number formatting to avoid floating point precision artifacts
+ * Only intervenes when precision artifacts are detected (many trailing 9s)
+ * Otherwise uses simple toString() to preserve original CSV formatting
+ */
+function formatNumberForDisplay(num: number): string {
+  // Handle special cases
+  if (!Number.isFinite(num)) {
+    if (isNaN(num)) return 'NaN';
+    if (!isFinite(num)) return num > 0 ? 'Infinity' : '-Infinity';
+    return num.toString();
+  }
+  
+  // Integers: display as-is
+  if (Number.isInteger(num)) {
+    return num.toString();
+  }
+  
+  const absNum = Math.abs(num);
+  
+  // For very large numbers, use standard formatting
+  if (absNum >= 1e15) {
+    return num.toExponential(10);
+  }
+  
+  // For very small numbers, use scientific notation
+  if (absNum < 1e-6 && absNum > 0) {
+    return num.toExponential(10);
+  }
+  
+  // Check if this number has precision artifacts by converting to high-precision string
+  // Only do this check - don't modify normal numbers
+  const highPrecisionStr = num.toFixed(15);
+  
+  // Detect precision artifacts: numbers ending in many consecutive 9s (6+)
+  // Pattern like 2.699999999999 suggests it should be 2.7
+  // Pattern like 2.639999999999 suggests it should be 2.64
+  const trailingNinesMatch = highPrecisionStr.match(/^-?\d+\.(\d*?)(9{6,})0*$/);
+  if (trailingNinesMatch) {
+    // This looks like a precision artifact - many trailing 9s indicate rounding error
+    const beforeNines = trailingNinesMatch[1];
+    
+    // Find where the 9s start - this tells us how many decimal places to keep
+    // For 2.699999999999: beforeNines = "", 9s start at position 1 -> round to 1 decimal -> 2.7
+    // For 2.639999999999: beforeNines = "63", 9s start at position 3 -> round to 2 decimals -> 2.64
+    
+    // The position where 9s start is: beforeNines.length + 1 (since 9s come after)
+    // We want to round to the position where 9s start (which will round up)
+    const roundPosition = beforeNines.length + 1;
+    
+    if (roundPosition <= 15) {
+      // Round to roundPosition decimal places
+      // This will round up the last digit before the 9s
+      const multiplier = Math.pow(10, roundPosition);
+      const cleanRounded = Math.round(num * multiplier) / multiplier;
+      
+      let formatted = cleanRounded.toFixed(roundPosition);
+      formatted = formatted.replace(/\.?0+$/, '');
+      
+      // Check if it's close to an integer
+      const nearestInt = Math.round(cleanRounded);
+      if (Math.abs(cleanRounded - nearestInt) < Number.EPSILON * 10) {
+        return nearestInt.toString();
+      }
+      
+      return formatted;
+    }
+  }
+  
+  // For normal numbers (like 10.78, 34.765), use simple toString()
+  // This preserves the original formatting from CSV without adding trailing zeros
+  return num.toString();
+}
+
 function safeToString(val: any): string {
   if (val === undefined || val === null) return '';
+  
+  // If it's a number, use smart formatting
+  if (typeof val === 'number') {
+    return formatNumberForDisplay(val);
+  }
+  
+  // For other types, convert to string
   try {
-    return val.toString();
+    const str = val.toString();
+    // Check if string represents a number with precision artifacts
+    // Pattern: numbers ending with many 9s or 0s after decimal (like 2.639999999999)
+    const numMatch = str.match(/^-?\d+\.(\d*?)(9{6,}|0{6,})/);
+    if (numMatch) {
+      // Try to parse and reformat
+      const parsed = parseFloat(str);
+      if (!isNaN(parsed)) {
+        return formatNumberForDisplay(parsed);
+      }
+    }
+    return str;
   } catch {/* empty */
     return '';
   }
+}
+
+// Normalize function names to uppercase (e.g., =sum( -> =SUM(), =Sum -> =SUM)
+// Only normalizes words that are followed by '(' (possibly with whitespace)
+// Preserves column names, strings, numbers, and other identifiers
+function normalizeFunctionNames(formula: string): string {
+  if (!formula || !formula.startsWith('=')) {
+    return formula;
+  }
+
+  const result: string[] = [];
+  let i = 1; // Start after '='
+  const length = formula.length;
+  let inString = false;
+  let stringChar = '';
+
+  while (i < length) {
+    const char = formula[i];
+    const prevChar = i > 0 ? formula[i - 1] : '';
+
+    // Handle string literals (preserve as-is)
+    if ((char === '"' || char === "'") && prevChar !== '\\') {
+      if (!inString) {
+        inString = true;
+        stringChar = char;
+        result.push(char);
+        i++;
+        continue;
+      } else if (char === stringChar) {
+        inString = false;
+        stringChar = '';
+        result.push(char);
+        i++;
+        continue;
+      }
+    }
+
+    if (inString) {
+      result.push(char);
+      i++;
+      continue;
+    }
+
+    // Detect potential function names (alphanumeric + underscore)
+    if (/[A-Za-z_]/.test(char)) {
+      const start = i;
+      // Collect the identifier
+      while (i < length && /[A-Za-z0-9_]/.test(formula[i])) {
+        i++;
+      }
+      const identifier = formula.slice(start, i);
+      
+      // Check if this is followed by '(' (possibly with whitespace)
+      let j = i;
+      while (j < length && /\s/.test(formula[j])) {
+        j++;
+      }
+      
+      if (j < length && formula[j] === '(') {
+        // This is a function name - normalize to uppercase
+        result.push(identifier.toUpperCase());
+        // Add any whitespace between function name and '('
+        if (j > i) {
+          result.push(formula.slice(i, j));
+        }
+        // Continue from j (the '(' will be added in next iteration)
+        i = j;
+        continue;
+      } else {
+        // Not a function - preserve original case (could be a column name)
+        result.push(identifier);
+        continue;
+      }
+    }
+
+    // All other characters (operators, parentheses, numbers, etc.) - preserve as-is
+    result.push(char);
+    i++;
+  }
+
+  return '=' + result.join('');
 }
 
 function formatCellValue(value: any, column: string, columnFormats?: DataFrameData['columnFormats']): string {
@@ -132,28 +306,30 @@ function formatCellValue(value: any, column: string, columnFormats?: DataFrameDa
     return safeToString(value);
   }
   
-  if (format.type === 'percentage') {
-    // Value is stored as decimal (e.g., 0.13567 or 1.6), multiply by 100 for display (13.567% or 160%)
-    // Preserve full precision - no decimal limit (user can use round function if needed)
-    const percentageValue = numValue * 100;
-    return `${percentageValue.toLocaleString(undefined, { 
-      useGrouping: true,
-      maximumFractionDigits: 20 // Allow many decimal places
-    })}%`;
-  }
+  // COMMENTED OUT: Percentage formatting
+  // if (format.type === 'percentage') {
+  //   // Value is stored as decimal (e.g., 0.13567 or 1.6), multiply by 100 for display (13.567% or 160%)
+  //   // Preserve full precision - no decimal limit (user can use round function if needed)
+  //   const percentageValue = numValue * 100;
+  //   return `${percentageValue.toLocaleString(undefined, { 
+  //     useGrouping: true,
+  //     maximumFractionDigits: 20 // Allow many decimal places
+  //   })}%`;
+  // }
   
-  if (format.type === 'currency' && format.currency) {
-    const symbols: Record<string, string> = {
-      USD: '$', EUR: '€', GBP: '£', JPY: '¥', INR: '₹',
-      CAD: 'C$', AUD: 'A$', CNY: '¥', CHF: 'Fr', MXN: '$', BRL: 'R$'
-    };
-    const symbol = symbols[format.currency] || '$';
-    // Preserve full precision - no decimal limit (user can use round function if needed)
-    return `${symbol}${numValue.toLocaleString(undefined, { 
-      useGrouping: true,
-      maximumFractionDigits: 20
-    })}`;
-  }
+  // COMMENTED OUT: Currency formatting
+  // if (format.type === 'currency' && format.currency) {
+  //   const symbols: Record<string, string> = {
+  //     USD: '$', EUR: '€', GBP: '£', JPY: '¥', INR: '₹',
+  //     CAD: 'C$', AUD: 'A$', CNY: '¥', CHF: 'Fr', MXN: '$', BRL: 'R$'
+  //   };
+  //   const symbol = symbols[format.currency] || '$';
+  //   // Preserve full precision - no decimal limit (user can use round function if needed)
+  //   return `${symbol}${numValue.toLocaleString(undefined, { 
+  //     useGrouping: true,
+  //     maximumFractionDigits: 20
+  //   })}`;
+  // }
   
   return safeToString(value);
 }
@@ -2704,32 +2880,46 @@ const DataFrameOperationsCanvas: React.FC<DataFrameOperationsCanvasProps> = ({
     }
   };
 
-// Helper to commit a cell edit after user finishes editing
-const commitCellEdit = (rowIndex: number, column: string) => {
-  // Save current state before making changes
-  if (data) {
-    saveToUndoStack(data);
-  }
-  
-  // Handle percentage format: convert user input (percentage) back to decimal for storage
-  let valueToSave = editingCellValue;
-  const isPercentageColumn = data.columnFormats?.[column]?.type === 'percentage';
-  
-  if (isPercentageColumn && editingCellValue.trim() !== '') {
-    // Remove % sign if present
-    let numericValue = editingCellValue.trim().replace(/%/g, '');
-    const num = parseFloat(numericValue);
-    
-    if (!isNaN(num)) {
-      // User entered percentage value (e.g., 13.567), convert to decimal (0.13567)
-      valueToSave = (num / 100).toString();
+  // Helper to commit a cell edit after user finishes editing
+  const commitCellEdit = async (rowIndex: number, column: string) => {
+    // Prevent multiple commits if already committing or cell doesn't match
+    if (!editingCell || (editingCell.row !== rowIndex || editingCell.col !== column)) {
+      return;
     }
-    // If not a valid number, pass through as-is (will be handled by backend validation)
-  }
-  
-  handleCellEdit(rowIndex, column, valueToSave);
-  setEditingCell(null);
-};
+    
+    // Save the value before clearing state
+    const valueToSave = editingCellValue;
+    
+    // Clear editing state immediately to prevent double-commits
+    setEditingCell(null);
+    
+    // Save current state before making changes
+    if (data) {
+      saveToUndoStack(data);
+    }
+    
+    // COMMENTED OUT: Handle percentage format: convert user input (percentage) back to decimal for storage
+    // const isPercentageColumn = data.columnFormats?.[column]?.type === 'percentage';
+    // if (isPercentageColumn && valueToSave.trim() !== '') {
+    //   // Remove % sign if present
+    //   let numericValue = valueToSave.trim().replace(/%/g, '');
+    //   const num = parseFloat(numericValue);
+    //   if (!isNaN(num)) {
+    //     // User entered percentage value (e.g., 13.567), convert to decimal (0.13567)
+    //     valueToSave = (num / 100).toString();
+    //   }
+    // }
+    
+    // Call API to save the value
+    try {
+      await handleCellEdit(rowIndex, column, valueToSave);
+    } catch (error) {
+      // If save fails, restore editing state so user can try again
+      console.error('[CellEdit] Failed to save cell:', error);
+      setEditingCell({ row: rowIndex, col: column });
+      setEditingCellValue(valueToSave);
+    }
+  };
 
 // Helper to commit a header edit
 const commitHeaderEdit = async (colIdx: number, value?: string) => {
@@ -3371,11 +3561,15 @@ const handleHeaderClick = (header: string) => {
       return;
     }
     
-    const trimmedFormula = formulaInput.trim();
+    let trimmedFormula = formulaInput.trim();
     if (!trimmedFormula) {
       showValidationError('Please enter a formula');
       return;
     }
+
+    // Normalize function names to uppercase (e.g., =sum( -> =SUM())
+    // This ensures case-insensitive function names work correctly
+    trimmedFormula = normalizeFunctionNames(trimmedFormula);
   
     console.log('[Formula] 🚀 Applying formula:', {
       fileId: activeFileId,
@@ -3475,6 +3669,55 @@ const handleHeaderClick = (header: string) => {
     
   } catch (err) {
     console.error('[DataFrameOperations] Formula application failed:', err);
+    
+    // Parse backend error message for better user feedback
+    let errorMessage = 'Formula evaluation failed';
+    let errorDetails: { errorType?: 'backend'; suggestions?: string[] } = {};
+    
+    if (err instanceof Error) {
+      errorMessage = err.message;
+      
+      // Try to extract detailed error from response
+      try {
+        const errorText = err.message;
+        
+        // Check for common backend formula errors
+        if (errorText.includes('FormulaEvaluationError') || errorText.includes('Failed to evaluate formula')) {
+          errorDetails.errorType = 'backend';
+          errorDetails.suggestions = [
+            'Check that all column names are spelled correctly',
+            'Verify function syntax matches the expected format',
+            'Ensure parentheses are balanced',
+            'Check that data types are compatible with the operation'
+          ];
+          
+          // Extract specific error details if available
+          const detailMatch = errorText.match(/detail[:\s]+(.+)/i);
+          if (detailMatch) {
+            errorMessage = detailMatch[1].trim();
+          }
+        } else if (errorText.includes('Invalid columns') || errorText.includes('not found')) {
+          errorDetails.errorType = 'backend';
+          errorDetails.suggestions = [
+            'Verify column names match exactly (case-sensitive)',
+            'Check that all referenced columns exist in the dataframe'
+          ];
+        } else if (errorText.includes('parenthesis') || errorText.includes('parentheses')) {
+          errorDetails.errorType = 'backend';
+          errorDetails.suggestions = [
+            'Ensure all opening parentheses ( have matching closing parentheses )',
+            'Check function call syntax'
+          ];
+        }
+      } catch (parseErr) {
+        console.warn('[DataFrameOperations] Error parsing backend error:', parseErr);
+      }
+    }
+    
+    // Show error in formula bar
+    showValidationError(errorMessage);
+    
+    // Also show toast notification
     handleApiError('Apply formula failed', err);
     addToHistory('Apply Formula', `Failed to apply formula "${trimmedFormula}" to column "${selectedColumn}"`, 'error');
   } finally {
@@ -4025,161 +4268,214 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
     }
   };
 
-  const handleConvertToPercentage = async (col: string) => {
-    const activeFileId = settings.fileId || fileId;
-    if (!data || !activeFileId) return;
-    
-    // Check if percentage is already applied
-    if (data.columnFormats?.[col]?.type === 'percentage') {
-      toast({
-        title: "Percentage Already Applied",
-        description: `Percentage format is already applied to column "${col}"`,
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    saveToUndoStack(data);
-    
-    setConvertLoading(true);
-    try {
-      console.log('[DataFrameOperations] Convert column to percentage:', col);
-      const resp = await apiConvertToPercentage(activeFileId, col);
-      
-      const currentHiddenColumns = data.hiddenColumns || [];
-      const currentDeletedColumns = data.deletedColumns || [];
-      const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
-      
-      const updatedData = {
-        headers: filtered.headers,
-        rows: filtered.rows,
-        fileName: data.fileName,
-        columnTypes: filtered.columnTypes,
-        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
-        frozenColumns: data.frozenColumns,
-        cellColors: data.cellColors,
-        hiddenColumns: currentHiddenColumns,
-        deletedColumns: currentDeletedColumns,
-        columnFormats: {
-          ...(data.columnFormats || {}),
-          [col]: { type: 'percentage' }
-        }
-      };
-      
-      onDataChange(updatedData);
-      addToHistory('Convert to Percentage', `Column "${col}" converted to percentage`);
-      
-      toast({
-        title: "Column Converted to Percentage",
-        description: `Column "${col}" will display as percentage (values unchanged)`,
-      });
-    } catch (err) {
-      handleApiError('Convert to percentage failed', err);
-      addToHistory('Convert to Percentage', `Failed to convert column "${col}"`, 'error');
-    } finally {
-      setConvertLoading(false);
-    }
-  };
+  // COMMENTED OUT: Percentage and Currency handler functions
+  // const handleConvertToPercentage = async (col: string) => {
+  //   const activeFileId = settings.fileId || fileId;
+  //   if (!data || !activeFileId) return;
+  //   
+  //   // Check if percentage is already applied
+  //   if (data.columnFormats?.[col]?.type === 'percentage') {
+  //     toast({
+  //       title: "Percentage Already Applied",
+  //       description: `Percentage format is already applied to column "${col}"`,
+  //       variant: "destructive",
+  //     });
+  //     return;
+  //   }
+  //   
+  //   saveToUndoStack(data);
+  //   
+  //   setConvertLoading(true);
+  //   try {
+  //     console.log('[DataFrameOperations] Convert column to percentage:', col);
+  //     const resp = await apiConvertToPercentage(activeFileId, col);
+  //     
+  //     const currentHiddenColumns = data.hiddenColumns || [];
+  //     const currentDeletedColumns = data.deletedColumns || [];
+  //     const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+  //     
+  //     const updatedData = {
+  //       headers: filtered.headers,
+  //       rows: filtered.rows,
+  //       fileName: data.fileName,
+  //       columnTypes: filtered.columnTypes,
+  //       pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+  //       frozenColumns: data.frozenColumns,
+  //       cellColors: data.cellColors,
+  //       hiddenColumns: currentHiddenColumns,
+  //       deletedColumns: currentDeletedColumns,
+  //       columnFormats: {
+  //         ...(data.columnFormats || {}),
+  //         [col]: { type: 'percentage' }
+  //       }
+  //     };
+  //     
+  //     onDataChange(updatedData);
+  //     addToHistory('Convert to Percentage', `Column "${col}" converted to percentage`);
+  //     
+  //     toast({
+  //       title: "Column Converted to Percentage",
+  //       description: `Column "${col}" will display as percentage (values unchanged)`,
+  //     });
+  //   } catch (err) {
+  //     handleApiError('Convert to percentage failed', err);
+  //     addToHistory('Convert to Percentage', `Failed to convert column "${col}"`, 'error');
+  //   } finally {
+  //     setConvertLoading(false);
+  //   }
+  // };
 
-  const handleConvertFromPercentage = async (col: string) => {
-    const activeFileId = settings.fileId || fileId;
-    if (!data || !activeFileId) return;
-    
-    // Check if percentage is not applied
-    if (data.columnFormats?.[col]?.type !== 'percentage') {
-      toast({
-        title: "Percentage Not Applied",
-        description: `Column "${col}" does not have percentage format applied`,
-        variant: "destructive",
-      });
-      return;
-    }
-    
-    saveToUndoStack(data);
-    
-    setConvertLoading(true);
-    try {
-      console.log('[DataFrameOperations] Convert column from percentage:', col);
-      const resp = await apiConvertFromPercentage(activeFileId, col);
-      
-      const currentHiddenColumns = data.hiddenColumns || [];
-      const currentDeletedColumns = data.deletedColumns || [];
-      const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
-      
-      // Remove percentage format
-      const updatedFormats = { ...(data.columnFormats || {}) };
-      delete updatedFormats[col];
-      
-      const updatedData = {
-        headers: filtered.headers,
-        rows: filtered.rows,
-        fileName: data.fileName,
-        columnTypes: filtered.columnTypes,
-        pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
-        frozenColumns: data.frozenColumns,
-        cellColors: data.cellColors,
-        hiddenColumns: currentHiddenColumns,
-        deletedColumns: currentDeletedColumns,
-        columnFormats: updatedFormats
-      };
-      
-      onDataChange(updatedData);
-      addToHistory('Convert from Percentage', `Column "${col}" converted back to number`);
-      
-      toast({
-        title: "Column Converted to Number",
-        description: `Column "${col}" percentage display format removed (values unchanged)`,
-      });
-    } catch (err) {
-      handleApiError('Convert from percentage failed', err);
-      addToHistory('Convert from Percentage', `Failed to convert column "${col}"`, 'error');
-    } finally {
-      setConvertLoading(false);
-    }
-  };
+  // const handleConvertFromPercentage = async (col: string) => {
+  //   const activeFileId = settings.fileId || fileId;
+  //   if (!data || !activeFileId) return;
+  //   
+  //   // Check if percentage is not applied
+  //   if (data.columnFormats?.[col]?.type !== 'percentage') {
+  //     toast({
+  //       title: "Percentage Not Applied",
+  //       description: `Column "${col}" does not have percentage format applied`,
+  //       variant: "destructive",
+  //     });
+  //     return;
+  //   }
+  //   
+  //   saveToUndoStack(data);
+  //   
+  //   setConvertLoading(true);
+  //   try {
+  //     console.log('[DataFrameOperations] Convert column from percentage:', col);
+  //     const resp = await apiConvertFromPercentage(activeFileId, col);
+  //     
+  //     const currentHiddenColumns = data.hiddenColumns || [];
+  //     const currentDeletedColumns = data.deletedColumns || [];
+  //     const filtered = filterBackendResponse(resp, currentHiddenColumns, currentDeletedColumns);
+  //     
+  //     // Remove percentage format
+  //     const updatedFormats = { ...(data.columnFormats || {}) };
+  //     delete updatedFormats[col];
+  //     
+  //     const updatedData = {
+  //       headers: filtered.headers,
+  //       rows: filtered.rows,
+  //       fileName: data.fileName,
+  //       columnTypes: filtered.columnTypes,
+  //       pinnedColumns: data.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
+  //       frozenColumns: data.frozenColumns,
+  //       cellColors: data.cellColors,
+  //       hiddenColumns: currentHiddenColumns,
+  //       deletedColumns: currentDeletedColumns,
+  //       columnFormats: updatedFormats
+  //     };
+  //     
+  //     onDataChange(updatedData);
+  //     addToHistory('Convert from Percentage', `Column "${col}" converted back to number`);
+  //     
+  //     toast({
+  //       title: "Column Converted to Number",
+  //       description: `Column "${col}" percentage display format removed (values unchanged)`,
+  //     });
+  //   } catch (err) {
+  //     handleApiError('Convert from percentage failed', err);
+  //     addToHistory('Convert from Percentage', `Failed to convert column "${col}"`, 'error');
+  //   } finally {
+  //     setConvertLoading(false);
+  //   }
+  // };
 
-  const handleFormatAsCurrency = async (col: string, currency: 'USD' | 'EUR' | 'GBP' | 'JPY' | 'INR' | 'CAD' | 'AUD' | 'CNY' | 'CHF' | 'MXN' | 'BRL') => {
-    if (!data) return;
+  // const handleFormatAsCurrency = async (col: string, currency: 'USD' | 'EUR' | 'GBP' | 'JPY' | 'INR' | 'CAD' | 'AUD' | 'CNY' | 'CHF' | 'MXN' | 'BRL') => {
+  //   if (!data) return;
+  //   
+  //   const updatedData = {
+  //     ...data,
+  //     columnFormats: {
+  //       ...(data.columnFormats || {}),
+  //       [col]: { type: 'currency', currency }
+  //     }
+  //   };
+  //   
+  //   onDataChange(updatedData);
+  //   addToHistory('Format as Currency', `Column "${col}" formatted as ${currency}`);
+  //   
+  //   toast({
+  //     title: "Currency Format Applied",
+  //     description: `Column "${col}" formatted as ${currency}`,
+  //   });
+  // };
+
+  // const handleRemoveCurrencyFormat = async (col: string) => {
+  //   if (!data) return;
+  //   
+  //   const updatedFormats = { ...(data.columnFormats || {}) };
+  //   delete updatedFormats[col];
+  //   
+  //   const updatedData = {
+  //     ...data,
+  //     columnFormats: updatedFormats
+  //   };
+  //   
+  //   onDataChange(updatedData);
+  //   addToHistory('Remove Currency Format', `Currency format removed from column "${col}"`);
+  //   
+  //   toast({
+  //     title: "Currency Format Removed",
+  //     description: `Column "${col}" currency format removed`,
+  //   });
+  // };
+
+  // Helper function to detect if a column is numeric by checking actual data
+  const isColumnNumeric = useCallback((columnName: string, dataToCheck: DataFrameData): boolean => {
+    // First check metadata
+    const columnType = dataToCheck.columnTypes?.[columnName];
+    if (columnType === 'number') {
+      return true;
+    }
+    if (columnType === 'text' || columnType === 'date') {
+      return false;
+    }
     
-    const updatedData = {
-      ...data,
-      columnFormats: {
-        ...(data.columnFormats || {}),
-        [col]: { type: 'currency', currency }
+    // If type is missing or unknown, check actual data values
+    if (!dataToCheck.rows || dataToCheck.rows.length === 0) {
+      return false;
+    }
+    
+    // Sample up to 100 values to determine if column is numeric
+    const sampleSize = Math.min(100, dataToCheck.rows.length);
+    let numericCount = 0;
+    let checkedCount = 0;
+    
+    for (let i = 0; i < sampleSize; i++) {
+      const value = dataToCheck.rows[i]?.[columnName];
+      if (value === null || value === undefined || value === '') {
+        continue; // Skip null/empty values
       }
-    };
+      checkedCount++;
+      
+      // Check if value is numeric
+      if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
+        numericCount++;
+      } else if (typeof value === 'string') {
+        // Try to parse as number
+        const num = parseFloat(value);
+        if (!isNaN(num) && isFinite(num)) {
+          numericCount++;
+        }
+      }
+    }
     
-    onDataChange(updatedData);
-    addToHistory('Format as Currency', `Column "${col}" formatted as ${currency}`);
+    // If we checked values and >80% are numeric, consider it numeric
+    if (checkedCount > 0 && (numericCount / checkedCount) > 0.8) {
+      console.log(`[DataFrameOperations] Detected numeric column "${columnName}" from data (${numericCount}/${checkedCount} numeric values)`);
+      return true;
+    }
     
-    toast({
-      title: "Currency Format Applied",
-      description: `Column "${col}" formatted as ${currency}`,
-    });
-  };
-
-  const handleRemoveCurrencyFormat = async (col: string) => {
-    if (!data) return;
-    
-    const updatedFormats = { ...(data.columnFormats || {}) };
-    delete updatedFormats[col];
-    
-    const updatedData = {
-      ...data,
-      columnFormats: updatedFormats
-    };
-    
-    onDataChange(updatedData);
-    addToHistory('Remove Currency Format', `Currency format removed from column "${col}"`);
-    
-    toast({
-      title: "Currency Format Removed",
-      description: `Column "${col}" currency format removed`,
-    });
-  };
+    return false;
+  }, []);
 
   const handleRoundColumns = async (columns: string[], decimalPlaces: number) => {
     if (!data || !settings.fileId || columns.length === 0) return;
+    
+    // Save current state before making changes
+    saveToUndoStack(data);
     
     // 🔧 FIX: Filter out hidden columns (defensive check)
     const visibleHeaders = data.headers.filter(header => !(data.hiddenColumns || []).includes(header));
@@ -4190,7 +4486,8 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       return;
     }
     
-    const fileId = settings.fileId;
+    // 🔧 FIX: Use settings.fileId (updated after operations) with fallback to prop
+    let activeFileId = settings.fileId || fileId;
     
     setConvertLoading(true);
     try {
@@ -4198,19 +4495,40 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
       
       // Process each column sequentially
       let currentData = data;
+      const successfullyRounded: string[] = [];
+      const skippedColumns: Array<{col: string; reason: string}> = [];
+      
       for (const col of filteredColumns) {
-        // Check if column exists and is numeric
-        if (!data.headers.includes(col)) {
-          throw new Error(`Column "${col}" does not exist`);
-        }
-        
-        const columnType = data.columnTypes[col];
-        if (columnType !== 'number') {
-          console.warn(`[DataFrameOperations] Column "${col}" is not numeric (type: ${columnType}), skipping...`);
+        // Check if column exists in current data (not stale data)
+        if (!currentData.headers.includes(col)) {
+          skippedColumns.push({ col, reason: 'Column does not exist' });
+          console.warn(`[DataFrameOperations] Column "${col}" does not exist, skipping...`);
           continue;
         }
         
-        const resp = await apiRoundColumn(fileId, col, decimalPlaces);
+        // 🔧 FIX: Use currentData.columnTypes instead of stale data.columnTypes
+        // Also add fallback to check actual data if type is missing
+        const columnType = currentData.columnTypes?.[col];
+        const isNumeric = columnType === 'number' || isColumnNumeric(col, currentData);
+        
+        if (!isNumeric) {
+          const reason = columnType ? `Type is "${columnType}" (not numeric)` : 'Type not detected (checking data shows non-numeric)';
+          skippedColumns.push({ col, reason });
+          console.warn(`[DataFrameOperations] Column "${col}" is not numeric (type: ${columnType || 'unknown'}), skipping...`);
+          continue;
+        }
+        
+        console.log(`[DataFrameOperations] Rounding column "${col}" (type: ${columnType || 'detected as numeric'}) to ${decimalPlaces} decimal places`);
+        
+        // 🔧 FIX: Use updated fileId from previous operations
+        const resp = await apiRoundColumn(activeFileId, col, decimalPlaces);
+        
+        // 🔧 FIX: Update fileId from response if provided
+        if (resp?.df_id && resp.df_id !== activeFileId) {
+          console.log(`[DataFrameOperations] Updating fileId for round operation: ${activeFileId} → ${resp.df_id}`);
+          activeFileId = resp.df_id;
+          onSettingsChange({ fileId: resp.df_id });
+        }
         
         // Preserve deleted columns by filtering out columns that were previously deleted
         const currentHiddenColumns = currentData.hiddenColumns || [];
@@ -4221,7 +4539,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           headers: filtered.headers,
           rows: filtered.rows,
           fileName: currentData.fileName,
-          columnTypes: filtered.columnTypes,
+          columnTypes: filtered.columnTypes, // ✅ Updated column types from backend
           pinnedColumns: currentData.pinnedColumns.filter(p => !currentHiddenColumns.includes(p)),
           frozenColumns: currentData.frozenColumns,
           cellColors: currentData.cellColors,
@@ -4229,15 +4547,35 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
           deletedColumns: currentDeletedColumns,
           columnFormats: currentData.columnFormats || {},
         };
+        
+        successfullyRounded.push(col);
       }
       
+      // Update data with all changes
       onDataChange(currentData);
-      addToHistory('Round Columns', `${filteredColumns.length} columns rounded to ${decimalPlaces} decimal places: ${filteredColumns.join(', ')}`);
       
-      toast({
-        title: "Columns Rounded",
-        description: `${filteredColumns.length} columns rounded to ${decimalPlaces} decimal places`,
-      });
+      // Provide user feedback
+      if (successfullyRounded.length > 0) {
+        addToHistory('Round Columns', `${successfullyRounded.length} columns rounded to ${decimalPlaces} decimal places: ${successfullyRounded.join(', ')}`);
+        
+        let toastMessage = `${successfullyRounded.length} column(s) rounded to ${decimalPlaces} decimal places`;
+        if (skippedColumns.length > 0) {
+          toastMessage += `. ${skippedColumns.length} column(s) skipped: ${skippedColumns.map(s => s.col).join(', ')}`;
+        }
+        
+        toast({
+          title: "Columns Rounded",
+          description: toastMessage,
+        });
+      } else {
+        // All columns were skipped
+        const reasons = skippedColumns.map(s => `${s.col} (${s.reason})`).join(', ');
+        toast({
+          title: "No Columns Rounded",
+          description: `All columns were skipped: ${reasons}`,
+          variant: "destructive",
+        });
+      }
       
       // Clear selection
       setMultiSelectedColumns(new Set());
@@ -5439,6 +5777,23 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
   // Keyboard shortcuts for multi-select
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 🔧 FIX: Don't handle keyboard shortcuts when editing a cell
+      // Check if user is typing in an input field (cell edit or formula bar)
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        // Allow Enter key to work in input fields (for cell editing)
+        if (e.key === 'Enter' && target.tagName === 'INPUT') {
+          return; // Let the input's onKeyDown handler handle it
+        }
+        // Don't interfere with other keys in input fields
+        return;
+      }
+      
+      // Also check if a cell is being edited
+      if (editingCell) {
+        return; // Don't handle shortcuts when editing a cell
+      }
+      
       // Handle Ctrl+Z for undo
       if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
         if (isEditingFormula) {
@@ -5494,7 +5849,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo, isEditingFormula]);
+  }, [data?.headers, data?.rows, permanentlyDeletedRows, processedData.filteredRows, handleUndo, handleRedo, isEditingFormula, editingCell]);
 
   // Debounced search effect
   useEffect(() => {
@@ -6085,6 +6440,13 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                          >
                            <span className="flex items-center gap-1 font-bold text-black overflow-hidden" style={{ maxWidth: '100%' }}>
                              <span className="truncate">{headerDisplayNames[header] ?? header}</span>
+                             {sortColumns.length > 0 && sortColumns[0].column === header && (
+                               sortColumns[0].direction === 'asc' ? (
+                                 <ArrowUp className="w-3 h-3 text-blue-600 flex-shrink-0" />
+                               ) : (
+                                 <ArrowDown className="w-3 h-3 text-blue-600 flex-shrink-0" />
+                               )
+                             )}
                              {filters[header] && (
                                <Filter className="w-3 h-3 text-blue-600 flex-shrink-0" />
                              )}
@@ -6266,22 +6628,26 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               e.stopPropagation(); // Prevent row selection when clicking cell
                               handleCellClick(rowIndex, column);
                             }}
-                            onDoubleClick={() => {
-                            // Always allow cell editing regardless of enableEditing setting
-                            // For percentage columns, show percentage value (multiply by 100) for editing
-                            // For other columns, show raw value
-                            const rawValue = row[column];
-                            const isPercentageColumn = data.columnFormats?.[column]?.type === 'percentage';
-                            let editValue = safeToString(rawValue);
-                            
-                            if (isPercentageColumn && typeof rawValue === 'number' && !isNaN(rawValue)) {
-                              // Show percentage value (e.g., 13.567) instead of decimal (0.13567)
-                              editValue = (rawValue * 100).toString();
-                            }
-                            
-                            setEditingCell({ row: rowIndex, col: column });
-                            setEditingCellValue(editValue);
-                          }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation(); // Prevent event bubbling
+                              // Always allow cell editing regardless of enableEditing setting
+                              // COMMENTED OUT: For percentage columns, show percentage value (multiply by 100) for editing
+                              // For other columns, show raw value
+                              const rawValue = row[column];
+                              // const isPercentageColumn = data.columnFormats?.[column]?.type === 'percentage';
+                              let editValue = safeToString(rawValue);
+                              
+                              // if (isPercentageColumn && typeof rawValue === 'number' && !isNaN(rawValue)) {
+                              //   // Show percentage value (e.g., 13.567) instead of decimal (0.13567)
+                              //   editValue = (rawValue * 100).toString();
+                              // }
+                              
+                              // Calculate cursor position from click for better UX
+                              const clickPosition = getCursorPositionFromClick(e, editValue);
+                              setEditingCell({ row: rowIndex, col: column });
+                              setEditingCellValue(editValue);
+                              setCursorPosition(clickPosition);
+                            }}
                         >
                           {editingCell?.row === rowIndex && editingCell?.col === column ? (
                             <input
@@ -6292,11 +6658,46 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                               value={editingCellValue}
                               autoFocus
                               onChange={e => setEditingCellValue(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') commitCellEdit(rowIndex, column);
-                                if (e.key === 'Escape') setEditingCell(null);
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  commitCellEdit(rowIndex, column);
+                                  return;
+                                }
+                                if (e.key === 'Escape') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setEditingCell(null);
+                                  setEditingCellValue(''); // Reset value on cancel
+                                  return;
+                                }
+                                // Allow Tab key to work normally (move to next cell)
+                                if (e.key === 'Tab') {
+                                  // Save current cell before moving
+                                  commitCellEdit(rowIndex, column);
+                                  // Don't prevent default - let Tab work normally
+                                  return;
+                                }
                               }}
-                              onBlur={() => commitCellEdit(rowIndex, column)}
+                              onBlur={(e) => {
+                                // Check if focus is moving to another cell input (to prevent double-save)
+                                const relatedTarget = e.relatedTarget as HTMLElement;
+                                if (relatedTarget && relatedTarget.tagName === 'INPUT' && relatedTarget.getAttribute('type') === 'text') {
+                                  // Focus is moving to another input (likely another cell), don't commit yet
+                                  // The new cell's onFocus or onDoubleClick will handle it
+                                  return;
+                                }
+                                
+                                // Use setTimeout to ensure blur completes before commit
+                                // This prevents issues with focus moving to other elements
+                                setTimeout(() => {
+                                  // Double-check we're still supposed to commit (cell might have been cancelled)
+                                  if (editingCell && editingCell.row === rowIndex && editingCell.col === column) {
+                                    commitCellEdit(rowIndex, column);
+                                  }
+                                }, 100);
+                              }}
                             />
                           ) : (
                             <div 
@@ -6309,24 +6710,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                                 justifyContent: getColumnAlignment(column) === 'left' ? 'flex-start' : 
                                               getColumnAlignment(column) === 'center' ? 'center' : 'flex-end'
                               }}
-                              onDoubleClick={(e) => {
-                                // Always allow cell editing regardless of enableEditing setting
-                                // For percentage columns, show percentage value (multiply by 100) for editing
-                                // For other columns, show raw value
-                                const rawValue = row[column];
-                                const isPercentageColumn = data.columnFormats?.[column]?.type === 'percentage';
-                                let cellValue = safeToString(rawValue);
-                                
-                                if (isPercentageColumn && typeof rawValue === 'number' && !isNaN(rawValue)) {
-                                  // Show percentage value (e.g., 13.567) instead of decimal (0.13567)
-                                  cellValue = (rawValue * 100).toString();
-                                }
-                                
-                                const clickPosition = getCursorPositionFromClick(e, cellValue);
-                                setEditingCell({ row: rowIndex, col: column });
-                                setEditingCellValue(cellValue);
-                                setCursorPosition(clickPosition);
-                              }}
+                              // onDoubleClick removed - handled by parent TableCell to avoid duplicate handlers
                               title={`Double-click to edit cell\nValue: ${safeToString(row[column])}`}
                             >
                               {(() => {
@@ -6634,6 +7018,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category (All)</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal (All)</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleMultiColumnRetype(Array.from(multiSelectedColumns), 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object (All)</button>
+                    {/* COMMENTED OUT: Percentage and Currency menu items for multi-column selection
                     <div className="border-t border-gray-100 my-1"></div>
                     <button 
                       className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" 
@@ -6757,6 +7142,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         </div>
                       )}
                     </div>
+                    */}
                   </>
                 ) : (
                   <>
@@ -6768,6 +7154,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Category</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'number'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Decimal</button>
                     <button className="block w-full text-left px-4 py-2 text-xs hover:bg-gray-100" onClick={() => { handleRetypeColumn(contextMenu.col, 'text'); setContextMenu(null); setOpenDropdown(null); setConvertSubmenuOpen(false); }}>Object</button>
+                    {/* COMMENTED OUT: Percentage and Currency menu items for single column selection
                     <div className="border-t border-gray-100 my-1"></div>
                     {data.columnFormats?.[contextMenu.col]?.type === 'percentage' ? (
                       <button className="block w-full text-left px-4 py-2 text-xs bg-gray-50 text-gray-400 cursor-not-allowed" disabled title={`Percentage already applied to column "${contextMenu.col}"`}>Percentage (Already Applied)</button>
@@ -6851,6 +7238,7 @@ const filters = typeof settings.filters === 'object' && settings.filters !== nul
                         </div>
                       )}
                     </div>
+                    */}
                   </>
                 )}
               </div>

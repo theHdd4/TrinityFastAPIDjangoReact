@@ -1056,19 +1056,45 @@ async def apply_formula(
         
         # 🔧 FIX: Replace inf, -inf, and nan with None to make JSON-compliant
         # Convert to list and replace non-finite values
+        # Also round floating point numbers to 15 decimal places to avoid JSON serialization artifacts
+        # This preserves precision while preventing floating point representation issues
         result_values = []
+        is_numeric_result = False
         for val in result_series.to_list():
-            if isinstance(val, float):
-                if math.isnan(val) or math.isinf(val):
-                    result_values.append(None)
+            if isinstance(val, (int, float)):
+                is_numeric_result = True
+                if isinstance(val, float):
+                    if math.isnan(val) or math.isinf(val):
+                        result_values.append(None)
+                    else:
+                        # Round to 15 decimal places to avoid floating point precision artifacts
+                        # This is sufficient precision for most use cases while preventing JSON serialization issues
+                        # Python's float has ~15-17 significant digits, so 15 is a safe choice
+                        rounded_val = round(val, 15)
+                        # Remove trailing zeros after decimal point for cleaner representation
+                        # But keep the value as float to preserve type information
+                        result_values.append(rounded_val)
                 else:
+                    # Integer values don't need rounding
                     result_values.append(val)
             else:
                 result_values.append(val)
         
-        df = df.with_columns(
-            pl.Series(name=target_column, values=result_values)
-        )
+        # 🔧 FIX: Explicitly cast to Float64 for numeric results to ensure proper type detection
+        # This ensures formula-derived columns are correctly identified as numeric
+        if is_numeric_result:
+            # Create Series with explicit Float64 dtype for numeric results
+            # This ensures the dtype is properly set and detected by frontend
+            df = df.with_columns(
+                pl.Series(name=target_column, values=result_values).cast(pl.Float64, strict=False)
+            )
+            logger.info(f"📊 [APPLY_FORMULA] Created numeric column '{target_column}' with Float64 dtype")
+        else:
+            # For non-numeric results, let Polars infer the type
+            df = df.with_columns(
+                pl.Series(name=target_column, values=result_values)
+            )
+            logger.info(f"📊 [APPLY_FORMULA] Created column '{target_column}' with inferred dtype")
     else:
         logger.info(f"📝 [APPLY_FORMULA] No '=' prefix, treating as literal value")
         df = df.with_columns(pl.lit(expr).alias(target_column))
@@ -1230,11 +1256,40 @@ async def retype_column(df_id: str = Body(...), name: str = Body(...), new_type:
 @router.post("/round_column")
 async def round_column(df_id: str = Body(...), name: str = Body(...), decimal_places: int = Body(...)):
     df = _get_df(df_id)
+    
+    # Validate column exists
+    if name not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{name}' not found in dataframe")
+    
+    # Get column dtype
+    column_series = df.get_column(name)
+    dtype = column_series.dtype
+    dtype_str = str(dtype)
+    
+    # Check if column is numeric
+    is_numeric = dtype in [
+        pl.Int8, pl.Int16, pl.Int32, pl.Int64,
+        pl.UInt8, pl.UInt16, pl.UInt32, pl.UInt64,
+        pl.Float32, pl.Float64
+    ]
+    
+    if not is_numeric:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Column '{name}' is not numeric (dtype: {dtype_str}). Rounding can only be applied to numeric columns."
+        )
+    
     try:
         # Round the specified column to the given decimal places
-        df = df.with_columns(pl.col(name).round(decimal_places))
+        # Cast to Float64 first to ensure consistent numeric type, then round
+        df = df.with_columns(
+            pl.col(name).cast(pl.Float64, strict=False).round(decimal_places)
+        )
+        logger.info(f"✅ [ROUND_COLUMN] Column '{name}' rounded to {decimal_places} decimal places (original dtype: {dtype_str})")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"❌ [ROUND_COLUMN] Failed to round column '{name}': {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to round column '{name}': {str(e)}")
+    
     SESSIONS[df_id] = df
     result = _df_payload(df, df_id)
     return result
