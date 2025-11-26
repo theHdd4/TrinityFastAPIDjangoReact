@@ -980,230 +980,216 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                 <Switch checked={textBoxEnabled} onCheckedChange={handleToggleTextBox} />
               </div>
 
-              <Separator />
+              {textBoxEnabled && (
+                <>
+                  <Separator />
 
-              <div className={`space-y-5 ${textBoxEnabled ? '' : 'opacity-60'}`}>
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Font Family</Label>
-                  <Select
-                    value={textBoxSettings.font_family}
-                    onValueChange={(value) => handleTextBoxSettingsChange({ font_family: value })}
-                    disabled={!textBoxEnabled}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {fontFamilies.map(font => (
-                        <SelectItem key={font} value={font} style={{ fontFamily: font }}>
-                          {font}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                  <div className="space-y-5">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-muted-foreground">Font Family</Label>
+                      <Select
+                        value={textBoxSettings.font_family}
+                        onValueChange={(value) => handleTextBoxSettingsChange({ font_family: value })}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {fontFamilies.map(font => (
+                            <SelectItem key={font} value={font} style={{ fontFamily: font }}>
+                              {font}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
 
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Font Size</Label>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => adjustFontSize(-2)}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <Minus className="h-4 w-4" />
-                    </Button>
-                    <Input
-                      type="number"
-                      value={textBoxSettings.font_size}
-                      onChange={(e) =>
-                        handleTextBoxSettingsChange({
-                          font_size: clampFontSize(Number(e.target.value) || 12),
-                        })
-                      }
-                      disabled={!textBoxEnabled}
-                      className="text-center font-medium"
-                    />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => adjustFontSize(2)}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </Button>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-muted-foreground">Font Size</Label>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => adjustFontSize(-2)}
+                          className="h-9 w-9"
+                        >
+                          <Minus className="h-4 w-4" />
+                        </Button>
+                        <Input
+                          type="number"
+                          value={textBoxSettings.font_size}
+                          onChange={(e) =>
+                            handleTextBoxSettingsChange({
+                              font_size: clampFontSize(Number(e.target.value) || 12),
+                            })
+                          }
+                          className="text-center font-medium"
+                        />
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => adjustFontSize(2)}
+                          className="h-9 w-9"
+                        >
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-muted-foreground">Text Formatting</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant={textBoxSettings.bold ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() => handleTextBoxSettingsChange({ bold: !textBoxSettings.bold })}
+                          className="h-9 w-9"
+                        >
+                          <Bold className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={textBoxSettings.italics ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() => handleTextBoxSettingsChange({ italics: !textBoxSettings.italics })}
+                          className="h-9 w-9"
+                        >
+                          <Italic className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={textBoxSettings.underline ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() => handleTextBoxSettingsChange({ underline: !textBoxSettings.underline })}
+                          className="h-9 w-9"
+                        >
+                          <Underline className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={textBoxSettings.strikethrough ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() => handleTextBoxSettingsChange({ strikethrough: !textBoxSettings.strikethrough })}
+                          className="h-9 w-9"
+                        >
+                          <Strikethrough className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-muted-foreground">Text Alignment</Label>
+                      <div className="flex gap-2">
+                        <Button
+                          variant={textBoxSettings.text_align === 'left' ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() => handleTextBoxSettingsChange({ text_align: 'left' })}
+                          className="h-9 w-9"
+                        >
+                          <AlignLeft className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={textBoxSettings.text_align === 'center' ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() => handleTextBoxSettingsChange({ text_align: 'center' })}
+                          className="h-9 w-9"
+                        >
+                          <AlignCenter className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={textBoxSettings.text_align === 'right' ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() => handleTextBoxSettingsChange({ text_align: 'right' })}
+                          className="h-9 w-9"
+                        >
+                          <AlignRight className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={textBoxSettings.text_align === 'justify' ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() => handleTextBoxSettingsChange({ text_align: 'justify' })}
+                          className="h-9 w-9"
+                        >
+                          <AlignJustify className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-muted-foreground">Lists</Label>
+                      <div className="flex gap-2">
+                        <Button
+                          variant={textBoxSettings.list_type === 'bullet' ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() =>
+                            handleTextBoxSettingsChange({
+                              list_type: textBoxSettings.list_type === 'bullet' ? 'none' : 'bullet',
+                            })
+                          }
+                          className="h-9 w-9"
+                        >
+                          <List className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant={textBoxSettings.list_type === 'number' ? 'default' : 'outline'}
+                          size="icon"
+                          onClick={() =>
+                            handleTextBoxSettingsChange({
+                              list_type: textBoxSettings.list_type === 'number' ? 'none' : 'number',
+                            })
+                          }
+                          className="h-9 w-9"
+                        >
+                          <ListOrdered className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-muted-foreground">Text Color</Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="color"
+                          value={textBoxSettings.text_color}
+                          onChange={(e) => handleTextBoxSettingsChange({ text_color: e.target.value })}
+                          className="h-10 w-20 cursor-pointer"
+                        />
+                        <Input
+                          type="text"
+                          value={textBoxSettings.text_color}
+                          onChange={(e) => handleTextBoxSettingsChange({ text_color: e.target.value })}
+                          className="flex-1 font-mono text-sm"
+                          placeholder="#000000"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium text-muted-foreground">Background Color</Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="color"
+                          value={textBoxSettings.background_color === 'transparent' ? '#ffffff' : textBoxSettings.background_color}
+                          onChange={(e) => handleTextBoxSettingsChange({ background_color: e.target.value })}
+                          className="h-10 w-20 cursor-pointer"
+                        />
+                        <Input
+                          type="text"
+                          value={textBoxSettings.background_color ?? ''}
+                          onChange={(e) => handleTextBoxSettingsChange({ background_color: e.target.value })}
+                          className="flex-1 font-mono text-sm"
+                          placeholder="transparent"
+                        />
+                      </div>
+                    </div>
                   </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Text Formatting</Label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant={textBoxSettings.bold ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() => handleTextBoxSettingsChange({ bold: !textBoxSettings.bold })}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <Bold className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={textBoxSettings.italics ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() => handleTextBoxSettingsChange({ italics: !textBoxSettings.italics })}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <Italic className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={textBoxSettings.underline ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() => handleTextBoxSettingsChange({ underline: !textBoxSettings.underline })}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <Underline className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={textBoxSettings.strikethrough ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() => handleTextBoxSettingsChange({ strikethrough: !textBoxSettings.strikethrough })}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <Strikethrough className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Text Alignment</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      variant={textBoxSettings.text_align === 'left' ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() => handleTextBoxSettingsChange({ text_align: 'left' })}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <AlignLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={textBoxSettings.text_align === 'center' ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() => handleTextBoxSettingsChange({ text_align: 'center' })}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <AlignCenter className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={textBoxSettings.text_align === 'right' ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() => handleTextBoxSettingsChange({ text_align: 'right' })}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <AlignRight className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={textBoxSettings.text_align === 'justify' ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() => handleTextBoxSettingsChange({ text_align: 'justify' })}
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <AlignJustify className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Lists</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      variant={textBoxSettings.list_type === 'bullet' ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() =>
-                        handleTextBoxSettingsChange({
-                          list_type: textBoxSettings.list_type === 'bullet' ? 'none' : 'bullet',
-                        })
-                      }
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <List className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant={textBoxSettings.list_type === 'number' ? 'default' : 'outline'}
-                      size="icon"
-                      onClick={() =>
-                        handleTextBoxSettingsChange({
-                          list_type: textBoxSettings.list_type === 'number' ? 'none' : 'number',
-                        })
-                      }
-                      disabled={!textBoxEnabled}
-                      className="h-9 w-9"
-                    >
-                      <ListOrdered className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Text Color</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="color"
-                      value={textBoxSettings.text_color}
-                      onChange={(e) => handleTextBoxSettingsChange({ text_color: e.target.value })}
-                      className="h-10 w-20 cursor-pointer"
-                      disabled={!textBoxEnabled}
-                    />
-                    <Input
-                      type="text"
-                      value={textBoxSettings.text_color}
-                      onChange={(e) => handleTextBoxSettingsChange({ text_color: e.target.value })}
-                      className="flex-1 font-mono text-sm"
-                      placeholder="#000000"
-                      disabled={!textBoxEnabled}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-medium text-muted-foreground">Background Color</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="color"
-                      value={textBoxSettings.background_color === 'transparent' ? '#ffffff' : textBoxSettings.background_color}
-                      onChange={(e) => handleTextBoxSettingsChange({ background_color: e.target.value })}
-                      className="h-10 w-20 cursor-pointer"
-                      disabled={!textBoxEnabled}
-                    />
-                    <Input
-                      type="text"
-                      value={textBoxSettings.background_color ?? ''}
-                      onChange={(e) => handleTextBoxSettingsChange({ background_color: e.target.value })}
-                      className="flex-1 font-mono text-sm"
-                      placeholder="transparent"
-                      disabled={!textBoxEnabled}
-                    />
-                  </div>
-                </div>
-              </div>
+                </>
+              )}
             </Card>
           </TabsContent>
 
