@@ -38,7 +38,7 @@ class ChartMakerPromptBuilder:
                     {
                         "x_column": "category_column",
                         "y_column": "numeric_column",
-                        "name": "Trace 1",
+                        "name": "Series Name",
                         "aggregation": "sum",
                         "color": "#41C185"
                     }
@@ -53,6 +53,22 @@ class ChartMakerPromptBuilder:
         "reasoning": "Found all required components with context from history",
         "used_memory": True
     }
+    
+    # 🔧 CRITICAL: Examples for dual Y-axis and legend field
+    # Example 1: Dual Y-axis (2 different metrics)
+    # {
+    #     "traces": [
+    #         {"x_column": "Year", "y_column": "SalesValue", "name": "Sales Value", "aggregation": "sum"},
+    #         {"x_column": "Year", "y_column": "Volume", "name": "Volume", "aggregation": "sum"}
+    #     ]
+    # }
+    # 
+    # Example 2: Legend field (segregate one metric by category)
+    # {
+    #     "traces": [
+    #         {"x_column": "Year", "y_column": "SalesValue", "legend_field": "Brand", "aggregation": "sum"}
+    #     ]
+    # }
     
     # ChartMaker-specific general response template
     GENERAL_TEMPLATE = {
@@ -98,12 +114,41 @@ class ChartMakerPromptBuilder:
         "AUTOMATIC COLUMN DETECTION: When file is selected, automatically identify categorical columns suitable for x-axis and numeric columns suitable for y-axis",
         "SMART CHART TYPE SELECTION: Suggest appropriate chart types based on data and user intent (bar for comparisons, line for trends, pie for proportions, scatter for relationships)",
         "VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section",
+        "🔧 CRITICAL: Use SIMPLE MODE format (not advanced traces mode) for all charts",
+        "🔧 CRITICAL: For multiple series, use ONE of these approaches:",
+        "   1. DUAL Y-AXIS: If user wants 2 different metrics (e.g., SalesValue and Volume), use secondYAxis field",
+        "       - Create 2 traces: first trace with y_column=SalesValue, second trace with y_column=Volume",
+        "       - Backend will automatically create dual Y-axis chart",
+        "   2. LEGEND FIELD (Segregate Field): If user wants to segregate one metric by a category (e.g., SalesValue by Brand), use legend_field",
+        "       - Create 1 trace with y_column=SalesValue and legend_field=Brand",
+        "       - Backend will create multiple series (one per Brand value) from single Y-axis",
+        "🔧 DO NOT use multiple traces with different y_columns unless you want dual Y-axis",
+        "🔧 For dual Y-axis: Always provide exactly 2 traces with different y_column values",
+        "🔧 For legend field segregation: Provide 1 trace with legend_field set to the categorical column",
         "CHART TYPES: Support bar, line, area, pie, and scatter chart types",
         "MULTIPLE CHARTS: Can create multiple charts in a single response by providing multiple chart configurations in chart_json array",
-        "TRACES: Support multiple traces per chart for advanced visualizations",
         "FILTERS: Support optional filters to narrow down data before charting",
         "AGGREGATION: Support aggregation functions (sum, mean, count, min, max) for numeric columns",
-        "DEFAULT BEHAVIOR: If no chart type specified, suggest bar chart as default"
+        "DEFAULT BEHAVIOR: If no chart type specified, suggest bar chart as default",
+        "🔧 CRITICAL: Use SIMPLE MODE format (not advanced traces mode) for all charts",
+        "🔧 CRITICAL: ALWAYS provide x_column and y_column in EVERY trace - these are REQUIRED for filters to work",
+        "🔧 CRITICAL: x_column must be a categorical column (e.g., Year, Month, Category, Brand)",
+        "🔧 CRITICAL: y_column must be a numeric column (e.g., SalesValue, Volume, Count, Revenue)",
+        "🔧 CRITICAL: For multiple series, use ONE of these approaches:",
+        "   1. DUAL Y-AXIS: If user wants 2 different metrics (e.g., SalesValue and Volume), use 2 traces with different y_column values",
+        "       - First trace: x_column='Year', y_column='SalesValue', name='Sales Value', aggregation='sum'",
+        "       - Second trace: x_column='Year', y_column='Volume', name='Volume', aggregation='sum'",
+        "       - Both traces MUST have the SAME x_column value",
+        "       - Backend will automatically create dual Y-axis chart with left and right axes",
+        "   2. LEGEND FIELD (Segregate Field): If user wants to segregate one metric by a category (e.g., SalesValue by Brand), use legend_field",
+        "       - Create 1 trace: x_column='Year', y_column='SalesValue', legend_field='Brand', aggregation='sum'",
+        "       - Backend will create multiple series (one per Brand value) from single Y-axis",
+        "       - Example: {'x_column': 'Year', 'y_column': 'SalesValue', 'legend_field': 'Brand', 'aggregation': 'sum'}",
+        "🔧 DO NOT use multiple traces with different y_columns unless you want dual Y-axis (2 different metrics)",
+        "🔧 For dual Y-axis: Always provide exactly 2 traces with different y_column values and same x_column",
+        "🔧 For legend field segregation: Provide 1 trace with legend_field set to the categorical column name",
+        "🔧 The frontend uses SIMPLE MODE (isAdvancedMode: false) with legendField or secondYAxis, NOT advanced traces mode",
+        "🔧 FILTERS: Filters are enabled when x_column and y_column are provided - always include them in traces"
     ]
     
     @staticmethod

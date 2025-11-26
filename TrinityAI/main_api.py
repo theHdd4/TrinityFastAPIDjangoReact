@@ -476,8 +476,8 @@ try:
     try:
         # Import like other agents: from TrinityAgent.main_app import ...
         # This matches: from Agent_Merge.main_app import router
-        print("Attempting import: from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router...")
-        from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, initialize_trinity_agent
+        print("Attempting import: from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, get_dataframe_operations_router...")
+        from TrinityAgent.main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, get_dataframe_operations_router, initialize_trinity_agent
         print("✅ Successfully imported TrinityAgent.main_app")
         
         # Initialize TrinityAgent (this registers all agents)
@@ -561,6 +561,10 @@ try:
         print("Getting chart_maker router from TrinityAgent...")
         chartmaker_router = get_chart_maker_router()
         
+        # Get dataframe_operations router using the connection interface
+        print("Getting dataframe_operations router from TrinityAgent...")
+        dataframe_operations_router = get_dataframe_operations_router()
+        
         if chartmaker_router:
             print("✅✅✅ CHARTMAKER ROUTER RETRIEVED FROM TRINITY AGENT ✅✅✅")
             print(f"✅ ChartMaker router type: {type(chartmaker_router)}")
@@ -588,7 +592,7 @@ try:
             if str(TRINITY_AGENT_PATH) not in sys.path:
                 sys.path.insert(0, str(TRINITY_AGENT_PATH))
                 print(f"✅ Added TrinityAgent to sys.path for fallback: {TRINITY_AGENT_PATH}")
-            from main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, initialize_trinity_agent
+            from main_app import get_concat_router, get_merge_router, get_create_transform_router, get_group_by_router, get_chart_maker_router, get_dataframe_operations_router, initialize_trinity_agent
             print("✅ Fallback import successful")
             init_results = initialize_trinity_agent()
             concat_router = get_concat_router()
@@ -596,6 +600,7 @@ try:
             create_transform_router = get_create_transform_router()
             groupby_router = get_group_by_router()
             chartmaker_router = get_chart_maker_router()
+            dataframe_operations_router = get_dataframe_operations_router()
             if concat_router:
                 print("✅✅✅ CONCAT ROUTER RETRIEVED VIA FALLBACK ✅✅✅")
             if merge_router:
@@ -638,6 +643,7 @@ except ImportError as e:
     create_transform_router = None
     groupby_router = None
     chartmaker_router = None
+    dataframe_operations_router = None
 except Exception as e:
     error_msg = f"❌❌❌ ERROR LOADING CONCAT/MERGE/CREATETRANSFORM AGENTS VIA REGISTRY ❌❌❌\nException: {e}"
     print("=" * 80)
@@ -731,7 +737,8 @@ if concat_router is None:
 # from Agent_chartmaker.main_app import router as chartmaker_router  # DISABLED - Using standardized Agent_ChartMaker from TrinityAgent
 # chartmaker_router is now loaded from TrinityAgent above
 from Agent_explore.main_app import router as explore_router
-from Agent_dataframe_operations.main_app import router as dataframe_operations_router
+# from Agent_dataframe_operations.main_app import router as dataframe_operations_router  # DISABLED - Using standardized Agent_DataFrameOperations from TrinityAgent
+# dataframe_operations_router is now loaded from TrinityAgent below
 from Agent_df_validate.main_app import router as df_validate_router
 from Agent_insight.main_app import router as workflow_insight_router
 from insight import router as insight_router
@@ -1099,8 +1106,55 @@ else:
     logger.error("❌ ChartMaker router is None - chartmaker endpoint will not work")
     logger.error("This means the import from TrinityAgent.main_app failed or get_chart_maker_router returned None")
 
+# Include standardized dataframe_operations router (from TrinityAgent via agent registry)
+logger.info("=" * 80)
+logger.info("INCLUDING DATAFRAME OPERATIONS ROUTER IN API")
+logger.info("=" * 80)
+logger.info(f"dataframe_operations_router value: {dataframe_operations_router}")
+logger.info(f"dataframe_operations_router is None: {dataframe_operations_router is None}")
+logger.info(f"dataframe_operations_router type: {type(dataframe_operations_router) if dataframe_operations_router else 'N/A'}")
+
+if dataframe_operations_router is not None:
+    try:
+        logger.info(f"DataFrameOperations router is not None: {dataframe_operations_router is not None}")
+        logger.info(f"DataFrameOperations router type: {type(dataframe_operations_router)}")
+        
+        # Check route count before inclusion
+        route_count = len(dataframe_operations_router.routes) if dataframe_operations_router else 0
+        logger.info(f"DataFrameOperations router has {route_count} routes before inclusion")
+        
+        if route_count == 0:
+            logger.error("❌❌❌ DATAFRAME OPERATIONS ROUTER HAS NO ROUTES - NOT INCLUDING ❌❌❌")
+            logger.error("The route decorators may not have executed during import")
+        else:
+            api_router.include_router(dataframe_operations_router, tags=["dataframe_operations"])
+            logger.info("✅ DataFrameOperations router included in API")
+            try:
+                route_count_after = len(dataframe_operations_router.routes)
+                logger.info(f"✅ DataFrameOperations router has {route_count_after} routes after inclusion")
+                for route in dataframe_operations_router.routes:
+                    if hasattr(route, 'path') and hasattr(route.path, 'methods'):
+                        logger.info(f"  - {list(route.methods)} {route.path}")
+                    elif hasattr(route, 'path'):
+                        logger.info(f"  - {route.path}")
+            except Exception as e:
+                logger.warning(f"Could not log dataframe_operations routes: {e}")
+    except Exception as e:
+        logger.error(f"❌ Failed to include dataframe_operations router: {e}", exc_info=True)
+else:
+    logger.error("❌ DataFrameOperations router is None - dataframe_operations endpoint will not work")
+    logger.error("This means the import from TrinityAgent.main_app failed or get_dataframe_operations_router returned None")
+    # Fallback to old router if available
+    try:
+        from Agent_dataframe_operations.main_app import router as dataframe_operations_router_fallback
+        logger.warning("⚠️ Using fallback dataframe_operations router from old Agent_dataframe_operations")
+        dataframe_operations_router = dataframe_operations_router_fallback
+    except ImportError:
+        logger.warning("⚠️ Fallback dataframe_operations router also not available")
+
 api_router.include_router(explore_router)
-api_router.include_router(dataframe_operations_router)
+if dataframe_operations_router is not None:
+    api_router.include_router(dataframe_operations_router)
 api_router.include_router(df_validate_router)
 api_router.include_router(insight_router)
 api_router.include_router(workflow_insight_router)

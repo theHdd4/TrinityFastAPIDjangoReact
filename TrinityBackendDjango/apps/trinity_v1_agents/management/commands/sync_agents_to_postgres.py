@@ -391,6 +391,12 @@ class Command(BaseCommand):
                 "description": "Create charts and visualizations (bar, line, area, pie, scatter) from data files",
                 "category": "Visualization",
                 "tags": ["chart", "visualization", "graph", "plot", "bar", "line", "pie", "scatter"]
+            },
+            "dataframe_operations": {
+                "name": "DataFrame Operations",
+                "description": "Perform DataFrame operations (load, filter, sort, column operations, formulas, save) on data files",
+                "category": "Data Operations",
+                "tags": ["dataframe", "operations", "filter", "sort", "columns", "formulas", "data", "manipulation"]
             }
         }
         
