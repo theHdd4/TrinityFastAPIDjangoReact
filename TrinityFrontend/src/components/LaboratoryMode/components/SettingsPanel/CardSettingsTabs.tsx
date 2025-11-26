@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
+import { Label } from '@/components/ui/label';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +28,7 @@ interface CardSettingsTabsProps {
   card: LayoutCard;
   tab: string;
   setTab: (value: string) => void;
+  onUpdateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   onAddVariable: (cardId: string, variable: CardVariable) => void;
   onUpdateVariable: (
     cardId: string,
@@ -98,6 +101,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   card,
   tab,
   setTab,
+  onUpdateCard,
   onAddVariable,
   onUpdateVariable,
   onDeleteVariable,
@@ -119,6 +123,18 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   const [editNameError, setEditNameError] = useState<string | null>(null);
   const [appendDialogOpen, setAppendDialogOpen] = useState(false);
   const [pendingAppendVariable, setPendingAppendVariable] = useState<AvailableVariable | null>(null);
+
+  const textBoxEnabled = card.textBoxEnabled ?? false;
+  const textBoxContent = card.textBoxContent ?? '';
+  const previewHtml = useMemo(() => {
+    const customHtml = card.textBoxHtml ?? '';
+    if (customHtml.trim()) {
+      return customHtml;
+    }
+    return textBoxContent ? textBoxContent.replace(/\n/g, '<br />') : '';
+  }, [card.textBoxHtml, textBoxContent]);
+  const wordCount = textBoxContent.trim() ? textBoxContent.trim().split(/\s+/).length : 0;
+  const lineCount = textBoxContent ? textBoxContent.split('\n').length : 0;
 
   const generateVariableId = () => {
     if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -759,6 +775,21 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
     }
   }, [card, tab, loadAvailableVariables]);
 
+  const handleToggleTextBox = (enabled: boolean) => {
+    onUpdateCard(card.id, { textBoxEnabled: enabled });
+  };
+
+  const handleTextBoxContentChange = (value: string) => {
+    onUpdateCard(card.id, {
+      textBoxContent: value,
+      ...(card.textBoxHtml ? {} : { textBoxHtml: value.replace(/\n/g, '<br />') }),
+    });
+  };
+
+  const handleTextBoxHtmlChange = (value: string) => {
+    onUpdateCard(card.id, { textBoxHtml: value });
+  };
+
   return (
     <>
       <Tabs value={tab} onValueChange={setTab} className="w-full">
@@ -766,8 +797,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
           <TabsTrigger value="variables" className="text-xs">
             Variables
           </TabsTrigger>
-          <TabsTrigger value="settings" className="text-xs">
-            Settings
+          <TabsTrigger value="textbox" className="text-xs">
+            Text Box
           </TabsTrigger>
           <TabsTrigger value="visual" className="text-xs">
             Visualisation
@@ -888,10 +919,97 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
             </Card>
           </TabsContent>
 
-          <TabsContent value="settings" className="space-y-4">
-            <Card className="p-4 text-sm text-gray-600">
-              <h4 className="font-medium text-gray-900 mb-2">Card Settings</h4>
-              <p>Global card configuration will appear here. For now, manage variables via the Variable Definition tab.</p>
+          <TabsContent value="textbox" className="space-y-4">
+            <Card className="p-4 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Text box</p>
+                  <h4 className="font-medium text-gray-900">Add contextual notes</h4>
+                  <p className="text-xs text-gray-500">
+                    Toggle the text box to overlay guidance beneath the atom section on this card.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">Insert text box on the card</span>
+                  <Switch checked={textBoxEnabled} onCheckedChange={handleToggleTextBox} />
+                </div>
+              </div>
+
+              {textBoxEnabled ? (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-muted-foreground">Text content</Label>
+                    <Textarea
+                      rows={4}
+                      value={textBoxContent}
+                      onChange={e => handleTextBoxContentChange(e.target.value)}
+                      placeholder="Type notes, instructions, or a narrative for this card"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-muted-foreground">Custom HTML (optional)</Label>
+                    <Textarea
+                      rows={4}
+                      value={card.textBoxHtml ?? ''}
+                      onChange={e => handleTextBoxHtmlChange(e.target.value)}
+                      placeholder="Paste formatted HTML to render inside the text box"
+                    />
+                  </div>
+
+                  <Separator />
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium text-muted-foreground">Preview</Label>
+                    <div className="p-4 border border-border rounded-md bg-muted/10">
+                      <div
+                        className="prose prose-sm max-w-none"
+                        dangerouslySetInnerHTML={{ __html: previewHtml }}
+                      />
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="justify-start"
+                      onClick={() => void navigator.clipboard?.writeText(textBoxContent)}
+                    >
+                      Copy text
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="justify-start"
+                      onClick={() => void navigator.clipboard?.writeText(previewHtml)}
+                    >
+                      Copy HTML
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 text-xs text-gray-600">
+                    <div className="flex justify-between rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                      <span>Characters</span>
+                      <span className="font-semibold text-gray-900">{textBoxContent.length}</span>
+                    </div>
+                    <div className="flex justify-between rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                      <span>Words</span>
+                      <span className="font-semibold text-gray-900">{wordCount}</span>
+                    </div>
+                    <div className="flex justify-between rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                      <span>Lines</span>
+                      <span className="font-semibold text-gray-900">{lineCount}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <Card className="p-4 text-xs text-gray-600 bg-gray-50 border-dashed">
+                  Turn on the toggle above to add a text box beneath this card's atom content.
+                </Card>
+              )}
             </Card>
           </TabsContent>
 

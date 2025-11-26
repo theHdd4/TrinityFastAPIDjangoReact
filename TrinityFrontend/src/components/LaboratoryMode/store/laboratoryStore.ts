@@ -1665,6 +1665,9 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
   variables?: CardVariable[];
+  textBoxEnabled?: boolean;
+  textBoxContent?: string;
+  textBoxHtml?: string;
   order?: number; // For positioning standalone cards between molecules
   afterMoleculeId?: string; // Reference to molecule this card is positioned after
   beforeMoleculeId?: string; // Reference to molecule this card is positioned before

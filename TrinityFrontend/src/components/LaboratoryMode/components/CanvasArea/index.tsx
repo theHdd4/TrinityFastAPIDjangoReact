@@ -484,6 +484,55 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     );
   };
 
+  const renderCardTextBox = (card: LayoutCard) => {
+    if (!card.textBoxEnabled) {
+      return null;
+    }
+
+    const plainText = card.textBoxContent ?? '';
+    const htmlContent = card.textBoxHtml && card.textBoxHtml.trim()
+      ? card.textBoxHtml
+      : plainText.replace(/\n/g, '<br />');
+
+    const wordCount = plainText.trim() ? plainText.trim().split(/\s+/).length : 0;
+    const lineCount = plainText ? plainText.split('\n').length : 0;
+
+    return (
+      <div className="mt-6">
+        <div className="border border-gray-200 bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Text box</p>
+              <h4 className="text-base font-semibold text-gray-900">Card notes</h4>
+              <p className="text-xs text-gray-500">Displayed beneath this card's atoms on the canvas.</p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-[11px] text-gray-600">
+              <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200 text-right">
+                <div className="text-[10px] uppercase tracking-wide text-gray-500">Chars</div>
+                <div className="text-sm font-semibold text-gray-900">{plainText.length}</div>
+              </div>
+              <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200 text-right">
+                <div className="text-[10px] uppercase tracking-wide text-gray-500">Words</div>
+                <div className="text-sm font-semibold text-gray-900">{wordCount}</div>
+              </div>
+              <div className="px-3 py-2 bg-gray-50 rounded-md border border-gray-200 text-right">
+                <div className="text-[10px] uppercase tracking-wide text-gray-500">Lines</div>
+                <div className="text-sm font-semibold text-gray-900">{lineCount}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 bg-gray-50/60">
+            <div
+              className="prose prose-sm max-w-none text-gray-900"
+              dangerouslySetInnerHTML={{ __html: htmlContent || '<p class="text-gray-500">No text provided.</p>' }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   useEffect(() => {
     if (!expandedCard) {
       return;
@@ -4525,6 +4574,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 ))}
                               </div>
                             )}
+                            {renderCardTextBox(card)}
                             {renderAppendedVariables(card)}
                           </div>
                         </Card>
@@ -4806,6 +4856,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             ))}
                           </div>
                         )}
+                        {renderCardTextBox(card)}
                         {renderAppendedVariables(card)}
                       </div>
                     </Card>
@@ -5293,12 +5344,13 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         </div>
                       )}
                     </AtomBox>
-                  ))}
-                </div>
-              )}
-              {renderAppendedVariables(card)}
+              ))}
             </div>
-          </Card>
+          )}
+          {renderCardTextBox(card)}
+          {renderAppendedVariables(card)}
+        </div>
+      </Card>
           {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
             <div className="flex justify-center my-4">
               <button

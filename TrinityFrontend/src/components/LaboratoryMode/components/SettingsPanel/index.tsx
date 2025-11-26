@@ -63,7 +63,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   selectedCardId,
   cardExhibited,
 }) => {
-  const [tab, setTab] = useState<'variables' | 'settings' | 'visual' | 'exhibition'>(
+  const [tab, setTab] = useState<'variables' | 'textbox' | 'settings' | 'visual' | 'exhibition'>(
     'variables',
   );
 
@@ -71,6 +71,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+  const updateCard = useLaboratoryStore(state => state.updateCard);
   const cards = useLaboratoryStore(state => state.cards);
   const addCardVariable = useLaboratoryStore(state => state.addCardVariable);
   const updateCardVariable = useLaboratoryStore(state => state.updateCardVariable);
@@ -113,7 +114,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   useEffect(() => {
     if (!cardExhibited && tab === 'exhibition') {
-      setTab('settings');
+      setTab('variables');
     }
   }, [cardExhibited, tab]);
 
@@ -155,6 +156,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
               card={selectedCard}
               tab={tab}
               setTab={setTab}
+              onUpdateCard={updateCard}
               onAddVariable={addCardVariable}
               onUpdateVariable={updateCardVariable}
               onDeleteVariable={deleteCardVariable}
