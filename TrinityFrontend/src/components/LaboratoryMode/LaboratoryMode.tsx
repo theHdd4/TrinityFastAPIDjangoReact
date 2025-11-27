@@ -58,7 +58,7 @@ const LaboratoryMode = () => {
     const saved = localStorage.getItem('trinity_ai_layout_preference');
     return (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
   });
-  
+
   // Listen for layout preference changes (from settings panel)
   useEffect(() => {
     const handleStorageChange = () => {
@@ -66,18 +66,18 @@ const LaboratoryMode = () => {
       const newLayout = (saved === 'horizontal' || saved === 'vertical') ? saved : 'vertical';
       setTrinityAILayout(newLayout);
     };
-    
+
     // Listen to custom event for same-tab updates
     const handleCustomStorageChange = () => handleStorageChange();
     window.addEventListener('trinity_ai_layout_changed', handleCustomStorageChange);
-    
+
     // Listen to storage events for cross-tab updates
     window.addEventListener('storage', (e) => {
       if (e.key === 'trinity_ai_layout_preference') {
         handleStorageChange();
       }
     });
-    
+
     return () => {
       window.removeEventListener('trinity_ai_layout_changed', handleCustomStorageChange);
       window.removeEventListener('storage', handleStorageChange);
@@ -97,7 +97,7 @@ const LaboratoryMode = () => {
   const canvasAreaRef = useRef<CanvasAreaRef>(null);
   // Ref to track if initial cards have been loaded (to prevent autosave on initial load)
   const hasInitialCardsLoadedRef = useRef(false);
-  
+
   // Real-time collaborative sync
   const { isConnected: isSyncConnected, activeUsers, cardEditors, notifyCardFocus, notifyCardBlur } = useCollaborativeSync({
     enabled: canEdit && autosaveEnabled, // Only enable for users with edit permissions and when autosave is enabled
@@ -227,11 +227,11 @@ const LaboratoryMode = () => {
       console.log('Successfully Loaded Existing Project State');
       toast({ title: 'Successfully Loaded Existing Project State' });
     }
-    
+
     // Hide navigation list when switching from workflow mode
-    const hasWorkflowData = localStorage.getItem('workflow-data') || 
-                           localStorage.getItem('workflow-selected-atoms') || 
-                           localStorage.getItem('workflow-molecules');
+    const hasWorkflowData = localStorage.getItem('workflow-data') ||
+      localStorage.getItem('workflow-selected-atoms') ||
+      localStorage.getItem('workflow-molecules');
     if (hasWorkflowData) {
       setShowFloatingNavigationList(false);
     }
@@ -280,70 +280,70 @@ const LaboratoryMode = () => {
     }
 
     const sortedCards: LayoutCard[] = [];
-    
+
     // Separate cards into workflow and standalone
     const workflowCards = cardsToSort.filter(card => card.moleculeId);
     const standaloneCards = cardsToSort.filter(card => !card.moleculeId);
-    
+
     // Create a map of moleculeId to moleculeIndex for quick lookup
     const moleculeIndexMap = new Map<string, number>();
     workflowMolecules.forEach((molecule, index) => {
       moleculeIndexMap.set(molecule.moleculeId, index);
     });
-    
-         // Process each molecule and its associated cards
-     workflowMolecules.forEach((molecule, moleculeIndex) => {
-       // Add all workflow cards for this molecule first (maintain their relative order)
-       const moleculeCards = workflowCards
-         .filter(card => card.moleculeId === molecule.moleculeId)
-         .sort((a, b) => {
-           // Maintain original order within molecule
-           const indexA = cardsToSort.findIndex(c => c.id === a.id);
-           const indexB = cardsToSort.findIndex(c => c.id === b.id);
-           return indexA - indexB;
-         });
-       sortedCards.push(...moleculeCards);
-       
-       // Find standalone cards that should appear after this molecule
-       // Based on order field: order = (moleculeIndex * 1000) + subOrder
-       const cardsAfterThisMolecule = standaloneCards.filter(card => {
-         if (card.order !== undefined && typeof card.order === 'number') {
-           const cardMoleculeIndex = Math.floor(card.order / 1000);
-           return cardMoleculeIndex === moleculeIndex;
-         }
-         return false;
-       });
-       
-       // Sort standalone cards by subOrder
-       cardsAfterThisMolecule.sort((a, b) => {
-         const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
-         const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
-         return subOrderA - subOrderB;
-       });
-       
-       // Add standalone cards that appear after this molecule (between molecules)
-       sortedCards.push(...cardsAfterThisMolecule);
-     });
-    
+
+    // Process each molecule and its associated cards
+    workflowMolecules.forEach((molecule, moleculeIndex) => {
+      // Add all workflow cards for this molecule first (maintain their relative order)
+      const moleculeCards = workflowCards
+        .filter(card => card.moleculeId === molecule.moleculeId)
+        .sort((a, b) => {
+          // Maintain original order within molecule
+          const indexA = cardsToSort.findIndex(c => c.id === a.id);
+          const indexB = cardsToSort.findIndex(c => c.id === b.id);
+          return indexA - indexB;
+        });
+      sortedCards.push(...moleculeCards);
+
+      // Find standalone cards that should appear after this molecule
+      // Based on order field: order = (moleculeIndex * 1000) + subOrder
+      const cardsAfterThisMolecule = standaloneCards.filter(card => {
+        if (card.order !== undefined && typeof card.order === 'number') {
+          const cardMoleculeIndex = Math.floor(card.order / 1000);
+          return cardMoleculeIndex === moleculeIndex;
+        }
+        return false;
+      });
+
+      // Sort standalone cards by subOrder
+      cardsAfterThisMolecule.sort((a, b) => {
+        const subOrderA = a.order !== undefined ? a.order % 1000 : 0;
+        const subOrderB = b.order !== undefined ? b.order % 1000 : 0;
+        return subOrderA - subOrderB;
+      });
+
+      // Add standalone cards that appear after this molecule (between molecules)
+      sortedCards.push(...cardsAfterThisMolecule);
+    });
+
     // Add standalone cards that should appear after the last molecule (orphans)
     const placedStandaloneIds = new Set(sortedCards.map(c => c.id));
     const orphanCards = standaloneCards.filter(card => !placedStandaloneIds.has(card.id));
     sortedCards.push(...orphanCards);
-    
+
     // Add any remaining workflow cards that weren't in any molecule (shouldn't happen, but safety check)
     const allProcessedIds = new Set(sortedCards.map(c => c.id));
     const remaining = cardsToSort.filter(c => !allProcessedIds.has(c.id));
     sortedCards.push(...remaining);
-    
+
     return sortedCards;
   };
 
   // Autosave: Automatically save and sync when cards or auxiliaryMenuLeftOpen change
   useEffect(() => {
     if (!canEdit || !autosaveEnabled) return;
-    
+
     const hasInitialCards = cards && cards.length > 0;
-    
+
     // Skip autosave on initial load (wait for cards to be loaded)
     // But allow autosave for auxiliaryMenuLeftOpen changes even if no cards
     if (!hasInitialCards) {
@@ -366,7 +366,7 @@ const LaboratoryMode = () => {
     // Debounce autosave to avoid too frequent saves
     const autosaveTimer = setTimeout(async () => {
       console.log('🔄 [AUTOSAVE] Triggering autosave...');
-      
+
       try {
         const exhibitedCards = (cards || []).filter(card => card.isExhibited);
         setExhibitionCards(cards);
@@ -383,20 +383,20 @@ const LaboratoryMode = () => {
         }
 
         // Sort cards in workflow order before saving
-        const sortedCards = workflowMolecules.length > 0 
+        const sortedCards = workflowMolecules.length > 0
           ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
           : cards || [];
 
         // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
-        const workflowMoleculesForSave = (sortedCards.length === 0) 
+        const workflowMoleculesForSave = (sortedCards.length === 0)
           ? []
           : workflowMolecules.map((molecule, index) => ({
-              moleculeId: molecule.moleculeId,
-              moleculeTitle: molecule.moleculeTitle,
-              atoms: molecule.atoms || [],
-              isActive: molecule.isActive !== false,
-              moleculeIndex: index
-            }));
+            moleculeId: molecule.moleculeId,
+            moleculeTitle: molecule.moleculeTitle,
+            atoms: molecule.atoms || [],
+            isActive: molecule.isActive !== false,
+            moleculeIndex: index
+          }));
 
         // Save the current laboratory configuration with sorted cards
         const labConfig = {
@@ -461,7 +461,7 @@ const LaboratoryMode = () => {
         }
 
         persistLaboratoryConfig(sanitized, subMode);
-        
+
         // CRITICAL: Sync changes to Workflow collection during autosave
         console.log('🔄 [AUTOSAVE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
         if (canvasAreaRef.current) {
@@ -510,7 +510,7 @@ const LaboratoryMode = () => {
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ state: { laboratory_config: sanitized } }),
-          }).catch(() => {});
+          }).catch(() => { });
 
           const storageSuccess = persistLaboratoryConfig(sanitized, subMode);
           if (!storageSuccess) {
@@ -523,7 +523,7 @@ const LaboratoryMode = () => {
             });
           }
 
-          await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => {});
+          await fetch(`${LAB_ACTIONS_API}/${last.id}/`, { method: 'DELETE', credentials: 'include' }).catch(() => { });
           toast({ title: 'Undo', description: 'Last change reverted' });
         }
       }
@@ -553,7 +553,7 @@ const LaboratoryMode = () => {
     if (!canEdit) return;
     setSelectedCardId(cardId);
     setCardExhibited(exhibited);
-    
+
     // Auto-select the atom in the card if it exists
     const card = cards.find(c => c.id === cardId);
     if (card && Array.isArray(card.atoms) && card.atoms.length > 0) {
@@ -608,7 +608,7 @@ const LaboratoryMode = () => {
       }
 
       // Sort cards in workflow order before saving (ensures order field reflects actual workflow position)
-      const sortedCards = workflowMolecules.length > 0 
+      const sortedCards = workflowMolecules.length > 0
         ? sortCardsInWorkflowOrder(cards || [], workflowMolecules)
         : cards || [];
 
@@ -628,15 +628,15 @@ const LaboratoryMode = () => {
       // Prepare workflow_molecules with isActive and moleculeIndex for MongoDB
       // moleculeIndex preserves the original order/position in the array
       // FIX: If there are no cards, clear workflow molecules to return to regular laboratory mode
-      const workflowMoleculesForSave = (sortedCards.length === 0) 
+      const workflowMoleculesForSave = (sortedCards.length === 0)
         ? [] // Clear workflow molecules when no cards remain
         : workflowMolecules.map((molecule, index) => ({
-            moleculeId: molecule.moleculeId,
-            moleculeTitle: molecule.moleculeTitle,
-            atoms: molecule.atoms || [],
-            isActive: molecule.isActive !== false, // Default to true if not specified
-            moleculeIndex: index // Preserve the original index/position
-          }));
+          moleculeId: molecule.moleculeId,
+          moleculeTitle: molecule.moleculeTitle,
+          atoms: molecule.atoms || [],
+          isActive: molecule.isActive !== false, // Default to true if not specified
+          moleculeIndex: index // Preserve the original index/position
+        }));
 
       // FIX: Clear workflow-related localStorage items when no cards remain
       if (sortedCards.length === 0) {
@@ -666,20 +666,20 @@ const LaboratoryMode = () => {
       };
       const sanitized = sanitizeLabConfig(labConfig);
 
-        const projectContext = getActiveProjectContext();
-        if (projectContext) {
-          const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
-          const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
-          const payload = {
-            client_name: projectContext.client_name,
-            app_name: projectContext.app_name,
-            project_name: projectContext.project_name,
-            cards: sanitized.cards || [],
-            workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
-            auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true, // Include auxiliary menu left state
-            autosaveEnabled: autosaveEnabled, // Include autosave toggle state
-            mode: mode,
-          };
+      const projectContext = getActiveProjectContext();
+      if (projectContext) {
+        const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+        const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+        const payload = {
+          client_name: projectContext.client_name,
+          app_name: projectContext.app_name,
+          project_name: projectContext.project_name,
+          cards: sanitized.cards || [],
+          workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
+          auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true, // Include auxiliary menu left state
+          autosaveEnabled: autosaveEnabled, // Include autosave toggle state
+          mode: mode,
+        };
 
         console.log('💾 [MANUAL SAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
@@ -733,7 +733,7 @@ const LaboratoryMode = () => {
       }
 
       const storageSuccess = persistLaboratoryConfig(sanitized, subMode);
-      
+
       // Sync changes to Workflow collection
       console.log('🔄 [LAB MODE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
       if (canvasAreaRef.current) {
@@ -749,7 +749,7 @@ const LaboratoryMode = () => {
       } else {
         console.warn('⚠️ [LAB MODE] canvasAreaRef.current is null, cannot sync workflow collection');
       }
-      
+
       if (storageSuccess) {
         toast({
           title: 'Configuration Saved',
@@ -804,7 +804,7 @@ const LaboratoryMode = () => {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        
+
         if (canEdit) {
           handleSave();
         }
@@ -824,7 +824,7 @@ const LaboratoryMode = () => {
       className="h-screen bg-gradient-to-br from-gray-50 to-gray-100 flex flex-col"
     >
       <Header />
-      
+
       {/* Laboratory Header */}
       <div
         data-lab-header="true"
@@ -845,7 +845,7 @@ const LaboratoryMode = () => {
                       key={activeUser.client_id}
                       className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-semibold border-2 border-white shadow-sm"
                       title={`${activeUser.name} (${activeUser.email})`}
-                      style={{ 
+                      style={{
                         zIndex: 10 - index,
                         backgroundColor: activeUser.color || '#3B82F6'
                       }}
@@ -865,20 +865,19 @@ const LaboratoryMode = () => {
               </div>
             </div>
           )}
-          
+
           {/* Undo */}
           <button
             onClick={handleUndo}
             disabled={!canEdit}
-            className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
-              !canEdit ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             title="Undo"
             type="button"
           >
             <Undo2 className="w-3.5 h-3.5" strokeWidth={2} />
           </button>
-          
+
           {/* Auto Save Toggle */}
           {canEdit && setAutosaveEnabled && (
             <div className="flex items-center">
@@ -890,15 +889,14 @@ const LaboratoryMode = () => {
               />
             </div>
           )}
-          
+
           {/* Save */}
           {!autosaveEnabled && handleSave && (
             <button
               onClick={handleSave}
               disabled={!canEdit}
-              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
-                !canEdit ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
+              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               title="Save"
               type="button"
               data-lab-save="true"
@@ -906,28 +904,26 @@ const LaboratoryMode = () => {
               <Save className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
           )}
-          
+
           {/* Share */}
           {handleShareClick && (
             <button
               onClick={handleShareClick}
               disabled={!canEdit}
-              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
-                !canEdit ? 'opacity-50 cursor-not-allowed' : ''
-              }`}
+              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               title="Share"
               type="button"
             >
               <Share2 className="w-3.5 h-3.5" strokeWidth={2} />
             </button>
           )}
-          
+
           {/* Run Pipeline */}
           <button
             disabled={!canEdit}
-            className={`px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs transition-all flex items-center gap-1.5 ${
-              !canEdit ? 'opacity-50 cursor-not-allowed' : ''
-            }`}
+            className={`px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs transition-all flex items-center gap-1.5 ${!canEdit ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             title="Run Pipeline"
             type="button"
           >
@@ -937,9 +933,8 @@ const LaboratoryMode = () => {
 
           {/* Mode Toggle Switch */}
           <div className="flex items-center gap-1.5 px-1.5 py-0.5 bg-gray-50 rounded-md border border-gray-200">
-            <span className={`text-[10px] font-medium px-1 transition-colors ${
-              subMode === 'analytics' ? 'text-gray-900' : 'text-gray-400'
-            }`}>
+            <span className={`text-[10px] font-medium px-1 transition-colors ${subMode === 'analytics' ? 'text-gray-900' : 'text-gray-400'
+              }`}>
               Analytics
             </span>
             <Switch
@@ -949,141 +944,140 @@ const LaboratoryMode = () => {
               }}
               className="scale-[0.65]"
             />
-            <span className={`text-[10px] font-medium px-1 transition-colors ${
-              subMode === 'dashboard' ? 'text-gray-900' : 'text-gray-400'
-            }`}>
+            <span className={`text-[10px] font-medium px-1 transition-colors ${subMode === 'dashboard' ? 'text-gray-900' : 'text-gray-400'
+              }`}>
               Dashboard
             </span>
           </div>
         </div>
       </div>
 
-        <div className="flex-1 flex overflow-hidden relative">
-          {/* Atoms Sidebar */}
-          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
-            <AuxiliaryMenuLeft 
-              onAtomDragStart={handleAtomDragStart}
-              active={auxActive}
-              onActiveChange={(newActive) => {
-                setAuxActive(newActive);
-              }}
-              isExhibitionOpen={isExhibitionOpen}
-              setIsExhibitionOpen={setIsExhibitionOpen}
-              canEdit={canEdit}
-              showFloatingNavigationList={showFloatingNavigationList}
-              setShowFloatingNavigationList={setShowFloatingNavigationList}
-            />
-          </div>
-
-          {/* Main Canvas Area */}
-          <div
-            data-lab-canvas="true"
-            className={`flex-1 pt-8 px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
-            onClick={
-              canEdit
-                ? () => {
-                    setSelectedAtomId(undefined);
-                    setSelectedCardId(undefined);
-                  }
-                : undefined
-            }
-          >
-              <CanvasArea
-                ref={canvasAreaRef}
-                onAtomSelect={handleAtomSelect}
-                onCardSelect={handleCardSelect}
-                selectedCardId={selectedCardId}
-                onToggleSettingsPanel={toggleSettingsPanel}
-                onOpenSettingsPanel={openSettingsPanel}
-                onToggleHelpPanel={toggleHelpPanel}
-                canEdit={canEdit}
-                cardEditors={cardEditors}
-                onCardFocus={notifyCardFocus}
-                onCardBlur={notifyCardBlur}
-              />
-          </div>
-
-          {/* Auxiliary menu */}
-          <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
-            <AuxiliaryMenu
-              selectedAtomId={selectedAtomId}
-              selectedCardId={selectedCardId}
-              cardExhibited={cardExhibited}
-              active={auxActive}
-              onActiveChange={(newActive) => {
-                setAuxActive(newActive);
-                // If clicking AI icon and panel was hidden, show it again
-                if (newActive === 'trinity' && !isTrinityAIVisible) {
-                  setIsTrinityAIVisible(true);
-                }
-                // In horizontal view, toggle collapse state when AI icon is clicked
-                if (trinityAILayout === 'horizontal' && newActive === 'trinity') {
-                  setIsHorizontalAICollapsed(false); // Expand when AI icon is clicked
-                } else if (trinityAILayout === 'horizontal' && newActive === null && auxActive === 'trinity') {
-                  setIsHorizontalAICollapsed(true); // Collapse when AI icon is clicked again
-                }
-              }}
-              trinityAILayout={trinityAILayout}
-              isTrinityAIVisible={isTrinityAIVisible}
-              onTrinityAIClose={() => {
-                setIsTrinityAIVisible(false);
-                setAuxActive(null);
-              }}
-              canEdit={canEdit}
-              activeUsers={activeUsers}
-              autosaveEnabled={autosaveEnabled}
-              setAutosaveEnabled={setAutosaveEnabled}
-              onUndo={handleUndo}
-              onSave={handleSave}
-              onShare={handleShareClick}
-              showFloatingNavigationList={showFloatingNavigationList}
-              setShowFloatingNavigationList={setShowFloatingNavigationList}
-            />
-            <FloatingNavigationList
-              isVisible={showFloatingNavigationList}
-              onClose={() => setShowFloatingNavigationList(false)}
-              anchorSelector="[data-lab-header-text]"
-            />
-          </div>
-
-          {/* Trinity AI Panel - Only for horizontal layout */}
-          {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
-          {/* In horizontal view, panel stays visible and aligned with canvas area */}
-          {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
-            <div 
-              className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
-            >
-              <div className="pointer-events-auto">
-                <TrinityAIPanel
-                  isCollapsed={isHorizontalAICollapsed}
-                  onToggle={() => {
-                    // In horizontal view, toggle between collapsed (sparkle icon) and expanded
-                    // Don't auto-minimize when other panels open - only toggle when AI icon is clicked
-                    setIsHorizontalAICollapsed(prev => !prev);
-                    if (isHorizontalAICollapsed) {
-                      setAuxActive('trinity');
-                    } else {
-                      setAuxActive(null);
-                    }
-                  }}
-                  onClose={() => {
-                    // Only X button calls this - completely hide the panel
-                    setIsTrinityAIVisible(false);
-                    setIsHorizontalAICollapsed(false);
-                    setAuxActive(null);
-                  }}
-                  layout="horizontal"
-                />
-              </div>
-            </div>
-          )}
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Atoms Sidebar */}
+        <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
+          <AuxiliaryMenuLeft
+            onAtomDragStart={handleAtomDragStart}
+            active={auxActive}
+            onActiveChange={(newActive) => {
+              setAuxActive(newActive);
+            }}
+            isExhibitionOpen={isExhibitionOpen}
+            setIsExhibitionOpen={setIsExhibitionOpen}
+            canEdit={canEdit}
+            showFloatingNavigationList={showFloatingNavigationList}
+            setShowFloatingNavigationList={setShowFloatingNavigationList}
+          />
         </div>
 
-        <ShareDialog
-          open={isShareOpen}
-          onOpenChange={setIsShareOpen}
-          projectName={projectContext?.project_name ?? 'Laboratory Project'}
-        />
+        {/* Main Canvas Area */}
+        <div
+          data-lab-canvas="true"
+          className={`flex-1 pt-8 px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
+          onClick={
+            canEdit
+              ? () => {
+                setSelectedAtomId(undefined);
+                setSelectedCardId(undefined);
+              }
+              : undefined
+          }
+        >
+          <CanvasArea
+            ref={canvasAreaRef}
+            onAtomSelect={handleAtomSelect}
+            onCardSelect={handleCardSelect}
+            selectedCardId={selectedCardId}
+            onToggleSettingsPanel={toggleSettingsPanel}
+            onOpenSettingsPanel={openSettingsPanel}
+            onToggleHelpPanel={toggleHelpPanel}
+            canEdit={canEdit}
+            cardEditors={cardEditors}
+            onCardFocus={notifyCardFocus}
+            onCardBlur={notifyCardBlur}
+          />
+        </div>
+
+        {/* Auxiliary menu */}
+        <div data-lab-settings="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
+          <AuxiliaryMenu
+            selectedAtomId={selectedAtomId}
+            selectedCardId={selectedCardId}
+            cardExhibited={cardExhibited}
+            active={auxActive}
+            onActiveChange={(newActive) => {
+              setAuxActive(newActive);
+              // If clicking AI icon and panel was hidden, show it again
+              if (newActive === 'trinity' && !isTrinityAIVisible) {
+                setIsTrinityAIVisible(true);
+              }
+              // In horizontal view, toggle collapse state when AI icon is clicked
+              if (trinityAILayout === 'horizontal' && newActive === 'trinity') {
+                setIsHorizontalAICollapsed(false); // Expand when AI icon is clicked
+              } else if (trinityAILayout === 'horizontal' && newActive === null && auxActive === 'trinity') {
+                setIsHorizontalAICollapsed(true); // Collapse when AI icon is clicked again
+              }
+            }}
+            trinityAILayout={trinityAILayout}
+            isTrinityAIVisible={isTrinityAIVisible}
+            onTrinityAIClose={() => {
+              setIsTrinityAIVisible(false);
+              setAuxActive(null);
+            }}
+            canEdit={canEdit}
+            activeUsers={activeUsers}
+            autosaveEnabled={autosaveEnabled}
+            setAutosaveEnabled={setAutosaveEnabled}
+            onUndo={handleUndo}
+            onSave={handleSave}
+            onShare={handleShareClick}
+            showFloatingNavigationList={showFloatingNavigationList}
+            setShowFloatingNavigationList={setShowFloatingNavigationList}
+          />
+          <FloatingNavigationList
+            isVisible={showFloatingNavigationList}
+            onClose={() => setShowFloatingNavigationList(false)}
+            anchorSelector="[data-lab-header-text]"
+          />
+        </div>
+
+        {/* Trinity AI Panel - Only for horizontal layout */}
+        {/* For vertical layout, it's rendered inside AuxiliaryMenu */}
+        {/* In horizontal view, panel stays visible and aligned with canvas area */}
+        {isTrinityAIVisible && trinityAILayout === 'horizontal' && (
+          <div
+            className="absolute bottom-0 left-0 right-12 z-50 pointer-events-none"
+          >
+            <div className="pointer-events-auto">
+              <TrinityAIPanel
+                isCollapsed={isHorizontalAICollapsed}
+                onToggle={() => {
+                  // In horizontal view, toggle between collapsed (sparkle icon) and expanded
+                  // Don't auto-minimize when other panels open - only toggle when AI icon is clicked
+                  setIsHorizontalAICollapsed(prev => !prev);
+                  if (isHorizontalAICollapsed) {
+                    setAuxActive('trinity');
+                  } else {
+                    setAuxActive(null);
+                  }
+                }}
+                onClose={() => {
+                  // Only X button calls this - completely hide the panel
+                  setIsTrinityAIVisible(false);
+                  setIsHorizontalAICollapsed(false);
+                  setAuxActive(null);
+                }}
+                layout="horizontal"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <ShareDialog
+        open={isShareOpen}
+        onOpenChange={setIsShareOpen}
+        projectName={projectContext?.project_name ?? 'Laboratory Project'}
+      />
     </div>
   );
 };

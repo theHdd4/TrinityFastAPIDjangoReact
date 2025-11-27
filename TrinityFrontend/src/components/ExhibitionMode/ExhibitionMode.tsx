@@ -1065,9 +1065,9 @@ const ExhibitionMode = () => {
   const hasInitialCardsLoadedRef = useRef(false);
   useEffect(() => {
     if (!canEdit || !autosaveEnabled) return;
-    
+
     const hasInitialCards = cards && cards.length > 0;
-    
+
     // Skip autosave on initial load (wait for cards to be loaded)
     if (!hasInitialCards) {
       if (!hasInitialCardsLoadedRef.current) {
@@ -1084,7 +1084,7 @@ const ExhibitionMode = () => {
     // Debounce autosave to avoid too frequent saves
     const autosaveTimer = setTimeout(async () => {
       console.log('🔄 [EXHIBITION AUTOSAVE] Triggering autosave...');
-      
+
       try {
         const context = getActiveProjectContext();
         if (!context) {
@@ -1107,7 +1107,7 @@ const ExhibitionMode = () => {
           slide_objects: slideObjectsToPersist,
           autosaveEnabled: autosaveEnabled,
         });
-        
+
         persistCardsLocally(cardsToPersist);
         console.log('✅ [EXHIBITION AUTOSAVE] Configuration saved successfully');
       } catch (error) {
@@ -1172,7 +1172,7 @@ const ExhibitionMode = () => {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        
+
         if (canEdit && !isSaving) {
           handleSave();
         }
@@ -2250,9 +2250,8 @@ const ExhibitionMode = () => {
         setCurrentSlide(baseSlideCount > 0 ? baseSlideCount : 0);
         toast({
           title: `${template.name} added`,
-          description: `Inserted ${createdCardIds.length} ${
-            createdCardIds.length === 1 ? 'slide' : 'slides'
-          } from the template.`,
+          description: `Inserted ${createdCardIds.length} ${createdCardIds.length === 1 ? 'slide' : 'slides'
+            } from the template.`,
         });
         return;
       }

@@ -23,6 +23,7 @@ import Table from '@/templates/tables/table';
 import { MultiSelectDropdown } from '@/templates/dropdown';
 import { CHART_MAKER_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { Input } from '@/components/ui/input';
 
 // FilterMenu component moved outside to prevent recreation on every render
 const FilterMenu = ({ 
@@ -142,6 +143,26 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
   
   // Container ref for responsive layout
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Handle note input change - save directly to chart config
+  const handleNoteChange = (chartId: string, value: string) => {
+    const chart = charts.find(c => c.id === chartId);
+    if (chart) {
+      const updatedCharts = charts.map(c =>
+        c.id === chartId ? { ...c, note: value } : c
+      );
+      updateSettings(atomId, { charts: updatedCharts });
+    }
+  };
+
+  // Handle note input keydown - save and blur on Enter
+  const handleNoteKeyDown = (chartId: string, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      // Blur the input to trigger save and remove focus
+      e.currentTarget.blur();
+    }
+  };
 
   // Fetch cardinality data when data is available
   useEffect(() => {
@@ -324,6 +345,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
       });
     };
   }, []);
+
 
   // Debounce utility
   const debounce = (fn: () => void, delay: number, chartId: string) => {
@@ -553,6 +575,7 @@ const ChartMakerCanvas: React.FC<ChartMakerCanvasProps> = ({ atomId, charts, dat
           legendField: chart.legendField,
           isAdvancedMode: chart.isAdvancedMode,
           traces: chart.traces ? cloneDeep(chart.traces) : undefined,
+          note: chart.note, // Include note in exhibition metadata (for future use)
         };
 
         const chartContextSnapshot: ChartMakerExhibitionSelectionContext = {
@@ -1523,12 +1546,22 @@ const renderChart = (
                       })()}
                      
                     <CardContent 
-                      className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-1'}`}
+                      className={`${isCompact ? 'px-2 pb-2 pt-1' : 'px-4 pb-4 pt-1'} flex flex-col`}
                       onClick={(e) => e.stopPropagation()}
                     >
-                       <div className="overflow-hidden">
+                       <div className="overflow-hidden flex-shrink-0">
                          {renderChart(chart, index)}
                        </div>
+                       {chart.showNote && (
+                         <Input
+                           placeholder="Add note"
+                           value={chart.note || ''}
+                           onChange={(e) => handleNoteChange(chart.id, e.target.value)}
+                           onKeyDown={(e) => handleNoteKeyDown(chart.id, e)}
+                           className="mt-2 w-full text-sm flex-shrink-0"
+                           onClick={(e) => e.stopPropagation()}
+                         />
+                       )}
                      </CardContent>
                    </Card>
             );

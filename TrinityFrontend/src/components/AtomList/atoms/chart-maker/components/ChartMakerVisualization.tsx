@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
@@ -579,6 +580,15 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                             getUniqueValues={getUniqueValues}
                           />
                         </div>
+
+                        {/* Show Note Box Toggle */}
+                        <div className="flex items-center justify-between pt-4 border-t">
+                          <Label className="text-xs">Show Note Box</Label>
+                          <Switch
+                            checked={chart.showNote || false}
+                            onCheckedChange={(checked) => updateChart(index, { showNote: checked })}
+                          />
+                        </div>
                       </>
                     ) : (
                       // Simple Mode - Single Y-axis and Filters
@@ -825,6 +835,15 @@ const ChartMakerVisualization: React.FC<ChartMakerVisualizationProps> = ({
                                </PopoverContent>
                             </Popover>
                           </div>
+                        </div>
+
+                        {/* Show Note Box Toggle */}
+                        <div className="flex items-center justify-between pt-2">
+                          <Label className="text-xs">Show Note Box</Label>
+                          <Switch
+                            checked={chart.showNote || false}
+                            onCheckedChange={(checked) => updateChart(index, { showNote: checked })}
+                          />
                         </div>
                       </>
                     )}

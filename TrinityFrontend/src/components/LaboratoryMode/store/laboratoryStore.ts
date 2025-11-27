@@ -608,6 +608,8 @@ export interface ChartMakerConfig {
   lastUpdateTime?: number;
   isAdvancedMode?: boolean;
   traces?: ChartTraceConfig[];
+  showNote?: boolean; // Toggle to show/hide note box
+  note?: string; // Note text stored in chart config
 }
 
 // ChartMaker Exhibition Types
@@ -624,6 +626,7 @@ export interface ChartMakerExhibitionSelectionChartState {
   legendField?: string;
   isAdvancedMode?: boolean;
   traces?: ChartTraceConfig[];
+  note?: string; // Note text (stored but not displayed in exhibition for now)
 }
 
 export interface ChartMakerExhibitionSelectionContext {
@@ -806,6 +809,7 @@ export const DEFAULT_CHART_MAKER_SETTINGS: ChartMakerSettings = {
       chartLoading: false,
       isAdvancedMode: false,
       traces: [],
+      showNote: false,
     },
   ],
   loading: {
