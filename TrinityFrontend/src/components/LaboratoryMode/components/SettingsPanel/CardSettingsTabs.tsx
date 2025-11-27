@@ -58,6 +58,13 @@ const normalizeTextBoxPlaceholder = (value?: string) => (value ?? '').replace(/\
 const TEXTBOX_PLACEHOLDER = '';
 const TEXTBOX_PLACEHOLDER_NORMALIZED = '';
 
+const baseIconButtonClass =
+  'h-10 w-10 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:text-gray-900';
+const activeIconButtonClass =
+  'h-10 w-10 rounded-md border border-gray-900 bg-gray-900 text-white hover:bg-gray-800 hover:text-white';
+const alignmentActiveClass =
+  'h-10 w-10 rounded-md border border-amber-200 bg-amber-100 text-amber-700 hover:bg-amber-200 hover:text-amber-800';
+
 interface CardSettingsTabsProps {
   card: LayoutCard;
   tab: string;
@@ -1102,16 +1109,18 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                     const textBoxSettings = box.settings;
 
                     return (
-                      <Card key={box.id} className="border border-gray-200 shadow-none">
+                      <Card key={box.id} className="border border-gray-200 shadow-none rounded-xl bg-white/90">
                         <div className="flex items-center justify-between px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium text-gray-900">{box.title || `Text Box ${index + 1}`}</span>
+                            <span className="text-sm font-semibold text-gray-900">
+                              {box.title || `Text Box ${index + 1}`}
+                            </span>
                           </div>
                           <div className="flex items-center gap-2">
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8"
+                              className="h-8 w-8 text-gray-500 hover:text-gray-800 hover:bg-gray-50"
                               onClick={() => setExpandedTextBoxId(isExpanded ? null : box.id)}
                             >
                               {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -1119,7 +1128,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 hover:text-red-600 hover:bg-red-50"
+                              className="h-8 w-8 text-gray-400 hover:text-red-600 hover:bg-red-50"
                               onClick={() => handleRemoveTextBox(box.id)}
                             >
                               <Trash2 className="h-4 w-4" />
@@ -1128,17 +1137,17 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                         </div>
 
                         {isExpanded && (
-                          <div className="px-4 pb-4 space-y-5">
+                          <div className="px-4 pb-5 space-y-6">
                             <div className="space-y-2">
-                              <Label className="text-xs font-medium text-muted-foreground">Font Family</Label>
+                              <Label className="text-sm font-medium text-gray-900">Font Family</Label>
                               <Select
                                 value={textBoxSettings.font_family}
                                 onValueChange={(value) => handleTextBoxSettingsChange(box.id, { font_family: value })}
                               >
-                                <SelectTrigger className="w-full">
-                                  <SelectValue />
+                                <SelectTrigger className="w-full h-11 rounded-lg border-gray-200 text-gray-900">
+                                  <SelectValue placeholder="Choose a font" />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="rounded-lg shadow-lg">
                                   {fontFamilies.map(font => (
                                     <SelectItem key={font} value={font} style={{ fontFamily: font }}>
                                       {font}
@@ -1149,13 +1158,13 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                             </div>
 
                             <div className="space-y-2">
-                              <Label className="text-xs font-medium text-muted-foreground">Font Size</Label>
-                              <div className="flex items-center gap-2">
+                              <Label className="text-sm font-medium text-gray-900">Font Size</Label>
+                              <div className="flex items-center gap-3">
                                 <Button
-                                  variant="outline"
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => adjustFontSize(box.id, -2)}
-                                  className="h-9 w-9"
+                                  className="h-11 w-11 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
                                 >
                                   <Minus className="h-4 w-4" />
                                 </Button>
@@ -1167,13 +1176,13 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                                       font_size: clampFontSize(Number(e.target.value) || 12),
                                     })
                                   }
-                                  className="text-center font-medium"
+                                  className="text-center h-11 w-24 rounded-lg border-gray-200 text-lg font-semibold text-gray-900"
                                 />
                                 <Button
-                                  variant="outline"
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => adjustFontSize(box.id, 2)}
-                                  className="h-9 w-9"
+                                  className="h-11 w-11 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50"
                                 >
                                   <Plus className="h-4 w-4" />
                                 </Button>
@@ -1183,37 +1192,37 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                             <Separator />
 
                             <div className="space-y-2">
-                              <Label className="text-xs font-medium text-muted-foreground">Text Formatting</Label>
-                              <div className="flex flex-wrap gap-2">
+                              <Label className="text-sm font-medium text-gray-900">Text Formatting</Label>
+                              <div className="flex flex-wrap gap-3">
                                 <Button
-                                  variant={textBoxSettings.bold ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => handleTextBoxSettingsChange(box.id, { bold: !textBoxSettings.bold })}
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.bold ? activeIconButtonClass : baseIconButtonClass}
                                 >
                                   <Bold className="h-4 w-4" />
                                 </Button>
                                 <Button
-                                  variant={textBoxSettings.italics ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => handleTextBoxSettingsChange(box.id, { italics: !textBoxSettings.italics })}
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.italics ? activeIconButtonClass : baseIconButtonClass}
                                 >
                                   <Italic className="h-4 w-4" />
                                 </Button>
                                 <Button
-                                  variant={textBoxSettings.underline ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => handleTextBoxSettingsChange(box.id, { underline: !textBoxSettings.underline })}
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.underline ? activeIconButtonClass : baseIconButtonClass}
                                 >
                                   <Underline className="h-4 w-4" />
                                 </Button>
                                 <Button
-                                  variant={textBoxSettings.strikethrough ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => handleTextBoxSettingsChange(box.id, { strikethrough: !textBoxSettings.strikethrough })}
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.strikethrough ? activeIconButtonClass : baseIconButtonClass}
                                 >
                                   <Strikethrough className="h-4 w-4" />
                                 </Button>
@@ -1223,37 +1232,37 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                             <Separator />
 
                             <div className="space-y-2">
-                              <Label className="text-xs font-medium text-muted-foreground">Text Alignment</Label>
-                              <div className="flex gap-2">
+                              <Label className="text-sm font-medium text-gray-900">Text Alignment</Label>
+                              <div className="flex gap-3">
                                 <Button
-                                  variant={textBoxSettings.text_align === 'left' ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => handleTextBoxSettingsChange(box.id, { text_align: 'left' })}
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.text_align === 'left' ? alignmentActiveClass : baseIconButtonClass}
                                 >
                                   <AlignLeft className="h-4 w-4" />
                                 </Button>
                                 <Button
-                                  variant={textBoxSettings.text_align === 'center' ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => handleTextBoxSettingsChange(box.id, { text_align: 'center' })}
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.text_align === 'center' ? alignmentActiveClass : baseIconButtonClass}
                                 >
                                   <AlignCenter className="h-4 w-4" />
                                 </Button>
                                 <Button
-                                  variant={textBoxSettings.text_align === 'right' ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => handleTextBoxSettingsChange(box.id, { text_align: 'right' })}
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.text_align === 'right' ? alignmentActiveClass : baseIconButtonClass}
                                 >
                                   <AlignRight className="h-4 w-4" />
                                 </Button>
                                 <Button
-                                  variant={textBoxSettings.text_align === 'justify' ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() => handleTextBoxSettingsChange(box.id, { text_align: 'justify' })}
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.text_align === 'justify' ? alignmentActiveClass : baseIconButtonClass}
                                 >
                                   <AlignJustify className="h-4 w-4" />
                                 </Button>
@@ -1263,29 +1272,29 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                             <Separator />
 
                             <div className="space-y-2">
-                              <Label className="text-xs font-medium text-muted-foreground">Lists</Label>
-                              <div className="flex gap-2">
+                              <Label className="text-sm font-medium text-gray-900">Lists</Label>
+                              <div className="flex gap-3">
                                 <Button
-                                  variant={textBoxSettings.list_type === 'bullet' ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() =>
                                     handleTextBoxSettingsChange(box.id, {
                                       list_type: textBoxSettings.list_type === 'bullet' ? 'none' : 'bullet',
                                     })
                                   }
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.list_type === 'bullet' ? activeIconButtonClass : baseIconButtonClass}
                                 >
                                   <List className="h-4 w-4" />
                                 </Button>
                                 <Button
-                                  variant={textBoxSettings.list_type === 'number' ? 'default' : 'outline'}
+                                  variant="ghost"
                                   size="icon"
                                   onClick={() =>
                                     handleTextBoxSettingsChange(box.id, {
                                       list_type: textBoxSettings.list_type === 'number' ? 'none' : 'number',
                                     })
                                   }
-                                  className="h-9 w-9"
+                                  className={textBoxSettings.list_type === 'number' ? activeIconButtonClass : baseIconButtonClass}
                                 >
                                   <ListOrdered className="h-4 w-4" />
                                 </Button>
@@ -1295,38 +1304,38 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
                             <Separator />
 
                             <div className="space-y-2">
-                              <Label className="text-xs font-medium text-muted-foreground">Text Color</Label>
-                              <div className="flex items-center gap-2">
+                              <Label className="text-sm font-medium text-gray-900">Text Color</Label>
+                              <div className="flex items-center gap-3">
                                 <Input
                                   type="color"
                                   value={textBoxSettings.text_color}
                                   onChange={(e) => handleTextBoxSettingsChange(box.id, { text_color: e.target.value })}
-                                  className="h-10 w-20 cursor-pointer"
+                                  className="h-11 w-20 cursor-pointer rounded-lg border-gray-200"
                                 />
                                 <Input
                                   type="text"
                                   value={textBoxSettings.text_color}
                                   onChange={(e) => handleTextBoxSettingsChange(box.id, { text_color: e.target.value })}
-                                  className="flex-1 font-mono text-sm"
+                                  className="flex-1 rounded-lg border-gray-200 font-mono text-sm"
                                   placeholder="#000000"
                                 />
                               </div>
                             </div>
 
                             <div className="space-y-2">
-                              <Label className="text-xs font-medium text-muted-foreground">Background Color</Label>
-                              <div className="flex items-center gap-2">
+                              <Label className="text-sm font-medium text-gray-900">Background Color</Label>
+                              <div className="flex items-center gap-3">
                                 <Input
                                   type="color"
                                   value={textBoxSettings.background_color === 'transparent' ? '#ffffff' : textBoxSettings.background_color}
                                   onChange={(e) => handleTextBoxSettingsChange(box.id, { background_color: e.target.value })}
-                                  className="h-10 w-20 cursor-pointer"
+                                  className="h-11 w-20 cursor-pointer rounded-lg border-gray-200"
                                 />
                                 <Input
                                   type="text"
                                   value={textBoxSettings.background_color ?? ''}
                                   onChange={(e) => handleTextBoxSettingsChange(box.id, { background_color: e.target.value })}
-                                  className="flex-1 font-mono text-sm"
+                                  className="flex-1 rounded-lg border-gray-200 font-mono text-sm"
                                   placeholder="transparent"
                                 />
                               </div>
