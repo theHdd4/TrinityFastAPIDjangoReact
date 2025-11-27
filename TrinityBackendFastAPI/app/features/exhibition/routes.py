@@ -27,7 +27,7 @@ from .export import (
     ExportGenerationError,
     build_export_filename,
     build_pdf_bytes,
-    build_pptx_bytes,
+    build_pptx_bytes_animated,
     render_slide_screenshots,
 )
 
@@ -228,6 +228,13 @@ async def get_shared_layout(
 
 @router.post("/export/pptx")
 async def export_presentation_pptx(payload: ExhibitionExportRequest) -> Response:
+    """Export presentation as PPTX with animation preservation.
+    
+    This endpoint uses a separate pipeline from PDF/JPG exports:
+    - Does NOT use Chromium screenshots (preserves animations)
+    - Uses object-based rendering (charts, shapes, text as native PowerPoint objects)
+    - Data loaded through metadata attachment
+    """
     if not payload.slides:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -235,9 +242,21 @@ async def export_presentation_pptx(payload: ExhibitionExportRequest) -> Response
         )
 
     try:
-        pptx_bytes = await run_in_threadpool(build_pptx_bytes, payload)
-    except ExportGenerationError as exc:  # pragma: no cover - defensive path
+        logging.info('Starting PPTX export for %d slide(s)', len(payload.slides))
+        # Use animated export function (separate pipeline from PDF/JPG)
+        pptx_bytes = await run_in_threadpool(build_pptx_bytes_animated, payload)
+        logging.info('PPTX export completed successfully: %d bytes', len(pptx_bytes))
+    except ExportGenerationError as exc:
+        # Log export errors with full context
+        logging.error('PPTX export failed (ExportGenerationError): %s', exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        # Log unexpected errors with full stack trace
+        logging.exception('PPTX export failed with unexpected error: %s', exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export PPTX document: {str(exc)}"
+        ) from exc
 
     filename = build_export_filename(payload.title, "pptx")
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
@@ -257,9 +276,20 @@ async def export_presentation_pdf(payload: ExhibitionExportRequest) -> Response:
         )
 
     try:
+        logging.info('Starting PDF export for %d slide(s)', len(payload.slides))
         pdf_bytes = await run_in_threadpool(build_pdf_bytes, payload)
-    except ExportGenerationError as exc:  # pragma: no cover - defensive path
+        logging.info('PDF export completed successfully: %d bytes', len(pdf_bytes))
+    except ExportGenerationError as exc:
+        # Log export errors with full context
+        logging.error('PDF export failed (ExportGenerationError): %s', exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        # Log unexpected errors with full stack trace
+        logging.exception('PDF export failed with unexpected error: %s', exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export PDF document: {str(exc)}"
+        ) from exc
 
     filename = build_export_filename(payload.title, "pdf")
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
