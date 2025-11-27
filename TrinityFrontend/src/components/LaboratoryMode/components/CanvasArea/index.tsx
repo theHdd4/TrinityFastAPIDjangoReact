@@ -273,6 +273,18 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   const editorRef = useRef<HTMLDivElement>(null);
   const [showToolbar, setShowToolbar] = useState(false);
 
+  const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
+    if (!editorRef.current) return;
+
+    if (typeof updates.text_color === 'string') {
+      editorRef.current.style.color = updates.text_color;
+    }
+
+    if (typeof updates.background_color === 'string') {
+      editorRef.current.style.backgroundColor = updates.background_color || 'transparent';
+    }
+  };
+
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== data.html) {
       editorRef.current.innerHTML = data.html;
@@ -389,9 +401,15 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
               onSettingsChange({ list_type: settings.list_type === 'number' ? 'none' : 'number' })
             }
             color={settings.text_color}
-            onColorChange={(color) => onSettingsChange({ text_color: color })}
+            onColorChange={(color) => {
+              applyImmediateStyles({ text_color: color });
+              onSettingsChange({ text_color: color });
+            }}
             backgroundColor={settings.background_color ?? 'transparent'}
-            onBackgroundColorChange={(color) => onSettingsChange({ background_color: color })}
+            onBackgroundColorChange={(color) => {
+              applyImmediateStyles({ background_color: color });
+              onSettingsChange({ background_color: color });
+            }}
           />
         </div>
       ) : null}

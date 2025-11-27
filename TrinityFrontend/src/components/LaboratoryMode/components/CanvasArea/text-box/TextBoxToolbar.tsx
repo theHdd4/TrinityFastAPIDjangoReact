@@ -592,10 +592,11 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             variant="ghost"
             size="icon"
             type="button"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/50 p-0"
+            className="flex h-8 min-w-[60px] shrink-0 items-center justify-center gap-1 rounded-full border border-border/50 px-2"
             onMouseDown={handleToolbarMouseDown}
             ref={colorTriggerRef}
           >
+            <span className="text-[11px] font-semibold text-muted-foreground">C</span>
             <span
               className="h-5 w-5 rounded-full border border-white/70 shadow-inner"
               style={{ backgroundColor: color }}
@@ -646,10 +647,11 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
             variant="ghost"
             size="icon"
             type="button"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/50 p-0"
+            className="flex h-8 min-w-[60px] shrink-0 items-center justify-center gap-1 rounded-full border border-border/50 px-2"
             onMouseDown={handleToolbarMouseDown}
             ref={backgroundTriggerRef}
           >
+            <span className="text-[11px] font-semibold text-muted-foreground">B</span>
             <span
               className="h-5 w-5 rounded-full border border-white/70 shadow-inner"
               style={{ backgroundColor: backgroundColor || 'transparent' }}
