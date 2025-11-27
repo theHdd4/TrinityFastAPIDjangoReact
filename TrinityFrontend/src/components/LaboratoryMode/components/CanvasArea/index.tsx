@@ -4,7 +4,21 @@ import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
+import {
+  Plus,
+  Grid3X3,
+  Trash2,
+  Settings,
+  ChevronDown,
+  Minus,
+  RefreshCcw,
+  Maximize2,
+  X,
+  HelpCircle,
+  HelpCircleIcon,
+  GripVertical,
+  Type,
+} from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -122,6 +136,35 @@ const normalizeTextBoxes = (card: any): TextBoxConfig[] => {
   }
 
   return [];
+};
+
+type NormalizedTextBox = TextBoxConfig & { settings: TextBoxSettings };
+
+const normalizeCardTextBoxes = (card: LayoutCard): NormalizedTextBox[] => {
+  const baseTextBoxes = (Array.isArray(card.textBoxes) && card.textBoxes.length > 0
+    ? card.textBoxes
+    : normalizeTextBoxes(card)) as NormalizedTextBox[];
+
+  const ensuredTextBoxes = baseTextBoxes.length > 0
+    ? baseTextBoxes
+    : [
+        {
+          id: 'text-box-1',
+          title: 'Text Box 1',
+          content: card.textBoxContent ?? '',
+          html: card.textBoxHtml ?? '',
+          settings: { ...DEFAULT_TEXTBOX_SETTINGS },
+        },
+      ];
+
+  return ensuredTextBoxes.map((box, index) => ({
+    ...box,
+    id: box.id ?? `text-box-${index + 1}`,
+    title: box.title ?? `Text Box ${index + 1}`,
+    content: box.content ?? '',
+    html: box.html ?? '',
+    settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? {}) },
+  }));
 };
 
 
@@ -290,6 +333,13 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
       editorRef.current.innerHTML = data.html;
     }
   }, [data.html]);
+
+  useEffect(() => {
+    applyImmediateStyles({
+      text_color: settings.text_color,
+      background_color: settings.background_color,
+    });
+  }, [settings.background_color, settings.text_color]);
 
   const handleInput = () => {
     if (editorRef.current) {
@@ -743,17 +793,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       return null;
     }
 
-    const normalizedTextBoxes = (Array.isArray(card.textBoxes) && card.textBoxes.length > 0
-      ? card.textBoxes
-      : normalizeTextBoxes(card))
-      .map((box, index) => ({
-        ...box,
-        id: box.id ?? `text-box-${index + 1}`,
-        title: box.title ?? `Text Box ${index + 1}`,
-        content: box.content ?? '',
-        html: box.html ?? '',
-        settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? {}) },
-      }));
+    const normalizedTextBoxes = normalizeCardTextBoxes(card);
 
     if (normalizedTextBoxes.length === 0) {
       return null;
@@ -3636,6 +3676,34 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     setExpandedCard(expandedCard === id ? null : id);
   };
 
+  const toggleCardTextBox = (cardId: string) => {
+    if (!Array.isArray(layoutCards)) return;
+
+    setLayoutCards(
+      layoutCards.map(card => {
+        if (card.id !== cardId) return card;
+
+        if (card.textBoxEnabled) {
+          return { ...card, textBoxEnabled: false };
+        }
+
+        const normalizedTextBoxes = normalizeCardTextBoxes(card);
+        const primary = normalizedTextBoxes[0];
+
+        return {
+          ...card,
+          textBoxEnabled: true,
+          textBoxes: normalizedTextBoxes,
+          textBoxContent: primary?.content ?? '',
+          textBoxHtml: primary?.html ?? '',
+          textBoxSettings: primary?.settings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...primary.settings }
+            : { ...DEFAULT_TEXTBOX_SETTINGS },
+        };
+      }),
+    );
+  };
+
   const toggleMoleculeCollapse = (moleculeId: string) => {
     setCollapsedMolecules(prev => ({ ...prev, [moleculeId]: !prev[moleculeId] }));
   };
@@ -4732,6 +4800,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 title="Refresh Atom"
                               >
                                 <RefreshCcw className="w-4 h-4 text-gray-400" />
+                              </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardTextBox(card.id);
+                                }}
+                                className={`p-1 rounded hover:bg-gray-100 ${
+                                  card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                                }`}
+                                title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                              >
+                                <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                               </button>
                             </div>
                             <div className="flex items-center space-x-2">
