@@ -260,8 +260,17 @@ const ensureImageDataUrl = async (props: Record<string, unknown>): Promise<Recor
     }
     return nextProps;
   } catch (error) {
-    console.error('[Exhibition Export] Unable to inline image for export', candidate, error);
-    throw new Error('We could not include one of the slide images in the export.');
+    console.warn('[Exhibition Export] Unable to inline image for export, will use original URL:', candidate, error);
+    // For PDF/PPTX exports, we can use the original URL - backend can fetch it
+    // Don't throw error, just return props with original src/dataUrl
+    // The backend's _load_image_asset will handle URL fetching
+    if (srcValue) {
+      nextProps.src = srcValue;
+    }
+    if (dataUrlValue) {
+      nextProps.dataUrl = dataUrlValue;
+    }
+    return nextProps;
   }
 };
 
