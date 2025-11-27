@@ -292,7 +292,38 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
 
     editorRef.current.style.color = settings.text_color;
     editorRef.current.style.backgroundColor = settings.background_color ?? 'transparent';
-  }, [settings.background_color, settings.text_color]);
+    editorRef.current.style.fontFamily = settings.font_family;
+    editorRef.current.style.fontSize = `${settings.font_size}px`;
+    editorRef.current.style.fontWeight = settings.bold ? 'bold' : 'normal';
+    editorRef.current.style.fontStyle = settings.italics ? 'italic' : 'normal';
+    editorRef.current.style.textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+    editorRef.current.style.textAlign = settings.text_align;
+
+    editorRef.current.classList.remove('list-disc', 'list-decimal', 'pl-8');
+    if (settings.list_type === 'bullet') {
+      editorRef.current.classList.add('list-disc', 'pl-8');
+      editorRef.current.style.listStyleType = 'disc';
+      editorRef.current.style.paddingLeft = '2rem';
+    } else if (settings.list_type === 'number') {
+      editorRef.current.classList.add('list-decimal', 'pl-8');
+      editorRef.current.style.listStyleType = 'decimal';
+      editorRef.current.style.paddingLeft = '2rem';
+    } else {
+      editorRef.current.style.listStyleType = 'none';
+      editorRef.current.style.paddingLeft = '0';
+    }
+  }, [
+    settings.background_color,
+    settings.text_color,
+    settings.bold,
+    settings.font_family,
+    settings.font_size,
+    settings.italics,
+    settings.list_type,
+    settings.strikethrough,
+    settings.text_align,
+    settings.underline,
+  ]);
 
   const handleApplyTextStyle = (preset: TextStylePreset) => {
     const updates: Partial<TextBoxSettings> = {
