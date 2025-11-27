@@ -1,12 +1,16 @@
 import { safeStringify } from './safeStringify';
 import { useExhibitionStore } from '@/components/ExhibitionMode/store/exhibitionStore';
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore, LaboratorySubMode } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { atoms as allAtoms } from '@/components/AtomList/data';
 import { VALIDATE_API } from '@/lib/api';
 
 const HEAVY_CACHE_KEYS = [
-  'laboratory-config',
-  'laboratory-layout-cards',
+  'laboratory-config', // Legacy key for backward compatibility
+  'laboratory-layout-cards', // Legacy key for backward compatibility
+  'laboratory-analytics-config',
+  'laboratory-analytics-layout-cards',
+  'laboratory-dashboard-config',
+  'laboratory-dashboard-layout-cards',
   'workflow-canvas-molecules',
   'workflow-selected-atoms',
   'column-classifier-config',
@@ -167,7 +171,7 @@ export function saveCurrentProject(project: any): void {
   }
 }
 
-export function persistLaboratoryConfig(config: any): boolean {
+export function persistLaboratoryConfig(config: any, subMode: LaboratorySubMode = 'analytics'): boolean {
   if (typeof localStorage === 'undefined') {
     return true;
   }
@@ -175,12 +179,16 @@ export function persistLaboratoryConfig(config: any): boolean {
   const serializedConfig = safeStringify(config);
   const serializedCards = safeStringify(config?.cards ?? []);
 
+  // Use mode-specific keys
+  const configKey = subMode === 'analytics' ? 'laboratory-analytics-config' : 'laboratory-dashboard-config';
+  const cardsKey = subMode === 'analytics' ? 'laboratory-analytics-layout-cards' : 'laboratory-dashboard-layout-cards';
+
   const setEntries = () => {
-    localStorage.setItem('laboratory-config', serializedConfig);
+    localStorage.setItem(configKey, serializedConfig);
     try {
-      localStorage.setItem('laboratory-layout-cards', serializedCards);
+      localStorage.setItem(cardsKey, serializedCards);
     } catch (error) {
-      localStorage.removeItem('laboratory-config');
+      localStorage.removeItem(configKey);
       throw error;
     }
   };
@@ -196,8 +204,8 @@ export function persistLaboratoryConfig(config: any): boolean {
         return true;
       } catch (retryError) {
         console.warn('Unable to cache laboratory configuration in localStorage:', retryError);
-        localStorage.removeItem('laboratory-config');
-        localStorage.removeItem('laboratory-layout-cards');
+        localStorage.removeItem(configKey);
+        localStorage.removeItem(cardsKey);
         return false;
       }
     }
@@ -228,8 +236,12 @@ export function clearProjectState(): void {
 
   [
     'current-project',
-    'laboratory-config',
-    'laboratory-layout-cards',
+    'laboratory-config', // Legacy key
+    'laboratory-layout-cards', // Legacy key
+    'laboratory-analytics-config',
+    'laboratory-analytics-layout-cards',
+    'laboratory-dashboard-config',
+    'laboratory-dashboard-layout-cards',
     'workflow-canvas-molecules',
     'workflow-selected-atoms',
     'column-classifier-config',

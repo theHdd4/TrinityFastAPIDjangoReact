@@ -114,6 +114,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
   const updateCard = useLaboratoryStore(state => state.updateCard);
   const auxiliaryMenuLeftOpen = useLaboratoryStore(state => state.auxiliaryMenuLeftOpen);
   const setAuxiliaryMenuLeftOpen = useLaboratoryStore(state => state.setAuxiliaryMenuLeftOpen);
+  const subMode = useLaboratoryStore(state => state.subMode);
   const { user } = useAuth();
   const userRef = useRef(user);
   
@@ -226,9 +227,13 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       const projectContext = getActiveProjectContext();
       if (!projectContext) return null;
 
+      // Determine mode value based on subMode
+      const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+
       const labConfig = {
         cards: cards || [],
         auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen,
+        mode: mode, // Include mode in WebSocket payload
         timestamp: new Date().toISOString(),
       };
       
@@ -242,7 +247,7 @@ export function useCollaborativeSync(options: CollaborativeSyncOptions = {}) {
       onErrorRef.current(error as Error);
       return null;
     }
-  }, [cards, auxiliaryMenuLeftOpen]);
+  }, [cards, auxiliaryMenuLeftOpen, subMode]);
 
   // Send message via WebSocket
   const sendMessage = useCallback((message: WSMessage) => {

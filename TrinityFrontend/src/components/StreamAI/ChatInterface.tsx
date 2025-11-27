@@ -22,16 +22,16 @@ import {
   Wrench, 
   Bot, 
   Sparkles, 
-  Brain,
   User,
-  Minus,
   Settings,
   X,
   Clock,
-  MessageCircle,
   Paperclip,
   Mic,
-  File
+  File,
+  Square,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 const BRAND_PURPLE = '#7C3AED';
@@ -98,6 +98,8 @@ interface ChatInterfaceProps {
   autoSize?: boolean;
   canvasAreaWidth?: number | null;
   canvasAreaLeft?: number | null;
+  // Stop handler
+  onStop?: () => void;
 }
 
 const BRAND_GREEN = '#50C878';
@@ -145,8 +147,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   autoSize = false,
   canvasAreaWidth = null,
   canvasAreaLeft = null,
+  onStop,
 }) => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isPanelHidden, setIsPanelHidden] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -155,12 +159,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [messages]);
 
-  // Auto-open history when there are messages
-  useEffect(() => {
-    if (messages.length > 0) {
-      setIsHistoryOpen(true);
-    }
-  }, [messages.length]);
+  // Chat history stays closed by default - user must click to open it
+  // Removed auto-open behavior so only chat box opens when AI panel is opened
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -172,6 +172,34 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
   // If collapsed, hide the panel completely (opened via AI icon in sidebar)
   if (isCollapsed) {
     return null;
+  }
+
+  // If panel is hidden and no request is active, hide completely
+  if (isPanelHidden && !isLoading) {
+    return null;
+  }
+
+  // If panel is hidden but request is active, show floating icon
+  if (isPanelHidden && isLoading) {
+    return (
+      <AnimatePresence>
+        <motion.div
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+          className="fixed bottom-6 right-6 z-50 pointer-events-auto"
+        >
+          <Button
+            onClick={() => setIsPanelHidden(false)}
+            className="h-14 w-14 p-0 rounded-full bg-gradient-to-br from-[#41C185] to-[#50C878] hover:from-[#50C878] hover:to-[#41C185] text-white shadow-lg shadow-[#41C185]/40 hover:shadow-xl hover:shadow-[#41C185]/50 transition-all duration-300 hover:scale-110"
+            title="Show Chat Panel"
+          >
+            <Bot className="w-6 h-6" />
+          </Button>
+        </motion.div>
+      </AnimatePresence>
+    );
   }
 
   // Calculate width and position for auto-size mode
@@ -196,7 +224,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
       }}
     >
       <div 
-        className={`mb-6 pointer-events-auto ${!autoSize ? 'w-full max-w-4xl mx-4' : ''}`}
+        className={`mb-6 pointer-events-auto ${!autoSize ? 'w-full max-w-3xl mx-4' : ''}`}
         style={autoSize && canvasAreaWidth ? {
           width: containerWidth,
           maxWidth: containerWidth,
@@ -417,62 +445,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
             }}
             transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
           >
-            {/* Header with control buttons */}
-            <div className="flex items-center justify-between px-5 py-2 border-b border-border/30">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onToggleCollapse?.()}
-                  className="h-8 w-8 p-0 rounded-xl hover:bg-muted/50 transition-all duration-200"
-                  title="Collapse Chat"
-                >
-                  <ChevronDown className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onHistoryClick?.()}
-                  className={cn(
-                    "h-8 w-8 p-0 rounded-xl hover:bg-muted/50 transition-all duration-200",
-                    showChatHistory && "bg-muted/50"
-                  )}
-                  title="Chat History"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onSettings?.()}
-                  className="h-8 w-8 p-0 rounded-xl hover:bg-muted/50 transition-all duration-200"
-                  title="Settings"
-                >
-                  <Settings className="w-4 h-4" />
-                </Button>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onMinimize?.()}
-                  className="h-8 w-8 p-0 rounded-xl hover:bg-blue-100 hover:text-blue-500 transition-all duration-200"
-                  title="Minimize"
-                >
-                  <Minus className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onClose?.()}
-                  className="h-8 w-8 p-0 rounded-xl hover:bg-red-100 hover:text-red-500 transition-all duration-200"
-                  title="Close"
-                >
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-
             <div className="px-5 py-4 bg-gradient-to-r from-primary/[0.02] via-transparent to-primary/[0.02] flex items-start gap-2">
               <Button
                 variant="ghost"
@@ -574,11 +546,39 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                     "h-9 gap-2 px-3 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-200 hover:scale-105",
                     showChatHistory && "bg-muted/50"
                   )}
-                  onClick={() => onMemoryClick?.() || onHistoryClick?.()}
-                  title="Memory / Chat History"
+                  onClick={() => {
+                    if (onHistoryClick) {
+                      onHistoryClick();
+                    }
+                  }}
+                  title="Chat History"
                 >
-                  <Brain className="w-4 h-4" />
-                  <span className="text-xs font-medium">Memory</span>
+                  <Clock className="w-4 h-4" />
+                  <span className="text-xs font-medium">History</span>
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsPanelHidden(!isPanelHidden)}
+                  className="h-9 w-9 p-0 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-200 hover:scale-105"
+                  title={isPanelHidden ? "Show Panel" : "Hide Panel"}
+                >
+                  {isPanelHidden ? (
+                    <Eye className="w-4 h-4" />
+                  ) : (
+                    <EyeOff className="w-4 h-4" />
+                  )}
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onSettings?.()}
+                  className="h-9 w-9 p-0 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all duration-200 hover:scale-105"
+                  title="Settings"
+                >
+                  <Settings className="w-4 h-4" />
                 </Button>
 
                 {onAttachClick && (
@@ -695,6 +695,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
                   </DropdownMenuContent>
                 </DropdownMenu>
 
+                {isLoading && onStop && (
+                  <Button
+                    onClick={onStop}
+                    className="h-10 w-10 p-0 rounded-2xl bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/30 hover:shadow-xl hover:shadow-red-500/40 transition-all duration-300 hover:scale-110"
+                    size="sm"
+                    title="Stop Request"
+                  >
+                    <Square className="w-4 h-4 fill-current" />
+                  </Button>
+                )}
+                
                 <Button
                   onClick={onSendMessage}
                   disabled={!inputValue.trim() || isLoading}

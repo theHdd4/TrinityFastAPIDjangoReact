@@ -112,7 +112,7 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
           setCombinationOptions([]);
         }
       })
-      .catch(() => {
+      .catch((error) => {
         setCombinationOptions([]);
       });
   }, [data.selectedDataframe, data.selectedIdentifierValues]);
@@ -144,15 +144,6 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
         // Combine existing available selections with newly available combinations
         const updatedCombinations = [...availableCombinations, ...newlyAvailableCombinations];
         
-        console.log('Updating selected combinations due to identifier filtering:', {
-          old: data.selectedCombinations,
-          new: updatedCombinations,
-          reason: newlyAvailableCombinations.length > 0 
-            ? 'New combinations available due to identifier changes' 
-            : 'Some combinations no longer match identifier criteria',
-          newlyAvailable: newlyAvailableCombinations
-        });
-        
         onDataChange({ selectedCombinations: updatedCombinations });
       }
     }
@@ -162,25 +153,13 @@ const EvaluateModelsFeatureSettings: React.FC<EvaluateModelsFeatureSettingsProps
     combinationOptions.length > 0 &&
     combinationOptions.every(option => (data.selectedCombinations || []).includes(option));
 
-  // Debug logging for select all checkbox
-  console.log('Select All Debug:', {
-    combinationOptionsLength: combinationOptions.length,
-    selectedCombinations: data.selectedCombinations,
-    selectedCombinationsLength: data.selectedCombinations?.length || 0,
-    allCombinationsSelected,
-    everyCheck: combinationOptions.every(option => (data.selectedCombinations || []).includes(option))
-  });
-
   const handleSelectAllCombinations = (checked: boolean) => {
-    console.log('Select All Handler called:', { checked, combinationOptions });
     if (checked) {
       // Select all combinations
       const allCombinations = combinationOptions;
-      console.log('Selecting all combinations:', allCombinations);
       onDataChange({ selectedCombinations: allCombinations });
     } else {
       // Deselect all combinations
-      console.log('Deselecting all combinations');
       onDataChange({ selectedCombinations: [] });
     }
   };

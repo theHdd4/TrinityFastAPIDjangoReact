@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { safeStringify } from "@/utils/safeStringify";
+import { atoms as allAtoms } from "@/components/AtomList/data";
 
 const dedupeCards = (cards: LayoutCard[]): LayoutCard[] => {
   if (!Array.isArray(cards)) return [];
@@ -1893,14 +1894,35 @@ export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
   currentTab: 'input',
 };
 
+// Mode constants
+export type LaboratorySubMode = 'analytics' | 'dashboard';
+
+// Dashboard mode allowed atoms
+export const DASHBOARD_ALLOWED_ATOMS = [
+  'dataframe-operations',
+  'chart-maker',
+  'correlation'
+] as const;
+
+// Helper function to get allowed atoms based on mode
+export const getAllowedAtoms = (mode: LaboratorySubMode) => {
+  if (mode === 'analytics') {
+    return allAtoms;  // All atoms for analytics mode
+  }
+  // Dashboard mode: filter to only allowed atoms
+  return allAtoms.filter(atom => DASHBOARD_ALLOWED_ATOMS.includes(atom.id as any));
+};
+
 interface LaboratoryStore {
   cards: LayoutCard[];
   auxPanelActive: 'settings' | 'frames' | null;
   auxiliaryMenuLeftOpen: boolean;
   metricsInputs: MetricsInputSettings;
+  subMode: LaboratorySubMode;  // Current mode: 'analytics' or 'dashboard'
   setCards: (cards: LayoutCard[]) => void;
   setAuxPanelActive: (panel: 'settings' | 'frames' | null) => void;
   setAuxiliaryMenuLeftOpen: (open: boolean) => void;
+  setSubMode: (mode: LaboratorySubMode) => void;
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   updateAtomSettings: (atomId: string, settings: any) => void;
   getAtom: (atomId: string) => DroppedAtom | undefined;
@@ -1924,6 +1946,7 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
   auxPanelActive: null,
   auxiliaryMenuLeftOpen: true,
   metricsInputs: DEFAULT_METRICS_INPUT_SETTINGS,
+  subMode: 'analytics',  // Default to analytics mode
   setCards: (cards: LayoutCard[]) => {
     // FIX: Ensure cards is always an array
     if (!Array.isArray(cards)) {
@@ -1947,6 +1970,12 @@ export const useLaboratoryStore = create<LaboratoryStore>((set, get) => ({
 
   setAuxiliaryMenuLeftOpen: (open: boolean) => {
     set({ auxiliaryMenuLeftOpen: open });
+  },
+
+  setSubMode: (mode: LaboratorySubMode) => {
+    set({ subMode: mode });
+    // When switching modes, clear cards (will be reloaded for new mode)
+    set({ cards: [] });
   },
 
   updateCard: (cardId: string, updates: Partial<LayoutCard>) => {

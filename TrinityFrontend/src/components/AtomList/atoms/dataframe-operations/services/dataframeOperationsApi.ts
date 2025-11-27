@@ -124,20 +124,36 @@ export function transformColumnCase(dfId: string, column: string, caseType: 'low
   });
 }
 
-export function findAndReplace(dfId: string, findText: string, replaceText: string, replaceAll: boolean = false, caseSensitive: boolean = false) {
+export function findAndReplace(dfId: string, findText: string, replaceText: string, replaceAll: boolean = false, caseSensitive: boolean = false, columns?: string[]) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/find_and_replace`, {
     df_id: dfId,
     find_text: findText,
     replace_text: replaceText,
     replace_all: replaceAll,
     case_sensitive: caseSensitive,
+    ...(columns && columns.length > 0 && { columns }), // Only include if provided and not empty
   });
 }
 
-export function countMatches(dfId: string, findText: string, caseSensitive: boolean = false) {
+export function countMatches(dfId: string, findText: string, caseSensitive: boolean = false, columns?: string[]) {
   return postJSON(`${DATAFRAME_OPERATIONS_API}/count_matches`, {
     df_id: dfId,
     find_text: findText,
     case_sensitive: caseSensitive,
+    ...(columns && columns.length > 0 && { columns }), // Only include if provided and not empty
+  });
+}
+
+export function convertToPercentage(dfId: string, column: string) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/convert_to_percentage`, {
+    df_id: dfId,
+    column,
+  });
+}
+
+export function convertFromPercentage(dfId: string, column: string) {
+  return postJSON(`${DATAFRAME_OPERATIONS_API}/convert_from_percentage`, {
+    df_id: dfId,
+    column,
   });
 }

@@ -63,12 +63,23 @@ except (ModuleNotFoundError, ImportError):  # pragma: no cover - fallback when F
         MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minio123")
         DEFAULT_MINIO_BUCKET = os.getenv("MINIO_BUCKET", "trinity")
         
-        _minio_client = Minio(
-            MINIO_ENDPOINT,
-            access_key=MINIO_ACCESS_KEY,
-            secret_key=MINIO_SECRET_KEY,
-            secure=False,
-        )
+        # Initialize MinIO client - handle different minio library versions
+        try:
+            # Try newer API (all keyword arguments)
+            _minio_client = Minio(
+                endpoint=MINIO_ENDPOINT,
+                access_key=MINIO_ACCESS_KEY,
+                secret_key=MINIO_SECRET_KEY,
+                secure=False,
+            )
+        except (TypeError, ValueError):
+            # Fallback for older minio versions (endpoint as positional)
+            _minio_client = Minio(
+                MINIO_ENDPOINT,
+                access_key=MINIO_ACCESS_KEY,
+                secret_key=MINIO_SECRET_KEY,
+                secure=False,
+            )
         
         def ensure_minio_bucket() -> None:
             try:
@@ -177,7 +188,7 @@ def _ensure_bucket(client: Minio) -> None:
 
 def _load_json_object(client: Minio, object_name: str) -> Optional[Dict[str, Any]]:
     try:
-        response = client.get_object(MEMORY_BUCKET, object_name)
+        response = client.get_object(bucket_name=MEMORY_BUCKET, object_name=object_name)
     except S3Error as exc:
         if exc.code in {"NoSuchKey", "NoSuchObject"}:
             return None
@@ -418,7 +429,7 @@ def delete_chat(
         # List all objects in the chat directory
         objects_to_delete = []
         try:
-            objects: Iterable = client.list_objects(MEMORY_BUCKET, prefix=chat_dir_prefix, recursive=True)
+            objects: Iterable = client.list_objects(bucket_name=MEMORY_BUCKET, prefix=chat_dir_prefix, recursive=True)
             for obj in objects:
                 objects_to_delete.append(obj.object_name)
         except Exception as exc:
@@ -456,7 +467,7 @@ def list_chats(
     prefix = f"{_context_prefix(client_name, app_name, project_name)}/chats/"
     results: List[Dict[str, Any]] = []
     try:
-        objects: Iterable = client.list_objects(MEMORY_BUCKET, prefix=prefix, recursive=True)
+        objects: Iterable = client.list_objects(bucket_name=MEMORY_BUCKET, prefix=prefix, recursive=True)
     except Exception as exc:
         raise MemoryStorageError(f"Failed to list chat memory objects: {exc}") from exc
 

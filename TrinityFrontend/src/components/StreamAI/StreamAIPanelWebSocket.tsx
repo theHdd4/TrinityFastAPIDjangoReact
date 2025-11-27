@@ -180,13 +180,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const [showSettings, setShowSettings] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false); // For collapsible chat history in horizontal mode
   const [selectedAgent, setSelectedAgent] = useState('Default'); // For agent selection dropdown
-  const [panelWidth, setPanelWidth] = useState(384); // Default 384px (w-96)
+  const [panelWidth, setPanelWidth] = useState(320); // Default 320px (w-80) - reduced from 384px
   const [panelHeight, setPanelHeight] = useState(500); // Default height for horizontal mode
   const [isPanelFrozen, setIsPanelFrozen] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const [autoSize, setAutoSize] = useState(false); // Auto-size horizontal panel based on canvas area
-  const [canvasAreaWidth, setCanvasAreaWidth] = useState<number | null>(null); // Canvas area width for auto-sizing
-  const [canvasAreaLeft, setCanvasAreaLeft] = useState<number | null>(null); // Canvas area left position for auto-sizing
   // Layout preference: 'vertical' (default) or 'horizontal'
   const [preferredLayout, setPreferredLayout] = useState<'vertical' | 'horizontal'>(() => {
     const saved = localStorage.getItem('trinity_ai_layout_preference');
@@ -195,6 +192,22 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   
   // Use preferred layout from settings if layout prop not provided
   const layout = layoutProp || preferredLayout;
+  
+  // Auto-size defaults to true when layout is horizontal
+  const [autoSize, setAutoSize] = useState(() => {
+    const initialLayout = layoutProp || preferredLayout;
+    return initialLayout === 'horizontal';
+  }); // Auto-size horizontal panel based on canvas area
+  const [canvasAreaWidth, setCanvasAreaWidth] = useState<number | null>(null); // Canvas area width for auto-sizing
+  const [canvasAreaLeft, setCanvasAreaLeft] = useState<number | null>(null); // Canvas area left position for auto-sizing
+  
+  // Auto-enable autoSize when layout changes to horizontal
+  useEffect(() => {
+    if (layout === 'horizontal') {
+      setAutoSize(true);
+    }
+  }, [layout]);
+  
   const [baseFontSize] = useState(14);
   const [smallFontSize] = useState(12);
   const isCompact = panelWidth <= 420;
@@ -2103,6 +2116,13 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         autoSize={autoSize}
         canvasAreaWidth={canvasAreaWidth}
         canvasAreaLeft={canvasAreaLeft}
+        onStop={() => {
+          if (wsConnection) {
+            wsConnection.close();
+          }
+          setIsLoading(false);
+          stopAutoRun();
+        }}
       />
       
       {/* Settings Panel for Horizontal Layout */}
@@ -2147,6 +2167,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                             const newLayout = preferredLayout === 'vertical' ? 'horizontal' : 'vertical';
                             setPreferredLayout(newLayout);
                             localStorage.setItem('trinity_ai_layout_preference', newLayout);
+                            // Auto-enable autoSize when switching to horizontal layout
+                            if (newLayout === 'horizontal') {
+                              setAutoSize(true);
+                            }
                             // Dispatch custom event for same-tab updates
                             window.dispatchEvent(new Event('trinity_ai_layout_changed'));
                             setShowSettings(false); // Close settings after changing layout
@@ -2235,6 +2259,227 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           </div>
         </div>
       )}
+      
+      {/* Chat History Sidebar for Horizontal Layout */}
+      {showChatHistory && (
+        <div className="fixed right-0 top-0 w-80 h-full bg-white backdrop-blur-xl border-l-2 border-gray-200 z-50 flex flex-col shadow-xl">
+          <div className="p-4 border-b-2 border-gray-200 bg-gradient-to-r from-gray-50 to-white">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-800 font-inter" style={{ fontSize: `${baseFontSize}px` }}>Chat History</h3>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    if (chats.length === 0) return;
+                    if (confirm(`Are you sure you want to delete all ${chats.length} chats? This cannot be undone.`)) {
+                      try {
+                        setIsMemoryLoading(true);
+                        const results = await Promise.allSettled(
+                          chats.map(chat => deleteMemoryChat(MEMORY_API_BASE, chat.id))
+                        );
+                        const failed = results.filter(result => result.status === 'rejected');
+                        if (failed.length > 0) {
+                          console.error('Some chats failed to delete:', failed);
+                          setMemoryError(`Failed to delete ${failed.length} chat(s). Please try again.`);
+                        } else {
+                          // Reload chats from server to ensure consistency
+                          const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+                          const mappedChats: Chat[] = records
+                            .filter(record => {
+                              if (!record.chatId || typeof record.chatId !== 'string') return false;
+                              if (!Array.isArray(record.messages)) return false;
+                              return true;
+                            })
+                            .map(record => mapRecordToChat(record));
+                          
+                          setChats(mappedChats);
+                          memoryPersistSkipRef.current = true;
+                          
+                          if (mappedChats.length === 0) {
+                            await createNewChat();
+                          } else {
+                            // Switch to first remaining chat
+                            const firstChat = mappedChats[0];
+                            setCurrentChatId(firstChat.id);
+                            const firstMessages = firstChat.messages && firstChat.messages.length > 0 
+                              ? firstChat.messages 
+                              : [{
+                                  id: '1',
+                                  content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+                                  sender: 'ai' as const,
+                                  timestamp: new Date()
+                                }];
+                            setMessages(firstMessages);
+                            setCurrentSessionId(firstChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                          }
+                          setMemoryError(null);
+                        }
+                      } catch (error) {
+                        console.error('Failed to clear all chats:', error);
+                        setMemoryError('Unable to clear all chats from server.');
+                      } finally {
+                        setIsMemoryLoading(false);
+                      }
+                    }
+                  }}
+                  className="h-6 px-2 text-xs hover:bg-red-100 hover:text-red-600 text-gray-600 rounded-lg transition-colors"
+                  disabled={chats.length === 0 || isMemoryLoading}
+                  title="Clear All Chats"
+                >
+                  Clear All
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowChatHistory(false)}
+                  className="h-6 w-6 p-0 hover:bg-gray-100 text-gray-800 rounded-xl"
+                >
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-4 border-b border-gray-200">
+            <Button
+              onClick={() => void createNewChat()}
+              className="w-full text-white font-semibold font-inter rounded-xl shadow-md transition-all duration-200"
+              style={{ fontSize: `${smallFontSize}px`, backgroundColor: BRAND_GREEN }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#3AB077')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = BRAND_GREEN)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Chat
+            </Button>
+          </div>
+          
+          <ScrollArea className="flex-1">
+            <div className="p-4 space-y-2">
+              {chats.length === 0 ? (
+                <div className="text-center py-8">
+                  <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                  <p className="text-gray-500 font-inter text-sm">No chat history yet</p>
+                </div>
+              ) : (
+                chats.map((chat) => (
+                  <div
+                    key={chat.id}
+                    className={`p-3 rounded-xl transition-all duration-200 border-2 ${
+                      chat.id === currentChatId
+                        ? 'shadow-md'
+                        : 'bg-gray-50 border-gray-200 hover:bg-gray-100 hover:border-gray-300'
+                    }`}
+                    style={
+                      chat.id === currentChatId
+                        ? {
+                            backgroundColor: `${BRAND_GREEN}1A`,
+                            borderColor: BRAND_GREEN,
+                          }
+                        : undefined
+                    }
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => switchToChat(chat.id)}
+                      >
+                        <h4 className="font-semibold text-gray-800 font-inter text-sm truncate">
+                          {chat.title}
+                        </h4>
+                        <p className="text-gray-500 font-inter text-xs mt-1">
+                          {new Date(chat.createdAt).toLocaleDateString()} • {chat.messages.length} messages
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {chat.id === currentChatId && (
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: BRAND_GREEN }}
+                          />
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 hover:bg-red-100 hover:text-red-600 text-gray-400 rounded-lg"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            if (confirm(`Are you sure you want to delete "${chat.title}"? This cannot be undone.`)) {
+                              try {
+                                setIsMemoryLoading(true);
+                                console.log('Deleting chat:', chat.id);
+                                await deleteMemoryChat(MEMORY_API_BASE, chat.id);
+                                console.log('Chat deleted successfully, reloading...');
+                                
+                                // Reload chats from server
+                                const records: MemoryChatResponse[] = await listMemoryChats(MEMORY_API_BASE);
+                                console.log('Reloaded chats:', records.length);
+                                const mappedChats: Chat[] = records
+                                  .filter(record => {
+                                    // Validate chat structure
+                                    if (!record.chatId || typeof record.chatId !== 'string') return false;
+                                    if (!Array.isArray(record.messages)) return false;
+                                    return true;
+                                  })
+                                  .map(record => mapRecordToChat(record));
+                                
+                                memoryPersistSkipRef.current = true;
+                                setChats(mappedChats);
+                                
+                                // If we deleted the current chat, switch to first available or create new
+                                if (chat.id === currentChatId) {
+                                  if (mappedChats.length === 0) {
+                                    await createNewChat();
+                                  } else {
+                                    const nextChat = mappedChats[0];
+                                    setCurrentChatId(nextChat.id);
+                                    const nextMessages = nextChat.messages && nextChat.messages.length > 0 
+                                      ? nextChat.messages 
+                                      : [{
+                                          id: '1',
+                                          content: "Hello! I'm Trinity AI. Describe your data analysis task and I'll execute it step-by-step with intelligent workflow generation.",
+                                          sender: 'ai' as const,
+                                          timestamp: new Date()
+                                        }];
+                                    setMessages(nextMessages);
+                                    setCurrentSessionId(nextChat.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+                                  }
+                                }
+                                setMemoryError(null);
+                                console.log('Chat deletion completed successfully');
+                              } catch (error) {
+                                console.error('Failed to delete chat:', error);
+                                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                                setMemoryError(`Unable to delete chat: ${errorMessage}`);
+                                alert(`Failed to delete chat: ${errorMessage}`);
+                              } finally {
+                                setIsMemoryLoading(false);
+                              }
+                            }
+                          }}
+                          title="Delete Chat"
+                          disabled={isMemoryLoading}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+          
+          <div className="p-4 border-t-2 border-gray-200 bg-gray-50">
+            <div className="text-center">
+              <p className="text-gray-500 font-inter text-xs">
+                {chats.length} {chats.length === 1 ? 'chat' : 'chats'} saved
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
       </>
     );
   }
@@ -2280,6 +2525,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                           const newLayout = preferredLayout === 'vertical' ? 'horizontal' : 'vertical';
                           setPreferredLayout(newLayout);
                           localStorage.setItem('trinity_ai_layout_preference', newLayout);
+                          // Auto-enable autoSize when switching to horizontal layout
+                          if (newLayout === 'horizontal') {
+                            setAutoSize(true);
+                          }
                           // Dispatch custom event for same-tab updates
                           window.dispatchEvent(new Event('trinity_ai_layout_changed'));
                         }}

@@ -3,7 +3,7 @@ import React, { useState, useEffect, useLayoutEffect, useRef, useInsertionEffect
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 // import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
-import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown } from 'lucide-react';
+import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown, BarChart3, LayoutDashboard } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
@@ -46,7 +46,7 @@ const LaboratoryMode = () => {
   const [selectedAtomId, setSelectedAtomId] = useState<string>();
   const [selectedCardId, setSelectedCardId] = useState<string>();
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
-  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(true);
+  const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(false);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
   const [isExhibitionOpen, setIsExhibitionOpen] = useState<boolean>(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
@@ -86,7 +86,7 @@ const LaboratoryMode = () => {
   const [projectContext, setProjectContext] = useState<ProjectContext | null>(() => getActiveProjectContext());
   const [autosaveEnabled, setAutosaveEnabled] = useState(true); // Default to true, will be loaded from MongoDB
   const { toast } = useToast();
-  const { cards, setCards: setLabCards, auxiliaryMenuLeftOpen } = useLaboratoryStore();
+  const { cards, setCards: setLabCards, auxiliaryMenuLeftOpen, subMode, setSubMode } = useLaboratoryStore();
   const setExhibitionCards = useExhibitionStore(state => state.setCards);
   const { hasPermission, user } = useAuth();
   const canEdit = hasPermission('laboratory:edit');
@@ -152,6 +152,29 @@ const LaboratoryMode = () => {
       setIsPreparingAnimation(false);
     }
   }, []);
+
+  // Load subMode from URL query param on mount
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const modeParam = urlParams.get('mode');
+    if (modeParam === 'dashboard' || modeParam === 'analytics') {
+      setSubMode(modeParam);
+    } else {
+      // Check localStorage for saved mode
+      const savedMode = localStorage.getItem('laboratory-submode');
+      if (savedMode === 'dashboard' || savedMode === 'analytics') {
+        setSubMode(savedMode);
+      }
+    }
+  }, [setSubMode]);
+
+  // Persist subMode to localStorage and URL when it changes
+  useEffect(() => {
+    localStorage.setItem('laboratory-submode', subMode);
+    const url = new URL(window.location.href);
+    url.searchParams.set('mode', subMode);
+    window.history.replaceState({}, '', url.toString());
+  }, [subMode]);
 
   useEffect(() => {
     if (isShareOpen) {
@@ -386,6 +409,7 @@ const LaboratoryMode = () => {
         const projectContext = getActiveProjectContext();
         if (projectContext) {
           const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+          const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
           const payload = {
             client_name: projectContext.client_name,
             app_name: projectContext.app_name,
@@ -394,7 +418,7 @@ const LaboratoryMode = () => {
             workflow_molecules: workflowMoleculesForSave,
             auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true,
             autosaveEnabled: autosaveEnabled,
-            mode: 'laboratory',
+            mode: mode,
           };
 
           console.log('🔄 [AUTOSAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
@@ -436,7 +460,7 @@ const LaboratoryMode = () => {
           }
         }
 
-        persistLaboratoryConfig(sanitized);
+        persistLaboratoryConfig(sanitized, subMode);
         
         // CRITICAL: Sync changes to Workflow collection during autosave
         console.log('🔄 [AUTOSAVE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
@@ -488,7 +512,7 @@ const LaboratoryMode = () => {
             body: JSON.stringify({ state: { laboratory_config: sanitized } }),
           }).catch(() => {});
 
-          const storageSuccess = persistLaboratoryConfig(sanitized);
+          const storageSuccess = persistLaboratoryConfig(sanitized, subMode);
           if (!storageSuccess) {
             console.warn('Storage quota exceeded while caching undo state.');
             toast({
@@ -642,19 +666,20 @@ const LaboratoryMode = () => {
       };
       const sanitized = sanitizeLabConfig(labConfig);
 
-      const projectContext = getActiveProjectContext();
-      if (projectContext) {
-        const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
-        const payload = {
-          client_name: projectContext.client_name,
-          app_name: projectContext.app_name,
-          project_name: projectContext.project_name,
-          cards: sanitized.cards || [],
-          workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
-          auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true, // Include auxiliary menu left state
-          autosaveEnabled: autosaveEnabled, // Include autosave toggle state
-          mode: 'laboratory',
-        };
+        const projectContext = getActiveProjectContext();
+        if (projectContext) {
+          const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+          const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+          const payload = {
+            client_name: projectContext.client_name,
+            app_name: projectContext.app_name,
+            project_name: projectContext.project_name,
+            cards: sanitized.cards || [],
+            workflow_molecules: workflowMoleculesForSave, // Include workflow molecules with isActive and moleculeIndex (empty if no cards)
+            auxiliaryMenuLeftOpen: auxiliaryMenuLeftOpen ?? true, // Include auxiliary menu left state
+            autosaveEnabled: autosaveEnabled, // Include autosave toggle state
+            mode: mode,
+          };
 
         console.log('💾 [MANUAL SAVE] Saving with auxiliaryMenuLeftOpen:', auxiliaryMenuLeftOpen ?? true);
 
@@ -707,7 +732,7 @@ const LaboratoryMode = () => {
         }
       }
 
-      const storageSuccess = persistLaboratoryConfig(sanitized);
+      const storageSuccess = persistLaboratoryConfig(sanitized, subMode);
       
       // Sync changes to Workflow collection
       console.log('🔄 [LAB MODE] About to call syncWorkflowCollection, canvasAreaRef exists:', !!canvasAreaRef.current);
@@ -909,6 +934,27 @@ const LaboratoryMode = () => {
             <Play className="w-3 h-3" fill="white" />
             <span>Run Pipeline</span>
           </button>
+
+          {/* Mode Toggle Switch */}
+          <div className="flex items-center gap-1.5 px-1.5 py-0.5 bg-gray-50 rounded-md border border-gray-200">
+            <span className={`text-[10px] font-medium px-1 transition-colors ${
+              subMode === 'analytics' ? 'text-gray-900' : 'text-gray-400'
+            }`}>
+              Analytics
+            </span>
+            <Switch
+              checked={subMode === 'dashboard'}
+              onCheckedChange={(checked) => {
+                setSubMode(checked ? 'dashboard' : 'analytics');
+              }}
+              className="scale-[0.65]"
+            />
+            <span className={`text-[10px] font-medium px-1 transition-colors ${
+              subMode === 'dashboard' ? 'text-gray-900' : 'text-gray-400'
+            }`}>
+              Dashboard
+            </span>
+          </div>
         </div>
       </div>
 

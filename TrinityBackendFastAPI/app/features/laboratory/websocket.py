@@ -209,9 +209,15 @@ class ConnectionManager:
             if project_key in self.pending_states:
                 latest_state = self.pending_states[project_key]
                 
+                # Extract mode from state if available, otherwise default to "laboratory" (analytics)
+                state_mode = latest_state.get("mode", "laboratory")
+                # Backward compatibility: ensure mode is valid
+                if state_mode not in ["laboratory", "laboratory-dashboard"]:
+                    state_mode = "laboratory"  # Fallback to analytics mode
+                
                 logger.info(
                     f"💾 Persisting state for project {project_key} "
-                    f"(cards: {len(latest_state.get('cards', []))})"
+                    f"(cards: {len(latest_state.get('cards', []))}, mode: {state_mode})"
                 )
                 
                 # Save to MongoDB
@@ -223,7 +229,7 @@ class ConnectionManager:
                         "cards": latest_state.get("cards", []),
                         "workflow_molecules": latest_state.get("workflow_molecules", []),
                         "auxiliaryMenuLeftOpen": latest_state.get("auxiliaryMenuLeftOpen", True),
-                        "mode": "laboratory",
+                        "mode": state_mode,
                     }
                 )
                 

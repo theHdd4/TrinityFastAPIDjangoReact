@@ -73,6 +73,7 @@ import {
   DEFAULT_EXPLORE_DATA,
   DEFAULT_PIVOT_TABLE_SETTINGS,
   DEFAULT_UNPIVOT_SETTINGS,
+  DASHBOARD_ALLOWED_ATOMS,
 } from '../../store/laboratoryStore';
 import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, UnifiedRenderItem } from './helpers';
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
@@ -205,7 +206,7 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
 };
 
 // Function to fetch atom configurations from MongoDB
-const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
+const fetchAtomConfigurationsFromMongoDB = async (subMode: 'analytics' | 'dashboard' = 'analytics'): Promise<{
   cards: LayoutCard[];
   workflowMolecules: WorkflowMolecule[];
   autosaveEnabled?: boolean;
@@ -217,11 +218,15 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
       return null;
     }
 
-    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}`;
+    // Determine mode value based on subMode
+    const mode = subMode === 'analytics' ? 'laboratory' : 'laboratory-dashboard';
+    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/get/${projectContext.client_name}/${projectContext.app_name}/${projectContext.project_name}?mode=${mode}`;
 
     console.info('[Laboratory API] Fetching atom configurations from MongoDB', {
       url: requestUrl,
       project: projectContext.project_name,
+      subMode,
+      mode,
     });
 
     const response = await fetch(requestUrl, {
@@ -393,7 +398,15 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
   onCardFocus,
   onCardBlur,
 }, ref) => {
-  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen } = useLaboratoryStore();
+  const { cards: layoutCards, setCards: setLayoutCards, updateAtomSettings, setAuxiliaryMenuLeftOpen, subMode } = useLaboratoryStore();
+  
+  // Calculate allowed atom IDs based on current mode
+  const allowedAtomIds = useMemo(() => {
+    if (subMode === 'dashboard') {
+      return DASHBOARD_ALLOWED_ATOMS.slice(); // Convert readonly array to regular array
+    }
+    return undefined; // undefined = show all atoms for analytics mode
+  }, [subMode]);
   const [workflowMolecules, setWorkflowMolecules] = useState<WorkflowMolecule[]>([]);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [collapsedCards, setCollapsedCards] = useState<Record<string, boolean>>({});
@@ -1138,7 +1151,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         console.log('[Laboratory API] Cards from localStorage - attempting to fetch molecule information from MongoDB');
 
         // Try to fetch molecule information from MongoDB
-        fetchAtomConfigurationsFromMongoDB()
+        fetchAtomConfigurationsFromMongoDB(subMode)
           .then((mongoData) => {
             if (mongoData && mongoData.cards.length > 0) {
               console.log('[Laboratory API] Found MongoDB data with molecule info, updating cards');
@@ -1509,10 +1522,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     };
 
     // PRIORITY: Fetch from MongoDB FIRST, then fall back to localStorage if MongoDB fails
-    console.info('[Laboratory API] Starting data load - prioritizing MongoDB over localStorage');
+    console.info('[Laboratory API] Starting data load - prioritizing MongoDB over localStorage', { subMode });
 
     hasPendingAsyncLoad = true;
-    fetchAtomConfigurationsFromMongoDB()
+    fetchAtomConfigurationsFromMongoDB(subMode)
       .then((mongoData) => {
         if (!isMounted) {
           return;
@@ -1722,9 +1735,10 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       }
     }
 
-      // If still no cards, try stored layout from localStorage
+      // If still no cards, try stored layout from localStorage (mode-specific)
       if (!initialCards || initialCards.length === 0) {
-      const storedLayout = localStorage.getItem(STORAGE_KEY);
+      const storageKey = subMode === 'analytics' ? 'laboratory-analytics-layout-cards' : 'laboratory-dashboard-layout-cards';
+      const storedLayout = localStorage.getItem(storageKey);
       if (storedLayout && storedLayout !== 'undefined') {
         try {
           const raw = JSON.parse(storedLayout);
@@ -1749,7 +1763,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             }
         } catch (e) {
           console.error('Failed to parse stored laboratory layout', e);
-          localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(storageKey);
         }
       }
 
@@ -1775,7 +1789,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [subMode]); // Reload data when subMode changes
 
 
   useEffect(() => {
@@ -1985,6 +1999,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     if (atomData) {
       const atom = JSON.parse(atomData);
       const info = allAtoms.find(a => a.id === atom.id);
+
+      // Validate atom is allowed in current mode (Dashboard mode restriction)
+      if (subMode === 'dashboard') {
+        if (!DASHBOARD_ALLOWED_ATOMS.includes(atom.id as any)) {
+          toast({
+            title: 'Atom Not Available',
+            description: `"${info?.title || atom.id}" is not available in Dashboard mode. Switch to Analytics mode to use this atom.`,
+            variant: 'destructive',
+          });
+          return;
+        }
+      }
 
       // Find the card to get its moleculeId and current atom count
       const card = (Array.isArray(layoutCards) ? layoutCards : []).find(c => c.id === cardId);
@@ -4423,6 +4449,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   isVisible={true}
                                   onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
                                   onAddAtom={handleAddAtomFromSuggestion}
+                                  allowedAtomIds={allowedAtomIds}
                                 />
                               </div>
                             ) : (
@@ -4691,6 +4718,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               isVisible={true}
                               onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
                               onAddAtom={handleAddAtomFromSuggestion}
+                              allowedAtomIds={allowedAtomIds}
                             />
                           </div>
                         ) : (
@@ -5177,6 +5205,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                     isVisible={true}
                     onClose={() => setShowAtomSuggestion(prev => ({ ...prev, [card.id]: false }))}
                     onAddAtom={handleAddAtomFromSuggestion}
+                    allowedAtomIds={allowedAtomIds}
                   />
                 </div>
               ) : (

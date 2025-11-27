@@ -8,6 +8,7 @@ interface AtomSuggestionProps {
   isVisible: boolean;
   onClose: () => void;
   onAddAtom?: (atomId: string, atomData: any, targetCardId?: string) => void;
+  allowedAtomIds?: string[]; // Optional: filter atoms by IDs. If undefined, show all atoms.
 }
 
 interface SavedFrameMeta {
@@ -20,7 +21,8 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
   cardId,
   isVisible,
   onClose,
-  onAddAtom
+  onAddAtom,
+  allowedAtomIds
 }) => {
   const [savedDataframes, setSavedDataframes] = useState<SavedFrameMeta[]>([]);
   const [isLoadingDataframes, setIsLoadingDataframes] = useState(false);
@@ -561,8 +563,13 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
     
     
     
+    // Apply mode filter if provided (Dashboard mode restriction)
+    if (allowedAtomIds && allowedAtomIds.length > 0) {
+      return suggestions.filter(suggestion => allowedAtomIds.includes(suggestion.id));
+    }
+    
     return suggestions;
-  }, [hasDataUploadAtom, hasColumnClassifierAtom, hasDataframeOperationsAtom, hasFeatureOverviewAtom, hasExploreAtom, hasCorrelationAtom, hasCreateAndTransformAtom, hasChartMakerAtom, hasGroupByAtom, hasMergeAtom, hasConcatAtom, hasScopeSelectorAtom, hasClusteringAtom, hasBuildFeatureBasedAtom, hasBuildAutoregressiveAtom, hasSelectModelsFeatureAtom, hasEvaluateModelsFeatureAtom, hasScenarioPlannerAtom, savedDataframes.length, cards, cardId, allAtoms.length]);
+  }, [hasDataUploadAtom, hasColumnClassifierAtom, hasDataframeOperationsAtom, hasFeatureOverviewAtom, hasExploreAtom, hasCorrelationAtom, hasCreateAndTransformAtom, hasChartMakerAtom, hasGroupByAtom, hasMergeAtom, hasConcatAtom, hasScopeSelectorAtom, hasClusteringAtom, hasBuildFeatureBasedAtom, hasBuildAutoregressiveAtom, hasSelectModelsFeatureAtom, hasEvaluateModelsFeatureAtom, hasScenarioPlannerAtom, savedDataframes.length, cards, cardId, allAtoms.length, allowedAtomIds]);
 
   // Check if we should show the suggestion
   const shouldShowSuggestion = useMemo(() => {
@@ -592,7 +599,7 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
       return [];
     }
     const query = searchQuery.toLowerCase();
-    return apiAtoms.filter(atom => {
+    let filtered = apiAtoms.filter(atom => {
       const name = atom.name || '';
       const description = atom.description || '';
       const tags = atom.tags || [];
@@ -600,7 +607,14 @@ const AtomSuggestion: React.FC<AtomSuggestionProps> = ({
              description.toLowerCase().includes(query) ||
              tags.some(tag => tag && tag.toLowerCase().includes(query));
     });
-  }, [searchQuery, apiAtoms]);
+    
+    // Apply mode filter if provided (Dashboard mode restriction)
+    if (allowedAtomIds && allowedAtomIds.length > 0) {
+      filtered = filtered.filter(atom => allowedAtomIds.includes(atom.id));
+    }
+    
+    return filtered;
+  }, [searchQuery, apiAtoms, allowedAtomIds]);
 
   // Handle adding a suggested atom
   const handleAddSuggestedAtom = (atomId: string, atomName: string, color: string) => {

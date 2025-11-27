@@ -57,7 +57,7 @@ import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, PieChart, Pie, Cell, Legend, Tooltip as RechartsTooltip, ScatterChart, Scatter } from 'recharts';
 import RechartsChartRenderer from '@/templates/charts/RechartsChartRenderer';
 import SCurveChartRenderer from '@/templates/charts/SCurveChartRenderer';
@@ -273,6 +273,46 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     }
   };
 
+  const deleteComment = async (chartId: string, commentId: string) => {
+    try {
+      // Extract combination name and graph type from chartId
+      const [graphType, combinationName] = chartId.split('-', 2);
+      
+      // Get environment variables
+      const envStr = localStorage.getItem('env');
+      const env = envStr ? JSON.parse(envStr) : {};
+      
+      // Remove the comment from the local array
+      const updatedComments = (comments[chartId] || []).filter(c => c.id !== commentId);
+      
+      const formData = new FormData();
+      formData.append('client_name', env.CLIENT_NAME || '');
+      formData.append('app_name', env.APP_NAME || '');
+      formData.append('project_name', env.PROJECT_NAME || '');
+      formData.append('combination_id', combinationName);
+      formData.append('graph_type', graphType);
+      formData.append('comments', JSON.stringify(updatedComments));
+      
+      const response = await fetch(`${EVALUATE_API}/save-comments`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (response.ok) {
+        onDataChange({
+          comments: {
+            ...comments,
+            [chartId]: updatedComments
+          }
+        });
+      } else {
+        console.error('Failed to delete comment');
+      }
+    } catch (error) {
+      console.error('Error deleting comment:', error);
+    }
+  };
+
   const renderCommentSection = (chartId: string) => {
     const newComment = newComments[chartId] || '';
     const chartComments = comments[chartId] || [];
@@ -385,6 +425,14 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const columnFilters = data.columnFilters || {};
   
   const selectedCombinations = data.selectedCombinations || [];
+  
+  // Debug log for selectedCombinations
+  console.log('EVALUATE FEATURE BASED: Component render - selectedCombinations:', {
+    count: selectedCombinations.length,
+    combinations: selectedCombinations,
+    hasDataframe: !!data.selectedDataframe,
+    dataframe: data.selectedDataframe
+  });
   
   // Get scope from the 'scope' column in the dataset
   const [currentScope, setCurrentScope] = useState<string>('');
@@ -880,7 +928,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   // Fetch YoY growth data when dataset and combinations are selected
   useEffect(() => {
     const fetchYoyGrowthData = async () => {
-      if (data.selectedDataframe && selectedCombinations.length > 0) {
+      const combos = data.selectedCombinations || [];
+      if (data.selectedDataframe && combos.length > 0) {
         setIsLoadingYoyData(true);
         try {
           // Get environment variables like column classifier
@@ -890,22 +939,27 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
-          const url =
-            `${EVALUATE_API}/yoy-growth?` +
+          const url = `${EVALUATE_API}/yoy-growth?` + 
             `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
             `&client_name=${encodeURIComponent(clientName)}` +
             `&app_name=${encodeURIComponent(appName)}` +
             `&project_name=${encodeURIComponent(projectName)}`;
-
-          const result = await fetchTaskAwareJson<any>(url);
-          console.log('🔍 DEBUG: YoY Backend response:', result);
-          if (result && result.results && Array.isArray(result.results)) {
-            setYoyGrowthData(result.results);
+          
+          const response = await fetch(url);
+          
+          if (response.ok) {
+            const payload = await response.json();
+            const result = await resolveTaskResponse<any>(payload);
+            // Handle array of results for multiple combinations
+            if (result && result.results && Array.isArray(result.results)) {
+              setYoyGrowthData(result.results);
+            } else {
+              setYoyGrowthData([]);
+            }
           } else {
             setYoyGrowthData([]);
           }
         } catch (error) {
-          console.error('Error fetching YoY growth data:', error);
           setYoyGrowthData([]);
         } finally {
           setIsLoadingYoyData(false);
@@ -916,7 +970,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     };
     
     fetchYoyGrowthData();
-  }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+  }, [data.selectedDataframe, data.selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
 
   // Fetch contribution data when dataset and combinations are selected
   useEffect(() => {
@@ -936,25 +990,29 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           // Fetch contribution data for each combination
           for (const combination of selectedCombinations) {
             try {
-              const url =
-                `${EVALUATE_API}/contribution?` +
+              const url = `${EVALUATE_API}/contribution?` + 
                 `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
                 `&combination_id=${encodeURIComponent(combination)}` +
                 `&client_name=${encodeURIComponent(clientName)}` +
                 `&app_name=${encodeURIComponent(appName)}` +
                 `&project_name=${encodeURIComponent(projectName)}`;
-
-              const result = await fetchTaskAwareJson<any>(url);
-              newContributionData[combination] = result.contribution_data || [];
+              
+              const response = await fetch(url);
+              
+              if (response.ok) {
+                const payload = await response.json();
+                const result = await resolveTaskResponse<any>(payload);
+                newContributionData[combination] = result.contribution_data || [];
+              } else {
+                newContributionData[combination] = [];
+              }
             } catch (error) {
-              console.error(`Error fetching contribution data for combination ${combination}:`, error);
               newContributionData[combination] = [];
             }
           }
           
           setContributionData(newContributionData);
         } catch (error) {
-          console.error('Error fetching contribution data:', error);
           setContributionData({});
         } finally {
           setIsLoadingContributionData(false);
@@ -983,27 +1041,25 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const betaDataMap: {[key: string]: any} = {};
           
           for (const combination of selectedCombinations) {
-            const response = await fetch(
-              `${EVALUATE_API}/beta?` + 
+            const url = `${EVALUATE_API}/beta?` + 
               `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
               `&combination_id=${encodeURIComponent(combination)}` +
               `&client_name=${encodeURIComponent(clientName)}` +
               `&app_name=${encodeURIComponent(appName)}` +
-              `&project_name=${encodeURIComponent(projectName)}`
-            );
+              `&project_name=${encodeURIComponent(projectName)}`;
+            
+            const response = await fetch(url);
             
             if (response.ok) {
               const result = await response.json();
               betaDataMap[combination] = result;
             } else {
-              console.warn(`Failed to fetch beta data for combination: ${combination}`);
               betaDataMap[combination] = { beta_data: [] };
             }
           }
           
           setBetaData(betaDataMap);
         } catch (error) {
-          console.error('Error fetching beta data:', error);
           setBetaData({});
         } finally {
           setIsLoadingBetaData(false);
@@ -1032,27 +1088,25 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const elasticityDataMap: {[key: string]: any} = {};
           
           for (const combination of selectedCombinations) {
-            const response = await fetch(
-              `${EVALUATE_API}/elasticity?` + 
+            const url = `${EVALUATE_API}/elasticity?` + 
               `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
               `&combination_id=${encodeURIComponent(combination)}` +
               `&client_name=${encodeURIComponent(clientName)}` +
               `&app_name=${encodeURIComponent(appName)}` +
-              `&project_name=${encodeURIComponent(projectName)}`
-            );
+              `&project_name=${encodeURIComponent(projectName)}`;
+            
+            const response = await fetch(url);
             
             if (response.ok) {
               const result = await response.json();
               elasticityDataMap[combination] = result;
             } else {
-              console.warn(`Failed to fetch elasticity data for combination: ${combination}`);
               elasticityDataMap[combination] = { elasticity_data: [] };
             }
           }
           
           setElasticityData(elasticityDataMap);
         } catch (error) {
-          console.error('Error fetching elasticity data:', error);
           setElasticityData({});
         } finally {
           setIsLoadingElasticityData(false);
@@ -1081,27 +1135,25 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const roiDataMap: {[key: string]: any} = {};
           
           for (const combination of selectedCombinations) {
-            const response = await fetch(
-              `${EVALUATE_API}/roi?` + 
+            const url = `${EVALUATE_API}/roi?` + 
               `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
               `&combination_id=${encodeURIComponent(combination)}` +
               `&client_name=${encodeURIComponent(clientName)}` +
               `&app_name=${encodeURIComponent(appName)}` +
-              `&project_name=${encodeURIComponent(projectName)}`
-            );
+              `&project_name=${encodeURIComponent(projectName)}`;
+            
+            const response = await fetch(url);
             
             if (response.ok) {
               const result = await response.json();
               roiDataMap[combination] = result;
             } else {
-              console.warn(`Failed to fetch ROI data for combination: ${combination}`);
               roiDataMap[combination] = { roi_data: [] };
             }
           }
           
           setRoiData(roiDataMap);
         } catch (error) {
-          console.error('Error fetching ROI data:', error);
           setRoiData({});
         } finally {
           setIsLoadingRoiData(false);
@@ -1117,7 +1169,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   // Fetch S-curve data when dataset and combinations are selected
   useEffect(() => {
     const fetchSCurveData = async () => {
-      if (data.selectedDataframe && selectedCombinations.length > 0) {
+      const combos = data.selectedCombinations || [];
+      if (data.selectedDataframe && combos.length > 0) {
         setIsLoadingSCurveData(true);
         try {
           // Get environment variables like column classifier
@@ -1127,25 +1180,21 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
-          const response = await fetch(
-            `${EVALUATE_API}/s-curve?` + 
+          const url = `${EVALUATE_API}/s-curve?` + 
             `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
             `&client_name=${encodeURIComponent(clientName)}` +
             `&app_name=${encodeURIComponent(appName)}` +
-            `&project_name=${encodeURIComponent(projectName)}`
-          );
+            `&project_name=${encodeURIComponent(projectName)}`;
+          
+          const response = await fetch(url);
           
           if (response.ok) {
             const result = await response.json();
-            console.log('🔍 S-curve data received:', result);
-            console.log('🔍 S-curve keys:', result.s_curves ? Object.keys(result.s_curves) : 'No s_curves');
             setSCurveData(result);
           } else {
-            console.warn('Failed to fetch S-curve data');
             setSCurveData({});
           }
         } catch (error) {
-          console.error('Error fetching S-curve data:', error);
           setSCurveData({});
         } finally {
           setIsLoadingSCurveData(false);
@@ -1156,7 +1205,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     };
     
     fetchSCurveData();
-  }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+  }, [data.selectedDataframe, data.selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
 
   // Function to fetch application type
   const fetchApplicationType = async () => {
@@ -1190,11 +1239,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       if (result && result.application_type) {
         setApplicationType(result.application_type);
         onDataChange({ applicationType: result.application_type });
-        console.log('🔍 Application type received:', result.application_type);
       }
       
     } catch (error) {
-      console.error('Error fetching application type:', error);
       setApplicationType('general');
       onDataChange({ applicationType: 'general' });
     } finally {
@@ -1225,27 +1272,25 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const averagesDataMap: {[key: string]: any} = {};
           
           for (const combination of selectedCombinations) {
-            const response = await fetch(
-              `${EVALUATE_API}/averages?` + 
+            const url = `${EVALUATE_API}/averages?` + 
               `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
               `&combination_id=${encodeURIComponent(combination)}` +
               `&client_name=${encodeURIComponent(clientName)}` +
               `&app_name=${encodeURIComponent(appName)}` +
-              `&project_name=${encodeURIComponent(projectName)}`
-            );
+              `&project_name=${encodeURIComponent(projectName)}`;
+            
+            const response = await fetch(url);
             
             if (response.ok) {
               const result = await response.json();
               averagesDataMap[combination] = result;
             } else {
-              console.warn(`Failed to fetch averages data for combination: ${combination}`);
               averagesDataMap[combination] = { averages_data: [] };
             }
           }
           
           setAveragesData(averagesDataMap);
         } catch (error) {
-          console.error('Error fetching averages data:', error);
           setAveragesData({});
         } finally {
           setIsLoadingAveragesData(false);
@@ -1261,7 +1306,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   // Fetch actual vs predicted data when dataset and combinations are selected
   useEffect(() => {
     const fetchActualVsPredictedData = async () => {
-      if (data.selectedDataframe && selectedCombinations.length > 0) {
+      const combos = data.selectedCombinations || [];
+      
+      if (data.selectedDataframe && combos.length > 0) {
         setIsLoadingActualVsPredictedData(true);
         try {
           // Get environment variables like column classifier
@@ -1271,36 +1318,34 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const appName = env.APP_NAME || '';
           const projectName = env.PROJECT_NAME || '';
           
-          const url =
-            `${EVALUATE_API}/selected/actual-vs-predicted?` +
+          const url = `${EVALUATE_API}/selected/actual-vs-predicted?` + 
             `results_file_key=${encodeURIComponent(data.selectedDataframe)}` +
             `&client_name=${encodeURIComponent(clientName)}` +
             `&app_name=${encodeURIComponent(appName)}` +
             `&project_name=${encodeURIComponent(projectName)}`;
-
-          const result = await fetchTaskAwareJson<any>(url);
-          console.log('🔍 DEBUG: Actual vs Predicted Backend response:', result);
-
-          // Transform the data to be organized by combination
-          if (result && result.items && Array.isArray(result.items)) {
-            console.log('🔍 DEBUG: Backend items:', result.items);
-            const transformedData: {[key: string]: any} = {};
-            result.items.forEach((item: any) => {
-              console.log('🔍 DEBUG: Processing item:', item);
-              console.log('🔍 DEBUG: Item combination_id:', item.combination_id);
-              console.log('🔍 DEBUG: Item actual_values:', item.actual_values);
-              console.log('🔍 DEBUG: Item predicted_values:', item.predicted_values);
-              if (item.combination_id) {
-                transformedData[item.combination_id] = item;
-              }
-            });
-            console.log('🔍 DEBUG: Transformed data:', transformedData);
-            setActualVsPredictedData(transformedData);
+          
+          const response = await fetch(url);
+          
+          if (response.ok) {
+            const payload = await response.json();
+            const result = await resolveTaskResponse<any>(payload);
+            
+            // Transform the data to be organized by combination
+            if (result && result.items && Array.isArray(result.items)) {
+              const transformedData: {[key: string]: any} = {};
+              result.items.forEach((item: any) => {
+                if (item.combination_id) {
+                  transformedData[item.combination_id] = item;
+                }
+              });
+              setActualVsPredictedData(transformedData);
+            } else {
+              setActualVsPredictedData({});
+            }
           } else {
             setActualVsPredictedData({});
           }
         } catch (error) {
-          console.error('Error fetching actual vs predicted data:', error);
           setActualVsPredictedData({});
         } finally {
           setIsLoadingActualVsPredictedData(false);
@@ -1311,7 +1356,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     };
     
     fetchActualVsPredictedData();
-  }, [data.selectedDataframe, selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
+  }, [data.selectedDataframe, data.selectedCombinations, settings.clientName, settings.appName, settings.projectName]);
 
   // Fetch identifiers when dataset is selected
   useEffect(() => {
@@ -1322,25 +1367,20 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
           const url = `${EVALUATE_API}/get-identifiers?` + 
             `object_name=${encodeURIComponent(data.selectedDataframe)}` +
             `&bucket=${encodeURIComponent('trinity')}`;
-          console.log('🔍 DEBUG: Fetching identifiers from URL:', url);
-          console.log('🔍 DEBUG: EVALUATE_API value:', EVALUATE_API);
           
           const response = await fetch(url);
           
           if (response.ok) {
             const result = await response.json();
-            console.log('🔍 DEBUG: Identifiers Backend response:', result);
             if (result && result.identifiers) {
               setIdentifiersData(result.identifiers);
             } else {
               setIdentifiersData({});
             }
           } else {
-            console.warn('Failed to fetch identifiers data');
             setIdentifiersData({});
           }
         } catch (error) {
-          console.error('Error fetching identifiers data:', error);
           setIdentifiersData({});
         } finally {
           setIsLoadingIdentifiers(false);
@@ -1368,15 +1408,15 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       
       try {
         const response = await fetch(url);
+        
         const result = await response.json();
         
         if (result.combinations && Array.isArray(result.combinations)) {
-          console.log('🔍 Re-fetched combinations based on identifier filters:', result.combinations);
           // Update the selected combinations to match the filtered ones
           onDataChange({ selectedCombinations: result.combinations });
         }
       } catch (error) {
-        console.error('Error fetching filtered combinations:', error);
+        // Silently handle errors
       }
     };
     
@@ -1417,8 +1457,6 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const toggleIdentifierValue = (identifierName: string, value: string, checked: boolean) => {
     const currentSelectedValues = selectedIdentifierValues[identifierName] || [];
     
-    console.log('🔍 Toggling identifier value:', { identifierName, value, checked, currentSelectedValues });
-    
     if (checked) {
       // Add value if not already selected
       if (!currentSelectedValues.includes(value)) {
@@ -1432,8 +1470,6 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
         
         // Update main data so settings component can access it
         onDataChange({ selectedIdentifierValues: updatedAllValues });
-        
-        console.log('🔍 Updated selectedIdentifierValues (added):', updatedAllValues);
       }
     } else {
       // Remove value if selected
@@ -1447,8 +1483,6 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       
       // Update main data so settings component can access it
       onDataChange({ selectedIdentifierValues: updatedAllValues });
-      
-      console.log('🔍 Updated selectedIdentifierValues (removed):', updatedAllValues);
     }
   };
 
@@ -2006,24 +2040,10 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
   const graphs = data.graphs || defaultGraphs;
   const selectedGraphs = graphs.filter(graph => graph.selected);
   
-  console.log('🔍 Canvas Debug - data.graphs:', data.graphs);
-  console.log('🔍 Canvas Debug - selectedGraphs:', selectedGraphs);
-  console.log('🔍 Canvas Debug - graphs with selected=true:', graphs.filter(g => g.selected === true));
-  
-  // Debug logging
-  console.log('Canvas Debug:', {
-    dataGraphs: data.graphs,
-    graphs: graphs,
-    selectedGraphs: selectedGraphs,
-    waterfallGraphs: selectedGraphs.filter(g => g.type === 'waterfall'),
-    contributionGraphs: selectedGraphs.filter(g => g.type === 'contribution'),
-    selectedCombinations: data.selectedCombinations,
-    allSelectedCombinations: selectedCombinations,
-    dropdownCombinations: data.selectedCombinations || []
-  });
-  
   // Combinations are already filtered by the backend based on selectedIdentifierValues
   // The Settings component re-fetches combinations when identifier values change
+  // This ensures charts are only rendered for combinations matching the selected identifier values
+  // This matches the select atom pattern where data is filtered by identifier values
   const filteredCombinations = selectedCombinations;
 
   const addComment = (chartId: string) => {
@@ -2048,14 +2068,6 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     });
   };
 
-  const deleteComment = (chartId: string, commentId: string) => {
-    onDataChange({
-      comments: {
-        ...comments,
-        [chartId]: comments[chartId]?.filter(comment => comment.id !== commentId) || []
-      }
-    });
-  };
 
 
 
@@ -2063,9 +2075,9 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartId = `waterfall-${combinationName}`;
     
     // Find YoY data for this specific combination
+    // Note: combinationName comes from filteredCombinations which are already filtered by selectedIdentifierValues
+    // This matches the select atom pattern where charts are rendered for filtered combinations
     const yoyData = yoyGrowthData.find(item => item.combination_id === combinationName);
-    
-    console.log('🔍 DEBUG: YoY data for', combinationName, ':', yoyData);
     
     if (isLoadingYoyData) {
       return (
@@ -2094,8 +2106,6 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       name: label,
       value: yoyData.waterfall.values[index] || 0
     }));
-    
-    console.log('🔍 DEBUG: Waterfall chart data:', chartData);
     
     // Get chart type and theme for this combination - prioritize settings over state
     const chartType = settings[`waterfallChartTypes_${combinationName}`] || waterfallChartTypes[combinationName] || 'bar_chart';
@@ -2414,11 +2424,19 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const chartId = `actual-vs-predicted-${combinationName}`;
     
     // Get actual vs predicted data for this combination
-    const combinationData = actualVsPredictedData[combinationName];
-    
-    console.log('🔍 DEBUG: renderActualVsPredictedChart called for:', combinationName);
-    console.log('🔍 DEBUG: combinationData:', combinationData);
-    console.log('🔍 DEBUG: actualVsPredictedData keys:', Object.keys(actualVsPredictedData));
+    // Note: combinationName comes from filteredCombinations which are already filtered by selectedIdentifierValues
+    // This matches the select atom pattern where charts are rendered for filtered combinations
+    // Try exact match first, then case-insensitive match
+    let combinationData = actualVsPredictedData[combinationName];
+    if (!combinationData) {
+      // Try case-insensitive match
+      const matchingKey = Object.keys(actualVsPredictedData).find(
+        key => key.toLowerCase() === combinationName.toLowerCase()
+      );
+      if (matchingKey) {
+        combinationData = actualVsPredictedData[matchingKey];
+      }
+    }
     
     if (isLoadingActualVsPredictedData) {
       return (
@@ -2444,19 +2462,37 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     
     // Prefer dates from backend for X-axis; fallback to index
     const dateArray: string[] | undefined = combinationData.dates || combinationData.date_values || combinationData.timestamps;
-    let chartData = combinationData.actual_values.map((actual: number, index: number) => ({
+    
+    // Transform data to single Y-axis format (like select atom) - use 'value' and 'series' fields
+    const rawData = combinationData.actual_values.map((actual: number, index: number) => ({
       date: dateArray && dateArray[index] !== undefined ? normalizeToDateString(dateArray[index]) : index,
       index,
       actual: actual,
       predicted: combinationData.predicted_values[index] || 0
     }));
+    
     // If dates provided for every point, sort by date ascending to draw a proper time series
-    const useDates = !!(dateArray && dateArray.length === chartData.length);
+    const useDates = !!(dateArray && dateArray.length === rawData.length);
+    let sortedData = rawData;
     if (useDates) {
-      chartData = chartData.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      sortedData = rawData.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
     }
     
-    console.log('🔍 DEBUG: Actual vs Predicted chart data:', chartData);
+    // Transform to single Y-axis format with series field
+    const chartData = sortedData.flatMap((item: any) => [
+      { 
+        date: item.date, 
+        index: item.index,
+        value: item.actual, 
+        series: 'Actual' 
+      },
+      { 
+        date: item.date, 
+        index: item.index,
+        value: item.predicted, 
+        series: 'Predicted' 
+      }
+    ]);
     
     // Get chart type and theme for this combination (default to line_chart)
     const chartType = settings[`actualVsPredictedChartTypes_${combinationName}`] || actualVsPredictedChartTypes[combinationName] || 'line_chart';
@@ -2464,20 +2500,20 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
     const showDataLabels = actualVsPredictedChartDataLabels[combinationName] !== undefined ? actualVsPredictedChartDataLabels[combinationName] : false;
     const sortOrder = actualVsPredictedChartSortOrder[combinationName] || null;
     const showGrid = actualVsPredictedChartGridToggle[combinationName] !== undefined ? actualVsPredictedChartGridToggle[combinationName] : true;
-    const showLegend = actualVsPredictedChartLegendToggle[combinationName] !== undefined ? actualVsPredictedChartLegendToggle[combinationName] : (chartType === 'pie_chart');
+    const showLegend = actualVsPredictedChartLegendToggle[combinationName] !== undefined ? actualVsPredictedChartLegendToggle[combinationName] : true;
     const showAxisLabels = actualVsPredictedChartAxisLabelsToggle[combinationName] !== undefined ? actualVsPredictedChartAxisLabelsToggle[combinationName] : true;
     const isExpanded = !collapsedGraphs['actual-vs-predicted'];
     
-    // Prepare props for RechartsChartRenderer
+    // Prepare props for RechartsChartRenderer - single Y-axis with series field
     const rendererProps = {
       key: `actual-vs-predicted-chart-${combinationName}-${chartType}-${chartTheme}`,
       type: chartType as 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart',
       data: chartData,
       xField: useDates ? 'date' : 'index',
-      yField: 'actual',
-      yFields: ['actual','predicted'],
+      yField: 'value',
+      legendField: 'series', // Use series field to distinguish Actual vs Predicted
       xKey: useDates ? 'date' : 'index',
-      yKey: 'actual',
+      yKey: 'value',
       xAxisLabel: useDates ? 'Date' : 'Index',
       yAxisLabel: 'Value',
       theme: chartTheme,
@@ -2489,6 +2525,7 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
       showGrid: showGrid,
       showAxisLabels: showAxisLabels,
       sortOrder: sortOrder,
+      forceSingleAxis: true, // Force single Y-axis
       onThemeChange: (newTheme: string) => handleActualVsPredictedChartThemeChange(combinationName, newTheme),
       onChartTypeChange: (newType: 'bar_chart' | 'line_chart' | 'pie_chart' | 'area_chart' | 'scatter_chart') => handleActualVsPredictedChartTypeChange(combinationName, newType),
       onDataLabelsToggle: (newShowDataLabels: boolean) => handleActualVsPredictedChartDataLabelsChange(combinationName, newShowDataLabels),
@@ -3635,8 +3672,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     <Maximize2 className="h-4 w-4" />
                   </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogTitle className="text-xl font-semibold">Waterfall Charts - Expanded View</DialogTitle>
                     <div className="space-y-6">
-                      <h2 className="text-xl font-semibold">Waterfall Charts - Expanded View</h2>
                       <div className="grid grid-cols-2 gap-6">
                         {filteredCombinations.map(combination => 
                           <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
@@ -3687,8 +3724,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     <Maximize2 className="h-4 w-4" />
                   </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogTitle className="text-xl font-semibold">Contribution Charts - Expanded View</DialogTitle>
                     <div className="space-y-6">
-                      <h2 className="text-xl font-semibold">Contribution Charts - Expanded View</h2>
                       <div className="grid grid-cols-2 gap-6">
                         {filteredCombinations.map(combination => 
                           <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
@@ -3739,8 +3776,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     <Maximize2 className="h-4 w-4" />
                   </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogTitle className="text-xl font-semibold">ROI Charts - Expanded View</DialogTitle>
                     <div className="space-y-6">
-                      <h2 className="text-xl font-semibold">ROI Charts - Expanded View</h2>
                       <div className="grid grid-cols-2 gap-6">
                         {filteredCombinations.map(combination => 
                           <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
@@ -3791,8 +3828,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     <Maximize2 className="h-4 w-4" />
                   </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogTitle className="text-xl font-semibold">Actual vs Predicted Charts - Expanded View</DialogTitle>
                     <div className="space-y-6">
-                      <h2 className="text-xl font-semibold">Actual vs Predicted Charts - Expanded View</h2>
                       <div className="grid grid-cols-2 gap-6">
                         {filteredCombinations.map(combination => 
                           <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
@@ -3843,8 +3880,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     <Maximize2 className="h-4 w-4" />
                   </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogTitle className="text-xl font-semibold">Beta Charts - Expanded View</DialogTitle>
                     <div className="space-y-6">
-                      <h2 className="text-xl font-semibold">Beta Charts - Expanded View</h2>
                       <div className="grid grid-cols-2 gap-6">
                         {filteredCombinations.map(combination => 
                           <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
@@ -3895,8 +3932,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     <Maximize2 className="h-4 w-4" />
                   </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogTitle className="text-xl font-semibold">Elasticity Charts - Expanded View</DialogTitle>
                     <div className="space-y-6">
-                      <h2 className="text-xl font-semibold">Elasticity Charts - Expanded View</h2>
                       <div className="grid grid-cols-2 gap-6">
                         {filteredCombinations.map(combination => 
                           <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
@@ -3947,8 +3984,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     <Maximize2 className="h-4 w-4" />
                   </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogTitle className="text-xl font-semibold">Averages Charts - Expanded View</DialogTitle>
                     <div className="space-y-6">
-                      <h2 className="text-xl font-semibold">Averages Charts - Expanded View</h2>
                       <div className="grid grid-cols-2 gap-6">
                         {filteredCombinations.map(combination => 
                           <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">
@@ -3999,8 +4036,8 @@ const EvaluateModelsFeatureCanvas: React.FC<EvaluateModelsFeatureCanvasProps> = 
                     <Maximize2 className="h-4 w-4" />
                   </Button>
                   <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+                    <DialogTitle className="text-xl font-semibold">S-Curve Charts - Expanded View</DialogTitle>
                     <div className="space-y-6">
-                      <h2 className="text-xl font-semibold">S-Curve Charts - Expanded View</h2>
                       <div className="flex flex-col gap-6">
                         {filteredCombinations.map(combination => 
                           <div key={combination} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm">

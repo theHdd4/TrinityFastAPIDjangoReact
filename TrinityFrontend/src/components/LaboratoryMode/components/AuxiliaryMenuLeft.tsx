@@ -2,7 +2,7 @@ import React from 'react';
 import { Grid3X3, List, GalleryHorizontal } from 'lucide-react';
 import AtomLibrary from '@/components/AtomList/AtomLibrary';
 import ExhibitionPanel from './ExhibitionPanel';
-import { useLaboratoryStore } from '../store/laboratoryStore';
+import { useLaboratoryStore, DASHBOARD_ALLOWED_ATOMS } from '../store/laboratoryStore';
 
 interface Props {
   onAtomDragStart?: (e: React.DragEvent, atomId: string) => void;
@@ -29,6 +29,12 @@ const AuxiliaryMenuLeft: React.FC<Props> = ({
 }) => {
   const open = useLaboratoryStore((state) => state.auxiliaryMenuLeftOpen);
   const setOpen = useLaboratoryStore((state) => state.setAuxiliaryMenuLeftOpen);
+  const subMode = useLaboratoryStore((state) => state.subMode);
+  
+  // Get allowed atom IDs based on current mode
+  const allowedAtomIds = subMode === 'dashboard' 
+    ? DASHBOARD_ALLOWED_ATOMS.slice()  // Convert readonly array to regular array
+    : undefined;  // undefined = show all atoms for analytics mode
 
   const handleAtomLibraryToggle = () => {
     if (!open) {
@@ -117,6 +123,7 @@ const AuxiliaryMenuLeft: React.FC<Props> = ({
       {open && !isExhibitionOpen && (
         <div className="relative z-30">
           <AtomLibrary
+            allowedAtomIds={allowedAtomIds}
             onAtomDragStart={onAtomDragStart}
             onCollapse={() => setOpen(false)}
           />

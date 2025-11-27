@@ -84,6 +84,12 @@ from app.features.data_upload_validate.app.database import (
 # Add this import
 from app.features.data_upload_validate.app.database import save_validator_atom_to_mongo
 
+# Import classifier functions for auto-classification
+from app.features.column_classifier.database import (
+    get_classifier_config_from_mongo,
+    save_classifier_config_to_mongo,
+)
+
 
 # Initialize router
 timing_dependency = timing_dependency_factory("app.features.data_upload_validate")
@@ -148,13 +154,6 @@ from app.DataStorageRetrieval.minio_utils import (
 from pathlib import Path
 import asyncio
 import os
-from urllib.parse import quote
-
-# Import column classifier functions for auto-classification
-from app.features.column_classifier.database import (
-    get_classifier_config_from_mongo,
-    save_classifier_config_to_mongo,
-)
 
 
 redis_client = feature_cache.router("data_upload_validate")
@@ -2579,26 +2578,6 @@ async def list_saved_dataframes(
             if isinstance(size, int):
                 entry["size"] = size
             files.append(entry)
-        
-        # Trigger background auto-classification for files without classification
-        # This runs asynchronously and doesn't block the response
-        resolved_client = env.get("CLIENT_NAME", client_name or "default_client")
-        resolved_app = env.get("APP_NAME", app_name or "default_app")
-        resolved_project = env.get("PROJECT_NAME", project_name or "default_project")
-        
-        try:
-            asyncio.create_task(
-                _background_auto_classify_files(
-                    files,
-                    env,
-                    resolved_client,
-                    resolved_app,
-                    resolved_project,
-                )
-            )
-        except Exception:
-            pass
-        
         return {
             "bucket": MINIO_BUCKET,
             "prefix": prefix,
@@ -3663,19 +3642,12 @@ async def apply_data_transformations(request: Request):
                 elif new_dtype == "object":
                     df[col_name] = df[col_name].astype(str)
                 elif new_dtype == "datetime64":
-                    # Normalize separators: replace all '/' and '.' with '-' to handle mixed separators
-                    # Convert to string first, then normalize separators
-                    df[col_name] = df[col_name].astype(str).str.replace('/', '-', regex=False).str.replace('.', '-', regex=False)
-                    
-                    # IMPORTANT: For datetime64, ALWAYS use auto-detection to avoid null values
-                    # Even if format is provided (from AI or manual), ignore it and use auto-detection
-                    # This ensures consistent behavior and prevents null values from format mismatches
-                    logger.info(f"Converting column '{col_name}' to datetime64 with auto-detection (ignoring any provided format to ensure compatibility)")
-                    
-                    # Use pd.to_datetime without format parameter to enable auto-detection
-                    # pandas will automatically infer the format from the data, preventing null values
-                    # This works for both AI-sent and manually-sent datetime64 conversions
-                    df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
+                    # Mirror process_saved_dataframe behavior: single-step conversion with optional format
+                    if datetime_format:
+                        df[col_name] = pd.to_datetime(df[col_name], format=datetime_format, errors='coerce')
+                    else:
+                        logger.info(f"Converting column '{col_name}' to datetime64 without specific format")
+                        df[col_name] = pd.to_datetime(df[col_name], errors='coerce')
                 elif new_dtype == "bool":
                     df[col_name] = df[col_name].astype(bool)
             except Exception as e:
