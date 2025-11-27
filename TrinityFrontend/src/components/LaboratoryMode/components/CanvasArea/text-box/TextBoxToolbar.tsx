@@ -15,7 +15,7 @@ import {
   Minus,
   Plus,
   Search,
-  Sparkles,
+  Sparkles as SparklesIcon,
   Strikethrough,
   Trash2,
   Underline,
@@ -65,7 +65,7 @@ const TEXT_COLOR_SECTIONS: readonly ColorTraySection[] = [
 
 const FONT_SECTION_ICONS: Record<FontMenuSection['id'], LucideIcon> = {
   document: FileText,
-  recommended: Sparkles,
+  recommended: SparklesIcon,
   recent: History,
   popular: Flame,
 };
