@@ -464,35 +464,33 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
         </div>
       ) : null}
 
-      <div className="w-full h-full flex items-center justify-center p-8 pb-12 bg-background">
-        <div className="w-full max-w-4xl">
-          <div
-            ref={editorRef}
-            contentEditable
-            onInput={handleInput}
-            suppressContentEditableWarning
-            className={`
-              w-full min-h-[200px] p-6
-              border-2 border-dashed border-border rounded-lg
-              focus:outline-none focus:border-primary
-              transition-colors duration-200
-              ${getListStyle()}
-            `}
-            style={{
-              fontFamily: settings.font_family,
-              fontSize: `${settings.font_size}px`,
-              fontWeight: settings.bold ? 'bold' : 'normal',
-              fontStyle: settings.italics ? 'italic' : 'normal',
-              textDecoration,
-              textAlign: settings.text_align,
-              color: settings.text_color,
-              backgroundColor: settings.background_color ?? 'transparent',
-            }}
-          />
+      <div className="w-full h-full space-y-3">
+        <div
+          ref={editorRef}
+          contentEditable
+          onInput={handleInput}
+          suppressContentEditableWarning
+          className={`
+            w-full min-h-[200px] p-6
+            border-2 border-dashed border-border rounded-lg
+            focus:outline-none focus:border-primary
+            transition-colors duration-200
+            ${getListStyle()}
+          `}
+          style={{
+            fontFamily: settings.font_family,
+            fontSize: `${settings.font_size}px`,
+            fontWeight: settings.bold ? 'bold' : 'normal',
+            fontStyle: settings.italics ? 'italic' : 'normal',
+            textDecoration,
+            textAlign: settings.text_align,
+            color: settings.text_color,
+            backgroundColor: settings.background_color ?? 'transparent',
+          }}
+        />
 
-          <div className="mt-4 text-sm text-muted-foreground text-center">
-            Click to edit text. Use the properties panel on the right to customize formatting.
-          </div>
+        <div className="text-sm text-muted-foreground text-left">
+          Click to edit text. Use the properties panel on the right to customize formatting.
         </div>
       </div>
     </div>
@@ -840,40 +838,36 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
           const textData = { text: textContent, html: htmlContent };
 
           return (
-            <Card key={box.id} className="p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-gray-900">{box.title}</h4>
-              </div>
-              <CardTextBoxCanvas
-                data={textData}
-                settings={box.settings as TextBoxSettings}
-                onTextChange={(data) =>
-                  updateCardTextBoxes((boxes) =>
-                    boxes.map(existing =>
-                      existing.id === box.id
-                        ? { ...existing, content: data.text, html: data.html }
-                        : existing,
-                    ),
-                  )
-                }
-                onSettingsChange={(updates) =>
-                  updateCardTextBoxes((boxes) =>
-                    boxes.map(existing =>
-                      existing.id === box.id
-                        ? {
-                            ...existing,
-                            settings: {
-                              ...DEFAULT_TEXTBOX_SETTINGS,
-                              ...(existing.settings ?? {}),
-                              ...updates,
-                            },
-                          }
-                        : existing,
-                    ),
-                  )
-                }
-              />
-            </Card>
+            <CardTextBoxCanvas
+              key={box.id}
+              data={textData}
+              settings={box.settings as TextBoxSettings}
+              onTextChange={(data) =>
+                updateCardTextBoxes((boxes) =>
+                  boxes.map(existing =>
+                    existing.id === box.id
+                      ? { ...existing, content: data.text, html: data.html }
+                      : existing,
+                  ),
+                )
+              }
+              onSettingsChange={(updates) =>
+                updateCardTextBoxes((boxes) =>
+                  boxes.map(existing =>
+                    existing.id === box.id
+                      ? {
+                          ...existing,
+                          settings: {
+                            ...DEFAULT_TEXTBOX_SETTINGS,
+                            ...(existing.settings ?? {}),
+                            ...updates,
+                          },
+                        }
+                      : existing,
+                  ),
+                )
+              }
+            />
           );
         })}
       </div>
