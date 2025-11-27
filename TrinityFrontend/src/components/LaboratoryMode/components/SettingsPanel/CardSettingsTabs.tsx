@@ -973,8 +973,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
           <TabsTrigger value="variables" className="text-xs">
             Variables
           </TabsTrigger>
-          <TabsTrigger value="textbox" className="text-xs">
-            Text-box
+          <TabsTrigger value="settings" className="text-xs">
+            Settings
           </TabsTrigger>
           <TabsTrigger value="visual" className="text-xs">
             Visualisation
@@ -1095,7 +1095,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
             </Card>
           </TabsContent>
 
-          <TabsContent value="textbox" className="space-y-4">
+          <TabsContent value="settings" className="space-y-4">
             <Card className="p-4 space-y-4">
               <div className="flex items-center justify-between w-full">
                 <span className="text-sm font-medium text-gray-900">Insert text box</span>

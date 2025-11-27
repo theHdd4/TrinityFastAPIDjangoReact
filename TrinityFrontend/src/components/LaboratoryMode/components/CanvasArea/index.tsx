@@ -421,12 +421,12 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full"
+      className="relative w-full h-full pt-6"
       onFocusCapture={() => setShowToolbar(true)}
       onBlurCapture={handleContainerBlur}
     >
       {showToolbar ? (
-        <div className="absolute left-1/2 -top-3 z-10 -translate-x-1/2 -translate-y-full">
+        <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full">
           <TextBoxToolbar
             fontFamily={settings.font_family}
             onFontFamilyChange={(font) => onSettingsChange({ font_family: font })}
@@ -827,7 +827,7 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     };
 
     return (
-      <div className="mt-6 space-y-6">
+      <div className="mt-10 space-y-8">
         {normalizedTextBoxes.map(box => {
           const rawTextContent = box.content ?? '';
           const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
