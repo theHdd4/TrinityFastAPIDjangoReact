@@ -5082,6 +5082,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           >
                             <RefreshCcw className="w-4 h-4 text-gray-400" />
                           </button>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              toggleCardTextBox(card.id);
+                            }}
+                            className={`p-1 rounded hover:bg-gray-100 ${
+                              card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                            }`}
+                            title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                          >
+                            <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                          </button>
                         </div>
                         <div className="flex items-center space-x-2">
                           <button
@@ -5566,6 +5578,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   title="Refresh Atom"
                 >
                   <RefreshCcw className="w-4 h-4 text-gray-400" />
+                </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleCardTextBox(card.id);
+                  }}
+                  className={`p-1 rounded hover:bg-gray-100 ${
+                    card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                  }`}
+                  title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                >
+                  <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 </button>
               </div>
               <div className="flex items-center space-x-2">
