@@ -287,6 +287,13 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     }
   };
 
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    editorRef.current.style.color = settings.text_color;
+    editorRef.current.style.backgroundColor = settings.background_color ?? 'transparent';
+  }, [settings.background_color, settings.text_color]);
+
   const handleApplyTextStyle = (preset: TextStylePreset) => {
     const updates: Partial<TextBoxSettings> = {
       font_size: clampFontSize(preset.fontSize),
