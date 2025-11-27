@@ -3,7 +3,6 @@ Base Agent for Trinity AI
 Comprehensive base class providing all standard functionality for agents.
 """
 
-import os
 import json
 import uuid
 import logging
@@ -104,14 +103,13 @@ class BaseAgent(BaseAgentInterface, ABC):
     # ========================================================================
     
     def set_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
-        """Set environment context for dynamic path resolution."""
-        self.file_reader.set_context(client_name, app_name, project_name)
-        if client_name:
-            os.environ["CLIENT_NAME"] = client_name
-        if app_name:
-            os.environ["APP_NAME"] = app_name
-        if project_name:
-            os.environ["PROJECT_NAME"] = project_name
+        """
+        Set context for the agent.
+        Note: Context is now passed directly to methods that need it (like load_files),
+        rather than being stored in environment variables or FileReader.
+        """
+        # Context is stored for use in other methods, but not set in environment
+        # FileReader no longer has set_context - context is passed directly to load_files
         logger.info(f"🔧 Context set: {client_name}/{app_name}/{project_name}")
     
     def _load_files(
@@ -175,6 +173,20 @@ class BaseAgent(BaseAgentInterface, ABC):
         Returns:
             The LLM response content as a string
         """
+        # Print full prompt to terminal
+        print("\n" + "="*80)
+        print(f"🚀 BASE AGENT LLM CALL - FULL PROMPT (Agent: {self.__class__.__name__})")
+        print("="*80)
+        print(f"API URL: {self.api_url}")
+        print(f"Model: {self.model_name}")
+        print(f"Temperature: {temperature}, Num Predict: {num_predict}")
+        print(f"Prompt Length: {len(prompt)} characters")
+        print("-"*80)
+        print("FULL PROMPT:")
+        print("-"*80)
+        print(prompt)
+        print("="*80 + "\n")
+        
         logger.info(f"CALLING LLM: {self.api_url}, Model: {self.model_name}")
         
         payload = {
@@ -202,8 +214,33 @@ class BaseAgent(BaseAgentInterface, ABC):
             )
             response.raise_for_status()
             
+            # Get raw response
+            raw_response_text = response.text
             response_data = response.json()
             content = response_data.get('message', {}).get('content', '')
+            
+            # Print raw API response to terminal
+            print("\n" + "="*80)
+            print(f"📥 BASE AGENT LLM - RAW RESPONSE (Agent: {self.__class__.__name__})")
+            print("="*80)
+            print(f"Status Code: {response.status_code}")
+            print("-"*80)
+            print("RAW JSON RESPONSE:")
+            print("-"*80)
+            print(raw_response_text)
+            print("="*80 + "\n")
+            
+            # Print processed content
+            print("\n" + "="*80)
+            print(f"✨ BASE AGENT LLM - PROCESSED CONTENT (Agent: {self.__class__.__name__})")
+            print("="*80)
+            print(f"Content Length: {len(content)} characters")
+            print("-"*80)
+            print("EXTRACTED CONTENT:")
+            print("-"*80)
+            print(content)
+            print("="*80 + "\n")
+            
             logger.info(f"LLM Response Status: {response.status_code}, Length: {len(content)}")
             
             return content

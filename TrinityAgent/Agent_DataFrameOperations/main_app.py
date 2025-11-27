@@ -867,6 +867,36 @@ def health_check() -> Dict[str, Any]:
     logger.info(f"Health check: {status}")
     return status
 
+# Register router in agent registry (for auto-discovery)
+try:
+    parent_dir = Path(__file__).parent.parent
+    if str(parent_dir) not in sys.path:
+        sys.path.insert(0, str(parent_dir))
+    
+    try:
+        from agent_registry import register_agent, set_agent_metadata
+        # Set metadata for PostgreSQL
+        set_agent_metadata("dataframe_operations", {
+            "name": "DataFrame Operations",
+            "description": "Perform DataFrame operations (load, filter, sort, column operations, formulas, save) on data files",
+            "category": "Data Operations",
+            "tags": ["dataframe", "operations", "filter", "sort", "columns", "formulas", "data", "manipulation"]
+        })
+        # Register router
+        if router is not None:
+            success = register_agent("dataframe_operations", router)
+            if success:
+                logger.info("✅ DataFrameOperations router registered in agent registry")
+            else:
+                logger.warning("⚠️ Failed to register DataFrameOperations router in agent registry")
+    except ImportError:
+        # Agent registry not available, will be auto-discovered
+        # This is expected during initialization, so log at debug level
+        logger.debug("Agent registry not available during module import - router will be auto-discovered")
+except Exception as e:
+    # Registration failure is non-critical - auto-discovery will handle it
+    logger.debug(f"Could not register DataFrameOperations router during module import (will be auto-discovered): {e}")
+
 # Log router setup on module load
 logger.info("=" * 80)
 logger.info("DATAFRAME OPERATIONS AGENT MODULE LOADED")

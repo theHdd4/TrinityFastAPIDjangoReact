@@ -397,6 +397,24 @@ class Command(BaseCommand):
                 "description": "Perform DataFrame operations (load, filter, sort, column operations, formulas, save) on data files",
                 "category": "Data Operations",
                 "tags": ["dataframe", "operations", "filter", "sort", "columns", "formulas", "data", "manipulation"]
+            },
+            "data_upload_validate": {
+                "name": "Data Upload and Validate",
+                "description": "Load files into the data upload atom and apply dtype conversions (int64, float64, datetime64, object, bool)",
+                "category": "Data Operations",
+                "tags": ["data", "upload", "validate", "dtype", "conversion", "load", "file", "int64", "float64", "datetime64"]
+            },
+            "fetch_atom": {
+                "name": "Fetch Atom",
+                "description": "Determines which atom/tool best matches a user's query and fetches atom configurations",
+                "category": "Routing",
+                "tags": ["fetch", "atom", "routing", "query", "matching", "atom selection", "tool selection"]
+            },
+            "explore": {
+                "name": "Explore",
+                "description": "Generates data exploration configurations for pattern analysis, trend analysis, outlier detection, and statistical summaries",
+                "category": "Data Analysis",
+                "tags": ["explore", "data", "analysis", "pattern", "trend", "outlier", "statistics", "visualization"]
             }
         }
         

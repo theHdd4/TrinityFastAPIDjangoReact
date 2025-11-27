@@ -74,3 +74,4 @@ logger.info(f"Final router status: {router is not None}, routes: {len(router.rou
 
 __all__ = ["agent", "router", "agent_initialized"]
 
+

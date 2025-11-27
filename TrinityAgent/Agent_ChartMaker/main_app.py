@@ -41,10 +41,24 @@ logger.info(f"Parent directory: {parent_dir}")
 logger.info(f"BaseAgent path: {parent_dir / 'BaseAgent'}")
 logger.info(f"BaseAgent exists: {(parent_dir / 'BaseAgent').exists()}")
 
+# Import exceptions for error handling
+TrinityException = None
+AgentExecutionError = None
+ConfigurationError = None
+FileLoadError = None
+ValidationError = None
+
 try:
     try:
         logger.info("Strategy 1: Importing from BaseAgent.__init__.py (package import)...")
         from BaseAgent import BaseAgent, AgentContext, AgentResult, settings
+        from BaseAgent.exceptions import (
+            TrinityException,
+            AgentExecutionError,
+            ConfigurationError,
+            FileLoadError,
+            ValidationError
+        )
         from .chart_maker_prompt import ChartMakerPromptBuilder
         logger.info("✅ Imported BaseAgent from BaseAgent package (__init__.py)")
     except ImportError as e1:
@@ -56,6 +70,13 @@ try:
             from BaseAgent.base_agent import BaseAgent
             from BaseAgent.interfaces import AgentContext, AgentResult
             from BaseAgent.config import settings
+            from BaseAgent.exceptions import (
+                TrinityException,
+                AgentExecutionError,
+                ConfigurationError,
+                FileLoadError,
+                ValidationError
+            )
             from .chart_maker_prompt import ChartMakerPromptBuilder
             logger.info("✅ Imported BaseAgent from local BaseAgent modules")
         except ImportError as e2:
@@ -66,6 +87,13 @@ try:
                 # Fallback import
                 logger.info("Strategy 3: Importing from TrinityAgent.BaseAgent (absolute)...")
                 from TrinityAgent.BaseAgent import BaseAgent, AgentContext, AgentResult, settings
+                from TrinityAgent.BaseAgent.exceptions import (
+                    TrinityException,
+                    AgentExecutionError,
+                    ConfigurationError,
+                    FileLoadError,
+                    ValidationError
+                )
                 from .chart_maker_prompt import ChartMakerPromptBuilder
                 logger.info("✅ Imported BaseAgent from TrinityAgent.BaseAgent package")
             except ImportError as e3:
@@ -74,6 +102,25 @@ try:
                 logger.error(f"Strategy 3 traceback: {traceback.format_exc()}")
                 logger.error(f"Failed to import BaseAgent from all locations: {e1}, {e2}, {e3}")
                 logger.error("Router will be available but agent functionality will not work")
+                # Fallback: define minimal exceptions if import fails
+                class TrinityException(Exception):
+                    def __init__(self, message: str, code: str = "INTERNAL_ERROR"):
+                        self.message = message
+                        self.code = code
+                        super().__init__(self.message)
+                
+                class AgentExecutionError(TrinityException):
+                    def __init__(self, message: str, agent_name: str = "unknown"):
+                        super().__init__(message, code="AGENT_EXECUTION_ERROR")
+                        self.agent_name = agent_name
+                
+                class ConfigurationError(TrinityException):
+                    def __init__(self, message: str, config_key: str = "unknown"):
+                        super().__init__(message, code="CONFIGURATION_ERROR")
+                        self.config_key = config_key
+                
+                FileLoadError = TrinityException
+                ValidationError = TrinityException
                 # Don't raise - let the router be created and routes be registered
                 # The endpoints will check if agent is initialized and return errors if not
 except Exception as e:
@@ -84,6 +131,26 @@ except Exception as e:
     logger.error(f"Full traceback:\n{traceback.format_exc()}")
     logger.error("Router will be available but agent functionality will not work")
     logger.error("=" * 80)
+    # Fallback: define minimal exceptions if import fails
+    if TrinityException is None:
+        class TrinityException(Exception):
+            def __init__(self, message: str, code: str = "INTERNAL_ERROR"):
+                self.message = message
+                self.code = code
+                super().__init__(self.message)
+        
+        class AgentExecutionError(TrinityException):
+            def __init__(self, message: str, agent_name: str = "unknown"):
+                super().__init__(message, code="AGENT_EXECUTION_ERROR")
+                self.agent_name = agent_name
+        
+        class ConfigurationError(TrinityException):
+            def __init__(self, message: str, config_key: str = "unknown"):
+                super().__init__(message, code="CONFIGURATION_ERROR")
+                self.config_key = config_key
+        
+        FileLoadError = TrinityException
+        ValidationError = TrinityException
     # Continue - router is already created and routes will be registered
 
 # Only define ChartMakerAgent if BaseAgent was imported successfully
@@ -654,16 +721,18 @@ def create_chart(request: ChartMakerRequest) -> Dict[str, Any]:
             logger.info("BaseAgent not imported - attempting to retry import...")
             if not _retry_baseagent_import():
                 logger.error("BaseAgent import retry failed - cannot initialize agent")
-                return {
-                    "success": False,
-                    "error": "ChartMakerAgent not initialized - BaseAgent import failed",
-                    "smart_response": "The chart_maker agent is not available. BaseAgent could not be imported. Please check server logs for details.",
-                    "processing_time": round(time.time() - start_time, 2)
-                }
+                raise ConfigurationError(
+                    "ChartMakerAgent not initialized - BaseAgent import failed",
+                    config_key="BASEAGENT_IMPORT"
+                )
             
             if BaseAgent is not None and ChartMakerAgent is None:
                 logger.error("BaseAgent imported but ChartMakerAgent class not found - this should not happen")
                 logger.error("ChartMakerAgent should be defined at module level when BaseAgent is imported")
+                raise ConfigurationError(
+                    "ChartMakerAgent class not found after BaseAgent import",
+                    config_key="CHARTMAKERAGENT_CLASS"
+                )
         
         # Try to initialize now
         if BaseAgent is not None and settings is not None:
@@ -686,29 +755,23 @@ def create_chart(request: ChartMakerRequest) -> Dict[str, Any]:
                 logger.info("✅ ChartMakerAgent initialized successfully on-demand")
             except Exception as init_error:
                 logger.error(f"❌ Failed to initialize ChartMakerAgent on-demand: {init_error}", exc_info=True)
-                return {
-                    "success": False,
-                    "error": f"ChartMakerAgent initialization failed: {str(init_error)}",
-                    "smart_response": "The chart_maker agent could not be initialized. Please check server logs for details.",
-                    "processing_time": round(time.time() - start_time, 2)
-                }
+                raise ConfigurationError(
+                    f"ChartMakerAgent initialization failed: {str(init_error)}",
+                    config_key="CHARTMAKERAGENT_INIT"
+                )
         else:
             logger.error("BaseAgent or settings still not available after retry")
-            return {
-                "success": False,
-                "error": "ChartMakerAgent not initialized - BaseAgent import failed",
-                "smart_response": "The chart_maker agent is not available. BaseAgent could not be imported. Please check server logs for details.",
-                "processing_time": round(time.time() - start_time, 2)
-            }
+            raise ConfigurationError(
+                "ChartMakerAgent not initialized - BaseAgent import failed",
+                config_key="BASEAGENT_IMPORT"
+            )
     
     if not agent_initialized or agent is None:
         logger.error("ChartMakerAgent still not initialized after retry")
-        return {
-            "success": False,
-            "error": "ChartMakerAgent not initialized",
-            "smart_response": "The chart_maker agent is not available. Please check server logs.",
-            "processing_time": round(time.time() - start_time, 2)
-        }
+        raise ConfigurationError(
+            "ChartMakerAgent not initialized",
+            config_key="CHARTMAKERAGENT_INIT"
+        )
     
     logger.info(f"CHARTMAKER REQUEST RECEIVED:")
     logger.info(f"Prompt: {request.prompt}")
@@ -797,27 +860,27 @@ def create_chart(request: ChartMakerRequest) -> Dict[str, Any]:
         
         return response
         
+    except (TrinityException, ValidationError, FileLoadError, ConfigurationError) as e:
+        # Re-raise Trinity exceptions to be caught by global handler
+        logger.error(f"CHARTMAKER REQUEST FAILED (TrinityException): {e.message if hasattr(e, 'message') else str(e)}", exc_info=True)
+        raise
     except Exception as e:
+        # Wrap generic exceptions in AgentExecutionError
         logger.error(f"CHARTMAKER REQUEST FAILED: {e}", exc_info=True)
-        processing_time = round(time.time() - start_time, 2)
-        
-        return {
-            "success": False,
-            "error": str(e),
-            "response": f"Error occurred: {str(e)}",
-            "smart_response": f"An error occurred while processing your request: {str(e)}",
-            "processing_time": processing_time
-        }
+        raise AgentExecutionError(
+            f"An error occurred while processing your request: {str(e)}",
+            agent_name="chart_maker"
+        )
 
 
 @router.get("/chart-maker/history/{session_id}")
 def get_history(session_id: str) -> Dict[str, Any]:
     """Get session history."""
     if not agent_initialized or agent is None:
-        return {
-            "success": False,
-            "error": "ChartMakerAgent not initialized"
-        }
+        raise ConfigurationError(
+            "ChartMakerAgent not initialized",
+            config_key="CHARTMAKERAGENT_INIT"
+        )
     
     logger.info(f"Getting history for session: {session_id}")
     
@@ -830,21 +893,21 @@ def get_history(session_id: str) -> Dict[str, Any]:
             "total_interactions": len(history) if isinstance(history, list) else 0
         }
     except Exception as e:
-        logger.error(f"Failed to get history: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Failed to get history: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"Failed to get session history: {str(e)}",
+            agent_name="chart_maker"
+        )
 
 
 @router.get("/chart-maker/files")
 def list_files() -> Dict[str, Any]:
     """List available files."""
     if not agent_initialized or agent is None:
-        return {
-            "success": False,
-            "error": "ChartMakerAgent not initialized"
-        }
+        raise ConfigurationError(
+            "ChartMakerAgent not initialized",
+            config_key="CHARTMAKERAGENT_INIT"
+        )
     
     logger.info("Listing available files")
     
@@ -856,11 +919,11 @@ def list_files() -> Dict[str, Any]:
             "files": files
         }
     except Exception as e:
-        logger.error(f"Failed to list files: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Failed to list files: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"Failed to list files: {str(e)}",
+            agent_name="chart_maker"
+        )
 
 
 @router.get("/chart-maker/health")
