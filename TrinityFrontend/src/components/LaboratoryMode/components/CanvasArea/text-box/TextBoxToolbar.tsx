@@ -13,10 +13,8 @@ import {
   List,
   ListOrdered,
   Minus,
-  Move,
   Plus,
   Search,
-  Sparkles,
   Strikethrough,
   Trash2,
   Underline,
@@ -99,9 +97,8 @@ interface TextBoxToolbarProps {
   onNumberedList?: () => void;
   color: string;
   onColorChange: (color: string) => void;
-  onRequestEffects?: () => void;
-  onRequestAnimate?: () => void;
-  onRequestPosition?: () => void;
+  backgroundColor: string;
+  onBackgroundColorChange: (color: string) => void;
   onDelete?: () => void;
 }
 
@@ -126,16 +123,17 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
   onNumberedList,
   color,
   onColorChange,
-  onRequestEffects,
-  onRequestAnimate,
-  onRequestPosition,
+  backgroundColor,
+  onBackgroundColorChange,
   onDelete,
 }) => {
   const [activeFilter, setActiveFilter] = useState<FontFilterChipId | null>(null);
   const [activeTab, setActiveTab] = useState<'font' | 'styles'>('font');
   const [searchTerm, setSearchTerm] = useState('');
   const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
+  const [backgroundPopoverOpen, setBackgroundPopoverOpen] = useState(false);
   const colorTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const backgroundTriggerRef = useRef<HTMLButtonElement | null>(null);
   const cssFontFamily = useMemo(() => resolveFontFamily(fontFamily), [fontFamily]);
   const activeTextStyleId = useMemo(() => {
     const presetMatch = TEXT_STYLE_PRESETS.find(preset => {
@@ -179,8 +177,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         ? 'bg-emerald-500 text-white shadow-sm'
         : 'bg-transparent text-muted-foreground hover:bg-muted/40 hover:text-foreground',
     );
-
-  const controlChipClasses = 'h-8 shrink-0 rounded-full px-2.5 text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40';
   const tabButtonClasses = (tab: 'font' | 'styles') =>
     cn(
       'rounded-full px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] transition-colors',
@@ -193,6 +189,11 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
     typeof color === 'string' && color.startsWith('#')
       ? `solid-${color.slice(1).toLowerCase()}`
       : color?.toLowerCase?.() ?? '';
+
+  const normalizedBackgroundColorId =
+    typeof backgroundColor === 'string' && backgroundColor.startsWith('#')
+      ? `solid-${backgroundColor.slice(1).toLowerCase()}`
+      : backgroundColor?.toLowerCase?.() ?? '';
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
 
@@ -638,42 +639,67 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         </PopoverContent>
       </Popover>
 
-      <span className="h-6 w-px rounded-full bg-border/60" />
-
-      <div className="flex shrink-0 items-center gap-1">
-        <Button
-          variant="ghost"
-          size="sm"
-          type="button"
-          onClick={onRequestEffects}
-          className={controlChipClasses}
-          onMouseDown={handleToolbarMouseDown}
+      <Popover open={backgroundPopoverOpen} onOpenChange={setBackgroundPopoverOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/50 p-0"
+            onMouseDown={handleToolbarMouseDown}
+            ref={backgroundTriggerRef}
+          >
+            <span
+              className="h-5 w-5 rounded-full border border-white/70 shadow-inner"
+              style={{ backgroundColor: backgroundColor || 'transparent' }}
+            />
+            <span className="sr-only">Background color</span>
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          side="left"
+          align="center"
+          sideOffset={14}
+          collisionPadding={24}
+          className="z-[4000] w-auto rounded-3xl border border-border/70 bg-background/95 p-0 shadow-2xl"
+          data-text-toolbar-root
         >
-          Effects
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          type="button"
-          onClick={onRequestAnimate}
-          className={cn(controlChipClasses, 'gap-1 text-purple-500 hover:text-purple-400')}
-          onMouseDown={handleToolbarMouseDown}
-        >
-          <Sparkles className="h-4 w-4" />
-          Animate
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          type="button"
-          onClick={onRequestPosition}
-          className={cn(controlChipClasses, 'gap-1')}
-          onMouseDown={handleToolbarMouseDown}
-        >
-          <Move className="h-4 w-4" />
-          Position
-        </Button>
-      </div>
+          <div className="w-[360px] space-y-4 p-4">
+            <ColorTray
+              sections={TEXT_COLOR_SECTIONS}
+              selectedId={normalizedBackgroundColorId}
+              onSelect={option => {
+                const value = option.value ?? option.id;
+                if (typeof value === 'string' && value.startsWith('#')) {
+                  onBackgroundColorChange(value);
+                  return;
+                }
+                if (option.id.startsWith('solid-')) {
+                  onBackgroundColorChange(`#${option.id.slice(6)}`);
+                }
+              }}
+              defaultSectionId="solids"
+            />
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={backgroundColor && backgroundColor !== 'transparent' ? backgroundColor : '#111827'}
+                onChange={event => onBackgroundColorChange(event.target.value)}
+                className="h-11 w-full cursor-pointer rounded-2xl border border-border"
+              />
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Custom</span>
+              <button
+                type="button"
+                className="rounded-full border border-border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+                onMouseDown={handleToolbarMouseDown}
+                onClick={() => onBackgroundColorChange('transparent')}
+              >
+                Transparent
+              </button>
+            </div>
+          </div>
+        </PopoverContent>
+      </Popover>
 
       {onDelete && (
         <>

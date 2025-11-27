@@ -352,6 +352,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             }
             color={settings.text_color}
             onColorChange={(color) => onSettingsChange({ text_color: color })}
+            backgroundColor={settings.background_color ?? 'transparent'}
+            onBackgroundColorChange={(color) => onSettingsChange({ background_color: color })}
           />
         </div>
       ) : null}
