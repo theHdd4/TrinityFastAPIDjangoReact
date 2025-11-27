@@ -314,6 +314,7 @@ const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
 const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const selectionRef = useRef<Range | null>(null);
   const [showToolbar, setShowToolbar] = useState(false);
 
   const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
@@ -346,6 +347,43 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
       const html = editorRef.current.innerHTML;
       const text = editorRef.current.innerText;
       onTextChange({ text, html });
+    }
+  };
+
+  const saveSelection = () => {
+    const selection = typeof window !== 'undefined' ? window.getSelection() : null;
+    if (selection?.rangeCount) {
+      selectionRef.current = selection.getRangeAt(0);
+    }
+  };
+
+  const restoreSelection = () => {
+    if (typeof window === 'undefined') return;
+
+    const selection = window.getSelection();
+    const range = selectionRef.current;
+
+    if (selection && range) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  };
+
+  const runCommand = (command: string, value?: string) => {
+    if (typeof document === 'undefined') return false;
+
+    restoreSelection();
+
+    try {
+      const executed = document.execCommand(command, false, value ?? undefined);
+
+      if (executed) {
+        handleInput();
+      }
+
+      return executed;
+    } catch {
+      return false;
     }
   };
 
@@ -444,20 +482,36 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             onToggleStrikethrough={() => onSettingsChange({ strikethrough: !settings.strikethrough })}
             align={toolbarAlign}
             onAlign={(align) => onSettingsChange({ text_align: align })}
-            onBulletedList={() =>
-              onSettingsChange({ list_type: settings.list_type === 'bullet' ? 'none' : 'bullet' })
-            }
-            onNumberedList={() =>
-              onSettingsChange({ list_type: settings.list_type === 'number' ? 'none' : 'number' })
-            }
+            onBulletedList={() => {
+              const nextType = settings.list_type === 'bullet' ? 'none' : 'bullet';
+              const executed = runCommand('insertUnorderedList');
+              if (!executed && !editorRef.current?.classList.contains('list-disc')) {
+                editorRef.current?.classList.toggle('list-disc', nextType === 'bullet');
+              }
+              onSettingsChange({ list_type: nextType });
+            }}
+            onNumberedList={() => {
+              const nextType = settings.list_type === 'number' ? 'none' : 'number';
+              const executed = runCommand('insertOrderedList');
+              if (!executed && !editorRef.current?.classList.contains('list-decimal')) {
+                editorRef.current?.classList.toggle('list-decimal', nextType === 'number');
+              }
+              onSettingsChange({ list_type: nextType });
+            }}
             color={settings.text_color}
             onColorChange={(color) => {
-              applyImmediateStyles({ text_color: color });
+              const executed = runCommand('foreColor', color);
+              if (!executed) {
+                applyImmediateStyles({ text_color: color });
+              }
               onSettingsChange({ text_color: color });
             }}
             backgroundColor={settings.background_color ?? 'transparent'}
             onBackgroundColorChange={(color) => {
-              applyImmediateStyles({ background_color: color });
+              const executed = runCommand('hiliteColor', color) || runCommand('backColor', color);
+              if (!executed) {
+                applyImmediateStyles({ background_color: color });
+              }
               onSettingsChange({ background_color: color });
             }}
           />
@@ -469,6 +523,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
           ref={editorRef}
           contentEditable
           onInput={handleInput}
+          onKeyUp={saveSelection}
+          onMouseUp={saveSelection}
           suppressContentEditableWarning
           className={`
             w-full min-h-[200px] p-6
@@ -490,7 +546,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
         />
 
         <div className="text-sm text-muted-foreground text-left">
-          Click to edit text. Use the properties panel on the right to customize formatting.
+          Click to edit text. Use the toolbar to format content and lists.
         </div>
       </div>
     </div>
