@@ -53,6 +53,8 @@ import {
   registerPrefillController,
   cancelPrefillController,
 } from '@/components/AtomList/atoms/column-classifier/prefillManager';
+import { TextBoxToolbar } from './text-box/TextBoxToolbar';
+import type { TextAlignOption, TextStylePreset } from './text-box/types';
 
 import {
   useLaboratoryStore,
@@ -261,10 +263,15 @@ interface CardTextBoxCanvasProps {
   data: { text: string; html: string };
   settings: TextBoxSettings;
   onTextChange: (data: { text: string; html: string }) => void;
+  onSettingsChange: (updates: Partial<TextBoxSettings>) => void;
 }
 
-const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange }) => {
+const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
+
+const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  const [showToolbar, setShowToolbar] = useState(false);
 
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== data.html) {
@@ -280,6 +287,26 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     }
   };
 
+  const handleApplyTextStyle = (preset: TextStylePreset) => {
+    const updates: Partial<TextBoxSettings> = {
+      font_size: clampFontSize(preset.fontSize),
+    };
+
+    if (typeof preset.bold === 'boolean') updates.bold = preset.bold;
+    if (typeof preset.italic === 'boolean') updates.italics = preset.italic;
+    if (typeof preset.underline === 'boolean') updates.underline = preset.underline;
+    if (typeof preset.strikethrough === 'boolean') updates.strikethrough = preset.strikethrough;
+
+    onSettingsChange(updates);
+  };
+
+  const handleContainerBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (!containerRef.current?.contains(nextTarget)) {
+      setShowToolbar(false);
+    }
+  };
+
   const getListStyle = () => {
     if (settings.list_type === 'bullet') return 'list-disc pl-8';
     if (settings.list_type === 'number') return 'list-decimal pl-8';
@@ -287,36 +314,77 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   };
 
   const textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+  const toolbarAlign: TextAlignOption = ['left', 'center', 'right'].includes(settings.text_align)
+    ? (settings.text_align as TextAlignOption)
+    : 'left';
 
   return (
-    <div className="w-full h-full flex items-center justify-center p-8 bg-background">
-      <div className="w-full max-w-4xl">
-        <div
-          ref={editorRef}
-          contentEditable
-          onInput={handleInput}
-          suppressContentEditableWarning
-          className={`
-            w-full min-h-[200px] p-6 
-            border-2 border-dashed border-border rounded-lg
-            focus:outline-none focus:border-primary
-            transition-colors duration-200
-            ${getListStyle()}
-          `}
-          style={{
-            fontFamily: settings.font_family,
-            fontSize: `${settings.font_size}px`,
-            fontWeight: settings.bold ? 'bold' : 'normal',
-            fontStyle: settings.italics ? 'italic' : 'normal',
-            textDecoration,
-            textAlign: settings.text_align,
-            color: settings.text_color,
-            backgroundColor: settings.background_color ?? 'transparent',
-          }}
-        />
+    <div
+      ref={containerRef}
+      className="relative w-full h-full"
+      onFocusCapture={() => setShowToolbar(true)}
+      onBlurCapture={handleContainerBlur}
+    >
+      {showToolbar ? (
+        <div className="absolute left-1/2 -top-3 z-10 -translate-x-1/2 -translate-y-full">
+          <TextBoxToolbar
+            fontFamily={settings.font_family}
+            onFontFamilyChange={(font) => onSettingsChange({ font_family: font })}
+            fontSize={settings.font_size}
+            onIncreaseFontSize={() => onSettingsChange({ font_size: clampFontSize(settings.font_size + 1) })}
+            onDecreaseFontSize={() => onSettingsChange({ font_size: clampFontSize(settings.font_size - 1) })}
+            onApplyTextStyle={handleApplyTextStyle}
+            bold={settings.bold}
+            italic={settings.italics}
+            underline={settings.underline}
+            strikethrough={Boolean(settings.strikethrough)}
+            onToggleBold={() => onSettingsChange({ bold: !settings.bold })}
+            onToggleItalic={() => onSettingsChange({ italics: !settings.italics })}
+            onToggleUnderline={() => onSettingsChange({ underline: !settings.underline })}
+            onToggleStrikethrough={() => onSettingsChange({ strikethrough: !settings.strikethrough })}
+            align={toolbarAlign}
+            onAlign={(align) => onSettingsChange({ text_align: align })}
+            onBulletedList={() =>
+              onSettingsChange({ list_type: settings.list_type === 'bullet' ? 'none' : 'bullet' })
+            }
+            onNumberedList={() =>
+              onSettingsChange({ list_type: settings.list_type === 'number' ? 'none' : 'number' })
+            }
+            color={settings.text_color}
+            onColorChange={(color) => onSettingsChange({ text_color: color })}
+          />
+        </div>
+      ) : null}
 
-        <div className="mt-4 text-sm text-muted-foreground text-center">
-          Click to edit text. Use the properties panel on the right to customize formatting.
+      <div className="w-full h-full flex items-center justify-center p-8 pb-12 bg-background">
+        <div className="w-full max-w-4xl">
+          <div
+            ref={editorRef}
+            contentEditable
+            onInput={handleInput}
+            suppressContentEditableWarning
+            className={`
+              w-full min-h-[200px] p-6
+              border-2 border-dashed border-border rounded-lg
+              focus:outline-none focus:border-primary
+              transition-colors duration-200
+              ${getListStyle()}
+            `}
+            style={{
+              fontFamily: settings.font_family,
+              fontSize: `${settings.font_size}px`,
+              fontWeight: settings.bold ? 'bold' : 'normal',
+              fontStyle: settings.italics ? 'italic' : 'normal',
+              textDecoration,
+              textAlign: settings.text_align,
+              color: settings.text_color,
+              backgroundColor: settings.background_color ?? 'transparent',
+            }}
+          />
+
+          <div className="mt-4 text-sm text-muted-foreground text-center">
+            Click to edit text. Use the properties panel on the right to customize formatting.
+          </div>
         </div>
       </div>
     </div>
@@ -686,6 +754,22 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
                     boxes.map(existing =>
                       existing.id === box.id
                         ? { ...existing, content: data.text, html: data.html }
+                        : existing,
+                    ),
+                  )
+                }
+                onSettingsChange={(updates) =>
+                  updateCardTextBoxes((boxes) =>
+                    boxes.map(existing =>
+                      existing.id === box.id
+                        ? {
+                            ...existing,
+                            settings: {
+                              ...DEFAULT_TEXTBOX_SETTINGS,
+                              ...(existing.settings ?? {}),
+                              ...updates,
+                            },
+                          }
                         : existing,
                     ),
                   )
