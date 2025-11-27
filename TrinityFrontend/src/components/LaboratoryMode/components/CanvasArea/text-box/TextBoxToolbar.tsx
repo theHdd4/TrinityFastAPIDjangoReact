@@ -15,6 +15,7 @@ import {
   Minus,
   Plus,
   Search,
+  Sparkles,
   Strikethrough,
   Trash2,
   Underline,
