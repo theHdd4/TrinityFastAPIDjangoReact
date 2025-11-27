@@ -35,6 +35,8 @@ interface ExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   totalSlides: number;
+  viewMode?: 'horizontal' | 'vertical';
+  setViewMode?: (mode: 'horizontal' | 'vertical') => void;
 }
 
 const formatLabel = (format: ExportFormat) => {
@@ -53,7 +55,13 @@ const formatLabel = (format: ExportFormat) => {
 const presentationFormatFor = (format: ExportFormat): PresentationFormat =>
   format === 'PDF' ? 'pdf' : 'pptx';
 
-export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, totalSlides }) => {
+export const ExportDialog: React.FC<ExportDialogProps> = ({ 
+  open, 
+  onOpenChange, 
+  totalSlides,
+  viewMode = 'horizontal',
+  setViewMode,
+}) => {
   const [isExporting, setIsExporting] = useState(false);
   const exhibitedCards = useExhibitionStore(state => state.exhibitedCards);
   const slideObjectsByCardId = useExhibitionStore(state => state.slideObjectsByCardId);
@@ -80,18 +88,14 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
   };
 
   const performSlidePreparation = async (format: ExportFormat): Promise<PreparedSlidesForExport | null> => {
-    if (format === 'Images') {
-      return prepareSlidesForExport(exhibitedCards, {
-        captureImages: false,
-        includeDomSnapshot: true,
-        pixelRatio: 3,
-      }, slideObjectsByCardId);
-    }
-
+    // NEW APPROACH: Always capture images directly from visible exhibition
+    // This ensures charts are fully rendered before capture
+    const pixelRatio = format === 'PDF' ? 3 : format === 'Images' ? 3 : 2;
+    
     return prepareSlidesForExport(exhibitedCards, {
-      captureImages: true,
-      includeDomSnapshot: true,
-      pixelRatio: format === 'PDF' ? 3 : 2,
+      captureImages: true, // Always capture images from visible exhibition
+      includeDomSnapshot: format === 'Images', // Only need DOM snapshot for server-side fallback in Images format
+      pixelRatio,
     }, slideObjectsByCardId);
   };
 
@@ -101,22 +105,109 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
     }
 
     setIsExporting(true);
-    const toastId = toast.loading(`Exporting presentation as ${formatLabel(format)}...`);
+    const toastId = toast.loading(`Capturing slides from exhibition...`);
 
+    // CRITICAL: Temporarily switch to vertical view for export
+    // This ensures consistent capture regardless of current navigation mode
+    const originalViewMode = viewMode;
+    let viewModeChanged = false;
+    
     try {
+      // Switch to vertical view if currently in horizontal mode
+      if (viewMode === 'horizontal' && setViewMode) {
+        console.log('[Exhibition Export] Switching to vertical view for export');
+        setViewMode('vertical');
+        viewModeChanged = true;
+        
+        // Wait for view mode change to take effect and slides to re-render
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Wait for slides to be visible in vertical view
+        await new Promise(resolve => {
+          const checkSlides = () => {
+            const verticalSlides = document.querySelectorAll('[data-exhibition-slide-id]');
+            if (verticalSlides.length > 0) {
+              resolve(undefined);
+            } else {
+              setTimeout(checkSlides, 100);
+            }
+          };
+          checkSlides();
+        });
+        
+        // Additional wait for layout to stabilize
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      // CRITICAL: Disable chart animations when export starts
+      // This ensures charts render immediately without animation effects
+      if (typeof window !== 'undefined') {
+        (window as any).__disableChartAnimations = true;
+        // Dispatch event to notify all charts
+        window.dispatchEvent(new CustomEvent('disable-chart-animations'));
+        console.log('[Exhibition Export] Chart animations disabled for export');
+      }
+
       let prepared: PreparedSlidesForExport | null = null;
 
+      // NEW APPROACH: Capture visible exhibition slides directly as images
+      // Charts will render immediately without animations
+      toast.loading(`Capturing visible exhibition slides as images...`, { id: toastId });
       prepared = await performSlidePreparation(format);
 
       if (!prepared) {
         throw new Error('Unable to prepare slides for export.');
       }
 
-      if (prepared.domSnapshots.size !== exhibitedCards.length) {
-        throw new Error('We could not prepare every slide for export. Please try again.');
+      // NEW APPROACH: Check captures length when using direct image capture
+      // OLD APPROACH: Check domSnapshots size when using server-side rendering
+      const hasCaptures = prepared.captures && prepared.captures.length > 0;
+      const hasDomSnapshots = prepared.domSnapshots && prepared.domSnapshots.size > 0;
+      
+      if (hasCaptures) {
+        // Using new approach: check captures
+        if (prepared.captures.length !== exhibitedCards.length) {
+          throw new Error(`We could not capture every slide for export. Captured ${prepared.captures.length} of ${exhibitedCards.length} slides. Please try again.`);
+        }
+      } else if (hasDomSnapshots) {
+        // Using old approach: check domSnapshots
+        if (prepared.domSnapshots.size !== exhibitedCards.length) {
+          throw new Error('We could not prepare every slide for export. Please try again.');
+        }
+      } else {
+        // Neither approach worked
+        throw new Error('We could not prepare any slides for export. Please try again.');
       }
 
       if (format === 'Images') {
+        // NEW APPROACH: If we have direct captures, use them immediately
+        if (hasCaptures && prepared.captures.length === exhibitedCards.length) {
+          console.log('[Exhibition Export] Using direct captures for Images export');
+          const screenshots = prepared.captures.map(capture => ({
+            id: capture.cardId,
+            index: exhibitedCards.findIndex(card => card.id === capture.cardId),
+            dataUrl: capture.dataUrl,
+            width: capture.imageWidth,
+            height: capture.imageHeight,
+            cssWidth: capture.cssWidth,
+            cssHeight: capture.cssHeight,
+            pixelRatio: capture.pixelRatio,
+          }));
+
+          await downloadRenderedSlideScreenshots(screenshots, presentationTitle);
+
+          toast.success(
+            `Downloaded ${screenshots.length} PNG ${screenshots.length === 1 ? 'file' : 'files'}.`,
+            {
+              id: toastId,
+              description: 'Slides captured directly from exhibition.',
+            },
+          );
+          onOpenChange(false);
+          return;
+        }
+
+        // Fallback: Use server-side rendering or hidden container method
         if (!prepared.documentStyles) {
           throw new Error('We could not collect the styles required to render your slides.');
         }
@@ -257,6 +348,23 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ open, onOpenChange, 
       });
     } finally {
       setIsExporting(false);
+      
+      // CRITICAL: Restore original view mode if it was changed
+      if (viewModeChanged && setViewMode && originalViewMode) {
+        console.log(`[Exhibition Export] Restoring view mode to ${originalViewMode}`);
+        // Use setTimeout to restore view mode asynchronously (can't use await in finally)
+        setTimeout(() => {
+          setViewMode(originalViewMode);
+        }, 100);
+      }
+      
+      // CRITICAL: Re-enable chart animations after export completes
+      if (typeof window !== 'undefined') {
+        (window as any).__disableChartAnimations = false;
+        // Dispatch event to notify all charts
+        window.dispatchEvent(new CustomEvent('enable-chart-animations'));
+        console.log('[Exhibition Export] Chart animations re-enabled after export');
+      }
     }
   };
 
