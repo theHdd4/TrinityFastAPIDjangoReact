@@ -4024,7 +4024,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           });
           return;
         }
-
+    
         const canvas = internalRef.current;
         if (!canvas) {
           toast({
@@ -4033,48 +4033,133 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           });
           return;
         }
-
-        const width = canvas.clientWidth;
-        const height = canvas.clientHeight;
+    
+        const canvasW = canvas.clientWidth;
+        const canvasH = canvas.clientHeight;
         const targets = unlockedSelectedObjects.length > 0 ? unlockedSelectedObjects : selectedObjects;
         const updates: Record<string, Partial<SlideObject>> = {};
-
-        targets.forEach(object => {
-          if (alignment === 'left' || alignment === 'center' || alignment === 'right') {
-            let targetX = 0;
-            if (alignment === 'center') {
-              targetX = (width - object.width) / 2;
-            } else if (alignment === 'right') {
-              targetX = width - object.width;
-            }
-            const maxX = Math.max(0, width - object.width);
-            const clampedX = Math.min(Math.max(0, targetX), maxX);
-            const snappedX = snapToGridEnabled
-              ? Math.min(Math.max(0, snapToGrid(targetX, gridSize)), maxX)
-              : clampedX;
-            if (Math.abs(snappedX - object.x) > 0.5) {
-              updates[object.id] = { ...(updates[object.id] ?? {}), x: snappedX };
-            }
+    
+        // Helpers --------------------------------------------------------------
+        const degToRad = (d: number) => (d * Math.PI) / 180;
+    
+        // compute AABB of a rotated rectangle (rotation about center)
+        function getAABB(obj: SlideObject) {
+          const cx = obj.x + obj.width / 2;
+          const cy = obj.y + obj.height / 2;
+          const hw = obj.width / 2;
+          const hh = obj.height / 2;
+          const theta = degToRad(obj.rotation ?? 0);
+    
+          const corners = [
+            { x: -hw, y: -hh },
+            { x: hw, y: -hh },
+            { x: hw, y: hh },
+            { x: -hw, y: hh },
+          ];
+    
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+    
+          const cos = Math.cos(theta);
+          const sin = Math.sin(theta);
+    
+          for (const c of corners) {
+            const rx = c.x * cos - c.y * sin;
+            const ry = c.x * sin + c.y * cos;
+            const worldX = cx + rx;
+            const worldY = cy + ry;
+            if (worldX < minX) minX = worldX;
+            if (worldY < minY) minY = worldY;
+            if (worldX > maxX) maxX = worldX;
+            if (worldY > maxY) maxY = worldY;
           }
-
-          if (alignment === 'top' || alignment === 'middle' || alignment === 'bottom') {
-            let targetY = 0;
-            if (alignment === 'middle') {
-              targetY = (height - object.height) / 2;
-            } else if (alignment === 'bottom') {
-              targetY = height - object.height;
-            }
-            const maxY = Math.max(0, height - object.height);
-            const clampedY = Math.min(Math.max(0, targetY), maxY);
-            const snappedY = snapToGridEnabled
-              ? Math.min(Math.max(0, snapToGrid(targetY, gridSize)), maxY)
-              : clampedY;
-            if (Math.abs(snappedY - object.y) > 0.5) {
-              updates[object.id] = { ...(updates[object.id] ?? {}), y: snappedY };
-            }
-          }
+    
+          return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+        }
+    
+        // Build selection bounding box from AABBs of the targets
+        let selMinX = Infinity;
+        let selMinY = Infinity;
+        let selMaxX = -Infinity;
+        let selMaxY = -Infinity;
+    
+        const targetAABBs = targets.map(obj => {
+          const aabb = getAABB(obj);
+          if (aabb.minX < selMinX) selMinX = aabb.minX;
+          if (aabb.minY < selMinY) selMinY = aabb.minY;
+          if (aabb.maxX > selMaxX) selMaxX = aabb.maxX;
+          if (aabb.maxY > selMaxY) selMaxY = aabb.maxY;
+          return { obj, aabb };
         });
-
+    
+        // If selection bounds didn't change (fail-safe)
+        if (!isFinite(selMinX)) {
+          toast({
+            title: 'Alignment failed',
+            description: 'No valid bounding box for selection.',
+          });
+          return;
+        }
+    
+        const selCenterX = (selMinX + selMaxX) / 2;
+        const selCenterY = (selMinY + selMaxY) / 2;
+    
+        // For each object compute the desired AABB target, then translate the object's x,y
+        for (const { obj, aabb } of targetAABBs) {
+          let desiredAabbLeft = aabb.minX;
+          let desiredAabbTop = aabb.minY;
+    
+          // Horizontal alignment
+          if (alignment === 'left' || alignment === 'center' || alignment === 'right') {
+            if (alignment === 'left') {
+              desiredAabbLeft = selMinX;
+            } else if (alignment === 'center') {
+              // set object's AABB center to selection center
+              desiredAabbLeft = selCenterX - aabb.width / 2;
+            } else if (alignment === 'right') {
+              desiredAabbLeft = selMaxX - aabb.width;
+            }
+          }
+    
+          // Vertical alignment
+          if (alignment === 'top' || alignment === 'middle' || alignment === 'bottom') {
+            if (alignment === 'top') {
+              desiredAabbTop = selMinY;
+            } else if (alignment === 'middle') {
+              desiredAabbTop = selCenterY - aabb.height / 2;
+            } else if (alignment === 'bottom') {
+              desiredAabbTop = selMaxY - aabb.height;
+            }
+          }
+    
+          // Optionally snap the desired AABB position to grid (snap the final object's top-left after translation)
+          // Compute translation delta to move AABB from current to desired
+          const dx = desiredAabbLeft - aabb.minX;
+          const dy = desiredAabbTop - aabb.minY;
+    
+          // Apply translation to the object's top-left coordinates
+          let newX = obj.x + dx;
+          let newY = obj.y + dy;
+    
+          // Snap the final object coordinates if grid is enabled (you can also snap desiredAabbLeft instead,
+          // but snapping object.x/object.y is straightforward and preserves rotation offset semantics)
+          if (snapToGridEnabled) {
+            newX = Math.min(Math.max(0, snapToGrid(newX, gridSize)), Math.max(0, canvasW - obj.width));
+            newY = Math.min(Math.max(0, snapToGrid(newY, gridSize)), Math.max(0, canvasH - obj.height));
+          } else {
+            // Clamp within canvas (to avoid negative or off-canvas top-left)
+            newX = Math.min(Math.max(0, newX), Math.max(0, canvasW - obj.width));
+            newY = Math.min(Math.max(0, newY), Math.max(0, canvasH - obj.height));
+          }
+    
+          // Only push an update if the change is meaningful
+          if (Math.abs(newX - obj.x) > 0.5 || Math.abs(newY - obj.y) > 0.5) {
+            updates[obj.id] = { ...(updates[obj.id] ?? {}), x: newX, y: newY };
+          }
+        }
+    
         if (Object.keys(updates).length === 0) {
           toast({
             title: 'No alignment changes',
@@ -4082,7 +4167,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           });
           return;
         }
-
+    
         onInteract();
         onBulkUpdate(updates);
         toast({
@@ -4090,8 +4175,19 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           description: 'Updated the selection alignment on the slide.',
         });
       },
-      [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects],
+      [
+        onBulkUpdate,
+        onInteract,
+        selectedObjects,
+        unlockedSelectedObjects,
+        internalRef,
+        snapToGridEnabled,
+        snapToGrid,
+        gridSize,
+        toast,
+      ],
     );
+    
 
     const handleBackgroundPointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
@@ -4100,6 +4196,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
 
         if (event.button !== 0) {
+          return;
+        }
+
+        const target = event.target as Element | null;
+        // Don't deselect when clicking inside context menu
+        if (target?.closest('[data-context-menu-root]') || 
+            target?.closest('[data-radix-context-menu-content]') ||
+            target?.closest('[data-radix-context-menu-sub-content]')) {
           return;
         }
 
@@ -4167,6 +4271,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           if (targetElement.closest('[data-text-toolbar-root]')) {
+            return;
+          }
+
+          // Don't deselect when clicking inside context menu
+          if (targetElement.closest('[data-context-menu-root]')) {
+            return;
+          }
+
+          // Also check for Radix UI context menu portal elements
+          if (targetElement.closest('[data-radix-context-menu-content]')) {
+            return;
+          }
+
+          // Check for context menu sub-content (submenus)
+          if (targetElement.closest('[data-radix-context-menu-sub-content]')) {
             return;
           }
         }
@@ -4858,6 +4977,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     transition: shouldAnimateResize 
                       ? 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), height 0.4s cubic-bezier(0.4, 0, 0.2, 1), left 0.4s cubic-bezier(0.4, 0, 0.2, 1), top 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
                       : undefined,
+                    transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+                    transformOrigin: rotation !== 0 ? 'center center' : undefined,
                   }}
                   data-exhibition-object-id={object.id}
                   data-exhibition-object-type={object.type}
@@ -4895,10 +5016,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     return 'border-border/70 hover:border-primary/40';
                   })(),
                 )}
-                style={{
-                  transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
-                  transformOrigin: rotation !== 0 ? 'center center' : undefined,
-                }}
               >
                 {isAtomObject(object) && shouldShowTitle && (
                   <div className="flex items-center gap-2 border-b border-border/60 bg-muted/10 px-4 py-2">
