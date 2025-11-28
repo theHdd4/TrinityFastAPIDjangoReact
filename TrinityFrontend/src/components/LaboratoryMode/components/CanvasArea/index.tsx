@@ -367,6 +367,39 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     return line;
   };
 
+  const toggleBulletedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+
+    if (isBulleted) {
+      return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map(line => {
+        const base = stripListPrefix(line).trimStart();
+        return base.length > 0 ? `• ${base}` : '• ';
+      })
+      .join('\n');
+  };
+
+  const toggleNumberedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+    if (isNumbered) {
+      return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map((line, index) => {
+        const base = stripListPrefix(line).trimStart();
+        const prefix = `${index + 1}. `;
+        return base.length > 0 ? `${prefix}${base}` : prefix;
+      })
+      .join('\n');
+  };
+
   const replaceSelectionWithHtml = (html: string) => {
     if (typeof window === 'undefined' || !editorRef.current) return false;
 
@@ -455,29 +488,14 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
       .join('');
   };
 
-  const buildListHtml = (lines: string[], type: 'bullet' | 'number'): string => {
-    const cleanedLines = lines.length > 0 ? lines : [''];
-    const tag = type === 'bullet' ? 'ul' : 'ol';
-
-    const items = cleanedLines.map(rawLine => {
-      const line = stripListPrefix(rawLine).trimStart();
-      const content = line.length > 0 ? escapeHtml(line) : '<br>';
-      return `<li>${content}</li>`;
-    });
-
-    return `<${tag}>${items.join('')}</${tag}>`;
-  };
-
-  const transformListHtml = (mode: 'bullet' | 'number' | 'none', html: string): string => {
-    const plain = htmlToPlainText(html);
+  const deriveListTypeFromPlain = (plain: string): TextBoxSettings['list_type'] => {
     const lines = plain.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
 
-    if (mode === 'none') {
-      const unlisted = lines.map(line => stripListPrefix(line)).join('\n');
-      return plainTextToHtml(unlisted);
-    }
-
-    return buildListHtml(lines, mode);
+    if (isBulleted) return 'bullet';
+    if (isNumbered) return 'number';
+    return 'none';
   };
 
   const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
@@ -700,8 +718,24 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     ? (settings.text_align as TextAlignOption)
     : 'left';
 
-  const applyListTransformation = (mode: 'bullet' | 'number' | 'none') => {
+  const updateListTypeFromContent = (plainOverride?: string) => {
+    const plain =
+      plainOverride ?? htmlToPlainText(editorRef.current?.innerHTML ?? settings.html ?? settings.content ?? '');
+    onSettingsChange({ list_type: deriveListTypeFromPlain(plain) });
+  };
+
+  const applyListTransformation = (
+    transformer: (value: string) => string,
+    onApplied?: (plain: string) => void,
+  ) => {
     if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const applyToHtml = (html: string): string => {
+      const plain = htmlToPlainText(html);
+      const transformed = transformer(plain);
+      onApplied?.(transformed);
+      return plainTextToHtml(transformed);
+    };
 
     const selectionApplied = (() => {
       restoreSelection();
@@ -717,14 +751,14 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
       const container = document.createElement('div');
       container.appendChild(range.cloneContents());
 
-      const nextHtml = transformListHtml(mode, container.innerHTML);
+      const nextHtml = applyToHtml(container.innerHTML);
       return replaceSelectionWithHtml(nextHtml);
     })();
 
     if (selectionApplied) return true;
 
     const sourceHtml = editorRef.current.innerHTML ?? '';
-    const nextHtml = transformListHtml(mode, sourceHtml);
+    const nextHtml = applyToHtml(sourceHtml);
 
     if (nextHtml === sourceHtml) return false;
 
@@ -847,22 +881,30 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             onBulletedList={() => {
               logToolbarAction('toggle-list', { type: 'bullet' });
 
-              const nextType = settings.list_type === 'bullet' ? 'none' : 'bullet';
               const executed = runCommand('insertUnorderedList');
-              if (!executed) {
-                applyListTransformation(nextType);
+              if (executed) {
+                updateListTypeFromContent();
+                handleInput();
+                return;
               }
-              onSettingsChange({ list_type: nextType });
+
+              applyListTransformation(toggleBulletedListContent, transformed => {
+                updateListTypeFromContent(transformed);
+              });
             }}
             onNumberedList={() => {
               logToolbarAction('toggle-list', { type: 'number' });
 
-              const nextType = settings.list_type === 'number' ? 'none' : 'number';
               const executed = runCommand('insertOrderedList');
-              if (!executed) {
-                applyListTransformation(nextType);
+              if (executed) {
+                updateListTypeFromContent();
+                handleInput();
+                return;
               }
-              onSettingsChange({ list_type: nextType });
+
+              applyListTransformation(toggleNumberedListContent, transformed => {
+                updateListTypeFromContent(transformed);
+              });
             }}
             color={settings.text_color}
             onColorChange={handleColorChange}
