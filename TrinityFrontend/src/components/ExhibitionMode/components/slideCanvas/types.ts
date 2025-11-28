@@ -7,7 +7,7 @@ export interface CanvasDropPlacement {
   height: number;
 }
 
-export type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se';
+export type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'l' | 'r';
 
 export type ActiveInteraction =
   | {
@@ -23,7 +23,8 @@ export type ActiveInteraction =
       handle: ResizeHandle;
       startClientX: number;
       startClientY: number;
-      initial: { x: number; y: number; width: number; height: number };
+      initial: { x: number; y: number; width: number; height: number; fontSize?: number };
+      finalWidth?: number; // Store final width for side handles to avoid stale state
     };
 
 export type EditingTextState =
