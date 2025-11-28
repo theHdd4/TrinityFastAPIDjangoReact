@@ -1,7 +1,7 @@
 import { Message, EnvironmentContext } from './types';
-import { MERGE_API, CONCAT_API, GROUPBY_API, CREATECOLUMN_API, DATAFRAME_OPERATIONS_API, VALIDATE_API } from '@/lib/api';
+import { MERGE_API, CONCAT_API, GROUPBY_API, CREATECOLUMN_API, DATAFRAME_OPERATIONS_API, VALIDATE_API, TEXT_API, LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
-import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { useLaboratoryStore, DEFAULT_TEXTBOX_SETTINGS } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 /**
  * Enhanced utility functions for Trinity AI handlers
@@ -679,4 +679,309 @@ const convertTableDataToCsv = (headers: string[], rows: Record<string, any>[]): 
   );
 
   return [headerRow, ...valueRows].join('\n');
+};
+
+/**
+ * Format agent response fields (response, reasoning, smart_response) for text box display
+ * Can be used by all agent handlers
+ */
+export const formatAgentResponseForTextBox = (data: any): string => {
+  console.log('📝 formatAgentResponseForTextBox called with data:', {
+    hasData: !!data,
+    dataKeys: data ? Object.keys(data) : [],
+    hasResponse: !!(data?.response || data?.data?.response),
+    hasReasoning: !!(data?.reasoning || data?.data?.reasoning),
+    hasSmartResponse: !!(data?.smart_response || data?.data?.smart_response || data?.smartResponse),
+  });
+  
+  // Handle both top-level and nested data structures
+  const response = data?.response || data?.data?.response || '';
+  const reasoning = data?.reasoning || data?.data?.reasoning || '';
+  const smartResponse = data?.smart_response || data?.data?.smart_response || data?.smartResponse || '';
+  
+  console.log('📝 Extracted values:', {
+    responseLength: response?.length || 0,
+    reasoningLength: reasoning?.length || 0,
+    smartResponseLength: smartResponse?.length || 0,
+  });
+  
+  let formattedText = '';
+  
+  if (smartResponse) {
+    formattedText += `**Smart Response:**\n${smartResponse}\n\n`;
+  }
+  
+  if (reasoning) {
+    formattedText += `**Reasoning:**\n${reasoning}\n\n`;
+  }
+  
+  if (response) {
+    formattedText += `**Response:**\n${response}`;
+  }
+  
+  const result = formattedText.trim() || 'No response data available.';
+  console.log('📝 Formatted text result length:', result.length);
+  return result;
+};
+
+/**
+ * Update card text box with agent response fields
+ * Finds the card containing the atom and enables/updates its text box
+ * Also saves the state via the API endpoint
+ */
+export const updateCardTextBox = async (atomId: string, content: string): Promise<void> => {
+  try {
+    console.log(`📝 ========== updateCardTextBox START ==========`);
+    console.log(`📝 atomId: ${atomId}`);
+    console.log(`📝 content length: ${content.length}`);
+    console.log(`📝 content preview: ${content.substring(0, 100)}...`);
+    
+    if (!atomId) {
+      console.error(`❌ atomId is empty or undefined!`);
+      return;
+    }
+    
+    if (!content || content.trim() === '') {
+      console.error(`❌ content is empty!`);
+      return;
+    }
+    
+    const { getAtom, updateCard, cards } = useLaboratoryStore.getState();
+    
+    console.log(`📝 Total cards in store: ${cards.length}`);
+    console.log(`📝 Cards IDs: ${cards.map(c => c.id).join(', ')}`);
+    
+    // Find the atom
+    const atom = getAtom(atomId);
+    if (!atom) {
+      console.error(`❌ Atom not found: ${atomId}`);
+      console.error(`❌ Available atoms:`, cards.flatMap(c => (c.atoms || []).map(a => a.id)).join(', '));
+      return;
+    }
+    
+    console.log(`✅ Atom found: ${atom.id}, atomId: ${atom.atomId}`);
+    
+    // Find the card that contains this atom
+    const card = cards.find(c => 
+      Array.isArray(c.atoms) && c.atoms.some(a => a.id === atomId)
+    );
+    
+    if (!card) {
+      console.error(`❌ Card not found for atom: ${atomId}`);
+      console.error(`❌ Searching through cards:`, cards.map(c => ({
+        cardId: c.id,
+        atomIds: (c.atoms || []).map(a => a.id)
+      })));
+      return;
+    }
+    
+    console.log(`✅ Found card: ${card.id} for atom: ${atomId}`);
+    console.log(`📝 Card current textBoxEnabled: ${card.textBoxEnabled}`);
+    console.log(`📝 Card current textBoxContent length: ${card.textBoxContent?.length || 0}`);
+    
+    // Enable text box and set content
+    // Create text box structure matching the expected format
+    const textBoxConfig = {
+      id: `text-box-${atomId}`,
+      title: 'Agent Response',
+      content: content,
+      html: content,
+      settings: {
+        ...DEFAULT_TEXTBOX_SETTINGS,
+        text_align: 'left',
+        font_size: 14,
+        font_family: 'Inter',
+        text_color: '#000000',
+        bold: false,
+        italics: false,
+        underline: false,
+      }
+    };
+    
+    const textBoxUpdate = {
+      textBoxEnabled: true,
+      textBoxContent: content,
+      textBoxHtml: content, // Also set HTML version
+      textBoxSettings: {
+        ...DEFAULT_TEXTBOX_SETTINGS,
+        text_align: 'left',
+        font_size: 14,
+        font_family: 'Inter',
+        text_color: '#000000',
+        bold: false,
+        italics: false,
+        underline: false,
+      },
+      textBoxes: [textBoxConfig]
+    };
+    
+    console.log(`📝 Text box config:`, {
+      id: textBoxConfig.id,
+      title: textBoxConfig.title,
+      contentLength: textBoxConfig.content.length,
+      hasSettings: !!textBoxConfig.settings,
+    });
+    
+    console.log(`📝 Updating card with text box:`, {
+      cardId: card.id,
+      textBoxEnabled: textBoxUpdate.textBoxEnabled,
+      textBoxContentLength: textBoxUpdate.textBoxContent.length,
+      textBoxesCount: textBoxUpdate.textBoxes.length,
+    });
+    
+     // Update the card using both updateCard and setCards to ensure re-render
+     const cardWithTextBox = {
+       ...card,
+       ...textBoxUpdate
+     };
+     
+     console.log(`📝 Card before update:`, {
+       id: card.id,
+       textBoxEnabled: card.textBoxEnabled,
+       hasTextBoxContent: !!card.textBoxContent,
+     });
+     
+     // Update the card in the store
+     updateCard(card.id, textBoxUpdate);
+     
+     // Also update using setCards to ensure React re-renders
+     const allCards = cards.map(c => c.id === card.id ? cardWithTextBox : c);
+     const { setCards } = useLaboratoryStore.getState();
+     setCards(allCards);
+     
+     console.log(`📝 Updated card in store using both updateCard and setCards`);
+     console.log(`📝 Card after update:`, {
+       id: cardWithTextBox.id,
+       textBoxEnabled: cardWithTextBox.textBoxEnabled,
+       textBoxContentLength: cardWithTextBox.textBoxContent?.length || 0,
+       textBoxesCount: cardWithTextBox.textBoxes?.length || 0,
+       textBoxContentPreview: cardWithTextBox.textBoxContent?.substring(0, 50) + '...',
+     });
+     
+     // Wait for state to propagate
+     await new Promise(resolve => setTimeout(resolve, 100));
+     
+     // Double-check: Get cards again and verify
+     const doubleCheckCards = useLaboratoryStore.getState().cards;
+     const doubleCheckCard = doubleCheckCards.find(c => c.id === card.id);
+     if (doubleCheckCard) {
+       console.log(`📝 Double-check - textBoxEnabled: ${doubleCheckCard.textBoxEnabled}, content length: ${doubleCheckCard.textBoxContent?.length || 0}`);
+       if (!doubleCheckCard.textBoxEnabled || !doubleCheckCard.textBoxContent) {
+         console.error(`❌ CRITICAL: textBoxEnabled or content missing after double-check! Forcing update...`);
+         const forceUpdate = doubleCheckCards.map(c => 
+           c.id === card.id ? { ...c, ...textBoxUpdate } : c
+         );
+         setCards(forceUpdate);
+         console.log(`🔄 Forced text box update for card ${card.id}`);
+       } else {
+         console.log(`✅ Text box is properly enabled and has content on card ${card.id}`);
+       }
+     }
+     
+     // Wait a bit for state to update
+     await new Promise(resolve => setTimeout(resolve, 200));
+     
+     // Verify the update
+     const verifyCards = useLaboratoryStore.getState().cards;
+     const verifyCard = verifyCards.find(c => c.id === card.id);
+     
+     if (verifyCard) {
+       console.log(`✅ Card text box updated in store for card ${card.id}`);
+       console.log(`✅ Verification - textBoxEnabled: ${verifyCard.textBoxEnabled}`);
+       console.log(`✅ Verification - textBoxContent length: ${verifyCard.textBoxContent?.length || 0}`);
+       console.log(`✅ Verification - textBoxContent preview: ${verifyCard.textBoxContent?.substring(0, 100)}...`);
+       console.log(`✅ Verification - textBoxes count: ${verifyCard.textBoxes?.length || 0}`);
+       
+       if (!verifyCard.textBoxEnabled) {
+         console.error(`❌ ERROR: textBoxEnabled is still false after update!`);
+         // Retry the update
+         const retryCards = verifyCards.map(c => 
+           c.id === card.id ? { ...c, ...textBoxUpdate } : c
+         );
+         setCards(retryCards);
+         console.log(`🔄 Retried text box update for card ${card.id}`);
+       }
+       if (!verifyCard.textBoxContent || verifyCard.textBoxContent.length === 0) {
+         console.error(`❌ ERROR: textBoxContent is empty after update!`);
+       }
+     } else {
+       console.error(`❌ Card not found after update!`);
+     }
+     
+     // Get updated cards from store after update for API save
+     const finalCards = useLaboratoryStore.getState().cards;
+     const finalCard = finalCards.find(c => c.id === card.id);
+    
+     if (!finalCard) {
+       console.error(`❌ Final card not found after update`);
+       return;
+     }
+     
+     // Get environment context for API call
+     const envContext = getEnvironmentContext();
+     
+     if (!envContext.client_name || !envContext.app_name || !envContext.project_name) {
+       console.warn(`⚠️ Missing environment context, skipping API save. Context:`, envContext);
+       console.warn(`⚠️ Text box is updated in store but not saved to backend. Please save manually.`);
+       return;
+     }
+     
+     // Import sanitizeLabConfig dynamically to avoid circular dependencies
+     let sanitizeLabConfig: ((config: any) => any) | null = null;
+     try {
+       const projectStorage = await import('@/utils/projectStorage');
+       sanitizeLabConfig = projectStorage.sanitizeLabConfig;
+     } catch (error) {
+       console.warn('⚠️ Could not import sanitizeLabConfig, using cards as-is');
+     }
+     
+     // Sanitize cards if function is available
+     const cardsToSave = sanitizeLabConfig 
+       ? sanitizeLabConfig({ cards: finalCards }).cards || finalCards
+       : finalCards;
+     
+     // Prepare payload for API
+     const payload = {
+       client_name: envContext.client_name,
+       app_name: envContext.app_name,
+       project_name: envContext.project_name,
+       cards: cardsToSave, // Send all cards with updated text box
+       workflow_molecules: [], // Empty for now, can be enhanced if needed
+       auxiliaryMenuLeftOpen: true,
+       autosaveEnabled: true,
+       mode: 'laboratory',
+     };
+     
+     console.log(`📤 Saving card state via API for card ${card.id}`);
+     console.log(`📤 Payload:`, {
+       client_name: payload.client_name,
+       app_name: payload.app_name,
+       project_name: payload.project_name,
+       cardsCount: payload.cards.length,
+       textBoxEnabled: finalCard.textBoxEnabled,
+       textBoxContentLength: finalCard.textBoxContent?.length || 0,
+     });
+    
+    // Save via API
+    const requestUrl = `${LABORATORY_PROJECT_STATE_API}/save`;
+    const response = await fetch(requestUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+    
+    if (response.ok) {
+      const result = await response.json();
+      console.log(`✅ Card text box saved via API for card ${card.id}:`, result);
+    } else {
+      const errorText = await response.text();
+      console.error(`❌ Failed to save card text box via API:`, response.status, response.statusText, errorText);
+    }
+  } catch (error) {
+    console.error('❌ Error updating card text box:', error);
+    if (error instanceof Error) {
+      console.error('❌ Error details:', error.message, error.stack);
+    }
+  }
 };

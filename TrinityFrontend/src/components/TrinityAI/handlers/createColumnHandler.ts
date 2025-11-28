@@ -9,7 +9,9 @@ import {
   executePerformOperation,
   validateFileInput,
   constructFullPath,
-  autoSaveStepResult
+  autoSaveStepResult,
+  formatAgentResponseForTextBox,
+  updateCardTextBox
 } from './utils';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
@@ -429,6 +431,29 @@ export const createColumnHandler: AtomHandler = {
     });
     
     updateAtomSettings(atomId, mergedSettings);
+    
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content length:', textBoxContent.length);
+    
+    // Update card's text box (this enables the text box icon on the card)
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // Store agent response in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || '',
+        reasoning: data.reasoning || '',
+        smart_response: data.smart_response || '',
+        formattedText: textBoxContent
+      }
+    });
     
     // Force a small delay to ensure state propagation, then verify
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -1058,6 +1083,16 @@ export const createColumnHandler: AtomHandler = {
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, aiMsg]);
+    
+    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
     
     return { success: true };
   }

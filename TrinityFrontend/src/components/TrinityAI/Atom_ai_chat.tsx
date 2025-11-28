@@ -11,6 +11,7 @@ import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratory
 import { createColumnHandler } from './handlers/createColumnHandler';
 import { AtomHandlerContext } from './handlers/types';
 import { getAtomHandler } from './handlers';
+import { formatAgentResponseForTextBox, updateCardTextBox } from './handlers/utils';
 
 interface Message {
   id: string;
@@ -306,6 +307,19 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           
           console.log('🤖 AI CONFIG EXTRACTED:', { file1, file2, direction });
           
+          // 📝 Update card text box with response, reasoning, and smart_response
+          console.log('📝 Updating card text box with agent response...');
+          const textBoxContent = formatAgentResponseForTextBox(data);
+          console.log('📝 Formatted text box content length:', textBoxContent.length);
+          
+          // Update card's text box (this enables the text box icon on the card)
+          try {
+            await updateCardTextBox(atomId, textBoxContent);
+            console.log('✅ Card text box updated successfully');
+          } catch (textBoxError) {
+            console.error('❌ Error updating card text box:', textBoxError);
+          }
+          
           // Update atom settings with the AI configuration
           updateAtomSettings(atomId, { 
             file1, 
@@ -313,7 +327,13 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             direction,
             // Store the full AI response for reference
             aiConfig: cfg,
-            aiMessage: data.message
+            aiMessage: data.message,
+            agentResponse: {
+              response: data.response || '',
+              reasoning: data.reasoning || '',
+              smart_response: data.smart_response || '',
+              formattedText: textBoxContent
+            }
           });
           
           console.log('🚨 About to add AI success message to chat');
@@ -448,6 +468,19 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           
           console.log('🤖 AI MERGE CONFIG EXTRACTED:', { file1, file2, joinColumns, joinType });
           
+          // 📝 Update card text box with response, reasoning, and smart_response
+          console.log('📝 Updating card text box with agent response...');
+          const textBoxContent = formatAgentResponseForTextBox(data);
+          console.log('📝 Formatted text box content length:', textBoxContent.length);
+          
+          // Update card's text box (this enables the text box icon on the card)
+          try {
+            await updateCardTextBox(atomId, textBoxContent);
+            console.log('✅ Card text box updated successfully');
+          } catch (textBoxError) {
+            console.error('❌ Error updating card text box:', textBoxError);
+          }
+          
           // Update atom settings with the AI configuration
           updateAtomSettings(atomId, { 
             file1, 
@@ -457,7 +490,13 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             availableColumns: joinColumns,
             // Store the full AI response for reference
             aiConfig: cfg,
-            aiMessage: data.message
+            aiMessage: data.message,
+            agentResponse: {
+              response: data.response || '',
+              reasoning: data.reasoning || '',
+              smart_response: data.smart_response || '',
+              formattedText: textBoxContent
+            }
           });
           
           // Add AI success message with operation completion
@@ -871,6 +910,29 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           
           console.log('✅ ATOM SETTINGS UPDATED - identifiers now includes:', newIdentifiers);
           console.log('✅ selectedIdentifiers set to:', aiSelectedIdentifiers);
+          
+          // 📝 Update card text box with response, reasoning, and smart_response
+          console.log('📝 Updating card text box with agent response...');
+          const textBoxContent = formatAgentResponseForTextBox(data);
+          console.log('📝 Formatted text box content length:', textBoxContent.length);
+          
+          // Update card's text box (this enables the text box icon on the card)
+          try {
+            await updateCardTextBox(atomId, textBoxContent);
+            console.log('✅ Card text box updated successfully');
+          } catch (textBoxError) {
+            console.error('❌ Error updating card text box:', textBoxError);
+          }
+          
+          // Store agent response in atom settings for reference
+          updateAtomSettings(atomId, {
+            agentResponse: {
+              response: data.response || '',
+              reasoning: data.reasoning || '',
+              smart_response: data.smart_response || '',
+              formattedText: textBoxContent
+            }
+          });
           
           // Add AI success message with operation completion
           const aiSuccessMsg: Message = {
@@ -1693,6 +1755,29 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 autoRenderAfterLoad: false,
                 // 🔧 Ensure dataSource is set using matched object_name for dropdown visibility
                 dataSource: matchedObjectName || targetFileObjectName || targetFile.replace(/\.arrow$/, '')
+              });
+              
+              // 📝 Update card text box with response, reasoning, and smart_response
+              console.log('📝 Updating card text box with agent response...');
+              const textBoxContent = formatAgentResponseForTextBox(data);
+              console.log('📝 Formatted text box content length:', textBoxContent.length);
+              
+              // Update card's text box (this enables the text box icon on the card)
+              try {
+                await updateCardTextBox(atomId, textBoxContent);
+                console.log('✅ Card text box updated successfully');
+              } catch (textBoxError) {
+                console.error('❌ Error updating card text box:', textBoxError);
+              }
+              
+              // Store agent response in atom settings for reference
+              updateAtomSettings(atomId, {
+                agentResponse: {
+                  response: data.response || '',
+                  reasoning: data.reasoning || '',
+                  smart_response: data.smart_response || '',
+                  formattedText: textBoxContent
+                }
               });
               
               console.log('🎉 Charts processed:', generatedCharts.length);
@@ -2641,6 +2726,29 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             operationCompleted: false
           });
           
+          // 📝 Update card text box with response, reasoning, and smart_response
+          console.log('📝 Updating card text box with agent response...');
+          const textBoxContent = formatAgentResponseForTextBox(data);
+          console.log('📝 Formatted text box content length:', textBoxContent.length);
+          
+          // Update card's text box (this enables the text box icon on the card)
+          try {
+            await updateCardTextBox(atomId, textBoxContent);
+            console.log('✅ Card text box updated successfully');
+          } catch (textBoxError) {
+            console.error('❌ Error updating card text box:', textBoxError);
+          }
+          
+          // Store agent response in atom settings for reference
+          updateAtomSettings(atomId, {
+            agentResponse: {
+              response: data.response || '',
+              reasoning: data.reasoning || '',
+              smart_response: data.smart_response || '',
+              formattedText: textBoxContent
+            }
+          });
+          
           // Add AI success message
           const aiSuccessMsg: Message = {
             id: (Date.now() + 1).toString(),
@@ -2904,10 +3012,16 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                       
                       // Update UI immediately after each operation
                       const currentSettings = useLaboratoryStore.getState().getAtom(atomId)?.settings;
+                      
+                      // 🔧 FIX: Clear selectedFile if it's invalid (doesn't end with .arrow) to prevent repeated load errors
+                      const currentSelectedFile = currentSettings?.selectedFile;
+                      const shouldClearSelectedFile = currentSelectedFile && !currentSelectedFile.endsWith('.arrow');
+                      
                       updateAtomSettings(atomId, {
                         ...currentSettings, // 🔧 CRITICAL: Preserve existing settings
                         tableData: dataFrameData,
-                        selectedFile: "AI_Processed_Data", // 🔧 CRITICAL: Set selectedFile to enable table display
+                        // 🔧 FIX: Clear invalid selectedFile values to prevent useEffect from trying to load them
+                        selectedFile: shouldClearSelectedFile ? null : (currentSelectedFile || null),
                         fileId: current_df_id,
                         selectedColumns: result.headers || []
                       });

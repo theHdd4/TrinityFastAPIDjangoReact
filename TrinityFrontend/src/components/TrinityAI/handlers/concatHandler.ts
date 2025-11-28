@@ -8,7 +8,9 @@ import {
   createErrorMessage,
   processSmartResponse,
   executePerformOperation,
-  validateFileInput 
+  validateFileInput,
+  formatAgentResponseForTextBox,
+  updateCardTextBox
 } from './utils';
 
 export const concatHandler: AtomHandler = {
@@ -30,6 +32,49 @@ export const concatHandler: AtomHandler = {
       return updated;
     });
     console.log('🚨 Test message added to state');
+    
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 RAW DATA RECEIVED:', {
+      hasResponse: !!data.response,
+      hasDataResponse: !!data.data?.response,
+      hasReasoning: !!data.reasoning,
+      hasDataReasoning: !!data.data?.reasoning,
+      hasSmartResponse: !!data.smart_response,
+      hasDataSmartResponse: !!data.data?.smart_response,
+      dataKeys: Object.keys(data),
+      dataDataKeys: data.data ? Object.keys(data.data) : [],
+    });
+    
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content length:', textBoxContent.length);
+    console.log('📝 Formatted text box content preview:', textBoxContent.substring(0, 300));
+    
+    if (!textBoxContent || textBoxContent.trim() === '' || textBoxContent === 'No response data available.') {
+      console.warn('⚠️ WARNING: Text box content is empty or invalid!');
+      console.warn('⚠️ Data structure:', JSON.stringify(data, null, 2).substring(0, 1000));
+    }
+    
+    // Store in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || data.data?.response || '',
+        reasoning: data.reasoning || data.data?.reasoning || '',
+        smart_response: data.smart_response || data.data?.smart_response || data.smartResponse || '',
+        formattedText: textBoxContent
+      }
+    });
+    
+    // Update card's text box (this enables the text box icon on the card)
+    console.log('📝 About to call updateCardTextBox with atomId:', atomId);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ updateCardTextBox completed successfully');
+    } catch (error) {
+      console.error('❌ ERROR in updateCardTextBox:', error);
+      if (error instanceof Error) {
+        console.error('❌ Error stack:', error.stack);
+      }
+    }
     
     // 🔧 CRITICAL FIX: Show smart_response EXACTLY like DataFrame Operations (no isStreamMode check)
     const smartResponseText = processSmartResponse(data);
@@ -272,6 +317,24 @@ export const concatHandler: AtomHandler = {
 
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { setMessages, updateAtomSettings, atomId } = context;
+    
+    // 📝 Update card text box with response, reasoning, and smart_response even on failure
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content (failure):', textBoxContent.substring(0, 200) + '...');
+    
+    // Store in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || data.data?.response || '',
+        reasoning: data.reasoning || data.data?.reasoning || '',
+        smart_response: data.smart_response || data.data?.smart_response || data.smartResponse || '',
+        formattedText: textBoxContent
+      }
+    });
+    
+    // Update card's text box (this enables the text box icon on the card)
+    await updateCardTextBox(atomId, textBoxContent);
+    console.log('📝 Card text box updated with agent response fields (failure case)');
     
     let aiText = '';
     if (data.smart_response) {

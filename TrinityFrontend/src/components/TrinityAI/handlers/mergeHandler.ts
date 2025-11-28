@@ -9,7 +9,9 @@ import {
   processSmartResponse,
   executePerformOperation,
   validateFileInput,
-  autoSaveStepResult
+  autoSaveStepResult,
+  formatAgentResponseForTextBox,
+  updateCardTextBox
 } from './utils';
 
 export const mergeHandler: AtomHandler = {
@@ -226,6 +228,29 @@ export const mergeHandler: AtomHandler = {
     
     updateAtomSettings(atomId, settingsToUpdate);
     
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content length:', textBoxContent.length);
+    
+    // Update card's text box (this enables the text box icon on the card)
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // Store agent response in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || '',
+        reasoning: data.reasoning || '',
+        smart_response: data.smart_response || '',
+        formattedText: textBoxContent
+      }
+    });
+    
     // 🔧 FIX: No need for duplicate success message - smart_response already shown at the top
     console.log('📋 Merge configuration:', {
       file1: mappedFile1,
@@ -412,6 +437,16 @@ export const mergeHandler: AtomHandler = {
     };
     setMessages(prev => [...prev, aiMsg]);
     console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
+    
+    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
     
     // 🔧 CRITICAL FIX: Load available files into atom settings for dropdown population
     // This ensures files appear in the merge interface even for failure cases

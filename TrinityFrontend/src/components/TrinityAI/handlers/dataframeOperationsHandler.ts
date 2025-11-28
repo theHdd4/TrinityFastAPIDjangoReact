@@ -10,7 +10,9 @@ import {
   validateFileInput,
   createProgressTracker,
   autoSaveStepResult,
-  constructFullPath
+  constructFullPath,
+  formatAgentResponseForTextBox,
+  updateCardTextBox
 } from './utils';
 
 // Import the dataframe operations API functions
@@ -1160,6 +1162,16 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
       }
     }
 
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
     return { success: true };
   },
 
@@ -1185,6 +1197,16 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
         fileAnalysis: data.file_analysis || null,
         lastInteractionTime: Date.now()
       });
+    }
+    
+    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
     }
     
     return { success: true };
