@@ -241,9 +241,22 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
 
   return (
     <div
-      className="relative flex w-full max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-background/95 px-2.5 py-2.5 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg"
+      className="relative flex w-full max-w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-border/70 bg-background/95 px-2.5 py-2.5 pr-12 text-sm shadow-[0_24px_48px_-22px_rgba(124,58,237,0.45)] backdrop-blur-lg"
       data-text-toolbar-root
     >
+
+      {onDelete && (
+        <Button
+          variant="ghost"
+          size="icon"
+          type="button"
+          onClick={onDelete}
+          className="absolute right-2 top-2 h-7 w-7 shrink-0 rounded-full text-destructive hover:bg-destructive/10"
+          onMouseDown={handleToolbarMouseDown}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      )}
 
       <Popover>
         <PopoverTrigger asChild>
@@ -719,21 +732,6 @@ export const TextBoxToolbar: React.FC<TextBoxToolbarProps> = ({
         </PopoverContent>
       </Popover>
 
-      {onDelete && (
-        <>
-          <span className="h-6 w-px shrink-0 rounded-full bg-border/60" />
-          <Button
-            variant="ghost"
-            size="icon"
-            type="button"
-            onClick={onDelete}
-            className="h-8 w-8 shrink-0 rounded-full text-destructive hover:bg-destructive/10"
-            onMouseDown={handleToolbarMouseDown}
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
-        </>
-      )}
     </div>
   );
 };

@@ -307,11 +307,12 @@ interface CardTextBoxCanvasProps {
   settings: TextBoxSettings;
   onTextChange: (data: { text: string; html: string }) => void;
   onSettingsChange: (updates: Partial<TextBoxSettings>) => void;
+  onDelete?: () => void;
 }
 
 const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
 
-const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange }) => {
+const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange, onDelete }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
@@ -881,7 +882,13 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             onBulletedList={() => {
               logToolbarAction('toggle-list', { type: 'bullet' });
 
+              console.log('[Laboratory Text Toolbar] Bullet toggle requested', {
+                hasEditableSelection: hasEditableSelection(),
+                currentHtml: editorRef.current?.innerHTML,
+              });
+
               const executed = runCommand('insertUnorderedList');
+              console.log('[Laboratory Text Toolbar] Native bullet command executed', executed);
               if (executed) {
                 updateListTypeFromContent();
                 handleInput();
@@ -889,13 +896,20 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
               }
 
               applyListTransformation(toggleBulletedListContent, transformed => {
+                console.log('[Laboratory Text Toolbar] Fallback bullet transform applied', transformed);
                 updateListTypeFromContent(transformed);
               });
             }}
             onNumberedList={() => {
               logToolbarAction('toggle-list', { type: 'number' });
 
+              console.log('[Laboratory Text Toolbar] Numbered toggle requested', {
+                hasEditableSelection: hasEditableSelection(),
+                currentHtml: editorRef.current?.innerHTML,
+              });
+
               const executed = runCommand('insertOrderedList');
+              console.log('[Laboratory Text Toolbar] Native numbered command executed', executed);
               if (executed) {
                 updateListTypeFromContent();
                 handleInput();
@@ -903,6 +917,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
               }
 
               applyListTransformation(toggleNumberedListContent, transformed => {
+                console.log('[Laboratory Text Toolbar] Fallback numbered transform applied', transformed);
                 updateListTypeFromContent(transformed);
               });
             }}
@@ -910,6 +925,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             onColorChange={handleColorChange}
             backgroundColor={settings.background_color ?? 'transparent'}
             onBackgroundColorChange={handleBackgroundColorChange}
+            onDelete={onDelete}
           />
         </div>
       ) : null}
@@ -1242,10 +1258,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
     const normalizedTextBoxes = normalizeCardTextBoxes(card);
 
-    if (normalizedTextBoxes.length === 0) {
-      return null;
-    }
-
     const syncLegacyFields = (boxes: TextBoxConfig[]) => {
       const primary = boxes[0];
 
@@ -1313,6 +1325,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               key={box.id}
               data={textData}
               settings={box.settings as TextBoxSettings}
+              onDelete={() =>
+                updateCardTextBoxes(boxes => {
+                  const filtered = boxes.filter(existing => existing.id !== box.id);
+                  return filtered;
+                })
+              }
               onTextChange={(data) =>
                 updateCardTextBoxes((boxes) =>
                   boxes.map(existing =>
@@ -1341,20 +1359,23 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             />
           );
         })}
-
-        <div className="text-sm text-muted-foreground text-left">
-          Click to edit text. Use the toolbar to format content and lists.
-        </div>
+        {normalizedTextBoxes.length > 0 ? (
+          <div className="text-sm text-muted-foreground text-left">
+            Click to edit text. Use the toolbar to format content and lists.
+          </div>
+        ) : null}
 
         {canAddMore ? (
-          <button
-            type="button"
-            onClick={addTextBoxBelow}
-            className="inline-flex items-center gap-2 text-primary hover:text-primary/80 text-sm font-medium"
-          >
-            <Plus className="h-4 w-4" />
-            Add text box
-          </button>
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={addTextBoxBelow}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-primary text-primary transition-colors hover:bg-primary/10"
+              aria-label="Add text box"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
         ) : null}
       </div>
     );
