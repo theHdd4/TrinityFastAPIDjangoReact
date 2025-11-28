@@ -939,7 +939,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
           onMouseUp={saveSelection}
           suppressContentEditableWarning
           className={`
-            w-full min-h-[200px] p-6
+            w-full min-h-[100px] p-6
             border-2 border-dashed border-border rounded-lg
             focus:outline-none focus:border-primary
             transition-colors duration-200
@@ -1359,12 +1359,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             />
           );
         })}
-        {normalizedTextBoxes.length > 0 ? (
-          <div className="text-sm text-muted-foreground text-left">
-            Click to edit text. Use the toolbar to format content and lists.
-          </div>
-        ) : null}
-
         {canAddMore ? (
           <div className="flex justify-center">
             <button
