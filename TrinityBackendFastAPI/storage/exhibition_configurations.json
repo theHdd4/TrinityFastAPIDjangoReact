@@ -98425,5 +98425,364 @@
     "id": "card-1763535093817-om4mzgwogx",
     "project_name": "DEMO",
     "updated_at": "2025-11-19T07:08:43.922643+00:00"
+  },
+  {
+    "app_name": "exploratory-data-analysis",
+    "atom_name": "Evaluate models - Feature based",
+    "client_name": "Quant_Matrix_AI_Schema",
+    "created_at": "2025-11-25T10:24:11.511956+00:00",
+    "exhibited_components": [
+      {
+        "atomId": "evaluate-models-feature",
+        "category": "Evaluate Models Feature",
+        "color": "bg-orange-500",
+        "id": "3-All_India_Godrej_Expert_Rich_Crème",
+        "metadata": {
+          "capturedAt": "2025-11-25T10:25:49.447Z",
+          "graphContext": {
+            "chartConfig": {
+              "chartType": "scatter_chart",
+              "showAxisLabels": true,
+              "showDataLabels": false,
+              "showGrid": true,
+              "showLegend": false,
+              "sortOrder": null,
+              "theme": "default"
+            },
+            "chartData": [
+              {
+                "actual": 19465457.8527,
+                "predicted": 19462168.51300684
+              },
+              {
+                "actual": 20320842.9939,
+                "predicted": 20355281.49681371
+              },
+              {
+                "actual": 20400915.547,
+                "predicted": 20540596.349238645
+              },
+              {
+                "actual": 20501148.0732,
+                "predicted": 20060554.011699248
+              },
+              {
+                "actual": 20799481.6806,
+                "predicted": 20724005.434659887
+              },
+              {
+                "actual": 21202372.3253,
+                "predicted": 20553404.92041205
+              },
+              {
+                "actual": 22062415.2115,
+                "predicted": 21620422.28328511
+              },
+              {
+                "actual": 23128012.927,
+                "predicted": 22448572.53637989
+              },
+              {
+                "actual": 23521401.7925,
+                "predicted": 23949467.09028245
+              },
+              {
+                "actual": 23899008.2851,
+                "predicted": 23382211.25820717
+              },
+              {
+                "actual": 24503551.0666,
+                "predicted": 25136515.08027039
+              },
+              {
+                "actual": 27226423.0922,
+                "predicted": 26403611.85263364
+              },
+              {
+                "actual": 27651727.8973,
+                "predicted": 27119215.59002204
+              },
+              {
+                "actual": 29195110.0622,
+                "predicted": 27737156.153656982
+              },
+              {
+                "actual": 29665554.527,
+                "predicted": 28877639.411803246
+              },
+              {
+                "actual": 30321272.5028,
+                "predicted": 29744443.487429358
+              },
+              {
+                "actual": 30934453.7451,
+                "predicted": 30704868.139107533
+              },
+              {
+                "actual": 31100234.9105,
+                "predicted": 31825474.40122443
+              },
+              {
+                "actual": 31846573.5677,
+                "predicted": 32725236.548404325
+              },
+              {
+                "actual": 33204180.8321,
+                "predicted": 33190704.921551123
+              },
+              {
+                "actual": 33650186.2208,
+                "predicted": 34006665.26805629
+              },
+              {
+                "actual": 33943839.0826,
+                "predicted": 33738265.838040546
+              },
+              {
+                "actual": 34963020.8567,
+                "predicted": 35158919.83780347
+              },
+              {
+                "actual": 36664173.8444,
+                "predicted": 35862121.5010173
+              },
+              {
+                "actual": 36684814.3849,
+                "predicted": 37090457.058703706
+              },
+              {
+                "actual": 36686110.1009,
+                "predicted": 35795979.24478988
+              },
+              {
+                "actual": 37298292.1578,
+                "predicted": 36568208.97768767
+              },
+              {
+                "actual": 37549462.4674,
+                "predicted": 37579101.01798143
+              },
+              {
+                "actual": 37814281.5897,
+                "predicted": 38928459.031494126
+              },
+              {
+                "actual": 38720604.7586,
+                "predicted": 38485580.355296165
+              },
+              {
+                "actual": 40862739.0973,
+                "predicted": 40031180.36627737
+              }
+            ],
+            "identifiers": [],
+            "identifiersData": {},
+            "modelResults": [],
+            "scope": "SCOPE 12",
+            "selectedCombinations": [
+              "All_India_Godrej_Expert_Rich_Crème",
+              "Andhra-Telangana_Godrej_Expert_Rich_Crème",
+              "Assam-NE_Godrej_Expert_Rich_Crème"
+            ],
+            "selectedDataframe": "Quant_Matrix_AI_Schema/exploratory-data-analysis/New Projects Project/model-results/mmm_ensemble_results_scope_1.arrow",
+            "selectedIdentifierValues": {
+              "Brand": [
+                "Godrej Expert Rich Crème"
+              ],
+              "Region": [
+                "All India",
+                "Andhra-Telangana",
+                "Assam-NE"
+              ]
+            }
+          },
+          "graphId": "3-All_India_Godrej_Expert_Rich_Crème",
+          "graphState": {
+            "chartTypePreference": "line_chart",
+            "combinationName": "All_India_Godrej_Expert_Rich_Crème",
+            "graphId": "3-All_India_Godrej_Expert_Rich_Crème",
+            "graphName": "Actual vs Predicted",
+            "graphType": "actual-vs-predicted",
+            "selected": true
+          },
+          "graphTitle": "Actual vs Predicted - All_India_Godrej_Expert_Rich_Crème",
+          "sourceAtomTitle": "Evaluate models - Feature based"
+        },
+        "title": "Actual vs Predicted - All_India_Godrej_Expert_Rich_Crème · Evaluate Models Feature"
+      },
+      {
+        "atomId": "evaluate-models-feature",
+        "category": "Evaluate Models Feature",
+        "color": "bg-orange-500",
+        "id": "3-Andhra-Telangana_Godrej_Expert_Rich_Crème",
+        "metadata": {
+          "capturedAt": "2025-11-25T10:26:38.960Z",
+          "graphContext": {
+            "chartConfig": {
+              "chartType": "scatter_chart",
+              "showAxisLabels": true,
+              "showDataLabels": false,
+              "showGrid": true,
+              "showLegend": false,
+              "sortOrder": null,
+              "theme": "default"
+            },
+            "chartData": [
+              {
+                "actual": 1161246.9303,
+                "predicted": 1219213.8439142492
+              },
+              {
+                "actual": 1191581.5134,
+                "predicted": 1184487.5472904062
+              },
+              {
+                "actual": 1251034.7077,
+                "predicted": 1235993.586911119
+              },
+              {
+                "actual": 1313441.7451,
+                "predicted": 1299672.7291315815
+              },
+              {
+                "actual": 1323109.8267,
+                "predicted": 1245455.9937061428
+              },
+              {
+                "actual": 1451251.929,
+                "predicted": 1403827.5493369983
+              },
+              {
+                "actual": 1498623.4752,
+                "predicted": 1524124.3569555564
+              },
+              {
+                "actual": 1506742.105,
+                "predicted": 1421186.9081887193
+              },
+              {
+                "actual": 1650572.8816,
+                "predicted": 1629474.4282028435
+              },
+              {
+                "actual": 1658303.7683,
+                "predicted": 1677635.6354309756
+              },
+              {
+                "actual": 1694606.4763,
+                "predicted": 1888164.9636359622
+              },
+              {
+                "actual": 1942693.768,
+                "predicted": 1999026.119818892
+              },
+              {
+                "actual": 1962701.7344,
+                "predicted": 1949208.204633695
+              },
+              {
+                "actual": 2010113.8319,
+                "predicted": 2023678.0831524224
+              },
+              {
+                "actual": 2162777.8765,
+                "predicted": 2063017.2721921718
+              },
+              {
+                "actual": 2244776.4651,
+                "predicted": 2126068.7648607185
+              },
+              {
+                "actual": 2354834.7678,
+                "predicted": 2270027.6410074704
+              },
+              {
+                "actual": 2472582.9087,
+                "predicted": 2532807.0674563143
+              },
+              {
+                "actual": 2515450.5584,
+                "predicted": 2598828.0630188966
+              },
+              {
+                "actual": 2518235.8647,
+                "predicted": 2401633.86989988
+              },
+              {
+                "actual": 2535871.2431,
+                "predicted": 2455424.3549573105
+              },
+              {
+                "actual": 2599805.354,
+                "predicted": 2521752.503310216
+              },
+              {
+                "actual": 2663998.2622,
+                "predicted": 2639592.3144191103
+              },
+              {
+                "actual": 2714812.8288,
+                "predicted": 2511404.385154641
+              },
+              {
+                "actual": 2717771.551,
+                "predicted": 2717716.559037662
+              },
+              {
+                "actual": 2730234.734,
+                "predicted": 2656434.61443901
+              },
+              {
+                "actual": 2811101.6674,
+                "predicted": 2665220.843929714
+              },
+              {
+                "actual": 2818815.5323,
+                "predicted": 2625411.213834106
+              },
+              {
+                "actual": 2818922.3705,
+                "predicted": 2744197.856701621
+              }
+            ],
+            "identifiers": [],
+            "identifiersData": {},
+            "modelResults": [],
+            "scope": "SCOPE 12",
+            "selectedCombinations": [
+              "All_India_Godrej_Expert_Rich_Crème",
+              "Andhra-Telangana_Godrej_Expert_Rich_Crème",
+              "Assam-NE_Godrej_Expert_Rich_Crème"
+            ],
+            "selectedDataframe": "Quant_Matrix_AI_Schema/exploratory-data-analysis/New Projects Project/model-results/mmm_ensemble_results_scope_1.arrow",
+            "selectedIdentifierValues": {
+              "Brand": [
+                "Godrej Expert Rich Crème"
+              ],
+              "Region": [
+                "All India",
+                "Andhra-Telangana",
+                "Assam-NE"
+              ]
+            }
+          },
+          "graphId": "3-Andhra-Telangana_Godrej_Expert_Rich_Crème",
+          "graphState": {
+            "chartTypePreference": "line_chart",
+            "combinationName": "Andhra-Telangana_Godrej_Expert_Rich_Crème",
+            "graphId": "3-Andhra-Telangana_Godrej_Expert_Rich_Crème",
+            "graphName": "Actual vs Predicted",
+            "graphType": "actual-vs-predicted",
+            "selected": true
+          },
+          "graphTitle": "Actual vs Predicted - Andhra-Telangana_Godrej_Expert_Rich_Crème",
+          "sourceAtomTitle": "Evaluate models - Feature based"
+        },
+        "title": "Actual vs Predicted - Andhra-Telangana_Godrej_Expert_Rich_Crème · Evaluate Models Feature"
+      }
+    ],
+    "id": "card-1764065725396-rxxdr0zy42",
+    "project_name": "New Projects Project",
+    "updated_at": "2025-11-25T10:26:46.062246+00:00"
   }
 ]

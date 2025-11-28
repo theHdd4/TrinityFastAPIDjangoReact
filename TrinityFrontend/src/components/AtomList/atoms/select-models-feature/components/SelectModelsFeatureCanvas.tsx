@@ -314,10 +314,17 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     }
   }, [data.selectedDataset, atomId]);
 
-  // Fetch weighted ensemble data when filtered models change
+  // Fetch weighted ensemble data when filtered models change or when ensemble method is enabled
   useEffect(() => {
-    if (data.selectedDataset && data.selectedCombinationId && data.ensembleMethod && data.elasticityData) {
-      fetchWeightedEnsembleData(data.selectedDataset, data.selectedCombinationId);
+    if (data.selectedDataset && data.selectedCombinationId && data.selectedCombinationId !== 'all' && data.ensembleMethod) {
+      // Fetch ensemble data if we have elasticity data (models to ensemble), or even if we don't have it yet
+      // This ensures ensemble option is available
+      if (data.elasticityData && data.elasticityData.length > 0) {
+        fetchWeightedEnsembleData(data.selectedDataset, data.selectedCombinationId);
+      } else if (data.selectedDataset) {
+        // Try to fetch ensemble data even without filtered models (will use all available models)
+        fetchWeightedEnsembleData(data.selectedDataset, data.selectedCombinationId);
+      }
     }
   }, [data.elasticityData, data.selectedDataset, data.selectedCombinationId, data.ensembleMethod]);
 
@@ -1674,16 +1681,15 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch actual vs predicted data for ensemble
   const fetchActualVsPredictedEnsemble = async (combinationId: string) => {
-    if (!data.selectedDataset || combinationId === 'all' || !data.weightedEnsembleData || data.weightedEnsembleData.length === 0) {
+    if (!data.selectedDataset || combinationId === 'all') {
       return;
     }
     
     try {
-      const ensemble = data.weightedEnsembleData[0];
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
-      // Use the ensemble-specific endpoint
+      // Use the ensemble-specific endpoint (doesn't require weightedEnsembleData)
       const baseUrl = `${SELECT_API}/models/actual-vs-predicted-ensemble`;
       const params = new URLSearchParams({
         file_key: data.selectedDataset,
@@ -1699,8 +1705,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
       
       const result = await fetchAndResolve(url, undefined, 'Failed to fetch actual vs predicted data');
       
+      // Debug logging
+      console.log('Ensemble Actual vs Predicted Result:', result);
+      
       // Transform the data to match the expected format
-      if (result.actual_values && result.predicted_values && Array.isArray(result.actual_values)) {
+      if (result && result.actual_values && result.predicted_values && Array.isArray(result.actual_values) && result.actual_values.length > 0) {
         const actualVsPredictedData = result.actual_values.map((actual: number, index: number) => ({
           date: result.dates ? result.dates[index] : `Period ${index + 1}`,
           actual: actual,
@@ -1742,9 +1751,13 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
         handleDataChange({
           scatterChartDomains: { x: xDomain, y: yDomain }
         });
+      } else {
+        console.warn('Ensemble Actual vs Predicted: Invalid or empty data', result);
+        handleDataChange({ actualVsPredictedData: [] });
       }
       
     } catch (error) {
+      console.error('Error fetching ensemble actual vs predicted:', error);
       handleDataChange({ actualVsPredictedData: [] });
     }
   };
@@ -1754,6 +1767,8 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
     if (!fileKey || combinationId === 'all') {
       return;
     }
+    
+    // Note: This function doesn't require weightedEnsembleData - backend calculates it
     
     try {
       const envStr = localStorage.getItem('env');
@@ -1794,16 +1809,15 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
 
   // Function to fetch YoY data for ensemble
   const fetchYoYDataEnsemble = async (combinationId: string) => {
-    if (!data.selectedDataset || combinationId === 'all' || !data.weightedEnsembleData || data.weightedEnsembleData.length === 0) {
+    if (!data.selectedDataset || combinationId === 'all') {
       return;
     }
     
     try {
-      const ensemble = data.weightedEnsembleData[0];
       const envStr = localStorage.getItem('env');
       const env = envStr ? JSON.parse(envStr) : {};
 
-      // Use the ensemble-specific endpoint
+      // Use the ensemble-specific endpoint (doesn't require weightedEnsembleData)
       const baseUrl = `${SELECT_API}/models/yoy-calculation-ensemble`;
       const params = new URLSearchParams({
         file_key: data.selectedDataset,
@@ -3550,10 +3564,11 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                   
                   if (value === 'Ensemble') {
                     // Use ensemble data for all calculations
+                    // First try to use cached ensemble data if available
                     if (data.weightedEnsembleData && data.weightedEnsembleData.length > 0) {
                       const ensemble = data.weightedEnsembleData[0];
                       
-                      // Set ensemble performance metrics
+                      // Set ensemble performance metrics from cached data
                       const ensemblePerformance = [
                         { name: 'MAPE Train', value: ensemble.weighted_metrics?.mape_train || 0 },
                         { name: 'MAPE Test', value: ensemble.weighted_metrics?.mape_test || 0 },
@@ -3563,19 +3578,27 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                         { name: 'BIC', value: ensemble.weighted_metrics?.bic || 0 }
                       ];
                       handleDataChange({ selectedModelPerformance: ensemblePerformance });
-                      
-                      // Calculate actual vs predicted using ensemble betas but same source file concept
-                      fetchActualVsPredictedEnsemble(data.selectedCombinationId);
-                      
-                      // Fetch ensemble contribution data
-                      fetchModelContributionEnsemble(data.selectedCombinationId, data.selectedDataset);
-                      
-                      // Calculate YoY using ensemble betas but same source file concept
-                      fetchYoYDataEnsemble(data.selectedCombinationId);
-                      
-                      // Fetch S-curve data for ensemble
-                      fetchSCurveData(data.selectedCombinationId, value);
+                    } else {
+                      // Fetch performance from backend (backend now handles Ensemble)
+                      fetchModelPerformance(value, data.selectedCombinationId, data.selectedDataset);
                     }
+                    
+                    // Fetch ensemble data if not already loaded
+                    if (!data.weightedEnsembleData || data.weightedEnsembleData.length === 0) {
+                      fetchWeightedEnsembleData(data.selectedDataset, data.selectedCombinationId);
+                    }
+                    
+                    // Calculate actual vs predicted using ensemble betas but same source file concept
+                    fetchActualVsPredictedEnsemble(data.selectedCombinationId);
+                    
+                    // Fetch ensemble contribution data
+                    fetchModelContributionEnsemble(data.selectedCombinationId, data.selectedDataset);
+                    
+                    // Calculate YoY using ensemble betas but same source file concept
+                    fetchYoYDataEnsemble(data.selectedCombinationId);
+                    
+                    // Fetch S-curve data for ensemble
+                    fetchSCurveData(data.selectedCombinationId, value);
                   } else {
                     // Use individual model data
                     fetchModelPerformance(value, data.selectedCombinationId, data.selectedDataset);
@@ -3596,7 +3619,7 @@ const SelectModelsFeatureCanvas: React.FC<SelectModelsFeatureCanvasProps> = ({
                 {data.elasticityData && data.elasticityData.length > 0 ? (
                   <>
                     {/* Ensemble option when ensemble method is enabled */}
-                    {data.ensembleMethod && data.weightedEnsembleData && data.weightedEnsembleData.length > 0 && (
+                    {data.ensembleMethod && (
                       <SelectItem key="ensemble" value="Ensemble">
                         Ensemble
                       </SelectItem>

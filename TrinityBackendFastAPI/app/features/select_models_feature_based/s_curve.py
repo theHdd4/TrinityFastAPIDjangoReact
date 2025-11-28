@@ -728,7 +728,7 @@ async def get_s_curve_endpoint(
                 )
                 
                 # Get build configuration
-                build_config = await get_ensemble_build_config(client_name, app_name, project_name)
+                build_config = await get_ensemble_build_config(db, client_name, app_name, project_name)
                 if not build_config:
                     return {
                         "success": False,

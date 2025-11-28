@@ -7,6 +7,7 @@ import {
   DEFAULT_UNPIVOT_SETTINGS,
 } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { UNPIVOT_API } from '@/lib/api';
+import { resolveTaskResponse } from '@/lib/taskQueue';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -314,6 +315,7 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
         }
 
         // Compute (auto-refresh will trigger this, but we can also call it explicitly)
+        // Uses Celery for asynchronous task execution
         let computeAtomId = currentAtomId;
         const computeResponse = await fetch(
           `${UNPIVOT_API}/${encodeURIComponent(computeAtomId)}/compute`,
@@ -343,9 +345,12 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
               const text = await retryComputeResponse.text().catch(() => '');
               throw new Error(text || `Compute failed (${retryComputeResponse.status})`);
             }
-            const retryResult = await retryComputeResponse.json().catch((err) => {
+            const retryRaw = await retryComputeResponse.json().catch((err) => {
               throw new Error(`Failed to parse compute response: ${err.message}`);
             });
+            // Resolve Celery task response if needed
+            // Use longer timeout for unpivot operations (15 minutes) to handle large datasets with many columns
+            const retryResult = await resolveTaskResponse(retryRaw, 900000, 180);
             updateSettings(atomId, {
               unpivotStatus: 'success',
               unpivotError: null,
@@ -361,9 +366,12 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
           throw new Error(text || `Compute failed (${computeResponse.status})`);
         }
 
-        const result = await computeResponse.json().catch((err) => {
+        const raw = await computeResponse.json().catch((err) => {
           throw new Error(`Failed to parse compute response: ${err.message}`);
         });
+        // Resolve Celery task response if needed (handles both direct and async task responses)
+        // Use longer timeout for unpivot operations (15 minutes) to handle large datasets with many columns
+        const result = await resolveTaskResponse(raw, 900000, 180);
         updateSettings(atomId, {
           unpivotResults: result?.dataframe ?? [],
           unpivotStatus: result?.status ?? 'success',
@@ -405,77 +413,6 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
   const handleRefresh = React.useCallback(() => {
     setManualRefreshToken((prev) => prev + 1);
   }, []);
-
-  const handleSave = React.useCallback(async () => {
-    if (!settings.datasetPath || !(settings.unpivotResults?.length ?? 0)) {
-      return;
-    }
-    setIsSaving(true);
-    setSaveError(null);
-    setSaveMessage(null);
-    try {
-      // Ensure backend atom exists before saving
-      const currentAtomId = await ensureBackendAtom();
-      
-      const response = await fetch(
-        `${UNPIVOT_API}/${encodeURIComponent(currentAtomId)}/save`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ format: 'parquet' }),
-        }
-      );
-      if (!response.ok) {
-        // If 404, atom expired - recreate and retry
-        if (response.status === 404) {
-          const recreatedAtomId = await ensureBackendAtom();
-          const retryResponse = await fetch(
-            `${UNPIVOT_API}/${encodeURIComponent(recreatedAtomId)}/save`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ format: 'parquet' }),
-            }
-          );
-          if (!retryResponse.ok) {
-            const text = await retryResponse.text().catch(() => '');
-            throw new Error(text || `Save failed (${retryResponse.status})`);
-          }
-          const retryResult = await retryResponse.json().catch((err) => {
-            throw new Error(`Failed to parse save response: ${err.message}`);
-          });
-          const message = retryResult?.minio_path
-            ? `Saved to ${retryResult.minio_path}`
-            : 'Unpivot result saved successfully';
-          setSaveMessage(message);
-          updateSettings(atomId, {
-            unpivotLastSavedPath: retryResult?.minio_path ?? null,
-            unpivotLastSavedAt: retryResult?.updated_at ?? null,
-          });
-          return;
-        }
-        const text = await response.text().catch(() => '');
-        throw new Error(text || `Save failed (${response.status})`);
-      }
-      const result = await response.json().catch((err) => {
-        throw new Error(`Failed to parse save response: ${err.message}`);
-      });
-      const message = result?.minio_path
-        ? `Saved to ${result.minio_path}`
-        : 'Unpivot result saved successfully';
-      setSaveMessage(message);
-      updateSettings(atomId, {
-        unpivotLastSavedPath: result?.minio_path ?? null,
-        unpivotLastSavedAt: result?.updated_at ?? null,
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unable to save result. Please try again.';
-      setSaveError(message);
-    } finally {
-      setIsSaving(false);
-    }
-  }, [atomId, settings.datasetPath, settings.unpivotResults, ensureBackendAtom, updateSettings]);
 
   const handleSaveAs = React.useCallback(() => {
     const defaultFilename = `unpivot_${atomId}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`;
@@ -590,7 +527,6 @@ const UnpivotAtom: React.FC<UnpivotAtomProps> = ({ atomId }) => {
             : null)
         }
         onRefresh={handleRefresh}
-        onSave={handleSave}
         onSaveAs={handleSaveAs}
       />
 

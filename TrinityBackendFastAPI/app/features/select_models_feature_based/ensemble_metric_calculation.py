@@ -30,23 +30,22 @@ async def calculate_weighted_ensemble_metrics(
     """
     try:
         # Import the weighted ensemble function
-        from .routes import weighted_ensemble
-        from .schemas import WeightedEnsembleRequest
+        from .service import calculate_weighted_ensemble
         
         # Create ensemble request
-        ensemble_request = WeightedEnsembleRequest(
-            file_key=individual_results_file_key,
-            grouping_keys=['combination_id'],
-            filter_criteria={"combination_id": combination_name},
-            include_numeric=None,
-            exclude_numeric=None,
-            filtered_models=None
-        )
+        ensemble_request = {
+            "file_key": individual_results_file_key,
+            "grouping_keys": ['combination_id'],
+            "filter_criteria": {"combination_id": combination_name},
+            "include_numeric": None,
+            "exclude_numeric": None,
+            "filtered_models": None
+        }
         
-        logger.info(f"🔍 Calling weighted_ensemble for metrics calculation...")
-        ensemble_response = await weighted_ensemble(ensemble_request)
+        logger.info(f"🔍 Calling calculate_weighted_ensemble for metrics calculation...")
+        ensemble_result = calculate_weighted_ensemble(ensemble_request)
         
-        if not ensemble_response.results or len(ensemble_response.results) == 0:
+        if not ensemble_result.get("results") or len(ensemble_result.get("results", [])) == 0:
             logger.warning(f"⚠️ No ensemble data found for combination {combination_name}")
             return {
                 "success": False,
@@ -54,15 +53,26 @@ async def calculate_weighted_ensemble_metrics(
                 "metrics": {}
             }
         
-        ensemble_data = ensemble_response.results[0]
-        weighted_metrics = ensemble_data.weighted
+        ensemble_data = ensemble_result["results"][0]
+        weighted_metrics = ensemble_data.get("weighted", {})
         
         # Calculate weighted coefficients
         weighted_coefficients = calculate_weighted_coefficients(weighted_metrics)
         
         # Calculate weighted transformation metadata
+        # Create a mock ensemble_data object for the transformation metadata function
+        class MockEnsembleData:
+            def __init__(self, weighted, model_composition):
+                self.weighted = weighted
+                self.model_composition = model_composition
+        
+        mock_ensemble = MockEnsembleData(
+            ensemble_data.get("weighted", {}),
+            ensemble_data.get("model_composition", {})
+        )
+        
         weighted_transformation_metadata = await calculate_weighted_transformation_metadata(
-            db, client_name, app_name, project_name, combination_name, ensemble_data
+            db, client_name, app_name, project_name, combination_name, mock_ensemble
         )
         
         # Calculate weighted intercept
@@ -166,7 +176,8 @@ async def calculate_weighted_transformation_metadata(
         
         # Get all unique variables from the ensemble data
         x_variables = []
-        for key in ensemble_data.weighted.keys():
+        weighted_dict = ensemble_data.weighted if hasattr(ensemble_data, 'weighted') else ensemble_data.get('weighted', {})
+        for key in weighted_dict.keys():
             if key.endswith("_beta") and key != "intercept":
                 x_variables.append(key.replace("_beta", ""))
         
@@ -269,6 +280,7 @@ def calculate_weighted_elasticity(weighted_metrics: Dict[str, Any]) -> Dict[str,
     return elasticity
 
 async def get_ensemble_build_config(
+    db,
     client_name: str,
     app_name: str,
     project_name: str
@@ -277,6 +289,7 @@ async def get_ensemble_build_config(
     Get build configuration for ensemble models.
     
     Args:
+        db: MongoDB database connection
         client_name: Client name
         app_name: App name
         project_name: Project name

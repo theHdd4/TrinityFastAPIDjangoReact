@@ -1750,6 +1750,7 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
 export interface PivotTableSettings {
   dataSource?: string;
   dataSourceColumns?: string[];
+  dataSourceColumnTypes?: Record<string, string>; // Map of column name to data type
   fields: string[];
   selectedFields: string[];
   rowFields: string[];
@@ -1789,6 +1790,7 @@ export interface PivotTableSettings {
 export const DEFAULT_PIVOT_TABLE_SETTINGS: PivotTableSettings = {
   dataSource: '',
   dataSourceColumns: [],
+  dataSourceColumnTypes: {},
   fields: [],
   selectedFields: [],
   rowFields: [],

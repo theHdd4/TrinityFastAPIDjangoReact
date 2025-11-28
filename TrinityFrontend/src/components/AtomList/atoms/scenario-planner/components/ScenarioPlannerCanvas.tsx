@@ -179,7 +179,10 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
         identifiers: currentScenarioData.identifiers || [],
 
-        features: currentScenarioData.features || [],
+        // ✅ FIXED: Prioritize scenario-specific features (with user selections) over global settings
+        features: (currentScenarioData.features && currentScenarioData.features.length > 0) 
+          ? currentScenarioData.features 
+          : (settings.features && Array.isArray(settings.features) ? settings.features : []),
 
         outputs: currentScenarioData.outputs || [],
 
@@ -201,8 +204,6 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
         ...(settings.backendIdentifiers && Array.isArray(settings.backendIdentifiers) && { identifiers: settings.backendIdentifiers }),
 
-        ...(settings.features && Array.isArray(settings.features) && { features: settings.features }), // Use user-selected features
-
         // ✅ FIXED: Prioritize scenario-specific aggregatedViews over global ones
 
         ...(currentScenarioData.aggregatedViews && Array.isArray(currentScenarioData.aggregatedViews) && currentScenarioData.aggregatedViews.length > 0 
@@ -223,7 +224,13 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
         combinationsCount: result.combinations.length,
 
-        combinationIds: result.combinations.map(c => c.combination_id || c.id)
+        combinationIds: result.combinations.map(c => c.combination_id || c.id),
+
+        featuresCount: result.features.length,
+
+        selectedFeaturesCount: result.features.filter(f => f.selected).length,
+
+        featuresSelected: result.features.map(f => ({ id: f.id, name: f.name, selected: f.selected }))
       });
 
       
@@ -258,7 +265,7 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
     }
 
-  }, [currentScenarioData, settings.backendIdentifiers, settings.features, settings.aggregatedViews, settings.selectedView]);
+  }, [currentScenarioData, settings.backendIdentifiers, settings.features, settings.aggregatedViews, settings.selectedView, currentScenario]);
 
 
 
@@ -1615,12 +1622,14 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
       
       
       // ✅ NEW: Update both the selected scenario, all scenarios list, and the scenarios data
+      // ✅ FIXED: Ensure availableScenarios is always an array
+      const safeAvailableScenarios = Array.isArray(availableScenarios) ? availableScenarios : ['scenario-1'];
 
       onSettingsChange({ 
 
         selectedScenario: newScenarioId,
 
-        allScenarios: [...availableScenarios, newScenarioId],
+        allScenarios: [...safeAvailableScenarios, newScenarioId],
 
         scenarios: updatedSettings.scenarios
 
@@ -1698,7 +1707,9 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
 
 
-            const updatedScenarios = (availableScenarios || []).filter(id => id !== scenarioId);
+            // ✅ FIXED: Ensure availableScenarios is always an array
+            const safeAvailableScenarios = Array.isArray(availableScenarios) ? availableScenarios : ['scenario-1'];
+            const updatedScenarios = safeAvailableScenarios.filter(id => id !== scenarioId);
     
     
     
@@ -4533,6 +4544,85 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
               </div>
 
               <div className="flex flex-col items-end space-y-2">
+                {/* ✅ FIXED: Compute currentSelectedViewId outside IIFE so it can be used in button disabled prop */}
+                {(() => {
+                  const currentSelectedViewId = computedSettings.selectedView || currentScenarioData?.selectedView || (computedSettings.aggregatedViews?.[0]?.id || 'view-1');
+                  
+                  const hasSelectedCombinations = !!currentScenarioData?.selectedCombinations?.length;
+                  const hasSelectedFeatures = !!(computedSettings.features || []).some(f => f.selected);
+                  const hasReferenceMethod = !!settings.referenceMethod;
+                  const hasReferencePeriod = !!(settings.referencePeriod?.from && settings.referencePeriod?.to);
+                  
+                  // Check aggregated views - find the selected view and check if it has identifier selections
+                  // ✅ FIXED: Use computedSettings.selectedView (scenario-specific) instead of settings.selectedView
+                  const selectedView = computedSettings.aggregatedViews?.find(v => v.id === currentSelectedViewId);
+                  const selectedViewIdentifiers = selectedView?.selectedIdentifiers || {};
+                  const hasAggregatedViews = !!(computedSettings.aggregatedViews?.length && 
+                    selectedView &&
+                    Object.values(selectedViewIdentifiers).some(values => Array.isArray(values) && values.length > 0));
+                  
+                  // Check fallback: checked identifiers (only if no aggregated views exist)
+                  const hasCheckedIdentifiers = !!(computedSettings.aggregatedViews?.length === 0 && 
+                    Array.isArray(computedSettings.identifiers) && 
+                    (computedSettings.identifiers || []).some(identifier => 
+                      Array.isArray(identifier.values) && identifier.values.some(v => v.checked)
+                    ));
+                  const hasIdentifierSelection = hasAggregatedViews || hasCheckedIdentifiers;
+                  
+                  // Compute if button should be disabled
+                  const isButtonDisabled = runningScenario || 
+                    !hasSelectedCombinations || 
+                    !hasSelectedFeatures || 
+                    !hasReferenceMethod || 
+                    !hasReferencePeriod || 
+                    !hasIdentifierSelection;
+                  
+                  // Detailed breakdown of each condition
+                  const disabledReasons = [];
+                  if (runningScenario) disabledReasons.push('runningScenario');
+                  if (!hasSelectedCombinations) disabledReasons.push('noSelectedCombinations');
+                  if (!hasSelectedFeatures) disabledReasons.push('noSelectedFeatures');
+                  if (!hasReferenceMethod) disabledReasons.push('noReferenceMethod');
+                  if (!hasReferencePeriod) disabledReasons.push('noReferencePeriod');
+                  if (!hasIdentifierSelection) disabledReasons.push('noIdentifierSelection');
+                  
+                  console.log('🔍 Button disabled check:', {
+                    runningScenario,
+                    hasSelectedCombinations,
+                    hasSelectedFeatures,
+                    hasReferenceMethod,
+                    hasReferencePeriod,
+                    hasReferencePeriodFrom: settings.referencePeriod?.from,
+                    hasReferencePeriodTo: settings.referencePeriod?.to,
+                    hasIdentifierSelection,
+                    hasAggregatedViews,
+                    hasCheckedIdentifiers,
+                    selectedFeaturesCount: (computedSettings.features || []).filter(f => f.selected).length,
+                    selectedCombinationsCount: currentScenarioData?.selectedCombinations?.length || 0,
+                    selectedCombinations: currentScenarioData?.selectedCombinations || [],
+                    backendCombinationsCount: settings.backendCombinations?.combinations?.length || 0,
+                    aggregatedViewsCount: computedSettings.aggregatedViews?.length || 0,
+                    selectedViewId: currentSelectedViewId,
+                    selectedViewFromSettings: settings.selectedView,
+                    selectedViewFromComputed: computedSettings.selectedView,
+                    selectedViewFromScenarioData: currentScenarioData?.selectedView,
+                    selectedViewData: selectedView,
+                    selectedViewIdentifiers: selectedViewIdentifiers,
+                    selectedViewIdentifierKeys: Object.keys(selectedViewIdentifiers),
+                    selectedViewIdentifierValues: Object.values(selectedViewIdentifiers).map(v => Array.isArray(v) ? v.length : 0),
+                    currentScenarioDataKeys: currentScenarioData ? Object.keys(currentScenarioData) : [],
+                    identifiersCount: computedSettings.identifiers?.length || 0,
+                    identifiersWithCheckedValues: computedSettings.identifiers?.map(id => ({
+                      id: id.id,
+                      name: id.name,
+                      checkedCount: (id.values || []).filter(v => v.checked).length
+                    })) || [],
+                    isDisabled: isButtonDisabled,
+                    disabledReasons: disabledReasons.length > 0 ? disabledReasons : ['NONE - BUTTON SHOULD BE ENABLED']
+                  });
+                  
+                  return null;
+                })()}
 
                                 <Button 
 
@@ -4540,15 +4630,21 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                   className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium px-6 py-2 shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
 
-                  disabled={runningScenario || 
+                  disabled={(() => {
+                    // ✅ FIXED: Compute currentSelectedViewId in the same scope as disabled check
+                    const currentSelectedViewId = computedSettings.selectedView || currentScenarioData?.selectedView || (computedSettings.aggregatedViews?.[0]?.id || 'view-1');
+                    const selectedView = computedSettings.aggregatedViews?.find(v => v.id === currentSelectedViewId);
+                    const selectedViewIdentifiers = selectedView?.selectedIdentifiers || {};
+                    
+                    return runningScenario || 
 
                             !currentScenarioData?.selectedCombinations?.length || 
 
-                            !(computedSettings.features || []).some(f => f.selected) ||
+                            !(computedSettings.features || []).some(f => f.selected) || 
 
-                            !settings.referenceMethod ||
+                            !settings.referenceMethod || 
 
-                            !settings.referencePeriod?.from ||
+                            !settings.referencePeriod?.from || 
 
                             !settings.referencePeriod?.to ||
 
@@ -4558,9 +4654,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                               (computedSettings.aggregatedViews?.length && 
 
-                               computedSettings.aggregatedViews?.find(v => v.id === settings.selectedView)?.selectedIdentifiers &&
-
-                               Object.values((computedSettings.aggregatedViews || []).find(v => v.id === settings.selectedView)?.selectedIdentifiers || {}).some(values => Array.isArray(values) && values.length > 0)) ||
+                               selectedView &&
+                               Object.values(selectedViewIdentifiers).some(values => Array.isArray(values) && values.length > 0)) ||
 
                               // OR we have checked identifiers for fallback
 
@@ -4568,9 +4663,16 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                                Array.isArray(computedSettings.identifiers) && (computedSettings.identifiers || []).some(identifier => (identifier.values || []).some(v => v.checked)))
 
-                            )}
+                            );
+                  })()}
 
-                  title={!currentScenarioData?.selectedCombinations?.length ? "No combinations available" :
+                  title={(() => {
+                    // ✅ FIXED: Compute currentSelectedViewId in title scope too
+                    const currentSelectedViewId = computedSettings.selectedView || currentScenarioData?.selectedView || (computedSettings.aggregatedViews?.[0]?.id || 'view-1');
+                    const selectedView = computedSettings.aggregatedViews?.find(v => v.id === currentSelectedViewId);
+                    const selectedViewIdentifiers = selectedView?.selectedIdentifiers || {};
+                    
+                    return !currentScenarioData?.selectedCombinations?.length ? "No combinations available" :
 
                          !(computedSettings.features || []).some(f => f.selected) ? "No features selected" :
 
@@ -4578,13 +4680,12 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                          !settings.referencePeriod?.from || !settings.referencePeriod?.to ? "Reference period incomplete" :
 
-                         !(
+                          !(
 
-                           (computedSettings.aggregatedViews?.length && 
+                            (computedSettings.aggregatedViews?.length && 
 
-                            computedSettings.aggregatedViews?.find(v => v.id === settings.selectedView)?.selectedIdentifiers &&
-
-                                                           Object.values((computedSettings.aggregatedViews || []).find(v => v.id === settings.selectedView)?.selectedIdentifiers || {}).some(values => Array.isArray(values) && values.length > 0)) ||
+                             selectedView &&
+                             Object.values(selectedViewIdentifiers).some(values => Array.isArray(values) && values.length > 0)) ||
 
                              (!computedSettings.aggregatedViews?.length && 
 
@@ -4592,7 +4693,8 @@ export const ScenarioPlannerCanvas: React.FC<ScenarioPlannerCanvasProps> = ({
 
                          ) ? "No identifiers selected for result filtering" :
 
-                         "Run scenario"}
+                         "Run scenario";
+                  })()}
 
                 >
 

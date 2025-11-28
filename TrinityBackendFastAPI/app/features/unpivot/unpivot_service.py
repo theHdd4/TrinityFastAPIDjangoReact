@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -382,15 +383,16 @@ async def update_unpivot_properties(atom_id: str, payload: UnpivotPropertiesUpda
     # If auto_refresh is enabled, trigger computation
     if metadata.get("auto_refresh", True):
         try:
-            await compute_unpivot(atom_id, UnpivotComputeRequest(force_recompute=True))
+            # compute_unpivot is now synchronous and uses asyncio.run() internally
+            compute_unpivot(atom_id, UnpivotComputeRequest(force_recompute=True))
         except Exception as e:
             logger.warning("Auto-refresh failed for atom %s: %s", atom_id, e)
     
     return await get_unpivot_metadata(atom_id)
 
 
-async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> UnpivotComputeResponse:
-    """Compute unpivot transformation."""
+async def _compute_unpivot_async(atom_id: str, payload: UnpivotComputeRequest) -> Dict[str, Any]:
+    """Internal async function that performs the actual unpivot computation."""
     logger.info("Computing unpivot for atom: %s", atom_id)
     
     start_time = time.time()
@@ -406,7 +408,7 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
         if cached:
             logger.info("Returning cached result for atom: %s", atom_id)
             updated_at = datetime.fromisoformat(cached["updated_at"]) if isinstance(cached.get("updated_at"), str) else datetime.now(timezone.utc)
-            return UnpivotComputeResponse(
+            response = UnpivotComputeResponse(
                 atom_id=atom_id,
                 status="success",
                 updated_at=updated_at,
@@ -415,6 +417,7 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
                 summary=cached.get("summary", {}),
                 computation_time=cached.get("computation_time", 0.0),
             )
+            return response.model_dump()
     
     # Load dataset
     try:
@@ -441,7 +444,15 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
     value_vars = resolve_columns(filtered_df, metadata.get("value_vars", []))
     
     # Validate configuration
-    is_valid, errors, warnings = validate_unpivot_config(filtered_df, id_vars, value_vars)
+    variable_col = metadata.get("variable_column_name", "variable")
+    value_col = metadata.get("value_column_name", "value")
+    is_valid, errors, warnings = validate_unpivot_config(
+        filtered_df, 
+        id_vars, 
+        value_vars,
+        variable_column_name=variable_col,
+        value_column_name=value_col,
+    )
     if not is_valid:
         raise HTTPException(status_code=400, detail=f"Invalid configuration: {', '.join(errors)}")
     
@@ -488,9 +499,6 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
     post_filters = metadata.get("post_filters", [])
     unpivoted_df = apply_filters(unpivoted_df, post_filters)
     
-    # Convert to records (needed for API response and storage decision)
-    records = [convert_numpy(record) for record in unpivoted_df.to_dict(orient="records")]
-    
     # Generate summary
     summary = {
         "original_rows": len(filtered_df),
@@ -503,16 +511,101 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
     
     computation_time = time.time() - start_time
     
-    # Store result
-    result = {
-        "atom_id": atom_id,
-        "status": "success",
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-        "row_count": len(records),
-        "dataframe": records,
-        "summary": summary,
-        "computation_time": computation_time,
-    }
+    # Estimate size before converting to records (to avoid expensive conversion for large datasets)
+    # Rough estimate: number of cells * average bytes per cell (assuming ~50 bytes per cell for mixed types)
+    estimated_size_bytes = len(unpivoted_df) * len(unpivoted_df.columns) * 50
+    SMALL_RESULT_THRESHOLD = 20 * 1024 * 1024  # 20MB
+    VERY_LARGE_THRESHOLD = 100 * 1024 * 1024  # 100MB
+    
+    # For large results, save to MinIO first and only convert preview to records
+    if estimated_size_bytes > VERY_LARGE_THRESHOLD:
+        logger.info(
+            "Unpivot result for atom %s is estimated to be very large (%d bytes), saving to MinIO first and using preview",
+            atom_id,
+            estimated_size_bytes,
+        )
+        
+        # Save full result to MinIO immediately (before converting to records)
+        try:
+            # Convert to Arrow format for efficient storage
+            table = pa.Table.from_pandas(unpivoted_df)
+            sink = pa.BufferOutputStream()
+            with ipc.new_file(sink, table.schema) as writer:
+                writer.write_table(table)
+            file_bytes = sink.getvalue().to_pybytes()
+            
+            # Get object prefix
+            prefix = await get_object_prefix()
+            if isinstance(prefix, tuple):
+                prefix = prefix[0]
+            if not prefix.endswith("/"):
+                prefix = f"{prefix}/"
+            
+            object_prefix = f"{prefix}unpivot/cache/"
+            file_name = f"{atom_id}_result.arrow"
+            
+            # Upload to MinIO
+            ensure_minio_bucket()
+            upload_result = upload_to_minio(file_bytes, file_name, object_prefix)
+            
+            if upload_result.get("status") == "success":
+                minio_path = upload_result["object_name"]
+                # Store the MinIO path in metadata
+                metadata["cached_result_path"] = minio_path
+                _store_metadata(atom_id, metadata)
+                logger.info("Saved very large unpivot result to MinIO: %s", minio_path)
+            else:
+                logger.warning("Failed to save to MinIO, will convert to records: %s", upload_result.get("error_message"))
+        except Exception as e:
+            logger.warning("Failed to save very large result to MinIO, will convert to records: %s", e)
+        
+        # Only convert preview (first 1000 rows) to records for API response
+        preview_df = unpivoted_df.head(1000)
+        records = [convert_numpy(record) for record in preview_df.to_dict(orient="records")]
+        
+        # Store result with preview
+        result = {
+            "atom_id": atom_id,
+            "status": "success",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "row_count": len(unpivoted_df),  # Full row count
+            "dataframe": records,  # Preview only
+            "summary": summary,
+            "computation_time": computation_time,
+            "stored_in_minio": True,
+            "is_preview": True,
+        }
+    elif estimated_size_bytes > SMALL_RESULT_THRESHOLD:
+        logger.info(
+            "Unpivot result for atom %s is estimated to be large (%d bytes), will check size after conversion",
+            atom_id,
+            estimated_size_bytes,
+        )
+        # Convert to records, but _store_result will handle MinIO storage if needed
+        records = [convert_numpy(record) for record in unpivoted_df.to_dict(orient="records")]
+        
+        result = {
+            "atom_id": atom_id,
+            "status": "success",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "row_count": len(records),
+            "dataframe": records,
+            "summary": summary,
+            "computation_time": computation_time,
+        }
+    else:
+        # Small results: convert to records as before
+        records = [convert_numpy(record) for record in unpivoted_df.to_dict(orient="records")]
+        
+        result = {
+            "atom_id": atom_id,
+            "status": "success",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "row_count": len(records),
+            "dataframe": records,
+            "summary": summary,
+            "computation_time": computation_time,
+        }
     
     await _store_result(atom_id, result)
     
@@ -520,17 +613,44 @@ async def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest) -> Unpiv
     metadata["last_computed_at"] = datetime.now(timezone.utc).isoformat()
     _store_metadata(atom_id, metadata)
     
-    logger.info("Computed unpivot for atom %s: %d rows in %.2f seconds", atom_id, len(records), computation_time)
+    # Get actual row count from result (may be preview or full)
+    actual_row_count = result.get("row_count", len(records))
+    logger.info("Computed unpivot for atom %s: %d rows in %.2f seconds", atom_id, actual_row_count, computation_time)
     
-    return UnpivotComputeResponse(
+    response = UnpivotComputeResponse(
         atom_id=atom_id,
         status="success",
         updated_at=datetime.now(timezone.utc),
-        row_count=len(records),
-        dataframe=records,
+        row_count=actual_row_count,
+        dataframe=records,  # May be preview for very large results
         summary=summary,
         computation_time=computation_time,
     )
+    
+    # Convert to dict for Celery compatibility
+    return response.model_dump()
+
+
+def compute_unpivot(atom_id: str, payload: UnpivotComputeRequest | Dict[str, Any]) -> Dict[str, Any]:
+    """Compute unpivot transformation.
+    
+    Synchronous wrapper that can be called from Celery or directly.
+    Uses asyncio.run() to execute async operations, which works even when called from Celery tasks.
+    
+    Args:
+        atom_id: The unpivot atom identifier
+        payload: Either UnpivotComputeRequest (Pydantic) or dict (from Celery)
+    
+    Returns:
+        Dict containing the unpivot computation result
+    """
+    # Convert dict to Pydantic model if needed (for Celery compatibility)
+    if isinstance(payload, dict):
+        payload = UnpivotComputeRequest(**payload)
+    
+    # Use asyncio.run() which creates a new event loop
+    # This works even when called from Celery tasks or other async contexts
+    return asyncio.run(_compute_unpivot_async(atom_id, payload))
 
 
 async def get_unpivot_result(atom_id: str) -> UnpivotResultResponse:
@@ -573,7 +693,13 @@ async def validate_unpivot_configuration(payload: UnpivotValidateRequest) -> Unp
     value_vars = resolve_columns(df, payload.value_vars)
     
     # Validate
-    is_valid, errors, warnings = validate_unpivot_config(df, id_vars, value_vars)
+    is_valid, errors, warnings = validate_unpivot_config(
+        df, 
+        id_vars, 
+        value_vars,
+        variable_column_name=payload.variable_column_name,
+        value_column_name=payload.value_column_name,
+    )
     
     column_info = {
         "total_columns": len(df.columns),
@@ -677,7 +803,15 @@ async def save_unpivot_result(atom_id: str, payload: UnpivotSaveRequest) -> Unpi
         value_vars = resolve_columns(filtered_df, metadata.get("value_vars", []))
         
         # Validate configuration
-        is_valid, errors, warnings = validate_unpivot_config(filtered_df, id_vars, value_vars)
+        variable_col = metadata.get("variable_column_name", "variable")
+        value_col = metadata.get("value_column_name", "value")
+        is_valid, errors, warnings = validate_unpivot_config(
+            filtered_df, 
+            id_vars, 
+            value_vars,
+            variable_column_name=variable_col,
+            value_column_name=value_col,
+        )
         if not is_valid:
             raise HTTPException(status_code=400, detail=f"Invalid configuration: {', '.join(errors)}")
         
@@ -817,7 +951,10 @@ async def handle_dataset_updated(atom_id: str, payload: UnpivotDatasetUpdatedReq
         _store_metadata(atom_id, metadata)
     
     # Auto-compute with current config
-    return await compute_unpivot(atom_id, UnpivotComputeRequest(force_recompute=True))
+    # compute_unpivot is now synchronous and uses asyncio.run() internally
+    result_dict = compute_unpivot(atom_id, UnpivotComputeRequest(force_recompute=True))
+    # Convert dict back to Pydantic model for this endpoint
+    return UnpivotComputeResponse(**result_dict)
 
 
 async def autosave_atom_state(atom_id: str) -> UnpivotAutosaveResponse:

@@ -33,9 +33,6 @@ from .service import (
     filter_models_with_existing,
     generate_s_curve,
     get_application_type,
-    get_ensemble_actual_vs_predicted,
-    get_ensemble_contribution,
-    get_ensemble_yoy,
     get_filter_options,
     get_model_contribution,
     get_model_performance,
@@ -45,6 +42,11 @@ from .service import (
     list_model_results_files,
     list_variables,
     save_model,
+)
+from .ensemble_method import (
+    get_ensemble_actual_vs_predicted,
+    get_ensemble_contribution,
+    get_ensemble_yoy,
 )
 
 router = APIRouter(prefix="/select", tags=["Select Feature Based"])
@@ -164,8 +166,8 @@ def get_saved_status(
 
 
 @router.post("/models/select-save-generic", response_model=SavedModelResponse)
-def post_save_model(request: GenericModelSelectionRequest) -> SavedModelResponse:
-    payload = save_model(request.model_dump())
+async def post_save_model(request: GenericModelSelectionRequest) -> SavedModelResponse:
+    payload = await save_model(request.model_dump())
     return SavedModelResponse.model_validate(payload)
 
 

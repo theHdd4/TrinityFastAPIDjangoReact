@@ -330,8 +330,33 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
         );
 
         if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || `Pivot compute failed (${response.status})`);
+          let errorMessage = `Pivot compute failed (${response.status})`;
+          try {
+            const contentType = response.headers.get('content-type');
+            const text = await response.text();
+            
+            if (contentType && contentType.includes('application/json')) {
+              try {
+                const errorData = JSON.parse(text);
+                // Extract error message from various possible formats
+                errorMessage = errorData?.detail || 
+                              errorData?.message || 
+                              errorData?.error || 
+                              (typeof errorData === 'string' ? errorData : JSON.stringify(errorData, null, 2)) ||
+                              text ||
+                              errorMessage;
+              } catch {
+                // If JSON parsing fails, use the text as-is
+                errorMessage = text || errorMessage;
+              }
+            } else {
+              errorMessage = text || errorMessage;
+            }
+          } catch (parseError) {
+            // Keep default error message if we can't read the response
+            errorMessage = `Pivot compute failed (${response.status}). Unable to read error details.`;
+          }
+          throw new Error(errorMessage);
         }
 
         const result = await response.json();
@@ -377,6 +402,304 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     setManualRefreshToken((prev) => prev + 1);
   }, []);
 
+  // Convert pivot results to percentage values using the same logic as display
+  const convertToPercentageData = React.useCallback((
+    data: any[],
+    rowFields: string[],
+    columnFields: string[],
+    percentageMode: string,
+    percentageDecimals: number,
+    pivotHierarchy?: any[]
+  ): any[] => {
+    if (!percentageMode || percentageMode === 'off' || !data || data.length === 0) {
+      return data;
+    }
+
+    // Helper function to canonicalize keys (matches canvas logic)
+    const canonicalizeKey = (key: unknown): string => {
+      if (key === null || key === undefined) return '';
+      return String(key).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    };
+
+    // Helper to get row field value (case-insensitive lookup)
+    const getRowFieldValue = (record: any, field: string): any => {
+      if (record[field] !== undefined) {
+        return record[field];
+      }
+      const target = field.toLowerCase();
+      const key = Object.keys(record).find(k => k.toLowerCase() === target);
+      return key ? record[key] : undefined;
+    };
+
+    // Identify value columns (columns that are not row or column fields)
+    const allColumns = new Set<string>();
+    data.forEach(record => {
+      Object.keys(record).forEach(key => allColumns.add(key));
+    });
+    const valueColumns = Array.from(allColumns).filter(
+      col => !rowFields.includes(col) && !columnFields.includes(col)
+    );
+
+    // Remove canonicalized duplicate columns from data to prevent duplication when saving
+    // Build a map of canonicalized -> original column names
+    const canonicalToOriginal = new Map<string, string>();
+    valueColumns.forEach(col => {
+      const canonicalCol = canonicalizeKey(col);
+      if (canonicalCol && canonicalCol !== col) {
+        // If canonical version exists in columns, map it to original
+        if (allColumns.has(canonicalCol)) {
+          canonicalToOriginal.set(canonicalCol, col);
+        }
+      }
+    });
+    
+    // Remove canonicalized duplicates from all records
+    if (canonicalToOriginal.size > 0) {
+      data = data.map(record => {
+        const cleaned = { ...record };
+        canonicalToOriginal.forEach((originalCol, canonicalCol) => {
+          // Only remove canonicalized column if original exists
+          if (canonicalCol in cleaned && originalCol in cleaned) {
+            delete cleaned[canonicalCol];
+          }
+        });
+        return cleaned;
+      });
+    }
+
+    // Helper to check if a column is a Grand Total column
+    const isGrandTotalColumn = (col: string): boolean => {
+      const normalized = col.toLowerCase();
+      return normalized.includes('grand total') || normalized === 'grandtotal';
+    };
+
+    // Helper to check if a row is a Grand Total row
+    const isGrandTotalRow = (record: any): boolean => {
+      return rowFields.some(field => {
+        const value = getRowFieldValue(record, field);
+        const valueStr = String(value || '').toLowerCase();
+        return valueStr.includes('grand total') || valueStr === 'grandtotal';
+      });
+    };
+
+    // Helper to get cell value (checks both original and canonical column names)
+    const getCellValue = (record: any, column: string): number | null => {
+      if (record[column] != null) {
+        const val = Number(record[column]);
+        if (!isNaN(val) && isFinite(val)) {
+          return val;
+        }
+      }
+      // Try canonicalized version
+      const canonicalColumn = canonicalizeKey(column);
+      if (canonicalColumn && canonicalColumn !== column && record[canonicalColumn] != null) {
+        const val = Number(record[canonicalColumn]);
+        if (!isNaN(val) && isFinite(val)) {
+          return val;
+        }
+      }
+      return null;
+    };
+
+    // Filter out Grand Total columns from value columns for calculations
+    const valueColumnsForCalculation = valueColumns.filter(col => !isGrandTotalColumn(col));
+
+    // For column totals: include Grand Total columns only when in column percentage mode
+    const columnsForColumnCalculation = percentageMode === 'column' 
+      ? valueColumns  // Include all columns including Grand Total columns
+      : valueColumnsForCalculation;  // Exclude Grand Total columns for other modes
+
+    // Calculate totals based on percentage mode
+    if (percentageMode === 'row') {
+      // Calculate row totals (excluding Grand Total columns) - matches canvas logic
+      const rowTotals = new Map<string, number>();
+      const hierarchyRowTotals = new Map<string, number>();
+
+      // Calculate from hierarchy nodes first (if available)
+      const rawHierarchy = Array.isArray(pivotHierarchy) ? pivotHierarchy : [];
+      if (rawHierarchy.length > 0) {
+        rawHierarchy.forEach((raw: any) => {
+          const nodeKey = raw?.key;
+          if (!nodeKey) return;
+          
+          let nodeRowTotal = 0;
+          const nodeValues = raw?.values ?? {};
+          valueColumnsForCalculation.forEach((column) => {
+            const value = nodeValues[column];
+            if (typeof value === 'number' && Number.isFinite(value)) {
+              nodeRowTotal += value;
+            }
+          });
+          if (nodeRowTotal > 0) {
+            hierarchyRowTotals.set(nodeKey, nodeRowTotal);
+          }
+        });
+      }
+
+      // Calculate from regular data
+      data.forEach(record => {
+        const rowKey = rowFields
+          .map(field => canonicalizeKey(getRowFieldValue(record, field)))
+          .join('|');
+        
+        let rowTotal = 0;
+        valueColumnsForCalculation.forEach(column => {
+          const cellValue = getCellValue(record, column);
+          if (cellValue !== null) {
+            rowTotal += cellValue;
+          }
+        });
+        if (rowTotal > 0) {
+          rowTotals.set(rowKey, rowTotal);
+        }
+      });
+
+      // Convert to percentages
+      return data.map(record => {
+        const rowKey = rowFields
+          .map(field => canonicalizeKey(getRowFieldValue(record, field)))
+          .join('|');
+        
+        // Try hierarchy row totals first, then regular row totals (matches canvas)
+        const rowTotal = hierarchyRowTotals.get(rowKey) || rowTotals.get(rowKey) || 0;
+        const converted = { ...record };
+        
+        // Remove canonicalized duplicate columns to avoid duplication when saving
+        const canonicalizedColumns = new Set<string>();
+        valueColumns.forEach(col => {
+          const canonicalCol = canonicalizeKey(col);
+          if (canonicalCol && canonicalCol !== col) {
+            canonicalizedColumns.add(canonicalCol);
+          }
+        });
+        canonicalizedColumns.forEach(canonicalCol => {
+          if (canonicalCol in converted) {
+            delete converted[canonicalCol];
+          }
+        });
+        
+        if (rowTotal !== 0) {
+          valueColumns.forEach(col => {
+            const cellValue = getCellValue(record, col);
+            if (cellValue !== null) {
+              // Grand Total columns should always be 100% in row percentage mode
+              if (isGrandTotalColumn(col)) {
+                converted[col] = Number((100).toFixed(percentageDecimals));
+              } else {
+                const percentage = Number(((cellValue / rowTotal) * 100).toFixed(percentageDecimals));
+                converted[col] = percentage;
+              }
+            }
+          });
+        }
+        return converted;
+      });
+    } else if (percentageMode === 'column') {
+      // Calculate column totals (excluding Grand Total rows) - matches canvas logic
+      const columnTotals = new Map<string, number>();
+      
+      columnsForColumnCalculation.forEach(column => {
+        let total = 0;
+        data.forEach(record => {
+          // Skip Grand Total rows
+          if (!isGrandTotalRow(record)) {
+            const cellValue = getCellValue(record, column);
+            if (cellValue !== null) {
+              total += cellValue;
+            }
+          }
+        });
+        if (total > 0) {
+          columnTotals.set(column, total);
+        }
+      });
+
+      // Convert to percentages
+      return data.map(record => {
+        const converted = { ...record };
+        const isGrandTotal = isGrandTotalRow(record);
+        
+        // Remove canonicalized duplicate columns to avoid duplication when saving
+        const canonicalizedColumns = new Set<string>();
+        valueColumns.forEach(col => {
+          const canonicalCol = canonicalizeKey(col);
+          if (canonicalCol && canonicalCol !== col) {
+            canonicalizedColumns.add(canonicalCol);
+          }
+        });
+        canonicalizedColumns.forEach(canonicalCol => {
+          if (canonicalCol in converted) {
+            delete converted[canonicalCol];
+          }
+        });
+        
+        valueColumns.forEach(col => {
+          const cellValue = getCellValue(record, col);
+          if (cellValue !== null) {
+            if (isGrandTotal) {
+              // Grand Total rows should be 100%
+              const percentage = Number((100).toFixed(percentageDecimals));
+              converted[col] = percentage;
+            } else {
+              const colTotal = columnTotals.get(col) || 0;
+              if (colTotal !== 0) {
+                const percentage = Number(((cellValue / colTotal) * 100).toFixed(percentageDecimals));
+                converted[col] = percentage;
+              }
+            }
+          }
+        });
+        return converted;
+      });
+    } else if (percentageMode === 'grand_total') {
+      // Calculate grand total (excluding Grand Total columns and rows) - matches canvas logic
+      let grandTotal = 0;
+      data.forEach(record => {
+        // Skip Grand Total rows
+        if (!isGrandTotalRow(record)) {
+          valueColumnsForCalculation.forEach(col => {
+            const cellValue = getCellValue(record, col);
+            if (cellValue !== null) {
+              grandTotal += cellValue;
+            }
+          });
+        }
+      });
+
+      // Convert to percentages
+      if (grandTotal !== 0) {
+        return data.map(record => {
+          const converted = { ...record };
+          
+          // Remove canonicalized duplicate columns to avoid duplication when saving
+          const canonicalizedColumns = new Set<string>();
+          valueColumns.forEach(col => {
+            const canonicalCol = canonicalizeKey(col);
+            if (canonicalCol && canonicalCol !== col) {
+              canonicalizedColumns.add(canonicalCol);
+            }
+          });
+          canonicalizedColumns.forEach(canonicalCol => {
+            if (canonicalCol in converted) {
+              delete converted[canonicalCol];
+            }
+          });
+          
+          valueColumns.forEach(col => {
+            const cellValue = getCellValue(record, col);
+            if (cellValue !== null) {
+              const percentage = Number(((cellValue / grandTotal) * 100).toFixed(percentageDecimals));
+              converted[col] = percentage;
+            }
+          });
+          return converted;
+        });
+      }
+    }
+
+    return data;
+  }, []);
+
   const handleSave = React.useCallback(async () => {
     if (!settings.dataSource || !(settings.pivotResults?.length ?? 0)) {
       return;
@@ -385,13 +708,27 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     setSaveError(null);
     setSaveMessage(null);
     try {
+      // Convert data to percentages if percentage mode is enabled
+      const dataToSave = convertToPercentageData(
+        settings.pivotResults,
+        settings.rowFields,
+        settings.columnFields,
+        settings.percentageMode || 'off',
+        settings.percentageDecimals ?? 2,
+        settings.pivotHierarchy
+      );
+
       // Save without filename to overwrite existing file
+      // Send pre-calculated percentage data to avoid backend recalculation mismatch
+      const savePayload: any = {
+        data: dataToSave,
+      };
       const response = await fetch(
         `${PIVOT_API}/${encodeURIComponent(atomId)}/save`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+          body: JSON.stringify(savePayload),
         }
       );
       if (!response.ok) {
@@ -439,7 +776,7 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [atomId, settings.dataSource, settings.pivotResults, updateSettings]);
+  }, [atomId, settings.dataSource, settings.pivotResults, settings.rowFields, settings.columnFields, settings.percentageMode, settings.percentageDecimals, convertToPercentageData, updateSettings]);
 
   const handleSaveAs = React.useCallback(() => {
     // Generate default filename based on config_id and timestamp
@@ -460,12 +797,27 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     setSaveError(null);
     setSaveMessage(null);
     try {
+      // Convert data to percentages if percentage mode is enabled
+      const dataToSave = convertToPercentageData(
+        settings.pivotResults,
+        settings.rowFields,
+        settings.columnFields,
+        settings.percentageMode || 'off',
+        settings.percentageDecimals ?? 2,
+        settings.pivotHierarchy
+      );
+
+      // Include converted data in save payload
+      const savePayload: any = {
+        filename: saveAsFileName.trim(),
+        data: dataToSave,
+      };
       const response = await fetch(
         `${PIVOT_API}/${encodeURIComponent(atomId)}/save`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: saveAsFileName.trim() }),
+          body: JSON.stringify(savePayload),
         }
       );
       if (!response.ok) {
@@ -515,7 +867,7 @@ const PivotTableAtom: React.FC<PivotTableAtomProps> = ({ atomId }) => {
     } finally {
       setIsSaving(false);
     }
-  }, [atomId, settings.dataSource, settings.pivotResults, saveAsFileName, updateSettings]);
+  }, [atomId, settings.dataSource, settings.pivotResults, settings.rowFields, settings.columnFields, settings.percentageMode, settings.percentageDecimals, saveAsFileName, convertToPercentageData, updateSettings]);
 
   const readinessMessage = React.useMemo(() => {
     if (!settings.dataSource) {

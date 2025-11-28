@@ -978,6 +978,23 @@ async def compute_pivot(config_id: str, payload: PivotComputeRequest) -> PivotCo
 
     value_columns = _resolve_columns(filtered_df, [value.field for value in payload.values])
 
+    # Convert object-type value columns to float before aggregation
+    for value_cfg, col in zip(payload.values, value_columns):
+        if col in filtered_df.columns:
+            col_dtype = str(filtered_df[col].dtype)
+            # Check if column is object type (string dtype in pandas)
+            if col_dtype == 'object' or 'object' in col_dtype.lower():
+                try:
+                    # Attempt to convert to numeric, coercing errors to NaN
+                    filtered_df[col] = pd.to_numeric(filtered_df[col], errors='coerce')
+                    logger.info(f"Converted object column '{col}' to float for pivot aggregation")
+                except Exception as e:
+                    logger.warning(f"Failed to convert column '{col}' to float: {e}")
+                    # If conversion fails, raise an error as we can't aggregate object types
+                    message = f"Cannot aggregate column '{col}': unable to convert object type to numeric"
+                    _store_status(config_id, "failed", message, None)
+                    raise HTTPException(status_code=400, detail=message)
+
     # Validate weighted average configurations
     weight_column_map = {}
     for value_cfg, col in zip(payload.values, value_columns):
@@ -1451,28 +1468,137 @@ def get_pivot_status(config_id: str) -> PivotStatusResponse:
 
 async def save_pivot(config_id: str, payload: Optional[PivotSaveRequest] = None) -> PivotSaveResponse:
     logger.info("save_pivot called with config_id=%s", config_id)
-    cached = _load_data(config_id)
-    logger.info("save_pivot: cached data exists=%s", cached is not None)
-    if not cached:
+    
+    # Load config to get the original compute request
+    config = _load_config(config_id) or {}
+    if not config:
         # Try to get more info about what's in Redis
         import urllib.parse
         decoded_config_id = urllib.parse.unquote(config_id)
         if decoded_config_id != config_id:
             logger.info("save_pivot: trying decoded config_id=%s", decoded_config_id)
-            cached = _load_data(decoded_config_id)
-            if cached:
+            config = _load_config(decoded_config_id) or {}
+            if config:
                 config_id = decoded_config_id
-        if not cached:
-            # Log what keys exist in Redis for debugging
-            # Note: FeatureCacheRouter doesn't have a keys() method, so we can't list keys
-            logger.warning("save_pivot: No data found for config_id=%s. Key parts used: (%s, data)", config_id, config_id)
-            raise HTTPException(status_code=404, detail="No pivot data available to save")
+        if not config:
+            logger.warning("save_pivot: No config found for config_id=%s", config_id)
+            raise HTTPException(status_code=404, detail="No pivot configuration found")
 
-    records = cached.get("data")
+    # Use provided data if available (e.g., pre-calculated percentages from frontend)
+    if payload and payload.data:
+        records = payload.data
+        logger.info("save_pivot: Using provided data with %d records (pre-calculated percentages)", len(records))
+    else:
+        # Recompute pivot table WITHOUT limit to get full dataset for saving
+        logger.info("save_pivot: Recomputing pivot table without limit to get full dataset")
+        try:
+            # Create compute request from config (similar to refresh_pivot)
+            # but set limit to None to get full dataset
+            compute_request_dict = {k: v for k, v in config.items()}
+            compute_request_dict["limit"] = None  # Remove limit for full dataset
+            compute_request = PivotComputeRequest(**compute_request_dict)
+            
+            # Recompute to get full dataset
+            compute_response = await compute_pivot(config_id, compute_request)
+            records = compute_response.data
+            logger.info("save_pivot: Recomputed full dataset with %d records (no limit applied)", len(records))
+        except Exception as e:
+            logger.warning("save_pivot: Failed to recompute without limit, falling back to cached data: %s", e)
+            # Fallback to cached data if recomputation fails
+            cached = _load_data(config_id)
+            if not cached:
+                raise HTTPException(status_code=404, detail="No pivot data available to save")
+            records = cached.get("data")
+            logger.info("save_pivot: Using cached data with %d records (may be limited)", len(records) if records else 0)
+    
     if not records:
         raise HTTPException(status_code=400, detail="Cannot save empty pivot results")
 
     df = pd.DataFrame(records)
+    
+    # Preserve original dtypes for row_fields
+    # When data comes from frontend as JSON, types may be lost (dates become strings, etc.)
+    # We need to restore the original dtypes from the source dataframe
+    row_fields = config.get("rows", [])
+    
+    # Try to get original dataframe to check dtypes
+    original_dtypes = {}
+    try:
+        resolved_path = await _resolve_object_path(config.get("data_source", ""))
+        original_df = download_dataframe(resolved_path)
+        
+        # Store original dtypes for all row_fields
+        for field in row_fields:
+            if field in original_df.columns:
+                original_dtypes[field] = original_df[field].dtype
+                logger.debug(f"Original dtype for '{field}': {original_dtypes[field]}")
+    except Exception as e:
+        logger.debug(f"Could not load original dataframe to check dtypes: {e}")
+    
+    # Restore original dtypes for row_fields
+    for field in row_fields:
+        if field not in df.columns:
+            continue
+        
+        if field not in original_dtypes:
+            # Skip if we don't have original dtype info
+            continue
+        
+        original_dtype = original_dtypes[field]
+        current_dtype = df[field].dtype
+        
+        # If already the correct type, skip
+        if current_dtype == original_dtype:
+            logger.debug(f"Column '{field}' already has correct dtype: {current_dtype}")
+            continue
+        
+        try:
+            original_dtype_str = str(original_dtype).lower()
+            
+            # Handle datetime types
+            if 'datetime' in original_dtype_str or 'date' in original_dtype_str:
+                df[field] = pd.to_datetime(df[field], errors='coerce')
+                logger.info(f"Converted column '{field}' to datetime dtype (was {current_dtype})")
+            
+            # Handle integer types
+            elif 'int' in original_dtype_str:
+                # Try to convert to the original integer type
+                df[field] = pd.to_numeric(df[field], errors='coerce').astype(original_dtype)
+                logger.info(f"Converted column '{field}' to {original_dtype} (was {current_dtype})")
+            
+            # Handle float types
+            elif 'float' in original_dtype_str:
+                df[field] = pd.to_numeric(df[field], errors='coerce').astype(original_dtype)
+                logger.info(f"Converted column '{field}' to {original_dtype} (was {current_dtype})")
+            
+            # Handle boolean types
+            elif 'bool' in original_dtype_str:
+                df[field] = df[field].astype(original_dtype)
+                logger.info(f"Converted column '{field}' to {original_dtype} (was {current_dtype})")
+            
+            # Handle categorical types
+            elif 'categor' in original_dtype_str:
+                df[field] = df[field].astype(original_dtype)
+                logger.info(f"Converted column '{field}' to {original_dtype} (was {current_dtype})")
+            
+            # For other types, try to convert to the original type
+            else:
+                try:
+                    df[field] = df[field].astype(original_dtype)
+                    logger.info(f"Converted column '{field}' to {original_dtype} (was {current_dtype})")
+                except Exception:
+                    logger.warning(f"Could not convert column '{field}' to {original_dtype}, keeping {current_dtype}")
+            
+            # Verify conversion worked
+            final_dtype = df[field].dtype
+            if str(final_dtype) == str(original_dtype):
+                logger.info(f"Successfully preserved dtype for column '{field}': {final_dtype}")
+            else:
+                logger.warning(f"Column '{field}' dtype mismatch: expected {original_dtype}, got {final_dtype}")
+                
+        except Exception as e:
+            logger.warning(f"Failed to convert column '{field}' to {original_dtype}: {e}", exc_info=True)
+    
     timestamp = datetime.now(timezone.utc)
 
     prefix = await get_object_prefix()
@@ -1483,7 +1609,6 @@ async def save_pivot(config_id: str, payload: Optional[PivotSaveRequest] = None)
     object_prefix = f"{prefix}pivot/"
 
     # Determine filename: use provided filename for save_as, or standard filename for save (always overwrites)
-    config = _load_config(config_id) or {}
     
     if payload and payload.filename:
         # Save As: create new file with provided filename
@@ -1496,7 +1621,13 @@ async def save_pivot(config_id: str, payload: Optional[PivotSaveRequest] = None)
         clean_config_id = re.sub(r'\d+', '', config_id).strip('-').strip('_')
         file_name = f"{clean_config_id}.arrow" if clean_config_id else f"pivot_{config_id}.arrow"
 
-    table = pa.Table.from_pandas(df)
+    # Convert to Arrow table, preserving datetime types
+    # Use preserve_index=False and coerce_temporal_nanoseconds=False to maintain datetime64[ns] types
+    table = pa.Table.from_pandas(df, preserve_index=False)
+    
+    # Log final dtypes for debugging
+    logger.debug(f"Final DataFrame dtypes before Arrow conversion: {df.dtypes.to_dict()}")
+    logger.debug(f"Arrow schema: {table.schema}")
     sink = pa.BufferOutputStream()
     with ipc.new_file(sink, table.schema) as writer:
         writer.write_table(table)
@@ -1524,7 +1655,8 @@ async def save_pivot(config_id: str, payload: Optional[PivotSaveRequest] = None)
     
     _store_config(config_id, config)
 
-    rows = cached.get("rows") or len(records)
+    # Use actual number of records saved (full dataset, not limited)
+    rows = len(records)
     return PivotSaveResponse(
         config_id=config_id,
         status="success",

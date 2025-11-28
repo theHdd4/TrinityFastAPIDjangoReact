@@ -24,9 +24,7 @@ from .service import (
     save_pivot,
 )
 
-
 logger = logging.getLogger(__name__)
-
 timing_dependency = timing_dependency_factory("app.features.pivot_table")
 
 router = APIRouter(
@@ -34,7 +32,6 @@ router = APIRouter(
     tags=["Pivot Table"],
     dependencies=[Depends(timing_dependency)],
 )
-
 
 @router.post("/{config_id}/compute", response_model=PivotComputeResponse)
 async def compute_pivot_endpoint(config_id: str, payload: PivotComputeRequest) -> PivotComputeResponse:

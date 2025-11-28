@@ -27,24 +27,35 @@ export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>, maxAt
 
   const startTime = Date.now();
   let attempt = 0;
+  let consecutiveErrors = 0;
+  const MAX_CONSECUTIVE_ERRORS = 5;
+  
   while (attempt < maxAttempts) {
     // Check timeout
     if (Date.now() - startTime > timeoutMs) {
       throw new Error(`Task polling timeout after ${timeoutMs}ms (${attempt} attempts)`);
     }
 
-    const sleep = Math.min(1000 * Math.max(attempt, 1), 5000);
+    // Exponential backoff with jitter, but cap at 10 seconds for very long operations
+    const baseDelay = Math.min(1000 * Math.pow(1.5, Math.min(attempt, 10)), 10000);
+    const jitter = Math.random() * 500;
+    const sleep = baseDelay + jitter;
     await delay(sleep);
     attempt += 1;
 
     try {
       const response = await fetch(`${TASK_QUEUE_API}/${taskId}`, {
         credentials: 'include',
+        // Increase timeout for fetch to prevent connection resets
+        signal: AbortSignal.timeout(30000), // 30 second timeout per request
       });
       if (!response.ok) {
+        // Reset consecutive errors on successful HTTP response (even if not 200)
+        consecutiveErrors = 0;
         throw new Error(`Failed to fetch task status (${response.status})`);
       }
       const payload: TaskEnvelope<T> = await response.json();
+      consecutiveErrors = 0; // Reset on successful fetch
       const status = (payload.status || payload.task_status || '').toLowerCase();
       if (status === 'success') {
         if (payload.result && typeof payload.result === 'object') {
@@ -56,12 +67,23 @@ export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>, maxAt
         throw new Error(payload.error ? String(payload.error) : 'Task failed');
       }
     } catch (error) {
+      consecutiveErrors += 1;
+      
+      // If too many consecutive errors, fail early
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        throw new Error(`Task polling failed after ${consecutiveErrors} consecutive errors: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      
       // If it's the last attempt, throw the error
       if (attempt >= maxAttempts) {
         throw error;
       }
+      
       // Otherwise, continue polling (might be a transient network error)
-      console.warn(`Task polling attempt ${attempt} failed, retrying...`, error);
+      // Use longer delay after errors
+      const errorDelay = Math.min(2000 * consecutiveErrors, 10000);
+      await delay(errorDelay);
+      console.warn(`Task polling attempt ${attempt} failed, retrying in ${errorDelay}ms...`, error);
     }
   }
 
@@ -76,9 +98,22 @@ export function isTaskEnvelope<T = any>(value: unknown): value is TaskEnvelope<T
   return typeof envelope.task_id === 'string' || typeof envelope.task_status === 'string';
 }
 
-export async function resolveTaskResponse<T = any>(value: unknown): Promise<T> {
+export async function resolveTaskResponse<T = any>(value: unknown, timeoutMs?: number, maxAttempts?: number): Promise<T> {
   if (isTaskEnvelope<T>(value)) {
-    return waitForTaskResult<T>(value);
+    // For unpivot operations, use longer timeout (15 minutes) and more attempts
+    // Check if this is an unpivot task by looking at the response structure
+    const envelope = value as TaskEnvelope<T>;
+    const isUnpivotTask = envelope.task_id && (
+      (envelope as any).feature === 'unpivot' || 
+      (envelope as any).operation === 'compute' ||
+      (envelope as any).metadata?.feature === 'unpivot'
+    );
+    
+    // Use longer timeout for unpivot operations (15 minutes) vs default (5 minutes)
+    const effectiveTimeout = timeoutMs ?? (isUnpivotTask ? 900000 : 300000);
+    const effectiveMaxAttempts = maxAttempts ?? (isUnpivotTask ? 180 : 60);
+    
+    return waitForTaskResult<T>(value, effectiveMaxAttempts, effectiveTimeout);
   }
   return value as T;
 }

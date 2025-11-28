@@ -47,6 +47,31 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
     return filteredFields.filter(f => !data.idVars.includes(f));
   }, [filteredFields, data.idVars]);
 
+  // Validation: Check if variable_column_name or value_column_name match existing columns
+  const validationErrors = useMemo(() => {
+    const errors: string[] = [];
+    const allColumns = new Set(data.dataSourceColumns || []);
+    
+    const variableName = data.variableColumnName || 'variable';
+    const valueName = data.valueColumnName || 'value';
+    
+    if (allColumns.has(variableName)) {
+      errors.push(`Variable column name "${variableName}" conflicts with an existing column. Please choose a different name.`);
+    }
+    
+    if (allColumns.has(valueName)) {
+      errors.push(`Value column name "${valueName}" conflicts with an existing column. Please choose a different name.`);
+    }
+    
+    if (variableName === valueName) {
+      errors.push('Variable column name and value column name cannot be the same.');
+    }
+    
+    return errors;
+  }, [data.variableColumnName, data.valueColumnName, data.dataSourceColumns]);
+
+  const isValid = validationErrors.length === 0;
+
   // Convert string arrays to {value, label} format for MultiSelectDropdown
   const idVarOptions = useMemo(() => {
     return availableForIdVars.map(field => ({ value: field, label: field }));
@@ -110,8 +135,13 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
               onDataChange({ variableColumnName: value || undefined });
             }}
             placeholder="variable"
-            className="w-full"
+            className={`w-full ${validationErrors.some(e => e.includes('Variable column name')) ? 'border-red-500' : ''}`}
           />
+          {validationErrors.some(e => e.includes('Variable column name')) && (
+            <p className="text-xs text-red-600 mt-1">
+              {validationErrors.find(e => e.includes('Variable column name'))}
+            </p>
+          )}
         </div>
 
         <div>
@@ -137,8 +167,18 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
               onDataChange({ valueColumnName: value || undefined });
             }}
             placeholder="value"
-            className="w-full"
+            className={`w-full ${validationErrors.some(e => e.includes('Value column name')) ? 'border-red-500' : ''}`}
           />
+          {validationErrors.some(e => e.includes('Value column name')) && (
+            <p className="text-xs text-red-600 mt-1">
+              {validationErrors.find(e => e.includes('Value column name'))}
+            </p>
+          )}
+          {validationErrors.some(e => e.includes('cannot be the same')) && (
+            <p className="text-xs text-red-600 mt-1">
+              {validationErrors.find(e => e.includes('cannot be the same'))}
+            </p>
+          )}
         </div>
       </div>
 
@@ -206,16 +246,38 @@ const UnpivotSettings: React.FC<UnpivotSettingsProps> = ({ data, onDataChange, o
         />
       </div>
 
+      {/* Validation Errors */}
+      {validationErrors.length > 0 && (
+        <Card className="p-3 bg-red-50 border-red-200">
+          <p className="text-xs font-medium text-red-800 mb-1">Validation Errors:</p>
+          <ul className="text-xs text-red-700 list-disc list-inside space-y-1">
+            {validationErrors.map((error, index) => (
+              <li key={index}>{error}</li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {/* Apply Button */}
       <div className="pt-2">
         <Button
           onClick={onApply || (() => {})}
-          disabled={isComputing || !data.datasetPath || (data.idVars.length === 0 && data.valueVars.length === 0)}
-          className="w-full bg-[#1A73E8] hover:bg-[#1455ad] text-white"
+          disabled={
+            isComputing || 
+            !data.datasetPath || 
+            (data.idVars.length === 0 && data.valueVars.length === 0) ||
+            !isValid
+          }
+          className="w-full bg-[#1A73E8] hover:bg-[#1455ad] text-white disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Check className="h-4 w-4 mr-2" />
           {isComputing ? 'Applying...' : 'Apply'}
         </Button>
+        {!isValid && (
+          <p className="text-xs text-red-600 mt-2 text-center">
+            Please fix the validation errors above before applying.
+          </p>
+        )}
       </div>
 
       {/* Info Message */}

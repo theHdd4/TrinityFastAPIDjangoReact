@@ -19,7 +19,7 @@ import numpy as np
 from minio.error import S3Error
 from pydantic import BaseModel, Field
 
-from .database import MINIO_BUCKET, get_minio_df, minio_client, client, db
+from .database import MINIO_BUCKET, get_minio_df, minio_client, client, db, get_select_configs_collection
 
 
 logger = logging.getLogger("app.features.select_models_feature_based.service")
@@ -285,8 +285,6 @@ def _combination_ids_from_minio(file_key: str) -> List[str] | None:
         if str(value).strip()
     }
     return sorted(combinations)
-
-
 
 
 def _detect_model_name_column(frame: pd.DataFrame) -> str | None:
@@ -1375,7 +1373,7 @@ def get_saved_combinations_status(file_key: str, atom_id: str) -> Dict[str, Any]
     }
 
 
-def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = GenericSavePayload(**payload)
     combination_id = request.filter_criteria.get("combination_id")
     try:
@@ -1428,12 +1426,254 @@ def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
             exc,
         )
 
+    # Save to MongoDB select_configs collection (like old implementation)
+    try:
+        await _save_to_select_configs(
+            request=request,
+            record=record,
+            combination_id=target_combination
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to save to select_configs collection for file=%s combination=%s model=%s: %s",
+            request.file_key,
+            target_combination,
+            request.model_name,
+            exc,
+        )
+        # Continue even if MongoDB save fails
+
     return {
         "model_id": model_id,
         "saved_at": saved_entry["saved_at"],
         "status": "saved",
         "row_data": saved_entry["row_data"],
     }
+
+
+async def _save_to_select_configs(
+    request: GenericSavePayload,
+    record: ModelRecord,
+    combination_id: str
+) -> None:
+    """Save selected model to MongoDB select_configs collection (like old implementation)."""
+    try:
+        # Get select_configs collection
+        select_configs_coll = get_select_configs_collection()
+        if select_configs_coll is None:
+            logger.warning("Select configs collection not available")
+            return
+
+        # Create document_id like old implementation: client_name/app_name/project_name
+        document_id = f"{request.client_name}/{request.app_name}/{request.project_name}"
+
+        # Load the raw file to get all columns (like old implementation)
+        df = _load_dataframe(request.file_key)
+        if df is None or df.empty:
+            logger.warning(f"Could not load file {request.file_key} for MongoDB save")
+            return
+
+        # Find the row matching this model (like old implementation)
+        model_row = None
+        for idx, row in df.iterrows():
+            row_combo = str(row.get("combination_id", "")).strip()
+            row_model = str(row.get("model_name", "")).strip()
+            if row_combo == combination_id and row_model == record.model_name:
+                model_row = row
+                break
+
+        if model_row is None:
+            logger.warning(f"Could not find matching row for combination {combination_id}, model {record.model_name}")
+            return
+
+        # Convert row to dict and clean it (like old implementation)
+        model_dict = model_row.to_dict()
+        cleaned_dict = {}
+        for key, value in model_dict.items():
+            try:
+                # Handle arrays/lists by converting to string
+                if isinstance(value, (list, np.ndarray)):
+                    cleaned_dict[key] = str(value)
+                elif pd.isna(value):
+                    cleaned_dict[key] = None
+                elif isinstance(value, (np.integer, np.floating)):
+                    if np.isinf(value):
+                        cleaned_dict[key] = "inf" if value > 0 else "-inf"
+                    else:
+                        cleaned_dict[key] = float(value)
+                else:
+                    cleaned_dict[key] = value
+            except Exception as e:
+                # If any error occurs, convert to string as fallback
+                cleaned_dict[key] = str(value)
+
+        # Use cleaned_dict as complete_model_data (like old implementation)
+        complete_model_data = cleaned_dict.copy()
+        
+        # Ensure combination_id is set
+        if "combination_id" not in complete_model_data:
+            complete_model_data["combination_id"] = combination_id
+
+        # Look up createandtransform_operations from scope selector collection (like old implementation)
+        createandtransform_operations = None
+        try:
+            scopeselector_collection = client["trinity_db"]["scopeselector_configs"]
+            scopeselector_doc = await scopeselector_collection.find_one({"_id": document_id})
+            if scopeselector_doc and "createandtransform_operations" in scopeselector_doc:
+                createandtransform_operations = scopeselector_doc["createandtransform_operations"]
+        except Exception as e:
+            logger.debug(f"Could not fetch createandtransform_operations: {e}")
+            createandtransform_operations = None
+
+        # Create mock result for saved_model_id (like old implementation)
+        class MockResult:
+            def __init__(self):
+                self.inserted_id = "mock_id_not_saved_to_mongo"
+        result = MockResult()
+
+        # Check if document already exists
+        existing_doc = await select_configs_coll.find_one({"_id": document_id})
+
+        if existing_doc:
+            # Update existing document (like old implementation)
+            merged_document = existing_doc.copy()
+            merged_document["updated_at"] = datetime.utcnow()
+            
+            # Update createandtransform_operations from scope selector
+            merged_document["createandtransform_operations"] = createandtransform_operations
+
+            # Initialize combinations array if it doesn't exist
+            if "combinations" not in merged_document:
+                merged_document["combinations"] = []
+
+            # Check if this combination already exists
+            existing_combination = None
+            for combo in merged_document["combinations"]:
+                if combo.get("combination_id") == combination_id:
+                    existing_combination = combo
+                    break
+
+            if existing_combination:
+                # Update existing combination (like old implementation with field fallbacks)
+                existing_combination.update({
+                    "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                    "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                    "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                    "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                    "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                    "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                    "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                    "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                    "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                    "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                    "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                    "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                    "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                    "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                    "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                    "source_file": request.file_key,
+                    "selection_criteria": {
+                        "row_index": None,  # Not available in current implementation
+                        "filter_criteria": request.filter_criteria
+                    },
+                    "tags": request.tags,
+                    "description": request.description,
+                    "complete_model_data": complete_model_data,
+                    "updated_at": datetime.utcnow()
+                })
+            else:
+                # Add new combination (like old implementation with field fallbacks)
+                new_combination = {
+                    "combination_id": combination_id,
+                    "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                    "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                    "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                    "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                    "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                    "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                    "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                    "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                    "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                    "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                    "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                    "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                    "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                    "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                    "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                    "source_file": request.file_key,
+                    "selection_criteria": {
+                        "row_index": None,  # Not available in current implementation
+                        "filter_criteria": request.filter_criteria
+                    },
+                    "tags": request.tags,
+                    "description": request.description,
+                    "complete_model_data": complete_model_data,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+                merged_document["combinations"].append(new_combination)
+
+            # Update the existing document
+            await select_configs_coll.replace_one(
+                {"_id": document_id},
+                merged_document
+            )
+            logger.info(f"✅ Updated select_configs for {document_id}, combination {combination_id}")
+        else:
+            # Create new document (like old implementation)
+            select_config_document = {
+                "_id": document_id,
+                "client_name": request.client_name,
+                "app_name": request.app_name,
+                "project_name": request.project_name,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "saved_model_id": str(result.inserted_id),
+                "saved_model_collection": "saved_models_generic",
+                "createandtransform_operations": createandtransform_operations,
+                "combinations": [{
+                    "combination_id": combination_id,
+                    "scope": cleaned_dict.get("Scope") or cleaned_dict.get("scope") or cleaned_dict.get("scope_name") or "unknown",
+                    "y_variable": cleaned_dict.get("y_variable") or cleaned_dict.get("Y_Variable") or cleaned_dict.get("target") or "unknown",
+                    "x_variables": cleaned_dict.get("x_variables") or cleaned_dict.get("X_Variables") or cleaned_dict.get("features") or "unknown",
+                    "model_name": cleaned_dict.get("model_name") or cleaned_dict.get("Model_Name") or cleaned_dict.get("Model") or "unknown",
+                    "mape_train": cleaned_dict.get("mape_train") or cleaned_dict.get("MAPE_Train") or cleaned_dict.get("train_mape") or None,
+                    "mape_test": cleaned_dict.get("mape_test") or cleaned_dict.get("MAPE_Test") or cleaned_dict.get("test_mape") or None,
+                    "r2_train": cleaned_dict.get("r2_train") or cleaned_dict.get("R2_Train") or cleaned_dict.get("train_r2") or None,
+                    "r2_test": cleaned_dict.get("r2_test") or cleaned_dict.get("R2_Test") or cleaned_dict.get("test_r2") or None,
+                    "aic": cleaned_dict.get("aic") or cleaned_dict.get("AIC") or None,
+                    "bic": cleaned_dict.get("bic") or cleaned_dict.get("BIC") or None,
+                    "intercept": cleaned_dict.get("intercept") or cleaned_dict.get("Intercept") or None,
+                    "n_parameters": cleaned_dict.get("n_parameters") or cleaned_dict.get("N_Parameters") or cleaned_dict.get("parameters") or None,
+                    "price_elasticity": cleaned_dict.get("price_elasticity") or cleaned_dict.get("Price_Elasticity") or cleaned_dict.get("elasticity") or None,
+                    "run_id": cleaned_dict.get("run_id") or cleaned_dict.get("Run_ID") or cleaned_dict.get("run") or None,
+                    "timestamp": cleaned_dict.get("timestamp") or cleaned_dict.get("Timestamp") or cleaned_dict.get("date") or None,
+                    "source_file": request.file_key,
+                    "selection_criteria": {
+                        "row_index": None,  # Not available in current implementation
+                        "filter_criteria": request.filter_criteria
+                    },
+                    "tags": request.tags,
+                    "description": request.description,
+                    "complete_model_data": complete_model_data,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }]
+            }
+
+            # Insert new document
+            await select_configs_coll.insert_one(select_config_document)
+            logger.info(f"✅ Created select_configs for {document_id}, combination {combination_id}")
+
+        # Create indexes for efficient queries
+        await select_configs_coll.create_index([("client_name", 1), ("app_name", 1), ("project_name", 1)])
+        await select_configs_coll.create_index([("combinations.combination_id", 1)])
+        await select_configs_coll.create_index([("combinations.model_name", 1)])
+        await select_configs_coll.create_index([("created_at", -1)])
+
+    except Exception as e:
+        logger.error(f"❌ Error saving to select_configs collection: {e}", exc_info=True)
+        raise
 
 
 def _build_contributions(record: ModelRecord) -> List[Dict[str, Any]]:
@@ -1561,6 +1801,51 @@ def get_model_contribution(file_key: str, combination_id: str, model_name: str) 
 
 def get_model_performance(file_key: str, combination_id: str, model_name: str) -> Dict[str, Any]:
     """Get performance metrics for a specific model and combination from model results file"""
+    # Check if this is an ensemble model
+    is_ensemble = model_name.lower() in ['ensemble', 'weighted ensemble', 'ensemble model']
+    
+    if is_ensemble:
+        # For ensemble models, calculate performance from weighted ensemble data
+        try:
+            ensemble_request = {
+                "file_key": file_key,
+                "grouping_keys": ['combination_id'],
+                "filter_criteria": {"combination_id": combination_id},
+                "include_numeric": None,
+                "exclude_numeric": None,
+                "filtered_models": None
+            }
+            
+            ensemble_result = calculate_weighted_ensemble(ensemble_request)
+            
+            if not ensemble_result.get("results") or len(ensemble_result["results"]) == 0:
+                raise ValueError("No ensemble data found for the given combination")
+            
+            ensemble_data = ensemble_result["results"][0]
+            weighted_metrics = ensemble_data.get("weighted", {})
+            
+            # Extract performance metrics from weighted ensemble data
+            # Handle None values by converting to 0 or None as appropriate
+            formatted_metrics = [
+                {"label": "MAPE Train", "value": weighted_metrics.get("mape_train") if weighted_metrics.get("mape_train") is not None else None, "unit": "%"},
+                {"label": "MAPE Test", "value": weighted_metrics.get("mape_test") if weighted_metrics.get("mape_test") is not None else None, "unit": "%"},
+                {"label": "R2 Train", "value": weighted_metrics.get("r2_train") if weighted_metrics.get("r2_train") is not None else None, "unit": ""},
+                {"label": "R2 Test", "value": weighted_metrics.get("r2_test") if weighted_metrics.get("r2_test") is not None else None, "unit": ""},
+                {"label": "AIC", "value": weighted_metrics.get("aic") if weighted_metrics.get("aic") is not None else None, "unit": ""},
+                {"label": "BIC", "value": weighted_metrics.get("bic") if weighted_metrics.get("bic") is not None else None, "unit": ""},
+            ]
+            
+            return {
+                "file_key": file_key,
+                "combination_id": combination_id,
+                "model_name": "Ensemble",
+                "performance_metrics": formatted_metrics
+            }
+        except Exception as e:
+            logger.error(f"Error getting ensemble performance: {str(e)}")
+            raise ValueError(f"Error getting ensemble performance: {str(e)}")
+    
+    # For regular models, get from file
     if not minio_client:
         raise ValueError("MinIO connection is not available")
     
@@ -2230,601 +2515,8 @@ def calculate_yoy(payload: Dict[str, Any]) -> Dict[str, Any]:
     return asyncio.run(_calculate())
 
 
-def _ensemble_models(file_key: str, combination_id: str) -> List[ModelRecord]:
-    return _models_for_file(file_key, combination_id)
-
-
-def get_ensemble_actual_vs_predicted(file_key: str, combination_id: str, client_name: str, app_name: str, project_name: str) -> Dict[str, Any]:
-    """Calculate actual vs predicted values using ensemble weighted metrics and source file data"""
-    async def _calculate():
-        if client is None or db is None:
-            raise ValueError("MongoDB connection is not available")
-        
-        if not minio_client:
-            raise ValueError("MinIO connection is not available")
-
-        document_id = f"{client_name}/{app_name}/{project_name}"
-        build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
-        
-        if not build_config:
-            raise ValueError(f"No build configuration found for {document_id}")
-
-        combination_file_keys = build_config.get("combination_file_keys", [])
-        source_file_key = None
-        for combo_info in combination_file_keys:
-            if combo_info.get("combination") == combination_id:
-                source_file_key = combo_info.get("file_key")
-                break
-        
-        if not source_file_key:
-            raise ValueError(f"No source file key found for combination '{combination_id}'")
-        
-        # Get weighted ensemble data
-        ensemble_request = {
-            "file_key": file_key,
-            "grouping_keys": ['combination_id'],
-            "filter_criteria": {"combination_id": combination_id},
-            "include_numeric": None,
-            "exclude_numeric": None,
-            "filtered_models": None
-        }
-        
-        ensemble_result = calculate_weighted_ensemble(ensemble_request)
-        
-        if not ensemble_result.get("results") or len(ensemble_result["results"]) == 0:
-            raise ValueError("No ensemble data found for the given combination")
-        
-        ensemble_data = ensemble_result["results"][0]
-        weighted_metrics = ensemble_data.get("weighted", {})
-        
-        # Get weighted transformation metadata
-        from .ensemble_metric_calculation import calculate_weighted_transformation_metadata
-        
-        # Create a mock ensemble_data object for the transformation metadata function
-        class MockEnsembleData:
-            def __init__(self, weighted, model_composition):
-                self.weighted = weighted
-                self.model_composition = model_composition
-        
-        mock_ensemble = MockEnsembleData(weighted_metrics, ensemble_data.get("model_composition", {}))
-        
-        logger.info(f"🔍 Calculating weighted transformation metadata for ensemble...")
-        transformation_metadata = await calculate_weighted_transformation_metadata(
-            db, client_name, app_name, project_name, combination_id, mock_ensemble
-        )
-        logger.info(f"✅ Weighted transformation metadata calculated: {len(transformation_metadata)} variables")
-        
-        # Import apply_transformation_steps from s_curve.py
-        try:
-            from .s_curve import apply_transformation_steps
-        except ImportError:
-            apply_transformation_steps = None
-        
-        # Get the source file data
-        response = minio_client.get_object(MINIO_BUCKET, source_file_key)
-        content = response.read()
-        response.close()
-        response.release_conn()
-        
-        # Read file based on extension
-        if source_file_key.lower().endswith('.parquet'):
-            df = pd.read_parquet(io.BytesIO(content))
-        elif source_file_key.lower().endswith(('.arrow', '.feather')):
-            df = pd.read_feather(io.BytesIO(content))
-        else:
-            try:
-                df = pd.read_parquet(io.BytesIO(content))
-            except:
-                df = pd.read_feather(io.BytesIO(content))
-        
-        # Filter data for the specific combination
-        if "combination_id" in df.columns:
-            df = df[df["combination_id"] == combination_id]
-        
-        if df.empty:
-            raise ValueError(f"No data found for combination {combination_id}")
-        
-        df.columns = df.columns.str.lower()
-        
-        # Find date column
-        date_column = None
-        for col in df.columns:
-            if col.lower() in ['date', 'time', 'timestamp', 'period', 'month', 'year']:
-                date_column = col
-                break
-        
-        # Get dates if available
-        dates = []
-        if date_column and date_column in df.columns:
-            dates = df[date_column].tolist()
-        else:
-            dates = [f"Period {i+1}" for i in range(len(df))]
-        
-        # Get the target variable (Y variable)
-        y_variable = None
-        for col in df.columns:
-            if col.lower() in ['target', 'y', 'dependent', 'sales', 'volume', 'value']:
-                y_variable = col
-                break
-        
-        if not y_variable:
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            if numeric_cols:
-                y_variable = numeric_cols[0]
-        
-        if not y_variable:
-            raise ValueError("Could not identify target variable")
-        
-        # Get ensemble intercept and betas
-        intercept = weighted_metrics.get("intercept", 0)
-        
-        # Calculate predicted values using ensemble betas
-        actual_values = df[y_variable].tolist()
-        predicted_values = []
-        
-        # Check if transformations are available
-        has_transformations = transformation_metadata and len(transformation_metadata) > 0 and apply_transformation_steps
-        
-        for index, row in df.iterrows():
-            predicted_value = intercept
-            
-            # Add contribution from each variable using ensemble betas
-            for col in df.columns:
-                if col != y_variable:
-                    beta_key = f"{col}_beta"
-                    if beta_key in weighted_metrics:
-                        x_value = row[col] if pd.notna(row[col]) else 0
-                        
-                        # Apply transformations if available
-                        if has_transformations and col in transformation_metadata:
-                            transformation_steps = transformation_metadata[col].get('transformation_steps', [])
-                            if transformation_steps:
-                                try:
-                                    transformed_result = apply_transformation_steps([x_value], transformation_steps)
-                                    if transformed_result and len(transformed_result) > 0:
-                                        x_value = transformed_result[0]
-                                except (IndexError, TypeError, ValueError) as e:
-                                    logger.warning(f"Transformation failed for {col}: {e}, using original value")
-                        
-                        beta_value = weighted_metrics[beta_key]
-                        contribution = beta_value * x_value
-                        predicted_value += contribution
-            
-            predicted_values.append(predicted_value)
-        
-        # Filter out extreme outliers
-        if len(predicted_values) > 0 and len(actual_values) > 0:
-            predicted_array = np.array(predicted_values)
-            actual_array = np.array(actual_values)
-            
-            if len(predicted_array) > 0 and len(actual_array) > 0:
-                try:
-                    pred_99th = np.percentile(predicted_array, 99)
-                    pred_1st = np.percentile(predicted_array, 1)
-                    actual_99th = np.percentile(actual_array, 99)
-                    actual_1st = np.percentile(actual_array, 1)
-                except (ValueError, IndexError) as e:
-                    logger.warning(f"Error calculating percentiles: {e}, skipping outlier filtering")
-                    pred_99th = pred_1st = actual_99th = actual_1st = None
-            else:
-                pred_99th = pred_1st = actual_99th = actual_1st = None
-            
-            filtered_data = []
-            if pred_99th is not None and pred_1st is not None and actual_99th is not None and actual_1st is not None:
-                for i, (actual, predicted) in enumerate(zip(actual_values, predicted_values)):
-                    if (predicted <= pred_99th and predicted >= pred_1st and 
-                        actual <= actual_99th and actual >= actual_1st):
-                        filtered_data.append((actual, predicted))
-            else:
-                filtered_data = [(a, p) for a, p in zip(actual_values, predicted_values)]
-            
-            if filtered_data and len(filtered_data) > 0:
-                if len(filtered_data) < len(actual_values):
-                    logger.warning(f"⚠️ Filtered out {len(actual_values) - len(filtered_data)} extreme outliers")
-                actual_values = [item[0] for item in filtered_data]
-                predicted_values = [item[1] for item in filtered_data]
-                if len(dates) > len(actual_values):
-                    dates = dates[:len(actual_values)]
-                elif len(dates) < len(actual_values):
-                    dates.extend([f"Period {i+1}" for i in range(len(dates), len(actual_values))])
-        
-        # Calculate performance metrics
-        if len(actual_values) > 0 and len(predicted_values) > 0:
-            from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-            
-            mae = mean_absolute_error(actual_values, predicted_values)
-            mse = mean_squared_error(actual_values, predicted_values)
-            rmse = mse ** 0.5
-            r2 = r2_score(actual_values, predicted_values)
-            
-            mape = 0
-            if sum(actual_values) != 0:
-                mape = (sum(abs((actual - pred) / actual) for actual, pred in zip(actual_values, predicted_values) if actual != 0) / len(actual_values)) * 100
-        else:
-            mae = mse = rmse = r2 = mape = 0
-        
-        # Extract x_variables from weighted_metrics
-        x_variables = [key.replace('_beta', '') for key in weighted_metrics.keys() if key.endswith('_beta')]
-
-    return {
-        "success": True,
-            "combination_name": combination_id,
-            "model_name": "Ensemble",
-            "file_key": source_file_key,
-        "dates": dates,
-            "actual_values": actual_values,
-            "predicted_values": predicted_values,
-            "performance_metrics": {
-                "mae": mae,
-                "mse": mse,
-                "rmse": rmse,
-                "r2": r2,
-                "mape": mape
-            },
-            "model_info": {
-                "intercept": intercept,
-                "coefficients": weighted_metrics,
-                "x_variables": x_variables,
-                "y_variable": y_variable
-            },
-            "data_points": len(actual_values)
-        }
-    
-    # Run async function
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(_calculate())
-
-
-def get_ensemble_contribution(file_key: str, combination_id: str, client_name: str, app_name: str, project_name: str) -> Dict[str, Any]:
-    """Get contribution data for ensemble using weighted ensemble metrics"""
-    # Get weighted ensemble data
-    ensemble_request = {
-        "file_key": file_key,
-        "grouping_keys": ['combination_id'],
-        "filter_criteria": {"combination_id": combination_id},
-        "include_numeric": None,
-        "exclude_numeric": None,
-        "filtered_models": None
-    }
-    
-    ensemble_result = calculate_weighted_ensemble(ensemble_request)
-    
-    if not ensemble_result.get("results") or len(ensemble_result["results"]) == 0:
-        raise ValueError("No ensemble data found for the given combination")
-    
-    ensemble_data = ensemble_result["results"][0]
-    weighted_metrics = ensemble_data.get("weighted", {})
-    
-    # Extract contribution data from ensemble weighted metrics
-    contribution_data = []
-    
-    # First, try to find contribution columns
-    for key in weighted_metrics.keys():
-        if key.endswith('_contribution'):
-            variable_name = key.replace('_contribution', '').replace('_Contribution', '')
-            value = weighted_metrics[key]
-            if value is not None:
-                contribution_data.append({
-                    "name": variable_name,
-                    "value": float(value)
-                })
-    
-    # If no contribution data found, try to calculate from betas and means
-    if not contribution_data:
-        intercept = weighted_metrics.get("intercept", 0)
-        
-        for key in weighted_metrics.keys():
-            if key.endswith('_beta'):
-                variable_name = key.replace('_beta', '').replace('_Beta', '')
-                beta_value = weighted_metrics[key]
-                
-                # Try to find corresponding mean value
-                mean_key = f"{variable_name}_avg"
-                if mean_key in weighted_metrics:
-                    mean_value = weighted_metrics[mean_key]
-                    if beta_value is not None and mean_value is not None:
-                        # Calculate contribution: abs(beta * mean)
-                        contribution_value = abs(float(beta_value) * float(mean_value))
-                        contribution_data.append({
-                            "name": variable_name,
-                            "value": contribution_value
-                        })
-    
-    # If still no data, try using elasticities
-    if not contribution_data:
-        for key in weighted_metrics.keys():
-            if key.endswith('_elasticity'):
-                variable_name = key.replace('_elasticity', '').replace('_Elasticity', '')
-                elasticity_value = weighted_metrics[key]
-                
-                if elasticity_value is not None:
-                    # Use absolute elasticity as contribution
-                    contribution_value = abs(float(elasticity_value))
-                    contribution_data.append({
-                        "name": variable_name,
-                        "value": contribution_value
-                    })
-    
-    if not contribution_data:
-        logger.error("No contribution data could be calculated from ensemble results")
-        raise ValueError("No valid contribution data found in ensemble results")
-    
-    return {
-        "file_key": file_key,
-        "combination_id": combination_id,
-        "model_name": "Ensemble",
-        "contribution_data": contribution_data
-    }
-
-
-def get_ensemble_yoy(file_key: str, combination_id: str, client_name: str, app_name: str, project_name: str) -> Dict[str, Any]:
-    """Calculate Year-over-Year (YoY) growth using ensemble weighted metrics and source file data"""
-    async def _calculate():
-        if client is None or db is None:
-            raise ValueError("MongoDB connection is not available")
-        
-        if not minio_client:
-            raise ValueError("MinIO connection is not available")
-        
-        # Get the build configuration from MongoDB
-        document_id = f"{client_name}/{app_name}/{project_name}"
-        build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
-        
-        if not build_config:
-            raise ValueError(f"No build configuration found for {document_id}")
-        
-        # Get the source file key for this combination
-        combination_file_keys = build_config.get("combination_file_keys", [])
-        source_file_key = None
-        for combo_info in combination_file_keys:
-            if combo_info.get("combination") == combination_id:
-                source_file_key = combo_info.get("file_key")
-                break
-        
-        if not source_file_key:
-            raise ValueError(f"No source file key found for combination '{combination_id}'")
-        
-        # Get weighted ensemble data
-        ensemble_request = {
-            "file_key": file_key,
-            "grouping_keys": ['combination_id'],
-            "filter_criteria": {"combination_id": combination_id},
-            "include_numeric": None,
-            "exclude_numeric": None,
-            "filtered_models": None
-        }
-        
-        ensemble_result = calculate_weighted_ensemble(ensemble_request)
-        
-        if not ensemble_result.get("results") or len(ensemble_result["results"]) == 0:
-            raise ValueError("No ensemble data found for the given combination")
-        
-        ensemble_data = ensemble_result["results"][0]
-        weighted_metrics = ensemble_data.get("weighted", {})
-        
-        # Get weighted transformation metadata
-        from .ensemble_metric_calculation import calculate_weighted_transformation_metadata
-        
-        class MockEnsembleData:
-            def __init__(self, weighted, model_composition):
-                self.weighted = weighted
-                self.model_composition = model_composition
-        
-        mock_ensemble = MockEnsembleData(weighted_metrics, ensemble_data.get("model_composition", {}))
-        
-        logger.info(f"🔍 Calculating weighted transformation metadata for ensemble YoY...")
-        transformation_metadata = await calculate_weighted_transformation_metadata(
-            db, client_name, app_name, project_name, combination_id, mock_ensemble
-        )
-        logger.info(f"✅ Weighted transformation metadata calculated: {len(transformation_metadata)} variables")
-        
-        # Import apply_transformation_steps from s_curve.py
-        try:
-            from .s_curve import apply_transformation_steps
-        except ImportError:
-            apply_transformation_steps = None
-        
-        # Get the source file data
-        response = minio_client.get_object(MINIO_BUCKET, source_file_key)
-        content = response.read()
-        response.close()
-        response.release_conn()
-        
-        # Read file based on extension
-        if source_file_key.lower().endswith('.parquet'):
-            df = pd.read_parquet(io.BytesIO(content))
-        elif source_file_key.lower().endswith(('.arrow', '.feather')):
-            df = pd.read_feather(io.BytesIO(content))
-        else:
-            try:
-                df = pd.read_parquet(io.BytesIO(content))
-            except:
-                df = pd.read_feather(io.BytesIO(content))
-        
-        # Filter data for the specific combination
-        if "combination_id" in df.columns:
-            df = df[df["combination_id"] == combination_id]
-        
-        if df.empty:
-            raise ValueError(f"No data found for combination {combination_id}")
-        
-        df.columns = df.columns.str.lower()
-        
-        # Get ensemble intercept and betas
-        intercept = weighted_metrics.get("intercept", 0)
-        
-        # Detect date column
-        date_column = None
-        date_columns = ["Date", "date", "Invoice_Date", "Bill_Date", "Order_Date", "Month", "month", "Period", "period", "Year", "year"]
-        for col in date_columns:
-            if col in df.columns:
-                date_column = col
-                break
-        
-        if not date_column:
-            raise ValueError("Could not detect date column. Please ensure a date column is present.")
-        
-        # Convert date column to datetime
-        df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
-        df = df.dropna(subset=[date_column])
-        
-        if df.empty:
-            raise ValueError("No valid date data found after conversion.")
-        
-        # Get unique years and ensure we have at least 2 years
-        years = sorted(df[date_column].dt.year.unique())
-        if len(years) < 2:
-            raise ValueError("Need at least two calendar years in the dataset for YoY calculation.")
-        
-        year_first, year_last = int(years[0]), int(years[-1])
-        
-        # Split data by years
-        df_first_year = df[df[date_column].dt.year == year_first]
-        df_last_year = df[df[date_column].dt.year == year_last]
-        
-        if df_first_year.empty or df_last_year.empty:
-            raise ValueError(f"No data found for year {year_first} or {year_last}.")
-        
-        y_variable = None
-        for col in df.columns:
-            if col.lower() in ['target', 'y', 'dependent', 'sales', 'volume', 'value']:
-                y_variable = col
-                break
-        
-        if not y_variable:
-            numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-            if numeric_cols:
-                y_variable = numeric_cols[0]
-        
-        if not y_variable:
-            raise ValueError("Could not identify target variable")
-        
-        # Calculate actual YoY change
-        y_first_mean = df_first_year[y_variable].mean() if y_variable in df_first_year.columns else 0
-        y_last_mean = df_last_year[y_variable].mean() if y_variable in df_last_year.columns else 0
-        observed_delta = float(y_last_mean - y_first_mean)
-        
-        # Calculate explained YoY change using ensemble coefficients
-        explained_delta = 0.0
-        contributions = []
-        
-        # Check if transformations are available
-        has_transformations = transformation_metadata and len(transformation_metadata) > 0 and apply_transformation_steps
-        
-        # Get all variables that have betas in the ensemble results
-        for key in weighted_metrics.keys():
-            if key.endswith('_beta'):
-                x_var = key.replace('_beta', '')
-                if x_var in df.columns:
-                    beta_value = weighted_metrics[key]
-                    
-                    # Calculate mean values for each year
-                    x_first_mean = df_first_year[x_var].mean()
-                    x_last_mean = df_last_year[x_var].mean()
-                    
-                    # Apply transformations if available
-                    if has_transformations and x_var in transformation_metadata:
-                        transformation_steps = transformation_metadata[x_var].get('transformation_steps', [])
-                        if transformation_steps:
-                            try:
-                                transformed_first = apply_transformation_steps([x_first_mean], transformation_steps)
-                                if transformed_first and len(transformed_first) > 0:
-                                    x_first_mean = transformed_first[0]
-                            except (IndexError, TypeError, ValueError) as e:
-                                logger.warning(f"Transformation failed for {x_var} (first year): {e}, using original value")
-                            
-                            try:
-                                transformed_last = apply_transformation_steps([x_last_mean], transformation_steps)
-                                if transformed_last and len(transformed_last) > 0:
-                                    x_last_mean = transformed_last[0]
-                            except (IndexError, TypeError, ValueError) as e:
-                                logger.warning(f"Transformation failed for {x_var} (last year): {e}, using original value")
-                    
-                    # Calculate contribution: beta * (mean_last_year - mean_first_year)
-                    delta_contribution = beta_value * (x_last_mean - x_first_mean)
-                    explained_delta += delta_contribution
-                    
-                    contributions.append({
-                        "variable": x_var,
-                        "beta_coefficient": beta_value,
-                        "mean_year1": float(x_first_mean),
-                        "mean_year2": float(x_last_mean),
-                        "delta_contribution": float(delta_contribution)
-                    })
-        
-        # Sort contributions by absolute value
-        contributions.sort(key=lambda x: abs(x["delta_contribution"]), reverse=True)
-        
-        # Calculate residual
-        residual = float(observed_delta - explained_delta)
-        
-        # Calculate YoY percentage change
-        yoy_percentage = 0.0
-        if y_first_mean != 0:
-            yoy_percentage = (observed_delta / y_first_mean) * 100
-        
-        # Create waterfall data for visualization
-        waterfall_labels = [f"Base {year_first}"] + [c["variable"] for c in contributions] + ["Residual", f"Final {year_last}"]
-        waterfall_values = [y_first_mean] + [c["delta_contribution"] for c in contributions] + [residual, y_last_mean]
-        
-        # For backward compatibility, return empty arrays (waterfall chart uses waterfall data instead)
-        dates = []
-        actual = []
-        predicted = []
-        
-        # Extract x_variables from weighted_metrics
-        x_variables = [key.replace('_beta', '') for key in weighted_metrics.keys() if key.endswith('_beta')]
-
-        return {
-            "success": True,
-            "combination_name": combination_id,
-            "model_name": "Ensemble",
-            "file_key": source_file_key,
-            "dates": dates,
-            "actual": actual,
-            "predicted": predicted,
-            "date_column_used": date_column,
-            "years_used": {"year1": year_first, "year2": year_last},
-            "y_variable_used": y_variable,
-            "observed": {
-                "year1_mean": float(y_first_mean),
-                "year2_mean": float(y_last_mean),
-                "delta_y": observed_delta,
-                "yoy_percentage": yoy_percentage
-            },
-            "explanation": {
-                "explained_delta_yhat": float(explained_delta),
-                "residual": residual,
-                "contributions": contributions
-            },
-            "waterfall": {
-                "labels": waterfall_labels,
-                "values": waterfall_values
-            },
-            "model_info": {
-                "intercept": intercept,
-                "coefficients": weighted_metrics,
-                "x_variables": x_variables,
-                "y_variable": y_variable
-            }
-        }
-    
-    # Run async function
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    return loop.run_until_complete(_calculate())
-
-
 def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Calculate weighted ensemble metrics from multiple models"""
     request = WeightedEnsemblePayload(**payload)
     combination_id = None
     if request.filter_criteria:
@@ -2840,45 +2532,156 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not models:
         raise ValueError("No models available for weighting")
 
+    # Calculate weights based on inverse MAPE
     weights = []
     for model in models:
         mape = model.metrics.get("mape_test") or 0.1
         weights.append((model, 1 / max(mape, 0.01)))
 
     weight_sum = sum(weight for _, weight in weights)
-    combos: List[Dict[str, Any]] = []
+    
+    # Calculate weighted averages across all models
+    weighted_metrics = {}
+    weighted_intercept = 0.0
+    weighted_mape_test = 0.0
+    weighted_r2_test = 0.0
+    weighted_mape_train = 0.0
+    weighted_r2_train = 0.0
+    weighted_aic = 0.0
+    weighted_bic = 0.0
+    
+    # Collect all variable names from all models
+    all_variables = set()
     for model, weight in weights:
         share = weight / weight_sum
-        combos.append(
-            {
-                "combo": model.combination,
-                "models_used": 1,
-                "best_model": model.model_name,
-                "best_mape": model.metrics.get("mape_test"),
-                "weight_concentration": round(share, 4),
-                "model_composition": {model.model_name: round(share, 4)},
-                "weighted": {
-                    "mape_test": model.metrics.get("mape_test"),
-                    "r2_test": model.metrics.get("r2_test"),
-                },
-                "aliases": {
-                    "elasticity": model.metrics.get("self_elasticity"),
-                    "roi": model.metrics.get("self_roi"),
-                },
-                "y_pred_at_mean": statistics.fmean(model.series.predicted),
+        all_variables.update(model.variable_impacts.keys())
+        all_variables.update(model.variable_averages.keys())
+        
+        # Weight the metrics
+        weighted_mape_test += (model.metrics.get("mape_test") or 0) * share
+        weighted_r2_test += (model.metrics.get("r2_test") or 0) * share
+        weighted_mape_train += (model.metrics.get("mape_train") or 0) * share
+        weighted_r2_train += (model.metrics.get("r2_train") or 0) * share
+        weighted_aic += (model.metrics.get("aic") or 0) * share
+        weighted_bic += (model.metrics.get("bic") or 0) * share
+    
+    # Calculate weighted averages for each variable
+    for var_name in all_variables:
+        weighted_beta = 0.0
+        weighted_avg = 0.0
+        weighted_impact = 0.0
+        
+        for model, weight in weights:
+            share = weight / weight_sum
+            # Get beta from variable_impacts (impact is typically beta * avg)
+            impact = model.variable_impacts.get(var_name, 0)
+            avg = model.variable_averages.get(var_name, 0)
+            
+            # Calculate beta: impact / avg (if avg != 0)
+            if avg != 0:
+                beta = impact / avg
+            else:
+                beta = impact
+            
+            weighted_beta += beta * share
+            weighted_avg += avg * share
+            weighted_impact += impact * share
+        
+        weighted_metrics[f"{var_name}_beta"] = weighted_beta
+        weighted_metrics[f"{var_name}_avg"] = weighted_avg
+        weighted_metrics[f"{var_name}_contribution"] = abs(weighted_impact)
+    
+    # Calculate weighted intercept (average of intercepts weighted by model performance)
+    # Note: Intercept calculation would need to come from MongoDB coefficients
+    # For now, we'll set it to 0 and it should be calculated elsewhere
+    weighted_intercept = 0.0
+    
+    # Build model composition dictionary
+    model_composition = {}
+    for model, weight in weights:
+        share = weight / weight_sum
+        model_composition[model.model_name] = round(share, 4)
+    
+    # Group by combination_id
+    combos: List[Dict[str, Any]] = []
+    if combination_id:
+        # Single combination
+        combos.append({
+            "combo": models[0].combination if models else {},
+            "combination_id": combination_id,
+            "models_used": len(models),
+            "best_model": max(weights, key=lambda x: x[1])[0].model_name if weights else None,
+            "best_mape": min((m.metrics.get("mape_test") or float('inf') for m in models), default=None),
+            "weight_concentration": round(max((w / weight_sum for _, w in weights), default=0), 4),
+            "model_composition": model_composition,
+            "weighted": {
+                "intercept": weighted_intercept,
+                "mape_train": round(weighted_mape_train, 4),
+                "mape_test": round(weighted_mape_test, 4),
+                "r2_train": round(weighted_r2_train, 4),
+                "r2_test": round(weighted_r2_test, 4),
+                "aic": round(weighted_aic, 2),
+                "bic": round(weighted_bic, 2),
+                **weighted_metrics
+            },
+            "aliases": {
+                "elasticity": weighted_metrics.get("self_elasticity", 0) if "self_elasticity" in weighted_metrics else None,
+                "roi": weighted_metrics.get("self_roi", 0) if "self_roi" in weighted_metrics else None,
             }
-        )
+        })
+    else:
+        # Multiple combinations - group by combination
+        from collections import defaultdict
+        combo_groups = defaultdict(list)
+        for model, weight in weights:
+            combo_key = str(model.combination)
+            combo_groups[combo_key].append((model, weight))
+        
+        for combo_key, combo_models in combo_groups.items():
+            combo_weight_sum = sum(weight for _, weight in combo_models)
+            combo_models_list = [m for m, _ in combo_models]
+            
+            # Calculate weighted metrics for this combination
+            combo_weighted_metrics = {}
+            combo_weighted_mape_test = 0.0
+            combo_weighted_r2_test = 0.0
+            
+            for model, weight in combo_models:
+                share = weight / combo_weight_sum
+                combo_weighted_mape_test += (model.metrics.get("mape_test") or 0) * share
+                combo_weighted_r2_test += (model.metrics.get("r2_test") or 0) * share
+                
+                for var_name in all_variables:
+                    impact = model.variable_impacts.get(var_name, 0)
+                    avg = model.variable_averages.get(var_name, 0)
+                    beta = impact / avg if avg != 0 else impact
+                    
+                    if f"{var_name}_beta" not in combo_weighted_metrics:
+                        combo_weighted_metrics[f"{var_name}_beta"] = 0.0
+                    combo_weighted_metrics[f"{var_name}_beta"] += beta * share
+            
+            combos.append({
+                "combo": combo_models_list[0].combination if combo_models_list else {},
+                "models_used": len(combo_models_list),
+                "best_model": max(combo_models, key=lambda x: x[1])[0].model_name if combo_models else None,
+                "best_mape": min((m.metrics.get("mape_test") or float('inf') for m, _ in combo_models), default=None),
+                "weight_concentration": round(max((w / combo_weight_sum for _, w in combo_models), default=0), 4),
+                "model_composition": {m.model_name: round(w / combo_weight_sum, 4) for m, w in combo_models},
+                "weighted": {
+                    "intercept": 0.0,
+                    "mape_test": round(combo_weighted_mape_test, 4),
+                    "r2_test": round(combo_weighted_r2_test, 4),
+                    **combo_weighted_metrics
+                },
+                "aliases": {},
+                "y_pred_at_mean": statistics.fmean([statistics.fmean(m.series.predicted) for m, _ in combo_models]) if combo_models else 0,
+            })
 
     return {
         "grouping_keys": request.grouping_keys,
         "total_combos": len(combos),
         "results": combos,
     }
-
-
-
-
-
 
 
 def get_application_type(client_name: str, app_name: str, project_name: str) -> Dict[str, Any]:

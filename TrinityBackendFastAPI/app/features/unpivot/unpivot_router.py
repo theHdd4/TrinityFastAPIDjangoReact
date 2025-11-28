@@ -6,6 +6,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.observability import timing_dependency_factory
+from app.core.task_queue import celery_task_client, format_task_response
 
 from .unpivot_models import (
     UnpivotAutosaveResponse,
@@ -49,6 +50,20 @@ router = APIRouter(
     tags=["Unpivot Atom"],
     dependencies=[Depends(timing_dependency)],
 )
+
+
+def _submit_task(name: str, dotted_path: str, kwargs: dict, metadata: dict) -> dict:
+    """Helper function to submit tasks to Celery."""
+    try:
+        submission = celery_task_client.submit_callable(
+            name=name,
+            dotted_path=dotted_path,
+            kwargs=kwargs,
+            metadata=metadata,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return format_task_response(submission)
 
 
 # ============================================================================
@@ -121,26 +136,29 @@ async def update_unpivot_properties_endpoint(
 # C. Core Computation Endpoints
 # ============================================================================
 
-@router.post("/{atom_id}/compute", response_model=UnpivotComputeResponse)
-async def compute_unpivot_endpoint(
+@router.post("/{atom_id}/compute")
+def compute_unpivot_endpoint(
     atom_id: str,
     payload: UnpivotComputeRequest,
-) -> UnpivotComputeResponse:
+) -> dict:
     """Compute unpivot transformation.
     
     Executes the unpivot operation with the current configuration.
     Returns the unpivoted dataframe, row count, summary, and computation time.
+    Uses Celery for asynchronous task execution.
     """
     logger.info("unpivot.compute atom_id=%s force_recompute=%s", atom_id, payload.force_recompute)
-    response = await compute_unpivot(atom_id, payload)
-    logger.info(
-        "unpivot.compute.completed atom_id=%s status=%s rows=%d time=%.2fs",
-        atom_id,
-        response.status,
-        response.row_count,
-        response.computation_time,
+    return _submit_task(
+        name="unpivot.compute",
+        dotted_path="app.features.unpivot.unpivot_service.compute_unpivot",
+        kwargs={"atom_id": atom_id, "payload": payload.model_dump()},
+        metadata={
+            "feature": "unpivot",
+            "operation": "compute",
+            "atom_id": atom_id,
+            "force_recompute": payload.force_recompute,
+        },
     )
-    return response
 
 
 @router.get("/{atom_id}/result", response_model=UnpivotResultResponse)

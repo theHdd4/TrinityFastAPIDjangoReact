@@ -99,10 +99,16 @@ const PivotTableInputFiles: React.FC<PivotTableInputFilesProps> = ({ atomId }) =
       const json = await resolveTaskResponse<{ summary?: any[] }>(raw);
       const summary = Array.isArray(json.summary) ? json.summary.filter(Boolean) : [];
       const columns = summary.map(col => col.column).filter(Boolean);
+      const columnTypes: Record<string, string> = {};
       const filterOptions: Record<string, string[]> = {};
       summary.forEach((item) => {
         const column = item?.column;
         if (!column) return;
+        // Store column data type
+        if (item?.data_type) {
+          columnTypes[column] = item.data_type;
+          columnTypes[column.toLowerCase()] = item.data_type;
+        }
         const rawValues = Array.isArray(item?.unique_values) ? item.unique_values : [];
         const values = rawValues
           .map((value: unknown) => (value === null || value === undefined ? null : String(value)))
@@ -116,6 +122,7 @@ const PivotTableInputFiles: React.FC<PivotTableInputFilesProps> = ({ atomId }) =
       updateSettings(atomId, {
         dataSource: normalized,
         dataSourceColumns: columns,
+        dataSourceColumnTypes: columnTypes,
         fields: columns,
         selectedFields: [],
         rowFields: [],
@@ -143,6 +150,7 @@ const PivotTableInputFiles: React.FC<PivotTableInputFilesProps> = ({ atomId }) =
         pivotLastSavedAt: null,
         pivotFilterOptions: settings.pivotFilterOptions ?? {},
         pivotFilterSelections: {},
+        dataSourceColumnTypes: settings.dataSourceColumnTypes ?? {},
         fields: settings.fields ?? [],
         selectedFields: [],
         rowFields: [],

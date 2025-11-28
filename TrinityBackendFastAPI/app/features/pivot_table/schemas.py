@@ -136,6 +136,10 @@ class PivotSaveRequest(BaseModel):
         default=None,
         description="Optional filename for save_as. If not provided, overwrites existing saved file.",
     )
+    data: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Optional pre-calculated data to save. If provided, this data will be saved directly (e.g., with percentage values already calculated).",
+    )
 
 
 class PivotSaveResponse(BaseModel):

@@ -125,6 +125,8 @@ def validate_unpivot_config(
     df: pd.DataFrame,
     id_vars: List[str],
     value_vars: List[str],
+    variable_column_name: Optional[str] = None,
+    value_column_name: Optional[str] = None,
 ) -> tuple[bool, List[str], List[str]]:
     """Validate unpivot configuration.
     
@@ -152,6 +154,20 @@ def validate_unpivot_config(
     overlap = id_set & value_set
     if overlap:
         errors.append(f"Columns cannot be in both id_vars and value_vars: {overlap}")
+    
+    # Check if variable_column_name conflicts with existing columns
+    var_col_name = variable_column_name or "variable"
+    if var_col_name in all_columns:
+        errors.append(f"Variable column name '{var_col_name}' conflicts with an existing column in the dataset. Please choose a different name.")
+    
+    # Check if value_column_name conflicts with existing columns
+    val_col_name = value_column_name or "value"
+    if val_col_name in all_columns:
+        errors.append(f"Value column name '{val_col_name}' conflicts with an existing column in the dataset. Please choose a different name.")
+    
+    # Check if variable_column_name and value_column_name are the same
+    if var_col_name == val_col_name:
+        errors.append("Variable column name and value column name cannot be the same.")
     
     # Check if both are empty
     if not id_vars and not value_vars:
