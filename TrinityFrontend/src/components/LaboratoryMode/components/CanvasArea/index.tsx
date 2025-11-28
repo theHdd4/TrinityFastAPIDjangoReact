@@ -387,6 +387,32 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     }
   };
 
+  const applyStyleToSelection = (styles: Partial<CSSStyleDeclaration>) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer)) return false;
+    if (range.collapsed) return false;
+
+    const span = document.createElement('span');
+    Object.assign(span.style, styles);
+
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+
+    selection.removeAllRanges();
+    const newRange = document.createRange();
+    newRange.selectNodeContents(span);
+    selection.addRange(newRange);
+    selectionRef.current = newRange;
+
+    handleInput();
+    return true;
+  };
+
   useEffect(() => {
     if (!editorRef.current) return;
 
@@ -501,17 +527,23 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             color={settings.text_color}
             onColorChange={(color) => {
               const executed = runCommand('foreColor', color);
-              if (!executed) {
+              const styled = executed || applyStyleToSelection({ color });
+
+              if (!styled) {
                 applyImmediateStyles({ text_color: color });
               }
+
               onSettingsChange({ text_color: color });
             }}
             backgroundColor={settings.background_color ?? 'transparent'}
             onBackgroundColorChange={(color) => {
               const executed = runCommand('hiliteColor', color) || runCommand('backColor', color);
-              if (!executed) {
+              const styled = executed || applyStyleToSelection({ backgroundColor: color });
+
+              if (!styled) {
                 applyImmediateStyles({ background_color: color });
               }
+
               onSettingsChange({ background_color: color });
             }}
           />
