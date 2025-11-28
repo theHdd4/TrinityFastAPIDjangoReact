@@ -500,11 +500,40 @@ async def get_atom_list_configuration(
             after_molecule_id = atom_config.get("after_molecule_id")
             before_molecule_id = atom_config.get("before_molecule_id")
             
+            atom_settings = atom_config.get("atom_configs", {}) or {}
+
             # Create card if it doesn't exist
             if canvas_pos not in cards_map:
                 card_id = atom_config.get("mode_meta", {}).get("card_id") or f"card-{canvas_pos}"
-                text_boxes = atom_config.get("text_boxes") or atom_config.get("textBoxes") or []
-                text_box_settings = atom_config.get("text_box_settings") or atom_config.get("textBoxSettings") or {}
+                text_boxes = (
+                    atom_config.get("text_boxes")
+                    or atom_config.get("textBoxes")
+                    or atom_settings.get("textBoxes")
+                    or []
+                )
+                text_box_settings = (
+                    atom_config.get("text_box_settings")
+                    or atom_config.get("textBoxSettings")
+                    or atom_settings.get("textBoxSettings")
+                    or {}
+                )
+                text_box_content = (
+                    atom_config.get("text_box_content")
+                    or atom_config.get("textBoxContent")
+                    or atom_settings.get("textBoxContent")
+                    or ""
+                )
+                text_box_html = (
+                    atom_config.get("text_box_html")
+                    or atom_config.get("textBoxHtml")
+                    or atom_settings.get("textBoxHtml")
+                    or ""
+                )
+                text_box_enabled = atom_config.get("text_box_enabled")
+                if text_box_enabled is None:
+                    text_box_enabled = atom_config.get("textBoxEnabled")
+                if text_box_enabled is None:
+                    text_box_enabled = atom_settings.get("textBoxEnabled")
                 card_data = {
                     "id": card_id,
                     "atoms": [],
@@ -512,9 +541,9 @@ async def get_atom_list_configuration(
                     "collapsed": atom_config.get("open_cards") == "no",
                     "scroll_position": atom_config.get("scroll_position", 0),
                     "textBoxes": text_boxes,
-                    "textBoxEnabled": atom_config.get("text_box_enabled", False),
-                    "textBoxContent": atom_config.get("text_box_content", ""),
-                    "textBoxHtml": atom_config.get("text_box_html", ""),
+                    "textBoxEnabled": bool(text_box_enabled),
+                    "textBoxContent": text_box_content,
+                    "textBoxHtml": text_box_html,
                     "textBoxSettings": text_box_settings,
                 }
                 # Set molecule and order fields if they exist
@@ -687,7 +716,16 @@ async def save_atom_list_configuration(
             for atom_pos, atom in enumerate(card.get("atoms", [])):
                 atom_id = atom.get("atomId") or atom.get("title") or "unknown"
                 atom_title = atom.get("title") or atom_id
-                atom_settings = atom.get("settings", {})
+                atom_settings = dict(atom.get("settings", {}))
+
+                # Always persist text box state inside atom_configs for reliable restoration
+                atom_settings.update({
+                    "textBoxes": text_boxes,
+                    "textBoxEnabled": text_box_enabled,
+                    "textBoxContent": text_box_content,
+                    "textBoxHtml": text_box_html,
+                    "textBoxSettings": text_box_settings,
+                })
                 
                 # Debug: Log what settings are being processed
                 logger.info(f"🔍 DEBUG: Processing atom {atom_id} with settings keys: {list(atom_settings.keys())}")
