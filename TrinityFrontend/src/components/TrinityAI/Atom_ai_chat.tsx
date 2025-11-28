@@ -637,6 +637,46 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           const aiSelectedIdentifiers = cfg.identifiers || [];
           const aiSelectedMeasures = [];
           
+          // 🔧 HELPER: Move AI-selected identifiers from measures to identifiers list (like manual drag-and-drop)
+          // 🔧 CRITICAL: Also ensure AI-selected identifiers are added even if they're not in current lists
+          const moveIdentifiersToIdentifierList = (selectedIds: string[]) => {
+            const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+            const currentIdentifiers = currentAtom?.settings?.identifiers || currentAtom?.settings?.identifierList || [];
+            const currentMeasures = currentAtom?.settings?.measures || currentAtom?.settings?.measureList || [];
+            const allColumns = currentAtom?.settings?.allColumns || [];
+            
+            // 🔧 CRITICAL: Get all available column names from allColumns
+            const allColumnNames = allColumns.map((col: any) => 
+              typeof col === 'string' ? col : (col.column || col.name || col)
+            );
+            
+            // 🔧 CRITICAL: Add AI-selected identifiers to identifiers list
+            // Even if they're not in currentIdentifiers or currentMeasures, add them if they exist in allColumns
+            const identifiersToAdd = selectedIds.filter(id => {
+              // Check if column exists in allColumns (case-insensitive)
+              const existsInColumns = allColumnNames.some((col: string) => 
+                col.toLowerCase() === id.toLowerCase()
+              );
+              return existsInColumns && !currentIdentifiers.includes(id);
+            });
+            
+            // Move selected identifiers from measures to identifiers, and add new ones
+            const newIdentifiers = [...new Set([...currentIdentifiers, ...selectedIds])];
+            const newMeasures = currentMeasures.filter(m => !selectedIds.includes(m));
+            
+            console.log('🔧 MOVE IDENTIFIERS DEBUG:', {
+              selectedIds,
+              currentIdentifiers,
+              currentMeasures,
+              allColumnNames: allColumnNames.slice(0, 10), // First 10 for logging
+              identifiersToAdd,
+              newIdentifiers,
+              newMeasures
+            });
+            
+            return { newIdentifiers, newMeasures };
+          };
+          
           // 🔧 FIX: Ensure we have a single file, not multiple files
           let singleFileName = '';
           
@@ -680,10 +720,18 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               };
               setMessages(prev => [...prev, errorMsg]);
               
+              // 🔧 CRITICAL: Move AI-selected identifiers from measures to identifiers list
+              const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+              
               updateAtomSettings(atomId, { 
                 aiConfig: cfg,
                 aiMessage: data.message,
                 operationCompleted: false,
+                // 🔧 CRITICAL: Update identifier and measure lists (like manual drag-and-drop)
+                identifiers: newIdentifiers,
+                identifierList: newIdentifiers,
+                measures: newMeasures,
+                measureList: newMeasures,
                 selectedIdentifiers: aiSelectedIdentifiers,
                 selectedMeasures: aiSelectedMeasures,
                 selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -766,15 +814,53 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             return; // Don't proceed with the operation
           }
           
+          // 🔧 CRITICAL FIX: Move AI-selected identifiers from measures to identifiers list (like manual drag-and-drop)
+          const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+          
+          // Also ensure selectedMeasureNames doesn't include identifiers that were moved
+          const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+          const currentSelectedMeasureNames = currentAtom?.settings?.selectedMeasureNames || [];
+          const newSelectedMeasureNames = aiSelectedMeasures.map(m => m.field).filter(
+            field => !aiSelectedIdentifiers.includes(field)
+          );
+          
+          console.log('🔧 MOVING AI-SELECTED IDENTIFIERS FROM MEASURES TO IDENTIFIERS:', {
+            aiSelectedIdentifiers,
+            newIdentifiers,
+            newMeasures,
+            movedFromMeasures: (currentAtom?.settings?.measures || currentAtom?.settings?.measureList || []).filter(
+              (m: string) => aiSelectedIdentifiers.includes(m)
+            )
+          });
+          
+          // 🔧 CRITICAL: Update identifiers FIRST, then selectedIdentifiers in a single update
+          // This ensures fallbackIdentifiers includes all AI-selected identifiers before filtering
+          console.log('🔧 UPDATING ATOM SETTINGS WITH AI IDENTIFIERS:', {
+            aiSelectedIdentifiers,
+            newIdentifiers,
+            newMeasures,
+            willUpdateIdentifiers: true,
+            willUpdateSelectedIdentifiers: true
+          });
+          
           // Update atom settings with the AI configuration and auto-populated options
+          // 🔧 CRITICAL: Update identifiers and identifierList FIRST, then selectedIdentifiers
+          // This ensures the component's fallbackIdentifiers calculation includes all AI-selected identifiers
           updateAtomSettings(atomId, { 
             aiConfig: cfg,
             aiMessage: data.message,
             operationCompleted: false,
-            // Auto-populate the interface
-            selectedIdentifiers: aiSelectedIdentifiers,
+            // 🔧 CRITICAL: Update identifier and measure lists FIRST (like manual drag-and-drop)
+            // This ensures fallbackIdentifiers = identifiers includes all AI-selected ones
+            identifiers: newIdentifiers,
+            identifierList: newIdentifiers,
+            measures: newMeasures,
+            measureList: newMeasures,
+            // 🔧 CRITICAL: Set selectedIdentifiers AFTER updating identifiers list
+            // This ensures they're not filtered out because they're now in fallbackIdentifiers
+            selectedIdentifiers: aiSelectedIdentifiers, // These are now in identifiers list above
             selectedMeasures: aiSelectedMeasures,
-            selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
+            selectedMeasureNames: newSelectedMeasureNames.length > 0 ? newSelectedMeasureNames : aiSelectedMeasures.map(m => m.field),
             // Set default aggregation methods
             selectedAggregationMethods: ['Sum', 'Mean', 'Min', 'Max', 'Count', 'Median', 'Weighted Mean', 'Rank Percentile'],
             // Set data source if available - use single file only
@@ -782,6 +868,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             // Set bucket name
             bucketName: cfg.bucket_name || 'trinity'
           });
+          
+          console.log('✅ ATOM SETTINGS UPDATED - identifiers now includes:', newIdentifiers);
+          console.log('✅ selectedIdentifiers set to:', aiSelectedIdentifiers);
           
           // Add AI success message with operation completion
           const aiSuccessMsg: Message = {
@@ -915,7 +1004,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                         });
                         
                         // ✅ REAL RESULTS AVAILABLE - Update atom settings with actual data
+                        // 🔧 CRITICAL: Ensure identifiers are in identifiers list (not measures)
+                        const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+                        
                         updateAtomSettings(atomId, {
+                          // 🔧 CRITICAL: Update identifier and measure lists
+                          identifiers: newIdentifiers,
+                          identifierList: newIdentifiers,
+                          measures: newMeasures,
+                          measureList: newMeasures,
                           selectedIdentifiers: aiSelectedIdentifiers,
                           selectedMeasures: aiSelectedMeasures,
                           selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -952,7 +1049,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                     console.error('❌ Error fetching results from saved file:', fetchError);
                     
                     // ⚠️ File saved but couldn't retrieve results - still mark as successful
+                    // 🔧 CRITICAL: Ensure identifiers are in identifiers list
+                    const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+                    
                     updateAtomSettings(atomId, {
+                      // 🔧 CRITICAL: Update identifier and measure lists
+                      identifiers: newIdentifiers,
+                      identifierList: newIdentifiers,
+                      measures: newMeasures,
+                      measureList: newMeasures,
                       selectedIdentifiers: aiSelectedIdentifiers,
                       selectedMeasures: aiSelectedMeasures,
                       selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -982,7 +1087,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                   // ❌ Backend operation failed
                   console.error('❌ GroupBy backend operation failed:', result);
                   
+                  // 🔧 CRITICAL: Ensure identifiers are in identifiers list
+                  const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+                  
                   updateAtomSettings(atomId, {
+                    // 🔧 CRITICAL: Update identifier and measure lists
+                    identifiers: newIdentifiers,
+                    identifierList: newIdentifiers,
+                    measures: newMeasures,
+                    measureList: newMeasures,
                     selectedIdentifiers: aiSelectedIdentifiers,
                     selectedMeasures: aiSelectedMeasures,
                     selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -1020,7 +1133,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 };
                 setMessages(prev => [...prev, errorMsg]);
                 
+                // 🔧 CRITICAL: Ensure identifiers are in identifiers list
+                const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+                
                 updateAtomSettings(atomId, {
+                  // 🔧 CRITICAL: Update identifier and measure lists
+                  identifiers: newIdentifiers,
+                  identifierList: newIdentifiers,
+                  measures: newMeasures,
+                  measureList: newMeasures,
                   selectedIdentifiers: aiSelectedIdentifiers,
                   selectedMeasures: aiSelectedMeasures,
                   selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -1041,7 +1162,15 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             };
             setMessages(prev => [...prev, errorMsg]);
             
+            // 🔧 CRITICAL: Ensure identifiers are in identifiers list
+            const { newIdentifiers, newMeasures } = moveIdentifiersToIdentifierList(aiSelectedIdentifiers);
+            
             updateAtomSettings(atomId, {
+              // 🔧 CRITICAL: Update identifier and measure lists
+              identifiers: newIdentifiers,
+              identifierList: newIdentifiers,
+              measures: newMeasures,
+              measureList: newMeasures,
               selectedIdentifiers: aiSelectedIdentifiers,
               selectedMeasures: aiSelectedMeasures,
               selectedMeasureNames: aiSelectedMeasures.map(m => m.field),
@@ -1068,13 +1197,70 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           
           // 🔧 GET TARGET FILE: Use the exact keys from LLM response
           let targetFile = '';
+          let targetFileObjectName = ''; // Store the object_name format for dataSource dropdown
           
           // Priority 1: Use AI-provided file name (exact keys from LLM)
           if (data.file_name) {
             targetFile = data.file_name;
+            // Extract object_name format (remove .arrow extension if present, keep path structure)
+            targetFileObjectName = targetFile.replace(/\.arrow$/, '');
             console.log('🎯 Using AI-provided file name:', targetFile);
+            console.log('🎯 Extracted object_name for dataSource:', targetFileObjectName);
+          } else if (chartsList.length > 0 && chartsList[0].file) {
+            // Fallback: Try to get file from first chart
+            const chartFile = Array.isArray(chartsList[0].file) ? chartsList[0].file[0] : chartsList[0].file;
+            if (chartFile) {
+              targetFile = chartFile;
+              // Extract object_name format (remove .arrow extension if present, keep path structure)
+              targetFileObjectName = chartFile.replace(/\.arrow$/, '');
+              console.log('🎯 Using file from chart config:', targetFile);
+              console.log('🎯 Extracted object_name for dataSource:', targetFileObjectName);
+            }
           } else {
             console.log('⚠️ No file name found in AI response');
+          }
+          
+          // 🔧 CRITICAL: Fetch frames list and match to correct object_name for dropdown
+          // This ensures the dropdown shows the selected file correctly
+          let matchedObjectName = targetFileObjectName;
+          try {
+            const framesResponse = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+            const framesData = await framesResponse.json();
+            const frames = Array.isArray(framesData.files) ? framesData.files : [];
+            
+            // Try to find matching object_name in frames list
+            const matchingFrame = frames.find((f: any) => {
+              if (!f.object_name || !f.arrow_name) return false;
+              
+              // Exact match
+              if (f.object_name === targetFileObjectName) return true;
+              
+              // Match by basename (filename without path)
+              const targetBasename = targetFileObjectName.split('/').pop()?.replace(/\.arrow$/, '');
+              const frameBasename = f.object_name.split('/').pop()?.replace(/\.arrow$/, '');
+              if (targetBasename && frameBasename && targetBasename === frameBasename) return true;
+              
+              // Match by arrow_name basename
+              const arrowBasename = f.arrow_name.split('/').pop()?.replace(/\.arrow$/, '');
+              if (targetBasename && arrowBasename && targetBasename === arrowBasename) return true;
+              
+              // Match by full arrow_name path
+              const arrowNameWithoutExt = f.arrow_name.replace(/\.arrow$/, '');
+              if (arrowNameWithoutExt === targetFileObjectName || arrowNameWithoutExt.endsWith('/' + targetFileObjectName)) return true;
+              
+              return false;
+            });
+            
+            if (matchingFrame) {
+              matchedObjectName = matchingFrame.object_name;
+              console.log('✅ Matched file to object_name:', targetFileObjectName, '->', matchedObjectName);
+            } else {
+              console.log('⚠️ Could not match file to frames list, using original:', targetFileObjectName);
+              console.log('Available frames:', frames.map((f: any) => ({ object_name: f.object_name, arrow_name: f.arrow_name })));
+            }
+          } catch (error) {
+            console.error('Failed to fetch frames list for matching:', error);
+            // Continue with original targetFileObjectName
           }
           
           if (!targetFile) {
@@ -1114,40 +1300,98 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               console.log('🔧 Additional filters from chartConfig.filters:', chartConfig.filters);
             }
             
+            // 🔧 CRITICAL FIX: Use SIMPLE MODE (isAdvancedMode: false) with legendField for multiple series
+            // This uses the simpler format that the user prefers:
+            // - Single Y-axis with legendField to segregate into multiple series
+            // - OR dual Y-axis (yAxis + secondYAxis) for two different metrics
+            // This avoids the complex traces-based advanced mode
+            
+            // Determine if we need dual Y-axis or legendField segregation
+            const firstTrace = traces[0];
+            const secondTrace = traces[1];
+            
+            // 🔧 CRITICAL: Validate that x_column and y_column are present (required for filters)
+            if (!firstTrace?.x_column || !firstTrace?.y_column) {
+              console.error(`❌ Chart ${index + 1} missing required columns:`, {
+                x_column: firstTrace?.x_column,
+                y_column: firstTrace?.y_column,
+                traces: traces
+              });
+              // Try to extract from chartConfig as fallback
+              const fallbackX = chartConfig.x_column || chartConfig.x_axis || '';
+              const fallbackY = chartConfig.y_column || chartConfig.y_axis || '';
+              if (!fallbackX || !fallbackY) {
+                console.error(`❌ Chart ${index + 1} cannot be created - missing x_column and y_column`);
+                return null; // Skip this chart
+              }
+            }
+            
+            // If we have 2 traces with different Y columns, use dual Y-axis (simpler)
+            // If we have 1 trace but want multiple series, use legendField
+            const useDualAxis = traces.length === 2 && 
+                                firstTrace?.y_column && 
+                                secondTrace?.y_column && 
+                                firstTrace.y_column !== secondTrace.y_column;
+            
+            // Extract legendField if provided (for segregating single Y-axis into multiple series)
+            const legendField = chartConfig.legend_field || chartConfig.segregate_field || 
+                               (traces.length === 1 && traces[0]?.legend_field) || 
+                               'aggregate'; // Default to 'aggregate' (no segregation)
+            
+            // 🔧 CRITICAL: Ensure xAxis and yAxis are set (required for filters to work)
+            const xAxisValue = firstTrace?.x_column || chartConfig.x_column || chartConfig.x_axis || '';
+            const yAxisValue = firstTrace?.y_column || chartConfig.y_column || chartConfig.y_axis || '';
+            
+            if (!xAxisValue || !yAxisValue) {
+              console.error(`❌ Chart ${index + 1} cannot be created - xAxis or yAxis is empty`);
+              return null; // Skip this chart
+            }
+            
             return {
               id: `ai_chart_${chartConfig.chart_id || index + 1}_${Date.now()}`,
               title: title,
               type: chartType as 'line' | 'bar' | 'area' | 'pie' | 'scatter',
               chart_type: chartType, // 🔧 CRITICAL FIX: Add chart_type field for backend compatibility
-              xAxis: traces[0]?.x_column || '',
-              yAxis: traces[0]?.y_column || '',
-              filters: filters, // 🔧 FILTER INTEGRATION: Use AI-generated filters
+              xAxis: xAxisValue, // 🔧 CRITICAL: Must be non-empty for filters to work
+              yAxis: yAxisValue, // 🔧 CRITICAL: Must be non-empty for filters to work
+              // 🔧 CRITICAL: Use dual Y-axis if we have 2 different Y columns (simpler than traces)
+              secondYAxis: useDualAxis ? secondTrace?.y_column : undefined,
+              dualAxisMode: useDualAxis ? 'dual' : undefined, // 'dual' = separate axes, 'single' = combined
+              filters: filters, // Chart-level filters
+              aggregation: firstTrace?.aggregation || 'sum', // Aggregation method
+              // 🔧 CRITICAL: Use legendField to segregate single Y-axis into multiple series
+              // This is the simpler approach: one Y-axis, segregated by a field (e.g., Brand, Channel)
+              legendField: !useDualAxis && legendField !== 'aggregate' ? legendField : 'aggregate',
               chartRendered: false,
-              isAdvancedMode: traces.length > 1,
-              traces: traces.map((trace: any, traceIndex: number) => ({
-                id: `trace_${traceIndex}`,
-                x_column: trace.x_column || '', // 🔧 FIX: Use correct property name
-                y_column: trace.y_column || '', // 🔧 FIX: Use correct property name
-                yAxis: trace.y_column || '', // Keep for backward compatibility
-                name: trace.name || `Trace ${traceIndex + 1}`,
-                color: trace.color || undefined,
-                aggregation: trace.aggregation || 'sum',
-                chart_type: trace.chart_type || chartType, // 🔧 CRITICAL FIX: Add chart_type to traces
-                filters: filters // 🔧 FILTER INTEGRATION: Apply same filters to traces
-              }))
+              chartLoading: false,
+              // 🔧 CRITICAL: Use SIMPLE MODE (not advanced mode) for AI-generated charts
+              // This ensures the simpler format is used with legendField or dual Y-axis
+              isAdvancedMode: false, // Use simple mode with legendField/dualAxis, not traces
+              traces: [], // Empty traces array - not used in simple mode
             };
-          });
+          }).filter((chart: any) => chart !== null); // Remove any null charts (validation failures)
+          
+          if (charts.length === 0) {
+            console.error('❌ No valid charts could be created from AI response');
+            toast({
+              title: 'Chart creation failed',
+              description: 'Could not create charts - missing required columns (x_column, y_column)',
+              variant: 'destructive',
+            });
+            return;
+          }
           
           console.log('🔧 Processed charts:', charts.length);
           
           // 🔧 CRITICAL FIX: Update atom settings with the AI configuration AND load data
+          // Use object_name format (without .arrow) for dataSource to match dropdown format
           updateAtomSettings(atomId, { 
             aiConfig: data,
             aiMessage: data.message,
             // Add the AI-generated charts to the charts array
             charts: charts,
-            // 🔧 CRITICAL: Set proper data source and file ID for chart rendering
-            dataSource: targetFile,
+            // 🔧 CRITICAL: Set proper data source using matched object_name for dropdown visibility
+            dataSource: matchedObjectName || targetFileObjectName || targetFile.replace(/\.arrow$/, ''),
             fileId: targetFile,
             // Set the first chart as active
             currentChart: charts[0],
@@ -1163,7 +1407,9 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
             yAxisColumn: charts[0].yAxis,
             // 🔧 CRITICAL: Set chart rendering state to trigger data loading
             chartRendered: false,
-            chartLoading: false
+            chartLoading: false,
+            // 🔧 AUTO-RENDER FLAG: Set flag to auto-trigger render after file loads
+            autoRenderAfterLoad: true
           });
           
           // 🔧 CRITICAL FIX: Connect to actual file system and load real data
@@ -1184,21 +1430,73 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               const fileData = await loadResponse.json();
               console.log('✅ File data loaded successfully:', fileData);
               
-              // 🔧 STEP 2: Update atom settings with REAL file data
+              // 🔧 STEP 2: Fetch additional data required for filters (same as handleDataUpload)
+              // The backend load-saved-dataframe returns basic info, but we need:
+              // - allColumns from getAllColumns endpoint
+              // - numericColumns/categoricalColumns from getColumns endpoint  
+              // - uniqueValuesByColumn from getUniqueValues endpoint (for ALL columns, not just categorical)
+              console.log('🔄 Fetching additional column data for filters...');
+              
+              // Import chartMakerApi to use the same methods as handleDataUpload
+              // Use dynamic import to avoid circular dependencies
+              const chartMakerApiModule = await import('@/components/AtomList/atoms/chart-maker/services/chartMakerApi');
+              const chartMakerApi = chartMakerApiModule.chartMakerApi;
+              
+              const [allColumnsResponse, columnsResponse] = await Promise.all([
+                chartMakerApi.getAllColumns(fileData.file_id),
+                chartMakerApi.getColumns(fileData.file_id)
+              ]);
+              
+              const resolvedFileId = columnsResponse.file_id || allColumnsResponse.file_id || fileData.file_id;
+              const allColumns = allColumnsResponse.columns || fileData.columns || [];
+              
+              // 🔧 CRITICAL: Fetch unique values for ALL columns (not just categorical)
+              // This is required for filters to work - getAvailableFilterColumns() needs uniqueValuesByColumn
+              console.log('🔄 Fetching unique values for all columns...');
+              let uniqueValuesByColumn = fileData.unique_values || {};
+              
+              if (allColumns.length > 0) {
+                try {
+                  const uniqueValuesResponse = await chartMakerApi.getUniqueValues(resolvedFileId, allColumns);
+                  
+                  if (uniqueValuesResponse.values) {
+                    uniqueValuesByColumn = uniqueValuesResponse.values;
+                    console.log(`✅ Fetched unique values for ${Object.keys(uniqueValuesByColumn).length} columns`);
+                  }
+                } catch (err) {
+                  console.warn('⚠️ Failed to fetch unique values, using defaults:', err);
+                }
+              }
+              
+              // 🔧 STEP 3: Update atom settings with REAL file data (matching handleDataUpload structure)
+              // Use object_name format (without .arrow) for dataSource to match dropdown format
+              // 🔧 CRITICAL: Don't clear charts here - preserve them so they don't disappear
               updateAtomSettings(atomId, {
-                dataSource: targetFile,
-                fileId: fileData.file_id,
+                dataSource: matchedObjectName || targetFileObjectName || targetFile.replace(/\.arrow$/, ''),
+                fileId: resolvedFileId,
                 uploadedData: {
                   columns: fileData.columns,
                   rows: fileData.sample_data,
                   numeric_columns: fileData.numeric_columns,
                   categorical_columns: fileData.categorical_columns,
                   unique_values: fileData.unique_values,
-                  file_id: fileData.file_id,
-                  row_count: fileData.row_count
+                  file_id: resolvedFileId,
+                  row_count: fileData.row_count,
+                  // 🔧 CRITICAL: Add fields required for getAvailableFilterColumns() to work
+                  // These must match the structure that handleDataUpload creates
+                  allColumns: allColumns, // Required for filter column detection (from getAllColumns)
+                  numericColumns: columnsResponse.numeric_columns || fileData.numeric_columns || [], // Required for filter column detection
+                  categoricalColumns: columnsResponse.categorical_columns || fileData.categorical_columns || [], // Required for filter column detection
+                  uniqueValuesByColumn: uniqueValuesByColumn // Required for filter dropdown values (from getUniqueValues)
                 },
-                chartRendered: false, // Will be rendered when chart is generated
-                chartLoading: false
+                // 🔧 CRITICAL: Don't reset chartRendered - keep existing chart state
+                // chartRendered will be updated after charts are generated
+                chartLoading: true, // Set to true to prevent useEffect from interfering
+                // 🔧 AUTO-RENDER FLAG: Keep flag to auto-trigger render
+                autoRenderAfterLoad: true,
+                // 🔧 CRITICAL: Preserve existing charts - don't clear them
+                // Charts will be updated in STEP 4 after generation
+                charts: charts  // Explicitly preserve charts here to prevent clearing
               });
               
               // 🔧 STEP 3: Generate charts using the backend - UNIFIED APPROACH
@@ -1222,67 +1520,79 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
               };
               
               const generateSingleChart = async (chart: any, index: number) => {
-                const chartType = chart.type || chart.chart_type || 'bar'; // 🔧 CRITICAL FIX: Use chart_type as fallback
-                const traces = chart.traces || [];
+                const chartType = chart.type || chart.chart_type || 'bar';
                 const title = chart.title;
                 
                 console.log(`📊 Generating chart ${index + 1}/${charts.length}: ${title} (${chartType})`);
+                console.log(`🔍 Chart mode: ${chart.isAdvancedMode ? 'Advanced (traces)' : 'Simple (legendField/dualAxis)'}`);
                 
-                // 🔧 ENHANCED FILTER PROCESSING: Ensure filters are properly formatted
+                // 🔧 CRITICAL FIX: Use SIMPLE MODE format (not advanced traces mode)
+                // Simple mode uses: yAxis, secondYAxis (optional), legendField (optional), filters
                 const processedFilters = chart.filters || {};
-                const processedTraceFilters = traces.map(trace => {
-                  const traceFilters = trace.filters || {};
-                  // Ensure trace filters are in the correct format
-                  const formattedTraceFilters = {};
-                  for (const [key, value] of Object.entries(traceFilters)) {
-                    if (Array.isArray(value)) {
-                      // Validate that all values are strings
-                      formattedTraceFilters[key] = value.filter(v => typeof v === 'string' && v.trim() !== '');
-                    } else if (typeof value === 'string' && value.trim() !== '') {
-                      formattedTraceFilters[key] = [value.trim()];
+                
+                // Build traces for API - simple mode uses buildTracesForAPI which handles legendField
+                // For simple mode with dual Y-axis: create 2 traces (one for each Y-axis)
+                // For simple mode with legendField: create 1 trace with legend_field
+                let apiTraces: any[] = [];
+                
+                if (chart.secondYAxis) {
+                  // Dual Y-axis mode: create 2 traces
+                  apiTraces = [
+                    {
+                      x_column: chart.xAxis,
+                      y_column: chart.yAxis,
+                      name: chart.yAxis,
+                      chart_type: chartType,
+                      aggregation: chart.aggregation || 'sum',
+                      filters: processedFilters,
+                    },
+                    {
+                      x_column: chart.xAxis,
+                      y_column: chart.secondYAxis,
+                      name: chart.secondYAxis,
+                      chart_type: chartType,
+                      aggregation: chart.aggregation || 'sum',
+                      filters: processedFilters,
                     }
-                  }
-                  return formattedTraceFilters;
-                });
-                
-                // 🔧 CRITICAL FIX: Ensure chart-level filters are also applied to traces
-                // This is important because the backend processes trace-level filters differently
-                const enhancedTraceFilters = traces.map((trace, traceIndex) => {
-                  const traceFilters = processedTraceFilters[traceIndex] || {};
-                  // Merge chart-level filters with trace-level filters
-                  const mergedFilters = { ...processedFilters, ...traceFilters };
-                  return mergedFilters;
-                });
-                
-                // 🔧 FILTER VALIDATION: Log any issues with filter processing
-                if (Object.keys(processedFilters).length > 0) {
-                  console.log(`✅ Chart ${index + 1} chart-level filters processed:`, processedFilters);
+                  ];
+                } else {
+                  // Single Y-axis with optional legendField for segregation
+                  apiTraces = [
+                    {
+                      x_column: chart.xAxis,
+                      y_column: chart.yAxis,
+                      name: chart.yAxis,
+                      chart_type: chartType,
+                      aggregation: chart.aggregation || 'sum',
+                      legend_field: chart.legendField && chart.legendField !== 'aggregate' ? chart.legendField : undefined,
+                      filters: processedFilters,
+                    }
+                  ];
                 }
-                if (enhancedTraceFilters.some(tf => Object.keys(tf).length > 0)) {
-                  console.log(`✅ Chart ${index + 1} enhanced trace-level filters processed:`, enhancedTraceFilters);
+                
+                // 🔧 FILTER VALIDATION: Log filter processing
+                if (Object.keys(processedFilters).length > 0) {
+                  console.log(`✅ Chart ${index + 1} filters processed:`, processedFilters);
                 }
                 
                 const chartRequest = {
                   file_id: fileData.file_id,
                   chart_type: chartType,
-                  traces: traces.map((trace, traceIndex) => ({
-                    x_column: trace.x_column || chart.xAxis,
-                    y_column: trace.y_column || chart.yAxis,
-                    name: trace.name || `Trace ${traceIndex + 1}`,
-                    chart_type: trace.chart_type || chartType,
-                    aggregation: trace.aggregation || 'sum',
-                    filters: enhancedTraceFilters[traceIndex] || {} // 🔧 CRITICAL FIX: Use enhanced trace filters
-                  })),
+                  traces: apiTraces, // Simple mode: 1-2 traces with legendField or dual Y-axis
                   title: title,
-                  filters: processedFilters // 🔧 FILTER INTEGRATION: Pass chart-level filters to backend
+                  filters: processedFilters // Chart-level filters
                 };
                 
                 console.log(`📊 Chart ${index + 1} request payload:`, chartRequest);
-                console.log(`🔍 Chart ${index + 1} filters debug:`, {
+                console.log(`🔍 Chart ${index + 1} configuration:`, {
+                  chartType,
+                  xAxis: chart.xAxis,
+                  yAxis: chart.yAxis,
+                  secondYAxis: chart.secondYAxis,
+                  legendField: chart.legendField,
                   chartFilters: processedFilters,
-                  enhancedTraceFilters: enhancedTraceFilters,
-                  originalChartFilters: chart.filters,
-                  originalTraceFilters: traces.map(t => t.filters)
+                  tracesCount: apiTraces.length,
+                  isAdvancedMode: chart.isAdvancedMode
                 });
                 
                 try {
@@ -1378,7 +1688,11 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                 charts: generatedCharts,
                 currentChart: generatedCharts[0] || charts[0],
                 chartRendered: generatedCharts.some(chart => chart.chartRendered),
-                chartLoading: false
+                chartLoading: false,
+                // 🔧 Clear auto-render flag after charts are generated
+                autoRenderAfterLoad: false,
+                // 🔧 Ensure dataSource is set using matched object_name for dropdown visibility
+                dataSource: matchedObjectName || targetFileObjectName || targetFile.replace(/\.arrow$/, '')
               });
               
               console.log('🎉 Charts processed:', generatedCharts.length);

@@ -58,23 +58,36 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   // ------------------------------
   // Get draggable lists from global store
   // ------------------------------
+  // 🔧 CRITICAL: Get AI-selected identifiers to preserve them even if not in fallbackIdentifiers
+  const aiConfig = settings.aiConfig;
+  const aiSelectedIdentifiers = aiConfig?.identifiers || [];
+  
   // Filter identifierList to only include valid identifiers from fallbackIdentifiers
+  // BUT preserve AI-selected identifiers even if not in fallbackIdentifiers
   const rawIdentifierList = settings.identifierList || fallbackIdentifiers;
   const identifierList = rawIdentifierList.filter(id => {
-    const isValid = fallbackIdentifiers.includes(id);
+    const isValid = fallbackIdentifiers.includes(id) || aiSelectedIdentifiers.includes(id);
     if (!isValid) {
       console.log('⚠️ [Filter] Removing invalid identifier from list:', id);
     }
     return isValid;
   });
-  if (rawIdentifierList.length !== identifierList.length) {
-    console.log('🔍 [Filter] Filtered identifierList:', {
+  
+  // 🔧 CRITICAL: Also add AI-selected identifiers that aren't in the list yet
+  const finalIdentifierList = [...new Set([...identifierList, ...aiSelectedIdentifiers])];
+  
+  if (rawIdentifierList.length !== finalIdentifierList.length) {
+    console.log('🔍 [Filter] Filtered/Updated identifierList:', {
       originalLength: rawIdentifierList.length,
-      filteredLength: identifierList.length,
-      removed: rawIdentifierList.filter(id => !fallbackIdentifiers.includes(id))
+      filteredLength: finalIdentifierList.length,
+      removed: rawIdentifierList.filter(id => !fallbackIdentifiers.includes(id) && !aiSelectedIdentifiers.includes(id)),
+      addedFromAI: aiSelectedIdentifiers.filter(id => !rawIdentifierList.includes(id))
     });
   }
   const measureList = settings.measureList || fallbackMeasures;
+  
+  // 🔧 CRITICAL: Use finalIdentifierList (includes AI-selected identifiers) for display
+  const displayIdentifierList = finalIdentifierList;
 
   // Keep global lists in sync when fallback arrays change (e.g. after data fetch)
   useEffect(() => {
@@ -128,29 +141,42 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
   // Update selected identifiers when data source changes (but NOT when user explicitly changes selection)
   useEffect(() => {
     if (fallbackIdentifiers.length > 0) {
+      // 🔧 CRITICAL: If AI config exists, preserve AI-selected identifiers even if not in fallbackIdentifiers
+      // This allows AI to select identifiers like "year" and "month" even if they're numeric
+      const aiConfig = settings.aiConfig;
+      const aiSelectedIdentifiers = aiConfig?.identifiers || [];
+      
       // Filter selected identifiers to only include those that exist in the new data
+      // BUT preserve AI-selected identifiers even if not in fallbackIdentifiers
       const validSelectedIdentifiers = selectedIdentifiers.filter(id => 
-        fallbackIdentifiers.includes(id)
+        fallbackIdentifiers.includes(id) || aiSelectedIdentifiers.includes(id)
       );
       
       // Only set defaults if data source actually changed (fallbackIdentifiers changed)
       // AND we have invalid identifiers (meaning data source changed)
       // Do NOT reset if user explicitly set to empty array
+      // 🔧 CRITICAL: Don't filter if AI config exists and identifiers are from AI
       const hasInvalidIdentifiers = selectedIdentifiers.length > 0 && 
-        selectedIdentifiers.some(id => !fallbackIdentifiers.includes(id));
+        selectedIdentifiers.some(id => !fallbackIdentifiers.includes(id) && !aiSelectedIdentifiers.includes(id));
       
       // Only reset if data source changed (has invalid identifiers) and we need to clean up
+      // BUT preserve AI-selected identifiers
       if (hasInvalidIdentifiers) {
-        // Clean up invalid identifiers, keep valid ones
+        // Clean up invalid identifiers, keep valid ones AND AI-selected ones
+        const cleanedIdentifiers = validSelectedIdentifiers.length > 0 
+          ? validSelectedIdentifiers 
+          : (aiSelectedIdentifiers.length > 0 ? aiSelectedIdentifiers : selectedIdentifiers);
+        
         console.log('⚙️ [useEffect] Cleaning invalid identifiers after data source change:', {
-          validSelectedIdentifiers: validSelectedIdentifiers,
-          removed: selectedIdentifiers.filter(id => !fallbackIdentifiers.includes(id))
+          validSelectedIdentifiers: cleanedIdentifiers,
+          removed: selectedIdentifiers.filter(id => !fallbackIdentifiers.includes(id) && !aiSelectedIdentifiers.includes(id)),
+          preservedAIIdentifiers: aiSelectedIdentifiers.filter(id => selectedIdentifiers.includes(id))
         });
-        updateSettings(atomId, { selectedIdentifiers: validSelectedIdentifiers });
+        updateSettings(atomId, { selectedIdentifiers: cleanedIdentifiers });
       }
       // Don't set defaults here - let the initial load useEffect handle that
     }
-  }, [fallbackIdentifiers, atomId, updateSettings]); // Removed selectedIdentifiers from deps to prevent reset on user actions
+  }, [fallbackIdentifiers, atomId, updateSettings, settings.aiConfig]); // Added aiConfig to deps to react to AI updates
 
   // Update selected measures when data source changes
   useEffect(() => {
@@ -204,7 +230,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
     if (source === destination) return;
 
     if (source === 'identifiers' && destination === 'measures') {
-      const newIdentifiers = identifierList.filter(i => i !== item);
+      const newIdentifiers = displayIdentifierList.filter(i => i !== item);
       const newMeasures = [...measureList, item];
       // If the item was selected in identifiers, move its selection to measures
       if (selectedIdentifiers.includes(item)) {
@@ -221,7 +247,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
       });
     } else if (source === 'measures' && destination === 'identifiers') {
       const newMeasures = measureList.filter(m => m !== item);
-      const newIdentifiers = [...identifierList, item];
+      const newIdentifiers = [...displayIdentifierList, item];
       // If the item was selected in measures, move its selection to identifiers
       if (localSelectedMeasures.includes(item)) {
         updateSettings(atomId, {
@@ -403,15 +429,15 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                 <Checkbox
                   id="select-all-identifiers"
                   checked={(() => {
-                    const allSelected = identifierList.length > 0 &&
-                      identifierList.every(id => selectedIdentifiers.includes(id));
+                    const allSelected = displayIdentifierList.length > 0 &&
+                      displayIdentifierList.every(id => selectedIdentifiers.includes(id));
                     console.log('🔍 [Identifiers Select All] Debug:', {
-                      identifierListLength: identifierList.length,
+                      identifierListLength: displayIdentifierList.length,
                       selectedIdentifiersLength: selectedIdentifiers.length,
-                      identifierList: identifierList,
+                      identifierList: displayIdentifierList,
                       selectedIdentifiers: selectedIdentifiers,
                       allSelected: allSelected,
-                      checkResult: identifierList.every(id => {
+                      checkResult: displayIdentifierList.every(id => {
                         const included = selectedIdentifiers.includes(id);
                         if (!included) {
                           console.log(`  ❌ Missing: ${id}`);
@@ -425,11 +451,11 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                     userHasInteractedRef.current = true;
                     console.log('🖱️ [Identifiers Select All] Clicked:', {
                       checked,
-                      identifierList: identifierList,
-                      willSetTo: checked ? [...identifierList] : []
+                      identifierList: displayIdentifierList,
+                      willSetTo: checked ? [...displayIdentifierList] : []
                     });
                     updateSettings(atomId, {
-                      selectedIdentifiers: checked ? [...identifierList] : []
+                      selectedIdentifiers: checked ? [...displayIdentifierList] : []
                     });
                   }}
                 />
@@ -441,7 +467,7 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
                 </label>
               </div>
               <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">
-                {identifierList.map((identifier: string) => {
+                {displayIdentifierList.map((identifier: string) => {
                   const isSelected = selectedIdentifiers.includes(identifier);
                   return (
                     <div

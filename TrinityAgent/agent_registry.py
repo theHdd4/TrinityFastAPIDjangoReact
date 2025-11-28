@@ -154,8 +154,9 @@ def _save_agent_to_postgres_with_retry(
                 logger.debug(f"⚠️ Interpreter shutting down, skipping PostgreSQL save for '{agent_name}'")
                 return False
             # Timeout is not critical - agents will be synced via Django management command
+            # Log as debug to reduce noise (these are expected in some environments)
             logger.debug(f"⚠️ Timeout/RuntimeError saving '{agent_name}' to PostgreSQL (attempt {attempt + 1}/{max_retries}). "
-                        f"Will be synced via Django management command.")
+                        f"Will be synced via Django management command. (Non-critical)")
             if attempt < max_retries - 1:
                 threading.Event().wait(1)
             else:
@@ -473,9 +474,10 @@ def auto_discover_agents(agent_dir: Optional[Path] = None) -> Dict[str, bool]:
         logger.info(f"✅ Added agent directory to sys.path: {agent_dir}")
     
     # Find all Agent_* directories
+    # Exclude non-agent directories like __pycache__, .git, etc.
     agent_dirs = [
         d for d in agent_dir.iterdir()
-        if d.is_dir() and d.name.startswith("Agent_")
+        if d.is_dir() and d.name.startswith("Agent_") and not d.name.startswith("__")
     ]
     
     logger.info(f"Found {len(agent_dirs)} agent directories: {[d.name for d in agent_dirs]}")
@@ -550,7 +552,9 @@ def auto_discover_agents(agent_dir: Optional[Path] = None) -> Dict[str, bool]:
                 else:
                     logger.error(f"  ❌ Failed to register agent '{agent_name}'")
             else:
-                logger.warning(f"  ⚠️ No router found for {agent_name} (router is {type(router)})")
+                # Only log as debug for None routers (reduces noise - some directories may not have routers)
+                # This is normal for non-agent directories or agents that haven't registered yet
+                logger.debug(f"  ⚠️ No router found for {agent_name} (router is {type(router)}) - may not be an agent or not yet registered")
                 results[agent_name] = False
                 
         except Exception as e:
@@ -637,9 +641,9 @@ def _sync_agents_after_init():
             if success_count == total_count and total_count > 0:
                 logger.info(f"✅✅✅ All {success_count} agents synced to PostgreSQL on startup ✅✅✅")
             elif success_count > 0:
-                logger.warning(f"⚠️ Only {success_count}/{total_count} agents synced to PostgreSQL on startup")
+                logger.debug(f"⚠️ Only {success_count}/{total_count} agents synced to PostgreSQL on startup (Django command will handle full sync)")
             else:
-                logger.error(f"❌ Failed to sync any agents to PostgreSQL on startup")
+                logger.debug(f"⚠️ Failed to sync any agents to PostgreSQL on startup (non-critical: Django management command will handle sync)")
             
             logger.info("=" * 80)
         except Exception as e:
@@ -1006,7 +1010,9 @@ def sync_agents_to_postgres_sync() -> Dict[str, bool]:
         if isinstance(e, RuntimeError) and ("cannot schedule" in str(e) or "interpreter shutdown" in str(e)):
             logger.debug("⚠️ Interpreter shutting down, skipping PostgreSQL sync")
         else:
-            logger.warning(f"⚠️ Timeout or runtime error syncing to PostgreSQL: {e}")
+            # PostgreSQL sync timeouts are non-critical - agents will be synced via Django management command
+            # Log as debug to reduce noise (sync happens in background and failures are expected)
+            logger.debug(f"⚠️ Timeout or runtime error syncing to PostgreSQL (non-critical): {e}")
         return {agent_id: False for agent_id in _agent_routers.keys()}
     except Exception as e:
         logger.error(f"❌ Failed to sync registry to PostgreSQL (sync): {e}", exc_info=True)

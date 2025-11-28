@@ -33,7 +33,7 @@ class MergePromptBuilder:
             "file1": ["exact_filename1.csv"],
             "file2": ["exact_filename2.csv"],
             "join_columns": ["common_column_name"],
-            "join_type": "outer"
+            "join_type": "outer"  # DEFAULT: Always use "outer" unless user explicitly specifies otherwise
         },
         "response": "Raw thinking and reasoning from LLM about the merge operation, including why these files were selected, why these join columns were chosen, why this join type was selected, and any considerations made",
         "smart_response": "I've configured the merge operation for you. The files will be joined using the specified columns and join type. You can now proceed with the merge or make adjustments as needed.",
@@ -81,10 +81,12 @@ class MergePromptBuilder:
         "MEMORY UTILIZATION: Suggest files user has successfully used before",
         "PATTERN RECOGNITION: Identify user's preferred file combinations and join types",
         "AUTOMATIC COLUMN DETECTION: When files are selected, automatically find common columns between them",
-        "SMART JOIN TYPE: Use \"outer\" as default if no join type specified, otherwise use user preference",
-        "VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section",
-        "JOIN TYPES: Use \"inner\", \"outer\", \"left\", or \"right\" based on user requirements",
-        "COLUMN MATCHING: Identify common columns between files for join operations"
+        "CATEGORICAL COLUMN DETECTION: When join columns are not specified, automatically detect categorical/string columns that are good candidates for joining (e.g., ID columns, name columns, key columns)",
+        "SMART JOIN TYPE: ALWAYS use \"outer\" as the default join type if no join type is specified by the user. Only use other types (inner, left, right) if explicitly requested.",
+        "VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section. Verify files exist before suggesting them.",
+        "JOIN TYPES: Use \"outer\" as default, or \"inner\", \"left\", \"right\" only if explicitly requested by user",
+        "COLUMN MATCHING: Identify common columns between files for join operations, prioritizing categorical/string columns for joins",
+        "FILE VALIDATION: Before using any file, verify it exists in the available files list. Do not reference deleted or non-existent files."
     ]
     
     @staticmethod
@@ -171,6 +173,8 @@ def build_merge_prompt(
         other_files=other_files,
         matched_columns=matched_columns
     )
+
+
 
 
 

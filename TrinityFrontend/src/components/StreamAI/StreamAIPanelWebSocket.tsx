@@ -1333,11 +1333,11 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     
     setIsLoading(true);
     
-    // Create progress message
+    // Create progress message - will be updated by status events
     const progressMessageId = `progress-${Date.now()}`;
     const progressMessage: Message = {
       id: progressMessageId,
-      content: '🔄 Analyzing request and generating workflow plan...',
+      content: '🔄 Analyzing the query...',
       sender: 'ai',
       timestamp: new Date()
     };
@@ -1748,10 +1748,22 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               if (shouldAutoApprove) {
                 console.log('⏩ Auto-run enqueueing queueAutoApprove for step', data.step);
                 queueAutoApprove(data.step, data.sequence_id);
+                // Keep loading true - more steps are coming
+                setIsLoading(true);
               } else if (autoRunRef.current && !hasNextStep) {
-                setIsLoading(false);
+                // Last step in auto-run mode - but wait for workflow_completed
+                // Keep loading true until workflow_completed event
+                setIsLoading(true);
               } else {
-                setIsLoading(false);
+                // Manual mode - waiting for user approval
+                // Keep loading true if there are more steps, only stop if this is the last step
+                if (!hasNextStep) {
+                  // This is the last step, but wait for workflow_completed event
+                  setIsLoading(true);
+                } else {
+                  // More steps coming - keep loading
+                  setIsLoading(true);
+                }
               }
             }
             break;
@@ -1812,7 +1824,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             });
             
             updateProgress('\n\n✅ Insights generated!');
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+            // The loading icon will be hidden when ws.onclose fires
             // Now close the connection after insight is received
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.close();
@@ -1822,7 +1835,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           case 'workflow_insight_failed':
             console.warn('⚠️ Workflow insight failed:', data.error);
             updateProgress(`\n\n⚠️ Insight generation failed: ${data.error || 'Unknown error'}`);
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+            // The loading icon will be hidden when ws.onclose fires
             // Close connection even if insight failed
             if (ws && ws.readyState === WebSocket.OPEN) {
               ws.close();
@@ -1831,21 +1845,118 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
 
           case 'workflow_rejected':
             stopAutoRun();
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+            // The loading icon will be hidden when ws.onclose fires
             updateProgress(`\n\n❌ Workflow stopped: ${data?.message || 'Rejected by backend'}`);
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
+            }
+            // Close the connection
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close();
             }
             break;
             
           case 'error':
             updateProgress(`\n\n❌ Error: ${data.error}`);
-            setIsLoading(false);
+            // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+            // The loading icon will be hidden when ws.onclose fires
             stopAutoRun();
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
             }
-            ws.close();
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+            break;
+            
+          case 'status':
+            // Handle status updates (Analyzing, Processing, Thinking, etc.)
+            console.log('📊 Status update:', data.message, data.status);
+            const statusMessage = data.message || 'Processing...';
+            
+            // Update the progress message with new status
+            setMessages(prev => prev.map(msg => 
+              msg.id === progressMessageId 
+                ? { ...msg, content: statusMessage }
+                : msg
+            ));
+            break;
+            
+          case 'text_reply':
+            // Handle direct text reply (for general questions)
+            console.log('💬 Text reply received:', data.message);
+            
+            // Remove progress message and add the actual reply
+            setMessages(prev => {
+              // Remove progress message
+              const filtered = prev.filter(msg => msg.id !== progressMessageId);
+              
+              // Add text reply message
+              const replyMessage: Message = {
+                id: `text-reply-${Date.now()}`,
+                content: data.message || 'No response received',
+                sender: 'ai',
+                timestamp: new Date(),
+                type: 'text'
+              };
+              
+              return [...filtered, replyMessage];
+            });
+            
+            setIsLoading(false);
+            stopAutoRun();
+            
+            // Persist the reply to memory
+            try {
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const updatedMessages = [...currentChat.messages];
+                // Remove progress message if it exists
+                const filteredMessages = updatedMessages.filter(m => m.id !== progressMessageId);
+                // Add reply message
+                const replyMessage: Message = {
+                  id: `text-reply-${Date.now()}`,
+                  content: data.message || 'No response received',
+                  sender: 'ai',
+                  timestamp: new Date(),
+                  type: 'text'
+                };
+                filteredMessages.push(replyMessage);
+                
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: filteredMessages,
+                };
+                memoryPersistSkipRef.current = false;
+                await persistChatToMemory(updatedChat);
+                console.log('✅ Text reply persisted to memory');
+              }
+            } catch (persistError) {
+              console.error('⚠️ Failed to persist text reply:', persistError);
+            }
+            break;
+            
+          case 'complete':
+            // Handle completion event
+            console.log('✅ Workflow/request completed:', data.status, data.intent);
+            
+            // If it's a text_reply completion, we've already handled it above
+            // If it's a workflow completion, the workflow_completed case handles it
+            if (data.intent === 'text_reply') {
+              setIsLoading(false);
+              stopAutoRun();
+            }
+            
+            // Close WebSocket connection
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+            break;
+            
+          default:
+            // Log unhandled event types for debugging
+            console.log('⚠️ Unhandled WebSocket event type:', data.type, data);
             break;
         }
       };
@@ -1882,7 +1993,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           console.error('Failed to persist message on WebSocket error:', persistError);
         }
         
-        setIsLoading(false);
+        // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
+        // The loading icon will be hidden when ws.onclose fires
         stopAutoRun();
       };
       
@@ -1913,8 +2025,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           }
         }
         
-        // 🔧 CRITICAL FIX: Always set loading to false when connection closes
+        // 🔧 CRITICAL FIX: Set loading to false ONLY when WebSocket connection closes
+        // This ensures the loading icon tracks the complete process until the connection is fully closed
         setIsLoading(false);
+        console.log('✅ Loading stopped - WebSocket connection closed');
       };
       
     } catch (error) {

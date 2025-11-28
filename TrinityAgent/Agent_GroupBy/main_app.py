@@ -41,10 +41,24 @@ logger.info(f"Parent directory: {parent_dir}")
 logger.info(f"BaseAgent path: {parent_dir / 'BaseAgent'}")
 logger.info(f"BaseAgent exists: {(parent_dir / 'BaseAgent').exists()}")
 
+# Import exceptions for error handling
+TrinityException = None
+AgentExecutionError = None
+ConfigurationError = None
+FileLoadError = None
+ValidationError = None
+
 try:
     try:
         logger.info("Strategy 1: Importing from BaseAgent.__init__.py (package import)...")
         from BaseAgent import BaseAgent, AgentContext, AgentResult, settings
+        from BaseAgent.exceptions import (
+            TrinityException,
+            AgentExecutionError,
+            ConfigurationError,
+            FileLoadError,
+            ValidationError
+        )
         from .group_by_prompt import GroupByPromptBuilder
         logger.info("✅ Imported BaseAgent from BaseAgent package (__init__.py)")
     except ImportError as e1:
@@ -56,6 +70,13 @@ try:
             from BaseAgent.base_agent import BaseAgent
             from BaseAgent.interfaces import AgentContext, AgentResult
             from BaseAgent.config import settings
+            from BaseAgent.exceptions import (
+                TrinityException,
+                AgentExecutionError,
+                ConfigurationError,
+                FileLoadError,
+                ValidationError
+            )
             from .group_by_prompt import GroupByPromptBuilder
             logger.info("✅ Imported BaseAgent from local BaseAgent modules")
         except ImportError as e2:
@@ -66,6 +87,13 @@ try:
                 # Fallback import
                 logger.info("Strategy 3: Importing from TrinityAgent.BaseAgent (absolute)...")
                 from TrinityAgent.BaseAgent import BaseAgent, AgentContext, AgentResult, settings
+                from TrinityAgent.BaseAgent.exceptions import (
+                    TrinityException,
+                    AgentExecutionError,
+                    ConfigurationError,
+                    FileLoadError,
+                    ValidationError
+                )
                 from .group_by_prompt import GroupByPromptBuilder
                 logger.info("✅ Imported BaseAgent from TrinityAgent.BaseAgent package")
             except ImportError as e3:
@@ -74,6 +102,25 @@ try:
                 logger.error(f"Strategy 3 traceback: {traceback.format_exc()}")
                 logger.error(f"Failed to import BaseAgent from all locations: {e1}, {e2}, {e3}")
                 logger.error("Router will be available but agent functionality will not work")
+                # Fallback: define minimal exceptions if import fails
+                class TrinityException(Exception):
+                    def __init__(self, message: str, code: str = "INTERNAL_ERROR"):
+                        self.message = message
+                        self.code = code
+                        super().__init__(self.message)
+                
+                class AgentExecutionError(TrinityException):
+                    def __init__(self, message: str, agent_name: str = "unknown"):
+                        super().__init__(message, code="AGENT_EXECUTION_ERROR")
+                        self.agent_name = agent_name
+                
+                class ConfigurationError(TrinityException):
+                    def __init__(self, message: str, config_key: str = "unknown"):
+                        super().__init__(message, code="CONFIGURATION_ERROR")
+                        self.config_key = config_key
+                
+                FileLoadError = TrinityException
+                ValidationError = TrinityException
                 # Don't raise - let the router be created and routes be registered
                 # The endpoints will check if agent is initialized and return errors if not
 except Exception as e:
@@ -84,6 +131,26 @@ except Exception as e:
     logger.error(f"Full traceback:\n{traceback.format_exc()}")
     logger.error("Router will be available but agent functionality will not work")
     logger.error("=" * 80)
+    # Fallback: define minimal exceptions if import fails
+    if TrinityException is None:
+        class TrinityException(Exception):
+            def __init__(self, message: str, code: str = "INTERNAL_ERROR"):
+                self.message = message
+                self.code = code
+                super().__init__(self.message)
+        
+        class AgentExecutionError(TrinityException):
+            def __init__(self, message: str, agent_name: str = "unknown"):
+                super().__init__(message, code="AGENT_EXECUTION_ERROR")
+                self.agent_name = agent_name
+        
+        class ConfigurationError(TrinityException):
+            def __init__(self, message: str, config_key: str = "unknown"):
+                super().__init__(message, code="CONFIGURATION_ERROR")
+                self.config_key = config_key
+        
+        FileLoadError = TrinityException
+        ValidationError = TrinityException
     # Continue - router is already created and routes will be registered
 
 # Only define GroupByAgent if BaseAgent was imported successfully
@@ -245,32 +312,84 @@ if BaseAgent is not None:
             if "group_by_json" in result:
                 group_by_json = result["group_by_json"]
                 
-                # 🔧 CRITICAL: LLM-provided values overwrite defaults - use exactly what LLM provided
-                # Normalize group_by_columns (identifiers/levels) to lowercase for backend compatibility
+                # Get original values from LLM
                 group_by_columns = group_by_json.get("group_by_columns", [])
-                # 🔧 Backend requires lowercase: "Year" -> "year", "Volume" -> "volume"
-                normalized_columns = [
-                    col.strip().lower() if isinstance(col, str) else str(col).strip().lower()
-                    for col in group_by_columns
-                ]
-                
-                # 🔧 CRITICAL: LLM-provided aggregation_functions (measures) overwrite defaults
-                # Normalize aggregation_functions field names to lowercase for backend compatibility
                 aggregation_functions = group_by_json.get("aggregation_functions", {})
-                # 🔧 Backend requires lowercase: "SalesValue" -> "salesvalue", "Volume" -> "volume"
+                
+                # Get file path
+                file = group_by_json.get("file", [])
+                if isinstance(file, list):
+                    file = file[0] if file else ""
+                elif not isinstance(file, str):
+                    file = str(file)
+                
+                # 🔧 CRITICAL: Validate columns exist in file first (case-insensitive matching)
+                # This ensures 100% guarantee that columns exist in actual file data
+                validation_errors = []
+                column_mapping = {}  # Maps user input -> original case from file
+                
+                if file and self.data_validator:
+                    # Validate using case-insensitive matching, get original case from file
+                    is_valid, errors, col_mapping = self.data_validator.validate_groupby_config(
+                        group_by_columns, aggregation_functions, file, "GroupBy"
+                    )
+                    
+                    if not is_valid:
+                        validation_errors.extend(errors)
+                        logger.error(f"❌ VALIDATION FAILED: {errors}")
+                    else:
+                        # Store column mapping
+                        column_mapping = col_mapping
+                        logger.info("✅ VALIDATION PASSED for GroupBy configuration")
+                    
+                    if validation_errors:
+                        error_msg = "Data validation failed. " + "; ".join(validation_errors)
+                        logger.error(f"❌ GROUPBY VALIDATION ERRORS: {error_msg}")
+                        # Set success to False and add detailed error message
+                        normalized["success"] = False
+                        normalized["smart_response"] = (
+                            f"I found some issues with the GroupBy configuration: {error_msg}. "
+                            "Please check that all column names exist in the file."
+                        )
+                        normalized["validation_errors"] = validation_errors
+                elif file:
+                    logger.warning("⚠️ DataValidator not available - skipping validation")
+                
+                # 🔧 CRITICAL: Apply column mapping to get original case from file, then normalize to lowercase
+                # Backend requires lowercase: "Year" -> "year", "Volume" -> "volume"
+                if column_mapping:
+                    # Use mapped columns (original case from file), then normalize to lowercase
+                    mapped_columns = [column_mapping.get(col, col) for col in group_by_columns]
+                    normalized_columns = [col.lower() for col in mapped_columns]
+                    logger.info(f"✅ Applied column case correction: {group_by_columns} -> {mapped_columns} -> {normalized_columns}")
+                else:
+                    # Fallback: normalize directly to lowercase
+                    normalized_columns = [
+                        col.strip().lower() if isinstance(col, str) else str(col).strip().lower()
+                        for col in group_by_columns
+                    ]
+                
+                # Normalize aggregation_functions: get original case, then normalize to lowercase
                 normalized_agg_funcs = {}
                 for field, agg_func in aggregation_functions.items():
-                    normalized_field = field.strip().lower() if isinstance(field, str) else str(field).strip().lower()
-                    # Normalize aggregation function name to lowercase if it's a string
-                    # "Sum" -> "sum", "Count" -> "count"
+                    # Get original case from file if mapping available
+                    if column_mapping and field in column_mapping:
+                        mapped_field = column_mapping[field]
+                    else:
+                        mapped_field = field
+                    # Normalize to lowercase for backend
+                    normalized_field = mapped_field.lower()
                     normalized_agg = agg_func.lower() if isinstance(agg_func, str) else str(agg_func).lower()
                     normalized_agg_funcs[normalized_field] = normalized_agg
+                
+                if column_mapping:
+                    logger.info(f"✅ Applied aggregation column case correction: {list(aggregation_functions.keys())} -> {list(normalized_agg_funcs.keys())}")
                 
                 # 🔧 CRITICAL: Store normalized values - LLM values overwrite any defaults
                 # All column names are lowercase for backend compatibility
                 normalized["group_by_json"] = {
                     "bucket_name": group_by_json.get("bucket_name", "trinity"),
-                    "file": group_by_json.get("file", []),
+                    "file": file,
                     "group_by_columns": normalized_columns,  # 🔧 Normalized to lowercase (e.g., "Year" -> "year")
                     "aggregation_functions": normalized_agg_funcs  # 🔧 All keys normalized to lowercase (e.g., "SalesValue" -> "salesvalue")
                 }
@@ -477,12 +596,10 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
             logger.info("BaseAgent not imported - attempting to retry import...")
             if not _retry_baseagent_import():
                 logger.error("BaseAgent import retry failed - cannot initialize agent")
-                return {
-                    "success": False,
-                    "error": "GroupByAgent not initialized - BaseAgent import failed",
-                    "smart_response": "The group_by agent is not available. BaseAgent could not be imported. Please check server logs for details.",
-                    "processing_time": round(time.time() - start_time, 2)
-                }
+                raise ConfigurationError(
+                    "GroupByAgent not initialized - BaseAgent import failed",
+                    config_key="BASEAGENT_IMPORT"
+                )
             
             # GroupByAgent should already be defined at module level if BaseAgent was imported
             # If it's still None, that means BaseAgent import succeeded but GroupByAgent wasn't defined
@@ -490,6 +607,10 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
             if BaseAgent is not None and GroupByAgent is None:
                 logger.error("BaseAgent imported but GroupByAgent class not found - this should not happen")
                 logger.error("GroupByAgent should be defined at module level when BaseAgent is imported")
+                raise ConfigurationError(
+                    "GroupByAgent class not found after BaseAgent import",
+                    config_key="GROUPBYAGENT_CLASS"
+                )
         
         # Try to initialize now
         if BaseAgent is not None and settings is not None:
@@ -512,29 +633,23 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
                 logger.info("✅ GroupByAgent initialized successfully on-demand")
             except Exception as init_error:
                 logger.error(f"❌ Failed to initialize GroupByAgent on-demand: {init_error}", exc_info=True)
-                return {
-                    "success": False,
-                    "error": f"GroupByAgent initialization failed: {str(init_error)}",
-                    "smart_response": "The group_by agent could not be initialized. Please check server logs for details.",
-                    "processing_time": round(time.time() - start_time, 2)
-                }
+                raise ConfigurationError(
+                    f"GroupByAgent initialization failed: {str(init_error)}",
+                    config_key="GROUPBYAGENT_INIT"
+                )
         else:
             logger.error("BaseAgent or settings still not available after retry")
-            return {
-                "success": False,
-                "error": "GroupByAgent not initialized - BaseAgent import failed",
-                "smart_response": "The group_by agent is not available. BaseAgent could not be imported. Please check server logs for details.",
-                "processing_time": round(time.time() - start_time, 2)
-            }
+            raise ConfigurationError(
+                "GroupByAgent not initialized - BaseAgent import failed",
+                config_key="BASEAGENT_IMPORT"
+            )
     
     if not agent_initialized or agent is None:
         logger.error("GroupByAgent still not initialized after retry")
-        return {
-            "success": False,
-            "error": "GroupByAgent not initialized",
-            "smart_response": "The group_by agent is not available. Please check server logs.",
-            "processing_time": round(time.time() - start_time, 2)
-        }
+        raise ConfigurationError(
+            "GroupByAgent not initialized",
+            config_key="GROUPBYAGENT_INIT"
+        )
     
     logger.info(f"GROUPBY REQUEST RECEIVED:")
     logger.info(f"Prompt: {request.prompt}")
@@ -590,15 +705,24 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
             # 🔧 ALIGNMENT: Backend expects "identifiers" (not "group_by_columns") and "aggregations" (not "aggregation_functions")
             # group_by_columns = identifiers = "levels" in UI terminology
             # 🔧 CRITICAL: LLM-provided values overwrite defaults - use what LLM provided (already normalized by _normalize_result)
+            # 🔧 CRITICAL: UI MUST show AI-selected identifiers even if backend rejects them (e.g., "year" as numeric)
+            # Backend validation happens later when user clicks "Perform", but UI should always display AI's selection
             group_by_columns = group_by_json.get("group_by_columns", [])
             aggregation_functions = group_by_json.get("aggregation_functions", {})
             
-            # 🔧 CRITICAL: Values from _normalize_result are already lowercase, but ensure normalization
-            # (This handles edge cases where normalization might not have been applied)
+            # 🔧 CRITICAL: Preserve ALL LLM-provided identifiers exactly as provided (normalized to lowercase for backend)
+            # Do NOT filter based on backend's predefined list - UI will show them and user can adjust if needed
+            # Values from _normalize_result are already lowercase, but ensure normalization for safety
             normalized_identifiers = [
                 col.strip().lower() if isinstance(col, str) else str(col).strip().lower() 
                 for col in group_by_columns
             ]
+            # 🔧 CRITICAL: Remove any empty strings or None values, but keep all valid identifiers
+            normalized_identifiers = [col for col in normalized_identifiers if col and col.strip()]
+            
+            logger.info(f"🔧 PRESERVING ALL LLM-PROVIDED IDENTIFIERS (will be shown in UI regardless of backend validation):")
+            logger.info(f"  - Original from LLM: {group_by_columns}")
+            logger.info(f"  - Normalized (for UI/backend): {normalized_identifiers}")
             
             # Convert aggregation_functions to backend-expected format
             # Backend expects: { "field_name": { "agg": "sum", "weight_by": "", "rename_to": "" } }
@@ -653,14 +777,16 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
             # Frontend handler expects: data.groupby_json.identifiers (array) and data.groupby_json.aggregations (object)
             # 🔧 CRITICAL: This MUST be at top level of response (like concat_json, merge_json) for frontend handler
             # 🔧 CRITICAL: Frontend handler does: const cfg = data.groupby_json; const aiSelectedIdentifiers = cfg.identifiers || [];
-            # So identifiers MUST be an array (even if empty) and MUST contain the LLM-provided values (normalized to lowercase)
+            # 🔧 CRITICAL: UI MUST display ALL AI-selected identifiers, even if backend rejects them (e.g., "year" as numeric)
+            # Backend validation happens when user clicks "Perform", but UI should always show AI's selection
+            # So identifiers MUST be an array containing ALL LLM-provided values (normalized to lowercase)
             groupby_json_for_frontend = {
                 "bucket_name": group_by_json.get("bucket_name", "trinity"),
                 "object_names": file,  # Full path - backend expects this in /run endpoint
                 "file_name": file_name_only,  # Just filename for frontend display
                 "file_key": file_name_only,   # Just filename - backend expects this in /run endpoint
-                "identifiers": normalized_identifiers if normalized_identifiers else [],  # 🔧 CRITICAL: Must be array (these are the "levels" in UI)
-                "aggregations": normalized_aggregations if normalized_aggregations else {}  # 🔧 CRITICAL: Must be object
+                "identifiers": normalized_identifiers if normalized_identifiers else [],  # 🔧 CRITICAL: ALL AI-selected identifiers (UI "levels") - no backend filtering
+                "aggregations": normalized_aggregations if normalized_aggregations else {}  # 🔧 CRITICAL: ALL AI-selected aggregations (UI "measures")
             }
             
             # Set at top level (frontend expects data.groupby_json)
@@ -670,11 +796,14 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
             if "data" in response and isinstance(response["data"], dict):
                 response["data"]["groupby_json"] = groupby_json_for_frontend
             
-            logger.info(f"🔧 SET groupby_json at top level with:")
-            logger.info(f"  - identifiers (array): {groupby_json_for_frontend['identifiers']}")
-            logger.info(f"  - aggregations (object): {list(groupby_json_for_frontend['aggregations'].keys())}")
+            logger.info(f"🔧 SET groupby_json at top level (UI will display ALL AI-selected identifiers):")
+            logger.info(f"  - identifiers (array, UI 'levels'): {groupby_json_for_frontend['identifiers']}")
+            logger.info(f"  - identifiers count: {len(groupby_json_for_frontend['identifiers'])}")
+            logger.info(f"  - aggregations (object, UI 'measures'): {list(groupby_json_for_frontend['aggregations'].keys())}")
+            logger.info(f"  - aggregations count: {len(groupby_json_for_frontend['aggregations'])}")
             logger.info(f"  - object_names: {groupby_json_for_frontend['object_names']}")
             logger.info(f"  - file_key: {groupby_json_for_frontend['file_key']}")
+            logger.info(f"  - NOTE: UI will show these identifiers even if backend rejects them during 'Perform'")
             
             # 🔧 ALIGNED STRUCTURE 3: group_by_config (compatibility layer with both naming conventions)
             response["group_by_config"] = {
@@ -710,8 +839,15 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
         logger.info(f"Has groupby_json (frontend/backend format): {'groupby_json' in response}")
         if "groupby_json" in response:
             groupby_cfg = response["groupby_json"]
-            logger.info(f"🔧 ALIGNED STRUCTURE - groupby_json (for backend):")
-            logger.info(f"  - identifiers (levels/group_by_columns): {groupby_cfg.get('identifiers')}")
+            logger.info(f"🔧 FINAL groupby_json structure (UI will use this to display levels):")
+            logger.info(f"  - identifiers (UI 'levels', ALL AI-selected): {groupby_cfg.get('identifiers', [])}")
+            logger.info(f"  - identifiers type: {type(groupby_cfg.get('identifiers', []))}, length: {len(groupby_cfg.get('identifiers', []))}")
+            logger.info(f"  - aggregations (UI 'measures'): {list(groupby_cfg.get('aggregations', {}).keys())}")
+            logger.info(f"  - object_names: {groupby_cfg.get('object_names')}")
+            logger.info(f"  - file_key: {groupby_cfg.get('file_key')}")
+            logger.info(f"🔧 CRITICAL: Frontend handler extracts cfg.identifiers and sets as selectedIdentifiers")
+            logger.info(f"🔧 CRITICAL: UI will display ALL identifiers even if backend rejects them during 'Perform'")
+            logger.info(f"🔧 Full groupby_json: {json.dumps(groupby_cfg, indent=2)}")
             logger.info(f"  - aggregations (fields): {list(groupby_cfg.get('aggregations', {}).keys())}")
             logger.info(f"  - object_names (full path): {groupby_cfg.get('object_names')}")
             logger.info(f"  - file_key (filename): {groupby_cfg.get('file_key')}")
@@ -724,27 +860,27 @@ def group_by_files(request: GroupByRequest) -> Dict[str, Any]:
         
         return response
         
+    except (TrinityException, ValidationError, FileLoadError, ConfigurationError) as e:
+        # Re-raise Trinity exceptions to be caught by global handler
+        logger.error(f"GROUPBY REQUEST FAILED (TrinityException): {e.message if hasattr(e, 'message') else str(e)}", exc_info=True)
+        raise
     except Exception as e:
+        # Wrap generic exceptions in AgentExecutionError
         logger.error(f"GROUPBY REQUEST FAILED: {e}", exc_info=True)
-        processing_time = round(time.time() - start_time, 2)
-        
-        return {
-            "success": False,
-            "error": str(e),
-            "response": f"Error occurred: {str(e)}",
-            "smart_response": f"An error occurred while processing your request: {str(e)}",
-            "processing_time": processing_time
-        }
+        raise AgentExecutionError(
+            f"An error occurred while processing your request: {str(e)}",
+            agent_name="group_by"
+        )
 
 
 @router.get("/groupby/history/{session_id}")
 def get_history(session_id: str) -> Dict[str, Any]:
     """Get session history."""
     if not agent_initialized or agent is None:
-        return {
-            "success": False,
-            "error": "GroupByAgent not initialized"
-        }
+        raise ConfigurationError(
+            "GroupByAgent not initialized",
+            config_key="GROUPBYAGENT_INIT"
+        )
     
     logger.info(f"Getting history for session: {session_id}")
     
@@ -757,21 +893,21 @@ def get_history(session_id: str) -> Dict[str, Any]:
             "total_interactions": len(history) if isinstance(history, list) else 0
         }
     except Exception as e:
-        logger.error(f"Failed to get history: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Failed to get history: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"Failed to get session history: {str(e)}",
+            agent_name="group_by"
+        )
 
 
 @router.get("/groupby/files")
 def list_files() -> Dict[str, Any]:
     """List available files."""
     if not agent_initialized or agent is None:
-        return {
-            "success": False,
-            "error": "GroupByAgent not initialized"
-        }
+        raise ConfigurationError(
+            "GroupByAgent not initialized",
+            config_key="GROUPBYAGENT_INIT"
+        )
     
     logger.info("Listing available files")
     
@@ -783,11 +919,11 @@ def list_files() -> Dict[str, Any]:
             "files": files
         }
     except Exception as e:
-        logger.error(f"Failed to list files: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Failed to list files: {e}", exc_info=True)
+        raise AgentExecutionError(
+            f"Failed to list files: {str(e)}",
+            agent_name="group_by"
+        )
 
 
 @router.get("/groupby/health")

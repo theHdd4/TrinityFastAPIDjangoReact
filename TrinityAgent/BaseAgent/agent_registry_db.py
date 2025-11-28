@@ -56,7 +56,7 @@ async def create_trinity_v1_agents_table() -> bool:
         True if table was created or already exists, False on error
     """
     if asyncpg is None:
-        logger.warning("asyncpg not available, cannot create trinity_v1_agents table")
+        logger.debug("asyncpg not available, cannot create trinity_v1_agents table (Django ORM will handle this)")
         return False
     
     try:
@@ -309,7 +309,7 @@ async def sync_all_agents_to_postgres(
     results = {}
     
     if asyncpg is None:
-        logger.warning("asyncpg not available, cannot sync agents to PostgreSQL")
+        logger.debug("asyncpg not available, cannot sync agents to PostgreSQL (Django ORM will handle this)")
         return {agent_id: False for agent_id in agents.keys()}
     
     # Ensure table exists
