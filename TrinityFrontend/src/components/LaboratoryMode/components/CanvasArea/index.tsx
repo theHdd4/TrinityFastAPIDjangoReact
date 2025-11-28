@@ -939,7 +939,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
           onMouseUp={saveSelection}
           suppressContentEditableWarning
           className={`
-            w-full min-h-[100px] p-6
+            w-full min-h-[100px] px-3 py-2
             border-2 border-dashed border-border rounded-lg
             focus:outline-none focus:border-primary
             transition-colors duration-200
