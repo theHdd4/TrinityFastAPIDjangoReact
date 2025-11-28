@@ -317,6 +317,34 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   const selectionRef = useRef<Range | null>(null);
   const [showToolbar, setShowToolbar] = useState(false);
 
+  const logToolbarAction = (action: string, details: Record<string, unknown> = {}) => {
+    const projectContext = getActiveProjectContext();
+
+    console.log('[Laboratory Text Toolbar]', action, {
+      ...details,
+      project: projectContext?.project_name,
+      app: projectContext?.app_name,
+    });
+
+    fetch(`${LABORATORY_PROJECT_STATE_API}/log-text-toolbar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        action,
+        client: projectContext?.client_name,
+        app: projectContext?.app_name,
+        project: projectContext?.project_name,
+        details: {
+          ...details,
+          textLength: data?.text?.length ?? 0,
+        },
+      }),
+    }).catch(() => {
+      /* non-blocking logging */
+    });
+  };
+
   const hasEditableSelection = () => {
     if (typeof window === 'undefined' || !editorRef.current) return false;
 
@@ -615,6 +643,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   ]);
 
   const handleApplyTextStyle = (preset: TextStylePreset) => {
+    logToolbarAction('apply-text-style', { preset: preset.id });
+
     const updates: Partial<TextBoxSettings> = {
       font_size: clampFontSize(preset.fontSize),
     };
@@ -660,6 +690,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   };
 
   const handleToggleStyle = (key: 'bold' | 'italics' | 'underline' | 'strikethrough') => {
+    logToolbarAction('toggle-style', { style: key });
+
     const commandMap: Record<typeof key, string> = {
       bold: 'bold',
       italics: 'italic',
@@ -676,6 +708,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   };
 
   const handleAlign = (align: TextAlignOption) => {
+    logToolbarAction('align-text', { align });
+
     if (hasEditableSelection()) {
       const command = align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
       runCommand(command);
@@ -685,6 +719,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   };
 
   const handleFontFamilyChange = (font: string) => {
+    logToolbarAction('change-font-family', { font });
+
     if (hasEditableSelection()) {
       const executed = runCommand('fontName', font);
       if (executed) return;
@@ -695,17 +731,23 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
 
   const handleIncreaseFontSize = () => {
     const next = clampFontSize(settings.font_size + 1);
+    logToolbarAction('increase-font-size', { next });
+
     if (applyFontSizeToSelection(next)) return;
     onSettingsChange({ font_size: next });
   };
 
   const handleDecreaseFontSize = () => {
     const next = clampFontSize(settings.font_size - 1);
+    logToolbarAction('decrease-font-size', { next });
+
     if (applyFontSizeToSelection(next)) return;
     onSettingsChange({ font_size: next });
   };
 
   const handleColorChange = (color: string) => {
+    logToolbarAction('text-color', { color });
+
     const hasSelection = hasEditableSelection();
     const executed = hasSelection ? runCommand('foreColor', color) : false;
     const styled = executed || (hasSelection ? applyStyleToSelection({ color }) : false);
@@ -718,6 +760,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   };
 
   const handleBackgroundColorChange = (color: string) => {
+    logToolbarAction('background-color', { color });
+
     const hasSelection = hasEditableSelection();
     const executed = hasSelection ? runCommand('hiliteColor', color) || runCommand('backColor', color) : false;
     const styled = executed || (hasSelection ? applyStyleToSelection({ backgroundColor: color }) : false);
@@ -756,6 +800,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             align={toolbarAlign}
             onAlign={handleAlign}
             onBulletedList={() => {
+              logToolbarAction('toggle-list', { type: 'bullet' });
+
               const nextType = settings.list_type === 'bullet' ? 'none' : 'bullet';
               const executed = runCommand('insertUnorderedList');
               if (!executed) {
@@ -767,6 +813,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
               onSettingsChange({ list_type: nextType });
             }}
             onNumberedList={() => {
+              logToolbarAction('toggle-list', { type: 'number' });
+
               const nextType = settings.list_type === 'number' ? 'none' : 'number';
               const executed = runCommand('insertOrderedList');
               if (!executed) {
