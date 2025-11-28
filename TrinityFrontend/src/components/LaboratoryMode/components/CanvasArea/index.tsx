@@ -731,35 +731,18 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   ) => {
     if (typeof window === 'undefined' || !editorRef.current) return false;
 
-    const applyToHtml = (html: string): string => {
-      const plain = htmlToPlainText(html);
-      const transformed = transformer(plain);
-      onApplied?.(transformed);
-      return plainTextToHtml(transformed);
-    };
-
-    const selectionApplied = (() => {
-      restoreSelection();
-
-      const selection = window.getSelection();
-      if (!selection?.rangeCount) return false;
-
-      const range = selection.getRangeAt(0);
-      if (!editorRef.current?.contains(range.commonAncestorContainer) || range.collapsed) {
-        return false;
-      }
-
-      const container = document.createElement('div');
-      container.appendChild(range.cloneContents());
-
-      const nextHtml = applyToHtml(container.innerHTML);
-      return replaceSelectionWithHtml(nextHtml);
-    })();
-
-    if (selectionApplied) return true;
-
     const sourceHtml = editorRef.current.innerHTML ?? '';
-    const nextHtml = applyToHtml(sourceHtml);
+    const plain = htmlToPlainText(sourceHtml);
+    const transformed = transformer(plain);
+    const nextHtml = plainTextToHtml(transformed);
+
+    console.log('[Laboratory Text Toolbar] Applying list transform', {
+      plain,
+      transformed,
+      nextHtml,
+    });
+
+    onApplied?.(transformed);
 
     if (nextHtml === sourceHtml) return false;
 
@@ -883,20 +866,11 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
               logToolbarAction('toggle-list', { type: 'bullet' });
 
               console.log('[Laboratory Text Toolbar] Bullet toggle requested', {
-                hasEditableSelection: hasEditableSelection(),
                 currentHtml: editorRef.current?.innerHTML,
               });
 
-              const executed = runCommand('insertUnorderedList');
-              console.log('[Laboratory Text Toolbar] Native bullet command executed', executed);
-              if (executed) {
-                updateListTypeFromContent();
-                handleInput();
-                return;
-              }
-
               applyListTransformation(toggleBulletedListContent, transformed => {
-                console.log('[Laboratory Text Toolbar] Fallback bullet transform applied', transformed);
+                console.log('[Laboratory Text Toolbar] Bullet transform applied to content', transformed);
                 updateListTypeFromContent(transformed);
               });
             }}
@@ -904,20 +878,11 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
               logToolbarAction('toggle-list', { type: 'number' });
 
               console.log('[Laboratory Text Toolbar] Numbered toggle requested', {
-                hasEditableSelection: hasEditableSelection(),
                 currentHtml: editorRef.current?.innerHTML,
               });
 
-              const executed = runCommand('insertOrderedList');
-              console.log('[Laboratory Text Toolbar] Native numbered command executed', executed);
-              if (executed) {
-                updateListTypeFromContent();
-                handleInput();
-                return;
-              }
-
               applyListTransformation(toggleNumberedListContent, transformed => {
-                console.log('[Laboratory Text Toolbar] Fallback numbered transform applied', transformed);
+                console.log('[Laboratory Text Toolbar] Numbered transform applied to content', transformed);
                 updateListTypeFromContent(transformed);
               });
             }}
