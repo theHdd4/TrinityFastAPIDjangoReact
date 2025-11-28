@@ -935,13 +935,6 @@ def filter_models(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not method_column:
             expected_column = f"{request.variable}_{method_suffix}"
             logger.warning(f"No {method_type} column found for variable '{request.variable}'. Expected column: '{expected_column}'. Available columns: {list(df.columns)[:20]}...")
-            
-            # Check if ensemble row exists and log its columns
-            if 'model_name' in df.columns or model_column:
-                ensemble_rows = df[df[model_column].astype(str).str.lower().str.contains('ensemble', na=False)]
-                if not ensemble_rows.empty:
-                    logger.info(f"🔍 Found {len(ensemble_rows)} ensemble row(s) in file. Columns with values: {[col for col in ensemble_rows.columns if pd.notna(ensemble_rows.iloc[0].get(col))][:20]}")
-            
             return []
         
         # Check for model column with flexible naming
@@ -955,14 +948,6 @@ def filter_models(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         
         if not model_column:
             raise ValueError(f"No model identifier column found. Expected one of: {possible_model_columns}")
-        
-        # Log ensemble row info for debugging
-        ensemble_rows = df[df[model_column].astype(str).str.lower().str.contains('ensemble', na=False)]
-        if not ensemble_rows.empty:
-            logger.info(f"🔍 Found {len(ensemble_rows)} ensemble row(s) in file for combination {request.combination_id}")
-            for idx, ensemble_row in ensemble_rows.iterrows():
-                method_value = ensemble_row.get(method_column)
-                logger.info(f"🔍 Ensemble row - model: {ensemble_row.get(model_column)}, {method_column}: {method_value}, is_na: {pd.isna(method_value) if method_value is not None else 'N/A'}")
         
         # Prepare a DataFrame with model column and the method column
         columns_to_select = [model_column, method_column]
@@ -1272,32 +1257,7 @@ def filter_models(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                                 filtered = filtered[filtered[var_method_column] <= max_val]
         
         # Remove rows with NaN values in critical columns
-        # But allow ensemble models even if they have NaN (they might be calculated differently)
-        filtered_before_dropna = filtered.copy()
         filtered = filtered.dropna(subset=['model_name', 'selected_variable_value'])
-        
-        # Check if ensemble row was dropped due to NaN
-        ensemble_rows = filtered_before_dropna[
-            filtered_before_dropna['model_name'].astype(str).str.lower().str.contains('ensemble', na=False)
-        ]
-        if not ensemble_rows.empty:
-            for _, ensemble_row in ensemble_rows.iterrows():
-                # Check if ensemble was dropped due to NaN in selected_variable_value
-                if pd.isna(ensemble_row.get('selected_variable_value')):
-                    logger.warning(f"⚠️ Ensemble model found but has NaN in selected_variable_value. Model: {ensemble_row.get('model_name')}")
-                    # Try to find elasticity value in other columns
-                    model_name_str = str(ensemble_row.get('model_name', ''))
-                    # Try to find elasticity column for the variable
-                    for col in filtered_before_dropna.columns:
-                        if col.lower() == f"{request.variable.lower()}_{method_suffix}" or col.lower() == f"{request.variable.lower()}_elasticity" or col.lower() == f"{request.variable.lower()}_elas":
-                            elasticity_value = ensemble_row.get(col)
-                            if pd.notna(elasticity_value):
-                                # Add ensemble row back with the found value
-                                ensemble_row_fixed = ensemble_row.copy()
-                                ensemble_row_fixed['selected_variable_value'] = elasticity_value
-                                filtered = pd.concat([filtered, ensemble_row_fixed.to_frame().T], ignore_index=True)
-                                logger.info(f"✅ Added ensemble model back with elasticity value: {elasticity_value}")
-                                break
         
         # Note: We no longer filter out ensemble models - they should be included in the results
         # Ensemble models are now saved to the file and should appear in graphs
@@ -1305,17 +1265,9 @@ def filter_models(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         # Prepare response
         results = []
         for _, row in filtered.iterrows():
-            model_name_str = str(row["model_name"])
-            selected_value = row["selected_variable_value"]
-            
-            # Skip if still NaN
-            if pd.isna(selected_value):
-                logger.warning(f"⚠️ Skipping model {model_name_str} due to NaN in selected_variable_value")
-                continue
-            
             model_data = {
-                "model_name": model_name_str,
-                "self_elasticity": float(selected_value)
+                "model_name": str(row["model_name"]),
+                "self_elasticity": float(row["selected_variable_value"])
             }
             
             # Add method-specific field based on the method type
@@ -2985,13 +2937,8 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
         filtered_frame = frame.copy()
     
     # Filter by model names that are in our weights
-    # Exclude "Ensemble" from the calculation (it's not a real model to weight)
     model_names = set(model_composition.keys())
-    # Exclude ensemble models from weighted calculation (they're results, not inputs)
-    filtered_frame = filtered_frame[
-        (filtered_frame[model_column].isin(model_names)) & 
-        (~filtered_frame[model_column].astype(str).str.lower().str.contains('ensemble', na=False))
-    ].copy()
+    filtered_frame = filtered_frame[filtered_frame[model_column].isin(model_names)].copy()
     
     if filtered_frame.empty:
         raise ValueError("No matching models found in file")
@@ -3030,111 +2977,140 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
         if "intercept" in row and pd.notna(row["intercept"]):
             weighted_intercept += float(row["intercept"]) * share
     
+    # Get y_variable to exclude it from variable calculations
+    # Check common y_variable names in the file columns
+    y_variable = None
+    common_y_names = ['target', 'y', 'dependent', 'sales', 'volume', 'value']
+    
+    # Check if y_variable column exists in the file
+    for col in filtered_frame.columns:
+        col_lower = col.lower()
+        if col_lower == 'y_variable':
+            # Get the most common y_variable value
+            y_var_values = filtered_frame[col].dropna().astype(str).str.lower()
+            if not y_var_values.empty:
+                y_variable = y_var_values.mode().iloc[0] if len(y_var_values.mode()) > 0 else y_var_values.iloc[0]
+                break
+    
+    # If not found, check common y_variable names in column names
+    if not y_variable:
+        for common_name in common_y_names:
+            # Check if this name appears as a standalone column or in variable columns
+            for col in filtered_frame.columns:
+                col_lower = col.lower()
+                # Check if it's a standalone column (not a variable metric)
+                if col_lower == common_name.lower():
+                    y_variable = common_name.lower()
+                    break
+                # Or check if it appears in variable columns but might be y_variable
+                # (e.g., volume_beta, volume_avg would indicate volume is y_variable)
+                elif col_lower.startswith(common_name.lower()) and (
+                    col_lower.endswith('_beta') or col_lower.endswith('_avg') or 
+                    col_lower.endswith('_av')
+                ):
+                    # Check if this variable has metrics - if so, it might be y_variable
+                    # But we need to be careful - if it's in x_variables, it's not y_variable
+                    # For now, we'll exclude common y_variable names
+                    y_variable = common_name.lower()
+                    break
+            if y_variable:
+                break
+    
+    # Create weights series for efficient calculation
+    weights_series = pd.Series(index=filtered_frame.index, dtype=float)
+    for idx, row in filtered_frame.iterrows():
+        model_name = str(row[model_column])
+        weights_series.loc[idx] = model_composition.get(model_name, 0.0)
+    
+    # Helper function for weighted average (like old implementation)
+    def _weighted_avg_series(s: pd.Series, w: pd.Series) -> float | None:
+        mask = s.notna() & w.notna()
+        if not mask.any():
+            return None
+        return float(np.average(s[mask], weights=w[mask]))
+    
+    # Find all variable columns and calculate weighted averages
+    # Use case-insensitive matching
+    column_lookup_lower = {col.lower(): col for col in filtered_frame.columns}
+    
     # Find all variable columns (beta, avg, elasticity, contribution, roi)
-    all_variables = set()
+    variable_columns = {}
     for col in filtered_frame.columns:
         col_lower = col.lower()
         # Check for variable columns: {var}_beta, {var}_avg, {var}_elasticity, {var}_elas, {var}_contrib, {var}_contribution, {var}_roi
         for suffix in ["_beta", "_avg", "_av", "_elasticity", "_elas", "_contrib", "_contribution", "_roi"]:
             if col_lower.endswith(suffix):
                 var_name = col_lower[:-len(suffix)]
-                all_variables.add(var_name)
+                
+                # Exclude y_variable
+                if y_variable and var_name == y_variable:
+                    continue
+                
+                if var_name not in variable_columns:
+                    variable_columns[var_name] = {}
+                
+                # Store the actual column name and its type
+                if suffix in ["_beta"]:
+                    variable_columns[var_name]["beta"] = col
+                elif suffix in ["_avg", "_av"]:
+                    variable_columns[var_name]["avg"] = col
+                elif suffix in ["_elasticity", "_elas"]:
+                    variable_columns[var_name]["elasticity"] = col
+                elif suffix in ["_roi"]:
+                    variable_columns[var_name]["roi"] = col
+                elif suffix in ["_contribution", "_contrib"]:
+                    variable_columns[var_name]["contribution"] = col
                 break
     
-    # Calculate weighted values for each variable from file columns
-    for var_name in all_variables:
-        weighted_beta = 0.0
-        weighted_avg = 0.0
-        weighted_elasticity = 0.0
-        weighted_roi = 0.0
-        weighted_contribution = 0.0
+    # Calculate weighted values for each variable using efficient pandas operations
+    for var_name, col_dict in variable_columns.items():
+        # Beta
+        if "beta" in col_dict:
+            beta_col = col_dict["beta"]
+            weighted_beta = _weighted_avg_series(filtered_frame[beta_col], weights_series)
+            if weighted_beta is not None:
+                weighted_metrics[f"{var_name}_beta"] = weighted_beta
         
-        beta_count = 0
-        avg_count = 0
-        elasticity_count = 0
-        roi_count = 0
-        contribution_count = 0
+        # Average
+        if "avg" in col_dict:
+            avg_col = col_dict["avg"]
+            weighted_avg = _weighted_avg_series(filtered_frame[avg_col], weights_series)
+            if weighted_avg is not None:
+                weighted_metrics[f"{var_name}_avg"] = weighted_avg
+        elif "av" in col_dict:
+            avg_col = col_dict["av"]
+            weighted_avg = _weighted_avg_series(filtered_frame[avg_col], weights_series)
+            if weighted_avg is not None:
+                weighted_metrics[f"{var_name}_avg"] = weighted_avg
         
-        for _, row in filtered_frame.iterrows():
-            model_name = str(row[model_column])
-            if model_name not in model_composition:
-                continue
-            
-            share = model_composition[model_name]
-            
-            # Try different column name variations
-            # Beta: {var}_beta
-            for beta_col in [f"{var_name}_beta", f"{var_name}_Beta", f"Beta_{var_name}"]:
-                if beta_col in row and pd.notna(row[beta_col]):
-                    weighted_beta += float(row[beta_col]) * share
-                    beta_count += 1
-                    break
-            
-            # Average: {var}_avg or {var}_av
-            for avg_col in [f"{var_name}_avg", f"{var_name}_av", f"{var_name}_Avg", f"{var_name}_AV"]:
-                if avg_col in row and pd.notna(row[avg_col]):
-                    weighted_avg += float(row[avg_col]) * share
-                    avg_count += 1
-                    break
-            
-            # Elasticity: {var}_elasticity or {var}_elas
-            for elas_col in [f"{var_name}_elasticity", f"{var_name}_elas", f"{var_name}_Elasticity", f"{var_name}_Elas"]:
-                if elas_col in row and pd.notna(row[elas_col]):
-                    weighted_elasticity += float(row[elas_col]) * share
-                    elasticity_count += 1
-                    break
-            
-            # ROI: {var}_roi
-            for roi_col in [f"{var_name}_roi", f"{var_name}_ROI", f"ROI_{var_name}"]:
-                if roi_col in row and pd.notna(row[roi_col]):
-                    weighted_roi += float(row[roi_col]) * share
-                    roi_count += 1
-                    break
-            
-            # Contribution: {var}_contribution or {var}_contrib
-            for contrib_col in [f"{var_name}_contribution", f"{var_name}_contrib", f"{var_name}_Contribution", f"{var_name}_Contrib"]:
-                if contrib_col in row and pd.notna(row[contrib_col]):
-                    weighted_contribution += float(row[contrib_col]) * share
-                    contribution_count += 1
-                    break
+        # Elasticity
+        if "elasticity" in col_dict:
+            elas_col = col_dict["elasticity"]
+            weighted_elasticity = _weighted_avg_series(filtered_frame[elas_col], weights_series)
+            if weighted_elasticity is not None:
+                weighted_metrics[f"{var_name}_elasticity"] = weighted_elasticity
         
-        # Store weighted values
-        if beta_count > 0:
-            weighted_metrics[f"{var_name}_beta"] = weighted_beta
-        if avg_count > 0:
-            weighted_metrics[f"{var_name}_avg"] = weighted_avg
-        if elasticity_count > 0:
-            weighted_metrics[f"{var_name}_elasticity"] = weighted_elasticity
-            logger.debug(f"✅ Stored weighted elasticity for {var_name}: {weighted_elasticity}")
-        elif beta_count > 0 and avg_count > 0:
-            # Calculate elasticity if not in file: elasticity = beta * (avg / y_avg)
-            # Try to get y_avg from volume_av or similar columns
-            y_avg = None
-            for y_col in ['volume_av', 'volume_avg', 'sales_av', 'sales_avg', 'value_av', 'value_avg']:
-                if y_col in filtered_frame.columns:
-                    # Get weighted y_avg
-                    weighted_y_avg = 0.0
-                    for _, row in filtered_frame.iterrows():
-                        model_name = str(row[model_column])
-                        if model_name in model_composition and pd.notna(row.get(y_col)):
-                            share = model_composition[model_name]
-                            weighted_y_avg += float(row[y_col]) * share
-                    if weighted_y_avg > 0:
-                        y_avg = weighted_y_avg
-                        break
-            
-            if y_avg and y_avg > 0 and weighted_avg != 0:
-                calculated_elasticity = weighted_beta * (weighted_avg / y_avg)
-                weighted_metrics[f"{var_name}_elasticity"] = calculated_elasticity
-                logger.debug(f"✅ Calculated elasticity for {var_name}: {calculated_elasticity} (beta={weighted_beta}, avg={weighted_avg}, y_avg={y_avg})")
+        # ROI
+        if "roi" in col_dict:
+            roi_col = col_dict["roi"]
+            weighted_roi = _weighted_avg_series(filtered_frame[roi_col], weights_series)
+            if weighted_roi is not None:
+                weighted_metrics[f"{var_name}_roi"] = weighted_roi
         
-        if roi_count > 0:
-            weighted_metrics[f"{var_name}_roi"] = weighted_roi
-        if contribution_count > 0:
-            weighted_metrics[f"{var_name}_contribution"] = weighted_contribution
-        elif beta_count > 0 and avg_count > 0:
-            # Calculate contribution if not in file: beta * avg
-            weighted_metrics[f"{var_name}_contribution"] = abs(weighted_beta * weighted_avg)
+        # Contribution
+        if "contribution" in col_dict:
+            contrib_col = col_dict["contribution"]
+            weighted_contribution = _weighted_avg_series(filtered_frame[contrib_col], weights_series)
+            if weighted_contribution is not None:
+                weighted_metrics[f"{var_name}_contribution"] = weighted_contribution
+        elif "contrib" in col_dict:
+            contrib_col = col_dict["contrib"]
+            weighted_contribution = _weighted_avg_series(filtered_frame[contrib_col], weights_series)
+            if weighted_contribution is not None:
+                weighted_metrics[f"{var_name}_contribution"] = weighted_contribution
+        # Calculate contribution from beta * avg if not in file
+        elif f"{var_name}_beta" in weighted_metrics and f"{var_name}_avg" in weighted_metrics:
+            weighted_metrics[f"{var_name}_contribution"] = abs(weighted_metrics[f"{var_name}_beta"] * weighted_metrics[f"{var_name}_avg"])
     
     # Store weighted performance metrics
     weighted_metrics["mape_train"] = round(weighted_mape_train, 4)
