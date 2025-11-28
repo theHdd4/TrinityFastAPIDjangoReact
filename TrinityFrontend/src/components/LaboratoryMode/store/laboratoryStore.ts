@@ -28,13 +28,24 @@ export interface TextBoxSettings {
   font_size: number;
   font_family: string;
   text_color: string;
+  background_color?: string;
   bold: boolean;
   italics: boolean;
   underline: boolean;
+  strikethrough?: boolean;
+  list_type?: "none" | "bullet" | "number";
   headline: string;
   slide_layout: "full" | "sidebar" | "note-callout";
   transition_effect: "none" | "fade" | "typewriter";
   lock_content: boolean;
+}
+
+export interface TextBoxConfig {
+  id: string;
+  title?: string;
+  content?: string;
+  html?: string;
+  settings?: Partial<TextBoxSettings>;
 }
 
 export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
@@ -46,9 +57,12 @@ export const DEFAULT_TEXTBOX_SETTINGS: TextBoxSettings = {
   font_size: 14,
   font_family: "Inter",
   text_color: "#000000",
+  background_color: "transparent",
   bold: false,
   italics: false,
   underline: false,
+  strikethrough: false,
+  list_type: "none",
   headline: "",
   slide_layout: "full",
   transition_effect: "none",
@@ -1665,6 +1679,11 @@ export interface LayoutCard {
   moleculeId?: string;
   moleculeTitle?: string;
   variables?: CardVariable[];
+  textBoxEnabled?: boolean;
+  textBoxContent?: string;
+  textBoxHtml?: string;
+  textBoxSettings?: TextBoxSettings;
+  textBoxes?: TextBoxConfig[];
   order?: number; // For positioning standalone cards between molecules
   afterMoleculeId?: string; // Reference to molecule this card is positioned after
   beforeMoleculeId?: string; // Reference to molecule this card is positioned before

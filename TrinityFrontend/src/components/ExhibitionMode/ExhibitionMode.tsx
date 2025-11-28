@@ -2731,6 +2731,8 @@ const ExhibitionMode = () => {
         open={isExportOpen}
         onOpenChange={setIsExportOpen}
         totalSlides={exhibitedCards.length}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
       />
 
       <ShareDialog

@@ -1,10 +1,24 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
+import {
+  Plus,
+  Grid3X3,
+  Trash2,
+  Settings,
+  ChevronDown,
+  Minus,
+  RefreshCcw,
+  Maximize2,
+  X,
+  HelpCircle,
+  HelpCircleIcon,
+  GripVertical,
+  Type,
+} from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -53,6 +67,8 @@ import {
   registerPrefillController,
   cancelPrefillController,
 } from '@/components/AtomList/atoms/column-classifier/prefillManager';
+import { TextBoxToolbar } from './text-box/TextBoxToolbar';
+import type { TextAlignOption, TextStylePreset } from './text-box/types';
 
 import {
   useLaboratoryStore,
@@ -60,6 +76,7 @@ import {
   DroppedAtom,
   CardVariable,
   DEFAULT_TEXTBOX_SETTINGS,
+  TextBoxConfig,
   createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
@@ -67,6 +84,7 @@ import {
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_DATA,
+  TextBoxSettings,
   DataUploadSettings,
   ColumnClassifierColumn,
   DEFAULT_EXPLORE_SETTINGS,
@@ -77,6 +95,77 @@ import {
 import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, UnifiedRenderItem } from './helpers';
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+
+const normalizeTextBoxPlaceholder = (value?: string) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+const normalizeTextBoxValue = (value?: string) =>
+  normalizeTextBoxPlaceholder(
+    value
+      ?.replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<[^>]+>/g, ' '),
+  );
+
+const TEXTBOX_PLACEHOLDER = '';
+const TEXTBOX_PLACEHOLDER_NORMALIZED = '';
+const isPlaceholderContent = (value?: string) => normalizeTextBoxValue(value) === TEXTBOX_PLACEHOLDER_NORMALIZED;
+
+const normalizeTextBoxes = (card: any): TextBoxConfig[] => {
+  const incoming = card?.textBoxes ?? card?.text_boxes;
+  const parsed = Array.isArray(incoming) ? incoming : [];
+
+  if (parsed.length > 0) {
+    return parsed.map((box: any, index: number) => ({
+      id: box.id ?? `text-box-${index + 1}`,
+      title: box.title ?? `Text Box ${index + 1}`,
+      content: box.content ?? box.text ?? card?.textBoxContent ?? '',
+      html: box.html ?? card?.textBoxHtml ?? '',
+      settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? box) },
+    }));
+  }
+
+  if (card?.textBoxEnabled ?? card?.text_box_enabled) {
+    return [
+      {
+        id: 'text-box-1',
+        title: 'Text Box 1',
+        content: card?.textBoxContent ?? card?.text_box_content ?? '',
+        html: card?.textBoxHtml ?? card?.text_box_html ?? '',
+        settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(card?.textBoxSettings ?? card?.text_box_settings ?? {}) },
+      },
+    ];
+  }
+
+  return [];
+};
+
+type NormalizedTextBox = TextBoxConfig & { settings: TextBoxSettings };
+
+const normalizeCardTextBoxes = (card: LayoutCard): NormalizedTextBox[] => {
+  const baseTextBoxes = (Array.isArray(card.textBoxes) && card.textBoxes.length > 0
+    ? card.textBoxes
+    : normalizeTextBoxes(card)) as NormalizedTextBox[];
+
+  const ensuredTextBoxes = baseTextBoxes.length > 0
+    ? baseTextBoxes
+    : [
+        {
+          id: 'text-box-1',
+          title: 'Text Box 1',
+          content: card.textBoxContent ?? '',
+          html: card.textBoxHtml ?? '',
+          settings: { ...DEFAULT_TEXTBOX_SETTINGS },
+        },
+      ];
+
+  return ensuredTextBoxes.map((box, index) => ({
+    ...box,
+    id: box.id ?? `text-box-${index + 1}`,
+    title: box.title ?? `Text Box ${index + 1}`,
+    content: box.content ?? '',
+    html: box.html ?? '',
+    settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? {}) },
+  }));
+};
 
 
 interface CanvasAreaProps {
@@ -201,7 +290,267 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
     beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
     variables: normalizeCardVariables(card.variables, card.id),
+    textBoxEnabled: card.textBoxEnabled ?? card.text_box_enabled ?? false,
+    textBoxContent: card.textBoxContent ?? card.text_box_content,
+    textBoxHtml: card.textBoxHtml ?? card.text_box_html,
+    textBoxSettings: card.textBoxSettings
+      ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }
+      : card.text_box_settings
+      ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.text_box_settings }
+      : undefined,
+    textBoxes: normalizeTextBoxes(card),
   }));
+};
+
+interface CardTextBoxCanvasProps {
+  data: { text: string; html: string };
+  settings: TextBoxSettings;
+  onTextChange: (data: { text: string; html: string }) => void;
+  onSettingsChange: (updates: Partial<TextBoxSettings>) => void;
+}
+
+const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
+
+const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const selectionRef = useRef<Range | null>(null);
+  const [showToolbar, setShowToolbar] = useState(false);
+
+  const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
+    if (!editorRef.current) return;
+
+    if (typeof updates.text_color === 'string') {
+      editorRef.current.style.color = updates.text_color;
+    }
+
+    if (typeof updates.background_color === 'string') {
+      editorRef.current.style.backgroundColor = updates.background_color || 'transparent';
+    }
+  };
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== data.html) {
+      editorRef.current.innerHTML = data.html;
+    }
+  }, [data.html]);
+
+  useEffect(() => {
+    applyImmediateStyles({
+      text_color: settings.text_color,
+      background_color: settings.background_color,
+    });
+  }, [settings.background_color, settings.text_color]);
+
+  const handleInput = () => {
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      const text = editorRef.current.innerText;
+      onTextChange({ text, html });
+    }
+  };
+
+  const saveSelection = () => {
+    const selection = typeof window !== 'undefined' ? window.getSelection() : null;
+    if (selection?.rangeCount) {
+      selectionRef.current = selection.getRangeAt(0);
+    }
+  };
+
+  const restoreSelection = () => {
+    if (typeof window === 'undefined') return;
+
+    const selection = window.getSelection();
+    const range = selectionRef.current;
+
+    if (selection && range) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  };
+
+  const runCommand = (command: string, value?: string) => {
+    if (typeof document === 'undefined') return false;
+
+    restoreSelection();
+
+    try {
+      const executed = document.execCommand(command, false, value ?? undefined);
+
+      if (executed) {
+        handleInput();
+      }
+
+      return executed;
+    } catch {
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    editorRef.current.style.color = settings.text_color;
+    editorRef.current.style.backgroundColor = settings.background_color ?? 'transparent';
+    editorRef.current.style.fontFamily = settings.font_family;
+    editorRef.current.style.fontSize = `${settings.font_size}px`;
+    editorRef.current.style.fontWeight = settings.bold ? 'bold' : 'normal';
+    editorRef.current.style.fontStyle = settings.italics ? 'italic' : 'normal';
+    editorRef.current.style.textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+    editorRef.current.style.textAlign = settings.text_align;
+
+    editorRef.current.classList.remove('list-disc', 'list-decimal', 'pl-8');
+    if (settings.list_type === 'bullet') {
+      editorRef.current.classList.add('list-disc', 'pl-8');
+      editorRef.current.style.listStyleType = 'disc';
+      editorRef.current.style.paddingLeft = '2rem';
+    } else if (settings.list_type === 'number') {
+      editorRef.current.classList.add('list-decimal', 'pl-8');
+      editorRef.current.style.listStyleType = 'decimal';
+      editorRef.current.style.paddingLeft = '2rem';
+    } else {
+      editorRef.current.style.listStyleType = 'none';
+      editorRef.current.style.paddingLeft = '0';
+    }
+  }, [
+    settings.background_color,
+    settings.text_color,
+    settings.bold,
+    settings.font_family,
+    settings.font_size,
+    settings.italics,
+    settings.list_type,
+    settings.strikethrough,
+    settings.text_align,
+    settings.underline,
+  ]);
+
+  const handleApplyTextStyle = (preset: TextStylePreset) => {
+    const updates: Partial<TextBoxSettings> = {
+      font_size: clampFontSize(preset.fontSize),
+    };
+
+    if (typeof preset.bold === 'boolean') updates.bold = preset.bold;
+    if (typeof preset.italic === 'boolean') updates.italics = preset.italic;
+    if (typeof preset.underline === 'boolean') updates.underline = preset.underline;
+    if (typeof preset.strikethrough === 'boolean') updates.strikethrough = preset.strikethrough;
+
+    onSettingsChange(updates);
+  };
+
+  const handleContainerBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (!containerRef.current?.contains(nextTarget)) {
+      setShowToolbar(false);
+    }
+  };
+
+  const getListStyle = () => {
+    if (settings.list_type === 'bullet') return 'list-disc pl-8';
+    if (settings.list_type === 'number') return 'list-decimal pl-8';
+    return '';
+  };
+
+  const textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+  const toolbarAlign: TextAlignOption = ['left', 'center', 'right'].includes(settings.text_align)
+    ? (settings.text_align as TextAlignOption)
+    : 'left';
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full h-full pt-6"
+      onFocusCapture={() => setShowToolbar(true)}
+      onBlurCapture={handleContainerBlur}
+    >
+      {showToolbar ? (
+        <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full">
+          <TextBoxToolbar
+            fontFamily={settings.font_family}
+            onFontFamilyChange={(font) => onSettingsChange({ font_family: font })}
+            fontSize={settings.font_size}
+            onIncreaseFontSize={() => onSettingsChange({ font_size: clampFontSize(settings.font_size + 1) })}
+            onDecreaseFontSize={() => onSettingsChange({ font_size: clampFontSize(settings.font_size - 1) })}
+            onApplyTextStyle={handleApplyTextStyle}
+            bold={settings.bold}
+            italic={settings.italics}
+            underline={settings.underline}
+            strikethrough={Boolean(settings.strikethrough)}
+            onToggleBold={() => onSettingsChange({ bold: !settings.bold })}
+            onToggleItalic={() => onSettingsChange({ italics: !settings.italics })}
+            onToggleUnderline={() => onSettingsChange({ underline: !settings.underline })}
+            onToggleStrikethrough={() => onSettingsChange({ strikethrough: !settings.strikethrough })}
+            align={toolbarAlign}
+            onAlign={(align) => onSettingsChange({ text_align: align })}
+            onBulletedList={() => {
+              const nextType = settings.list_type === 'bullet' ? 'none' : 'bullet';
+              const executed = runCommand('insertUnorderedList');
+              if (!executed && !editorRef.current?.classList.contains('list-disc')) {
+                editorRef.current?.classList.toggle('list-disc', nextType === 'bullet');
+              }
+              onSettingsChange({ list_type: nextType });
+            }}
+            onNumberedList={() => {
+              const nextType = settings.list_type === 'number' ? 'none' : 'number';
+              const executed = runCommand('insertOrderedList');
+              if (!executed && !editorRef.current?.classList.contains('list-decimal')) {
+                editorRef.current?.classList.toggle('list-decimal', nextType === 'number');
+              }
+              onSettingsChange({ list_type: nextType });
+            }}
+            color={settings.text_color}
+            onColorChange={(color) => {
+              const executed = runCommand('foreColor', color);
+              if (!executed) {
+                applyImmediateStyles({ text_color: color });
+              }
+              onSettingsChange({ text_color: color });
+            }}
+            backgroundColor={settings.background_color ?? 'transparent'}
+            onBackgroundColorChange={(color) => {
+              const executed = runCommand('hiliteColor', color) || runCommand('backColor', color);
+              if (!executed) {
+                applyImmediateStyles({ background_color: color });
+              }
+              onSettingsChange({ background_color: color });
+            }}
+          />
+        </div>
+      ) : null}
+
+      <div className="w-full h-full space-y-3">
+        <div
+          ref={editorRef}
+          contentEditable
+          onInput={handleInput}
+          onKeyUp={saveSelection}
+          onMouseUp={saveSelection}
+          suppressContentEditableWarning
+          className={`
+            w-full min-h-[200px] p-6
+            border-2 border-dashed border-border rounded-lg
+            focus:outline-none focus:border-primary
+            transition-colors duration-200
+            ${getListStyle()}
+          `}
+          style={{
+            fontFamily: settings.font_family,
+            fontSize: `${settings.font_size}px`,
+            fontWeight: settings.bold ? 'bold' : 'normal',
+            fontStyle: settings.italics ? 'italic' : 'normal',
+            textDecoration,
+            textAlign: settings.text_align,
+            color: settings.text_color,
+            backgroundColor: settings.background_color ?? 'transparent',
+          }}
+        />
+
+        <div className="text-sm text-muted-foreground text-left">
+          Click to edit text. Use the toolbar to format content and lists.
+        </div>
+      </div>
+    </div>
+  );
 };
 
 // Function to fetch atom configurations from MongoDB
@@ -286,6 +635,15 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
           afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
           beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
           variables: normalizeCardVariables(card.variables, card.id),
+          textBoxEnabled: card.textBoxEnabled ?? card.text_box_enabled ?? false,
+          textBoxContent: card.textBoxContent ?? card.text_box_content,
+          textBoxHtml: card.textBoxHtml ?? card.text_box_html,
+          textBoxSettings: card.textBoxSettings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }
+            : card.text_box_settings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.text_box_settings }
+            : undefined,
+          textBoxes: normalizeTextBoxes(card),
         };
 
         // Validation: Log warning if we expected moleculeId but it's missing
@@ -478,6 +836,94 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               </div>
               {infoText && <div className="text-xs text-gray-500">{infoText}</div>}
             </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderCardTextBox = (card: LayoutCard) => {
+    if (!card.textBoxEnabled) {
+      return null;
+    }
+
+    const normalizedTextBoxes = normalizeCardTextBoxes(card);
+
+    if (normalizedTextBoxes.length === 0) {
+      return null;
+    }
+
+    const syncLegacyFields = (boxes: TextBoxConfig[]) => {
+      const primary = boxes[0];
+
+      return {
+        textBoxes: boxes,
+        textBoxContent: primary?.content ?? '',
+        textBoxHtml: primary?.html ?? '',
+        textBoxSettings: primary?.settings
+          ? { ...DEFAULT_TEXTBOX_SETTINGS, ...primary.settings }
+          : card.textBoxSettings,
+      };
+    };
+
+    const updateCardTextBoxes = (updater: (boxes: TextBoxConfig[]) => TextBoxConfig[]) => {
+      if (!Array.isArray(layoutCards)) return;
+
+      setLayoutCards(
+        layoutCards.map(existing => {
+          if (existing.id !== card.id) return existing;
+
+          const nextBoxes = updater(normalizedTextBoxes);
+          return {
+            ...existing,
+            ...syncLegacyFields(nextBoxes),
+          };
+        }),
+      );
+    };
+
+    return (
+      <div className="mt-10 space-y-8">
+        {normalizedTextBoxes.map(box => {
+          const rawTextContent = box.content ?? '';
+          const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
+          const rawHtmlContent = box.html?.trim()?.length ? box.html : '';
+          const htmlContent = rawHtmlContent && !isPlaceholderContent(rawHtmlContent)
+            ? rawHtmlContent
+            : textContent.replace(/\n/g, '<br />');
+          const textData = { text: textContent, html: htmlContent };
+
+          return (
+            <CardTextBoxCanvas
+              key={box.id}
+              data={textData}
+              settings={box.settings as TextBoxSettings}
+              onTextChange={(data) =>
+                updateCardTextBoxes((boxes) =>
+                  boxes.map(existing =>
+                    existing.id === box.id
+                      ? { ...existing, content: data.text, html: data.html }
+                      : existing,
+                  ),
+                )
+              }
+              onSettingsChange={(updates) =>
+                updateCardTextBoxes((boxes) =>
+                  boxes.map(existing =>
+                    existing.id === box.id
+                      ? {
+                          ...existing,
+                          settings: {
+                            ...DEFAULT_TEXTBOX_SETTINGS,
+                            ...(existing.settings ?? {}),
+                            ...updates,
+                          },
+                        }
+                      : existing,
+                  ),
+                )
+              }
+            />
           );
         })}
       </div>
@@ -3280,6 +3726,34 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     setExpandedCard(expandedCard === id ? null : id);
   };
 
+  const toggleCardTextBox = (cardId: string) => {
+    if (!Array.isArray(layoutCards)) return;
+
+    setLayoutCards(
+      layoutCards.map(card => {
+        if (card.id !== cardId) return card;
+
+        if (card.textBoxEnabled) {
+          return { ...card, textBoxEnabled: false };
+        }
+
+        const normalizedTextBoxes = normalizeCardTextBoxes(card);
+        const primary = normalizedTextBoxes[0];
+
+        return {
+          ...card,
+          textBoxEnabled: true,
+          textBoxes: normalizedTextBoxes,
+          textBoxContent: primary?.content ?? '',
+          textBoxHtml: primary?.html ?? '',
+          textBoxSettings: primary?.settings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...primary.settings }
+            : { ...DEFAULT_TEXTBOX_SETTINGS },
+        };
+      }),
+    );
+  };
+
   const toggleMoleculeCollapse = (moleculeId: string) => {
     setCollapsedMolecules(prev => ({ ...prev, [moleculeId]: !prev[moleculeId] }));
   };
@@ -4377,6 +4851,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               >
                                 <RefreshCcw className="w-4 h-4 text-gray-400" />
                               </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardTextBox(card.id);
+                                }}
+                                className={`p-1 rounded hover:bg-gray-100 ${
+                                  card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                                }`}
+                                title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                              >
+                                <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                              </button>
                             </div>
                             <div className="flex items-center space-x-2">
                               <button
@@ -4525,6 +5011,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 ))}
                               </div>
                             )}
+                            {renderCardTextBox(card)}
                             {renderAppendedVariables(card)}
                           </div>
                         </Card>
@@ -4644,6 +5131,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             title="Refresh Atom"
                           >
                             <RefreshCcw className="w-4 h-4 text-gray-400" />
+                          </button>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              toggleCardTextBox(card.id);
+                            }}
+                            className={`p-1 rounded hover:bg-gray-100 ${
+                              card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                            }`}
+                            title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                          >
+                            <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                           </button>
                         </div>
                         <div className="flex items-center space-x-2">
@@ -4806,6 +5305,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             ))}
                           </div>
                         )}
+                        {renderCardTextBox(card)}
                         {renderAppendedVariables(card)}
                       </div>
                     </Card>
@@ -5129,6 +5629,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 >
                   <RefreshCcw className="w-4 h-4 text-gray-400" />
                 </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleCardTextBox(card.id);
+                  }}
+                  className={`p-1 rounded hover:bg-gray-100 ${
+                    card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                  }`}
+                  title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                >
+                  <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                </button>
               </div>
               <div className="flex items-center space-x-2">
                 <button
@@ -5293,12 +5805,13 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         </div>
                       )}
                     </AtomBox>
-                  ))}
-                </div>
-              )}
-              {renderAppendedVariables(card)}
+              ))}
             </div>
-          </Card>
+          )}
+          {renderCardTextBox(card)}
+          {renderAppendedVariables(card)}
+        </div>
+      </Card>
           {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
             <div className="flex justify-center my-4">
               <button

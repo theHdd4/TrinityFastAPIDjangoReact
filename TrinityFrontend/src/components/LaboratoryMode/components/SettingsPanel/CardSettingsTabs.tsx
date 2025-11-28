@@ -12,11 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Plus, MoreHorizontal, Trash2, Pencil, Layers } from 'lucide-react';
-import {
-  useLaboratoryStore,
-  CardVariable,
-  LayoutCard,
-} from '../../store/laboratoryStore';
+import { useLaboratoryStore, CardVariable, LayoutCard } from '../../store/laboratoryStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { LABORATORY_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -26,6 +22,7 @@ interface CardSettingsTabsProps {
   card: LayoutCard;
   tab: string;
   setTab: (value: string) => void;
+  onUpdateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   onAddVariable: (cardId: string, variable: CardVariable) => void;
   onUpdateVariable: (
     cardId: string,
@@ -98,6 +95,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   card,
   tab,
   setTab,
+  onUpdateCard,
   onAddVariable,
   onUpdateVariable,
   onDeleteVariable,
@@ -890,8 +888,8 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
 
           <TabsContent value="settings" className="space-y-4">
             <Card className="p-4 text-sm text-gray-600">
-              <h4 className="font-medium text-gray-900 mb-2">Card Settings</h4>
-              <p>Global card configuration will appear here. For now, manage variables via the Variable Definition tab.</p>
+              <h4 className="font-medium text-gray-900 mb-2">Card settings</h4>
+              <p>Text boxes can be toggled on the card header and formatted directly with the toolbar inside the card.</p>
             </Card>
           </TabsContent>
 
