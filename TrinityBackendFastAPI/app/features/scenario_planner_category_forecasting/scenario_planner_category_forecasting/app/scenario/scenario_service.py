@@ -133,10 +133,58 @@ class ScenarioService:
                 df[date_col] = df[date_col].dt.tz_convert(None)
 
             df = df[(df[date_col] >= t0) & (df[date_col] <= t1)]
+        
+        # ✅ FIXED: Handle case-insensitive column matching
+        # Create a mapping from requested x_vars to actual column names in DataFrame
+        available_columns = list(df.columns)
+        column_mapping = {}  # Maps requested var name -> actual column name
+        missing_vars = []
+        
+        for var in x_vars:
+            # Try exact match first
+            if var in available_columns:
+                column_mapping[var] = var
+            else:
+                # Try case-insensitive match
+                matched = None
+                for col in available_columns:
+                    if col.lower() == var.lower():
+                        matched = col
+                        break
+                
+                if matched:
+                    column_mapping[var] = matched
+                    logger.info(f"✅ Case-insensitive match: '{var}' -> '{matched}'")
+                else:
+                    missing_vars.append(var)
+                    logger.warning(f"⚠️ Column '{var}' not found in DataFrame. Available columns: {available_columns}")
+        
+        if missing_vars:
+            error_msg = (
+                f"Columns not found in DataFrame: {missing_vars}. "
+                f"Available columns: {available_columns}. "
+                f"Requested columns: {x_vars}"
+            )
+            logger.error(f"❌ {error_msg}")
+            raise KeyError(error_msg)
+        
+        # Use the actual column names from the mapping
+        actual_columns = [column_mapping[var] for var in x_vars]
+        logger.info(f"🔍 Using columns: {actual_columns} (requested: {x_vars})")
+        
         ref_series = (
-            df[x_vars].mean() if stat.endswith("mean") else df[x_vars].median()
+            df[actual_columns].mean() if stat.endswith("mean") else df[actual_columns].median()
         )
-        return ref_series.to_dict()
+        
+        # ✅ FIXED: Return dictionary with original x_variable names (not mapped column names)
+        # This ensures downstream code can match by the original variable names
+        ref_dict = {}
+        for var in x_vars:
+            actual_col = column_mapping[var]
+            ref_dict[var] = ref_series[actual_col]
+        
+        logger.info(f"✅ Reference values calculated: {ref_dict}")
+        return ref_dict
 
     @staticmethod
     def _prepare_results_dataframe(results: List[dict]) -> pd.DataFrame:

@@ -175,8 +175,72 @@ def _write_dataframe_to_minio(frame: pd.DataFrame, file_key: str) -> None:
     elif lower_key.endswith(".arrow") or lower_key.endswith(".feather"):
         import pyarrow as pa
         import pyarrow.ipc as ipc
+        import numpy as np
 
-        table = pa.Table.from_pandas(frame)
+        # Clean dataframe for PyArrow compatibility
+        frame_clean = frame.copy()
+        
+        # Clean each column individually to handle arrays/lists properly
+        for col in frame_clean.columns:
+            col_data = frame_clean[col]
+            
+            # Handle object columns (may contain lists, arrays, or mixed types)
+            if col_data.dtype == 'object':
+                # Convert lists/arrays to string representation
+                def convert_value(x):
+                    # Check for array-like objects FIRST (before pd.isna)
+                    # pd.isna() on arrays returns an array of booleans, which can't be used in if statements
+                    if isinstance(x, (list, tuple, np.ndarray, pd.Series)):
+                        # Convert array-like to string representation
+                        if isinstance(x, np.ndarray):
+                            # Handle numpy arrays - convert to list then string
+                            return str(x.tolist())
+                        elif isinstance(x, pd.Series):
+                            # Handle pandas Series
+                            return str(x.tolist())
+                        else:
+                            # Handle list/tuple
+                            return str(list(x) if isinstance(x, tuple) else x)
+                    
+                    # Check for dict
+                    if isinstance(x, dict):
+                        return str(x)
+                    
+                    # Only use pd.isna() on scalar values (not arrays)
+                    # pd.isna() is safe for scalars (returns single boolean)
+                    if pd.isna(x):
+                        return None
+                    
+                    return x
+                
+                frame_clean[col] = col_data.apply(convert_value)
+                # Convert to string, handling NaN
+                frame_clean[col] = frame_clean[col].astype(str)
+                frame_clean[col] = frame_clean[col].replace('nan', None).replace('None', None)
+            
+            # Handle numeric columns - replace inf/-inf with None
+            elif pd.api.types.is_numeric_dtype(col_data):
+                # Replace inf and -inf with None column by column
+                mask_inf = np.isinf(col_data) & (col_data > 0)
+                mask_neg_inf = np.isinf(col_data) & (col_data < 0)
+                frame_clean.loc[mask_inf, col] = None
+                frame_clean.loc[mask_neg_inf, col] = None
+            
+            # Handle datetime columns
+            elif pd.api.types.is_datetime64_any_dtype(col_data):
+                frame_clean[col] = col_data.astype(str)
+                frame_clean[col] = frame_clean[col].replace('NaT', None)
+        
+        try:
+            table = pa.Table.from_pandas(frame_clean, preserve_index=False)
+        except Exception as e:
+            logger.warning(f"PyArrow conversion failed, trying with string conversion: {e}")
+            # Fallback: convert all columns to string
+            for col in frame_clean.columns:
+                frame_clean[col] = frame_clean[col].astype(str)
+                frame_clean[col] = frame_clean[col].replace('nan', None).replace('None', None).replace('NaT', None)
+            table = pa.Table.from_pandas(frame_clean, preserve_index=False)
+        
         buffer = io.BytesIO()
         with ipc.new_file(buffer, table.schema) as writer:
             writer.write_table(table)
@@ -871,6 +935,13 @@ def filter_models(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not method_column:
             expected_column = f"{request.variable}_{method_suffix}"
             logger.warning(f"No {method_type} column found for variable '{request.variable}'. Expected column: '{expected_column}'. Available columns: {list(df.columns)[:20]}...")
+            
+            # Check if ensemble row exists and log its columns
+            if 'model_name' in df.columns or model_column:
+                ensemble_rows = df[df[model_column].astype(str).str.lower().str.contains('ensemble', na=False)]
+                if not ensemble_rows.empty:
+                    logger.info(f"🔍 Found {len(ensemble_rows)} ensemble row(s) in file. Columns with values: {[col for col in ensemble_rows.columns if pd.notna(ensemble_rows.iloc[0].get(col))][:20]}")
+            
             return []
         
         # Check for model column with flexible naming
@@ -884,6 +955,14 @@ def filter_models(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
         
         if not model_column:
             raise ValueError(f"No model identifier column found. Expected one of: {possible_model_columns}")
+        
+        # Log ensemble row info for debugging
+        ensemble_rows = df[df[model_column].astype(str).str.lower().str.contains('ensemble', na=False)]
+        if not ensemble_rows.empty:
+            logger.info(f"🔍 Found {len(ensemble_rows)} ensemble row(s) in file for combination {request.combination_id}")
+            for idx, ensemble_row in ensemble_rows.iterrows():
+                method_value = ensemble_row.get(method_column)
+                logger.info(f"🔍 Ensemble row - model: {ensemble_row.get(model_column)}, {method_column}: {method_value}, is_na: {pd.isna(method_value) if method_value is not None else 'N/A'}")
         
         # Prepare a DataFrame with model column and the method column
         columns_to_select = [model_column, method_column]
@@ -1193,17 +1272,50 @@ def filter_models(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                                 filtered = filtered[filtered[var_method_column] <= max_val]
         
         # Remove rows with NaN values in critical columns
+        # But allow ensemble models even if they have NaN (they might be calculated differently)
+        filtered_before_dropna = filtered.copy()
         filtered = filtered.dropna(subset=['model_name', 'selected_variable_value'])
         
-        # Filter out ensemble models
-        filtered = filtered[~filtered['model_name'].astype(str).str.lower().str.contains('ensemble', na=False)]
+        # Check if ensemble row was dropped due to NaN
+        ensemble_rows = filtered_before_dropna[
+            filtered_before_dropna['model_name'].astype(str).str.lower().str.contains('ensemble', na=False)
+        ]
+        if not ensemble_rows.empty:
+            for _, ensemble_row in ensemble_rows.iterrows():
+                # Check if ensemble was dropped due to NaN in selected_variable_value
+                if pd.isna(ensemble_row.get('selected_variable_value')):
+                    logger.warning(f"⚠️ Ensemble model found but has NaN in selected_variable_value. Model: {ensemble_row.get('model_name')}")
+                    # Try to find elasticity value in other columns
+                    model_name_str = str(ensemble_row.get('model_name', ''))
+                    # Try to find elasticity column for the variable
+                    for col in filtered_before_dropna.columns:
+                        if col.lower() == f"{request.variable.lower()}_{method_suffix}" or col.lower() == f"{request.variable.lower()}_elasticity" or col.lower() == f"{request.variable.lower()}_elas":
+                            elasticity_value = ensemble_row.get(col)
+                            if pd.notna(elasticity_value):
+                                # Add ensemble row back with the found value
+                                ensemble_row_fixed = ensemble_row.copy()
+                                ensemble_row_fixed['selected_variable_value'] = elasticity_value
+                                filtered = pd.concat([filtered, ensemble_row_fixed.to_frame().T], ignore_index=True)
+                                logger.info(f"✅ Added ensemble model back with elasticity value: {elasticity_value}")
+                                break
+        
+        # Note: We no longer filter out ensemble models - they should be included in the results
+        # Ensemble models are now saved to the file and should appear in graphs
         
         # Prepare response
         results = []
         for _, row in filtered.iterrows():
+            model_name_str = str(row["model_name"])
+            selected_value = row["selected_variable_value"]
+            
+            # Skip if still NaN
+            if pd.isna(selected_value):
+                logger.warning(f"⚠️ Skipping model {model_name_str} due to NaN in selected_variable_value")
+                continue
+            
             model_data = {
-                "model_name": str(row["model_name"]),
-                "self_elasticity": float(row["selected_variable_value"])
+                "model_name": model_name_str,
+                "self_elasticity": float(selected_value)
             }
             
             # Add method-specific field based on the method type
@@ -1376,18 +1488,323 @@ def get_saved_combinations_status(file_key: str, atom_id: str) -> Dict[str, Any]
 async def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     request = GenericSavePayload(**payload)
     combination_id = request.filter_criteria.get("combination_id")
-    try:
-        models = _models_for_file(request.file_key, combination_id)
-    except ModelDataUnavailableError as exc:
-        raise ValueError(str(exc)) from exc
-    try:
-        record = next(
-            model
-            for model in models
-            if model.model_name == request.model_name
-        )
-    except StopIteration as exc:  # pragma: no cover - defensive
-        raise ValueError("Model not found for the provided criteria") from exc
+    
+    # Check if this is an ensemble model
+    is_ensemble = request.model_name.lower() == "ensemble"
+    
+    if is_ensemble:
+        # Handle ensemble model - create ensemble row and append to file
+        try:
+            logger.info(f"🔍 Starting ensemble model save for combination: {combination_id}")
+            
+            # Get ensemble data
+            ensemble_request = {
+                "file_key": request.file_key,
+                "grouping_keys": ['combination_id'],
+                "filter_criteria": {"combination_id": combination_id},
+                "include_numeric": None,
+                "exclude_numeric": None,
+                "filtered_models": None
+            }
+            logger.info("🔍 Calculating weighted ensemble...")
+            ensemble_result = calculate_weighted_ensemble(ensemble_request)
+            
+            if not ensemble_result.get("results") or len(ensemble_result["results"]) == 0:
+                raise ValueError("No ensemble data found for the given combination")
+            
+            ensemble_data = ensemble_result["results"][0]
+            weighted_metrics = ensemble_data.get("weighted", {})
+            model_composition = ensemble_data.get("model_composition", {})
+            combo_dict = ensemble_data.get("combo", {})
+            logger.info(f"🔍 Got ensemble data with {len(weighted_metrics)} weighted metrics")
+            
+            # Update weighted_metrics with intercepts and betas from MongoDB
+            from .database import db
+            if db is not None:
+                try:
+                    logger.info("🔍 Fetching build config from MongoDB...")
+                    document_id = f"{request.client_name}/{request.app_name}/{request.project_name}"
+                    build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
+                    if build_config:
+                        # Import the function to update weighted metrics from MongoDB
+                        from .ensemble_method import _update_weighted_metrics_from_mongodb
+                        logger.info("🔍 Updating weighted metrics from MongoDB...")
+                        weighted_metrics = await _update_weighted_metrics_from_mongodb(
+                            db, build_config, combination_id, weighted_metrics, model_composition
+                        )
+                        logger.info("✅ Updated weighted metrics with intercepts and betas from MongoDB")
+                    else:
+                        logger.warning(f"⚠️ Build config not found for {document_id}")
+                except Exception as e:
+                    logger.warning(f"Could not update weighted metrics from MongoDB: {e}", exc_info=True)
+            else:
+                logger.warning("⚠️ MongoDB db is None, skipping MongoDB updates")
+            
+            # Load the file to append ensemble row
+            frame = _load_dataframe(request.file_key)
+            if frame is None or frame.empty:
+                raise ValueError(f"Could not load file {request.file_key}")
+            
+            # Check if ensemble row already exists for this combination
+            combination_column = _detect_combination_column(frame)
+            model_column = _detect_model_name_column(frame)
+            
+            if combination_column and model_column:
+                existing_mask = (
+                    (frame[combination_column].astype(str) == str(combination_id)) &
+                    (frame[model_column].astype(str).str.lower() == "ensemble")
+                )
+                if existing_mask.any():
+                    # Update existing ensemble row
+                    ensemble_row_idx = frame[existing_mask].index[0]
+                    logger.info(f"Updating existing ensemble row at index {ensemble_row_idx}")
+                else:
+                    # Create new row
+                    ensemble_row_idx = len(frame)
+                    frame.loc[ensemble_row_idx] = pd.NA  # Initialize with NA
+                    logger.info(f"Creating new ensemble row at index {ensemble_row_idx}")
+            else:
+                raise ValueError("Could not find combination_id or model_name columns")
+            
+            # Get a sample row to copy categorical/scope columns
+            sample_models = _models_for_file(request.file_key, combination_id)
+            if not sample_models:
+                raise ValueError("No models found for combination to use as template")
+            sample_model = sample_models[0]
+            
+            # Set basic columns
+            if combination_column:
+                frame.loc[ensemble_row_idx, combination_column] = combination_id
+            if model_column:
+                frame.loc[ensemble_row_idx, model_column] = "Ensemble"
+            
+            # Set Scope column if it exists (from image: Scope_1)
+            if "Scope" in frame.columns:
+                # Try to get from sample model or use a default
+                scope_value = sample_model.combination.get("Scope") if isinstance(sample_model.combination, dict) else None
+                if scope_value:
+                    frame.loc[ensemble_row_idx, "Scope"] = scope_value
+                else:
+                    # Use combination_id as fallback or default
+                    frame.loc[ensemble_row_idx, "Scope"] = f"Scope_{combination_id}" if combination_id else "Scope_1"
+            
+            # Copy combination/scope columns from sample model (Brand, Region, etc.)
+            for key, value in sample_model.combination.items():
+                if key in frame.columns:
+                    frame.loc[ensemble_row_idx, key] = value
+            
+            # Get y_variable, x_variables, and n_parameters from MongoDB if available
+            y_variable = None
+            x_variables = []
+            n_parameters = None
+            
+            if db is not None:
+                try:
+                    document_id = f"{request.client_name}/{request.app_name}/{request.project_name}"
+                    build_config = await db["build-model_featurebased_configs"].find_one({"_id": document_id})
+                    if build_config:
+                        model_coefficients = build_config.get("model_coefficients", {})
+                        combination_coefficients = model_coefficients.get(combination_id, {})
+                        # Get from first model in composition
+                        for model_name in model_composition.keys():
+                            model_coeffs = combination_coefficients.get(model_name, {})
+                            y_var = model_coeffs.get("y_variable", "")
+                            x_vars = model_coeffs.get("x_variables", [])
+                            n_params = model_coeffs.get("n_parameters")
+                            if y_var:
+                                y_variable = y_var
+                            if x_vars:
+                                x_variables = x_vars
+                            if n_params is not None:
+                                n_parameters = n_params
+                            break
+                except Exception as e:
+                    logger.warning(f"Could not get y_variable/x_variables from MongoDB: {e}")
+            
+            # Set weighted metrics
+            frame.loc[ensemble_row_idx, "mape_train"] = weighted_metrics.get("mape_train")
+            frame.loc[ensemble_row_idx, "mape_test"] = weighted_metrics.get("mape_test")
+            frame.loc[ensemble_row_idx, "r2_train"] = weighted_metrics.get("r2_train")
+            frame.loc[ensemble_row_idx, "r2_test"] = weighted_metrics.get("r2_test")
+            frame.loc[ensemble_row_idx, "aic"] = weighted_metrics.get("aic")
+            frame.loc[ensemble_row_idx, "bic"] = weighted_metrics.get("bic")
+            frame.loc[ensemble_row_idx, "intercept"] = weighted_metrics.get("intercept", 0)
+            
+            # Set y_variable, x_variables, and n_parameters if columns exist
+            if y_variable and "y_variable" in frame.columns:
+                frame.loc[ensemble_row_idx, "y_variable"] = y_variable
+            if x_variables and "x_variables" in frame.columns:
+                # x_variables might be stored as list or string
+                frame.loc[ensemble_row_idx, "x_variables"] = str(x_variables) if isinstance(x_variables, list) else x_variables
+            # Set n_parameters (handle both n_parameters and n_paramet columns)
+            if n_parameters is not None:
+                if "n_parameters" in frame.columns:
+                    frame.loc[ensemble_row_idx, "n_parameters"] = n_parameters
+                elif "n_paramet" in frame.columns:  # Truncated column name
+                    frame.loc[ensemble_row_idx, "n_paramet"] = n_parameters
+            else:
+                # Calculate n_parameters as count of variables with betas + intercept
+                n_params = len([k for k in weighted_metrics.keys() if k.endswith("_beta")]) + 1  # +1 for intercept
+                if "n_parameters" in frame.columns:
+                    frame.loc[ensemble_row_idx, "n_parameters"] = n_params
+                elif "n_paramet" in frame.columns:
+                    frame.loc[ensemble_row_idx, "n_paramet"] = n_params
+            
+            # Set timestamp if column exists
+            if "timestamp" in frame.columns:
+                frame.loc[ensemble_row_idx, "timestamp"] = datetime.utcnow().isoformat() + "Z"
+            
+            # Set run_id if column exists (use a default or leave empty)
+            if "run_id" in frame.columns:
+                frame.loc[ensemble_row_idx, "run_id"] = f"ensemble-{combination_id}"
+            
+            # Set weighted averages, betas, elasticities, and contributions for each variable
+            # Handle different column naming conventions from the file
+            for key, value in weighted_metrics.items():
+                # Try exact match first
+                if key in frame.columns:
+                    frame.loc[ensemble_row_idx, key] = value
+                else:
+                    # Handle different naming conventions
+                    # For averages: try {var}_avg, {var}_av
+                    if key.endswith("_avg"):
+                        var_name = key.replace("_avg", "")
+                        # Try {var}_avg
+                        if f"{var_name}_avg" in frame.columns:
+                            frame.loc[ensemble_row_idx, f"{var_name}_avg"] = value
+                        # Try {var}_av (for y_variable like volume_av)
+                        elif f"{var_name}_av" in frame.columns:
+                            frame.loc[ensemble_row_idx, f"{var_name}_av"] = value
+                    
+                    # For betas: try {var}_beta
+                    elif key.endswith("_beta"):
+                        var_name = key.replace("_beta", "")
+                        beta_col = f"{var_name}_beta"
+                        if beta_col in frame.columns:
+                            frame.loc[ensemble_row_idx, beta_col] = value
+                    
+                    # For elasticities: try {var}_elasticity, {var}_elas
+                    elif key.endswith("_elasticity"):
+                        var_name = key.replace("_elasticity", "")
+                        # Try {var}_elasticity
+                        if f"{var_name}_elasticity" in frame.columns:
+                            frame.loc[ensemble_row_idx, f"{var_name}_elasticity"] = value
+                        # Try {var}_elas (shorter form like price_elas)
+                        elif f"{var_name}_elas" in frame.columns:
+                            frame.loc[ensemble_row_idx, f"{var_name}_elas"] = value
+                    
+                    # For contributions: try {var}_contribution, {var}_contrib
+                    elif key.endswith("_contribution"):
+                        var_name = key.replace("_contribution", "")
+                        # Try {var}_contribution
+                        if f"{var_name}_contribution" in frame.columns:
+                            frame.loc[ensemble_row_idx, f"{var_name}_contribution"] = value
+                        # Try {var}_contrib (shorter form like d1_contrib)
+                        elif f"{var_name}_contrib" in frame.columns:
+                            frame.loc[ensemble_row_idx, f"{var_name}_contrib"] = value
+            
+            # Also set y_variable average if available (e.g., volume_av)
+            if y_variable:
+                y_var_lower = y_variable.lower()
+                # Try volume_av, {y_var}_av, {y_var}_avg
+                for col_name in [f"{y_var_lower}_av", f"{y_var_lower}_avg", f"{y_variable}_av", f"{y_variable}_avg"]:
+                    if col_name in frame.columns:
+                        # Get y_variable average from weighted_metrics or sample model
+                        y_avg_key = f"{y_var_lower}_avg"
+                        y_avg_value = weighted_metrics.get(y_avg_key) or sample_model.variable_averages.get(y_variable)
+                        if y_avg_value is not None:
+                            frame.loc[ensemble_row_idx, col_name] = y_avg_value
+                        break
+            
+            # Set selected_models flag
+            selected_column = _selected_models_column(frame)
+            if not selected_column:
+                selected_column = "selected_models"
+                if selected_column not in frame.columns:
+                    frame[selected_column] = "no"
+            frame.loc[ensemble_row_idx, selected_column] = "yes"
+            
+            # Write updated dataframe back to MinIO
+            logger.info("🔍 Writing updated dataframe to MinIO...")
+            _write_dataframe_to_minio(frame, request.file_key)
+            logger.info(f"✅ Saved ensemble model row to file {request.file_key}")
+            
+            # Create a synthetic ModelRecord for ensemble (for compatibility with existing code)
+            logger.info("🔍 Creating synthetic ModelRecord...")
+            variable_impacts = {}
+            variable_averages = {}
+            for key, value in weighted_metrics.items():
+                if key.endswith("_beta"):
+                    var_name = key.replace("_beta", "")
+                    variable_impacts[var_name] = value
+                elif key.endswith("_avg"):
+                    var_name = key.replace("_avg", "")
+                    variable_averages[var_name] = value
+            
+            logger.info(f"🔍 Extracted {len(variable_impacts)} variable impacts and {len(variable_averages)} variable averages")
+            
+            # Create synthetic ModelRecord
+            try:
+                # Ensure we have required fields with defaults if missing
+                if not variable_impacts:
+                    logger.warning("⚠️ No variable impacts found, using empty dict")
+                    variable_impacts = {}
+                if not variable_averages:
+                    logger.warning("⚠️ No variable averages found, using empty dict")
+                    variable_averages = {}
+                
+                # Ensure combination is a dict
+                combination = sample_model.combination if isinstance(sample_model.combination, dict) else {}
+                
+                # Ensure rpi_competitors is a dict
+                rpi_competitors = sample_model.rpi_competitors if isinstance(sample_model.rpi_competitors, dict) else {}
+                
+                record = ModelRecord(
+                    file_key=_normalise_file_key(request.file_key),
+                    combination_id=combination_id or "",
+                    combination=combination,
+                    model_name="Ensemble",
+                    metrics={
+                        "mape_train": weighted_metrics.get("mape_train"),
+                        "mape_test": weighted_metrics.get("mape_test"),
+                        "r2_train": weighted_metrics.get("r2_train"),
+                        "r2_test": weighted_metrics.get("r2_test"),
+                        "aic": weighted_metrics.get("aic"),
+                        "bic": weighted_metrics.get("bic"),
+                    },
+                    variable_impacts=variable_impacts,
+                    variable_averages=variable_averages,
+                    price_variable=sample_model.price_variable or "",
+                    base_price=sample_model.base_price or 0.0,
+                    base_volume=sample_model.base_volume or 0.0,
+                    rpi_competitors=rpi_competitors,
+                    series=sample_model.series,  # Use sample series as placeholder
+                )
+                logger.info("✅ Created synthetic ModelRecord for ensemble")
+            except Exception as model_record_exc:
+                logger.error(f"❌ Error creating ModelRecord: {str(model_record_exc)}", exc_info=True)
+                raise ValueError(f"Failed to create ModelRecord for ensemble: {str(model_record_exc)}") from model_record_exc
+        except ValueError as ve:
+            # Re-raise ValueError as-is (these are expected errors)
+            logger.error(f"❌ ValueError in ensemble save: {str(ve)}")
+            raise
+        except Exception as exc:
+            logger.error(f"❌ Error creating ensemble model: {str(exc)}", exc_info=True)
+            raise ValueError(f"Failed to create ensemble model: {str(exc)}") from exc
+    else:
+        # Handle regular model (existing logic)
+        try:
+            models = _models_for_file(request.file_key, combination_id)
+        except ModelDataUnavailableError as exc:
+            raise ValueError(str(exc)) from exc
+        try:
+            record = next(
+                model
+                for model in models
+                if model.model_name == request.model_name
+            )
+        except StopIteration as exc:  # pragma: no cover - defensive
+            raise ValueError("Model not found for the provided criteria") from exc
 
     model_id = f"saved-{next(_saved_counter):05d}"
     saved_entry = {
@@ -1408,23 +1825,26 @@ async def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     SAVED_MODELS[model_id] = saved_entry
 
     target_combination = combination_id or record.combination_id
-    try:
-        updated = _update_selected_models_flag(request.file_key, target_combination, request.model_name)
-        if not updated:
-            logger.warning(
-                "Selected model flag not updated for file=%s combination=%s model=%s",
+    
+    # Update selected_models flag (for ensemble, this was already done above)
+    if not is_ensemble:
+        try:
+            updated = _update_selected_models_flag(request.file_key, target_combination, request.model_name)
+            if not updated:
+                logger.warning(
+                    "Selected model flag not updated for file=%s combination=%s model=%s",
+                    request.file_key,
+                    target_combination,
+                    request.model_name,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(
+                "Failed to update selected_models column for file=%s combination=%s model=%s: %s",
                 request.file_key,
                 target_combination,
                 request.model_name,
+                exc,
             )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error(
-            "Failed to update selected_models column for file=%s combination=%s model=%s: %s",
-            request.file_key,
-            target_combination,
-            request.model_name,
-            exc,
-        )
 
     # Save to MongoDB select_configs collection (like old implementation)
     try:
@@ -2540,7 +2960,43 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
 
     weight_sum = sum(weight for _, weight in weights)
     
-    # Calculate weighted averages across all models
+    # Build model composition dictionary (weights normalized to sum to 1)
+    model_composition = {}
+    for model, weight in weights:
+        share = weight / weight_sum
+        model_composition[model.model_name] = round(share, 4)
+    
+    # Load the dataframe directly from file to read columns
+    frame = _load_dataframe(request.file_key)
+    if frame is None or frame.empty:
+        raise ValueError(f"Could not load file {request.file_key}")
+    
+    # Find combination_id and model_name columns
+    combination_column = _detect_combination_column(frame)
+    model_column = _detect_model_name_column(frame)
+    
+    if not combination_column or not model_column:
+        raise ValueError("Could not find combination_id or model_name columns")
+    
+    # Filter by combination_id
+    if combination_id:
+        filtered_frame = frame[frame[combination_column] == combination_id].copy()
+    else:
+        filtered_frame = frame.copy()
+    
+    # Filter by model names that are in our weights
+    # Exclude "Ensemble" from the calculation (it's not a real model to weight)
+    model_names = set(model_composition.keys())
+    # Exclude ensemble models from weighted calculation (they're results, not inputs)
+    filtered_frame = filtered_frame[
+        (filtered_frame[model_column].isin(model_names)) & 
+        (~filtered_frame[model_column].astype(str).str.lower().str.contains('ensemble', na=False))
+    ].copy()
+    
+    if filtered_frame.empty:
+        raise ValueError("No matching models found in file")
+    
+    # Calculate weighted averages across all models for performance metrics
     weighted_metrics = {}
     weighted_intercept = 0.0
     weighted_mape_test = 0.0
@@ -2550,57 +3006,144 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
     weighted_aic = 0.0
     weighted_bic = 0.0
     
-    # Collect all variable names from all models
-    all_variables = set()
-    for model, weight in weights:
-        share = weight / weight_sum
-        all_variables.update(model.variable_impacts.keys())
-        all_variables.update(model.variable_averages.keys())
+    # Weight performance metrics from file columns
+    for _, row in filtered_frame.iterrows():
+        model_name = str(row[model_column])
+        if model_name not in model_composition:
+            continue
         
-        # Weight the metrics
-        weighted_mape_test += (model.metrics.get("mape_test") or 0) * share
-        weighted_r2_test += (model.metrics.get("r2_test") or 0) * share
-        weighted_mape_train += (model.metrics.get("mape_train") or 0) * share
-        weighted_r2_train += (model.metrics.get("r2_train") or 0) * share
-        weighted_aic += (model.metrics.get("aic") or 0) * share
-        weighted_bic += (model.metrics.get("bic") or 0) * share
+        share = model_composition[model_name]
+        
+        # Weight the metrics from file columns
+        if "mape_test" in row and pd.notna(row["mape_test"]):
+            weighted_mape_test += float(row["mape_test"]) * share
+        if "mape_train" in row and pd.notna(row["mape_train"]):
+            weighted_mape_train += float(row["mape_train"]) * share
+        if "r2_test" in row and pd.notna(row["r2_test"]):
+            weighted_r2_test += float(row["r2_test"]) * share
+        if "r2_train" in row and pd.notna(row["r2_train"]):
+            weighted_r2_train += float(row["r2_train"]) * share
+        if "aic" in row and pd.notna(row["aic"]):
+            weighted_aic += float(row["aic"]) * share
+        if "bic" in row and pd.notna(row["bic"]):
+            weighted_bic += float(row["bic"]) * share
+        if "intercept" in row and pd.notna(row["intercept"]):
+            weighted_intercept += float(row["intercept"]) * share
     
-    # Calculate weighted averages for each variable
+    # Find all variable columns (beta, avg, elasticity, contribution, roi)
+    all_variables = set()
+    for col in filtered_frame.columns:
+        col_lower = col.lower()
+        # Check for variable columns: {var}_beta, {var}_avg, {var}_elasticity, {var}_elas, {var}_contrib, {var}_contribution, {var}_roi
+        for suffix in ["_beta", "_avg", "_av", "_elasticity", "_elas", "_contrib", "_contribution", "_roi"]:
+            if col_lower.endswith(suffix):
+                var_name = col_lower[:-len(suffix)]
+                all_variables.add(var_name)
+                break
+    
+    # Calculate weighted values for each variable from file columns
     for var_name in all_variables:
         weighted_beta = 0.0
         weighted_avg = 0.0
-        weighted_impact = 0.0
+        weighted_elasticity = 0.0
+        weighted_roi = 0.0
+        weighted_contribution = 0.0
         
-        for model, weight in weights:
-            share = weight / weight_sum
-            # Get beta from variable_impacts (impact is typically beta * avg)
-            impact = model.variable_impacts.get(var_name, 0)
-            avg = model.variable_averages.get(var_name, 0)
-            
-            # Calculate beta: impact / avg (if avg != 0)
-            if avg != 0:
-                beta = impact / avg
-            else:
-                beta = impact
-            
-            weighted_beta += beta * share
-            weighted_avg += avg * share
-            weighted_impact += impact * share
+        beta_count = 0
+        avg_count = 0
+        elasticity_count = 0
+        roi_count = 0
+        contribution_count = 0
         
-        weighted_metrics[f"{var_name}_beta"] = weighted_beta
-        weighted_metrics[f"{var_name}_avg"] = weighted_avg
-        weighted_metrics[f"{var_name}_contribution"] = abs(weighted_impact)
+        for _, row in filtered_frame.iterrows():
+            model_name = str(row[model_column])
+            if model_name not in model_composition:
+                continue
+            
+            share = model_composition[model_name]
+            
+            # Try different column name variations
+            # Beta: {var}_beta
+            for beta_col in [f"{var_name}_beta", f"{var_name}_Beta", f"Beta_{var_name}"]:
+                if beta_col in row and pd.notna(row[beta_col]):
+                    weighted_beta += float(row[beta_col]) * share
+                    beta_count += 1
+                    break
+            
+            # Average: {var}_avg or {var}_av
+            for avg_col in [f"{var_name}_avg", f"{var_name}_av", f"{var_name}_Avg", f"{var_name}_AV"]:
+                if avg_col in row and pd.notna(row[avg_col]):
+                    weighted_avg += float(row[avg_col]) * share
+                    avg_count += 1
+                    break
+            
+            # Elasticity: {var}_elasticity or {var}_elas
+            for elas_col in [f"{var_name}_elasticity", f"{var_name}_elas", f"{var_name}_Elasticity", f"{var_name}_Elas"]:
+                if elas_col in row and pd.notna(row[elas_col]):
+                    weighted_elasticity += float(row[elas_col]) * share
+                    elasticity_count += 1
+                    break
+            
+            # ROI: {var}_roi
+            for roi_col in [f"{var_name}_roi", f"{var_name}_ROI", f"ROI_{var_name}"]:
+                if roi_col in row and pd.notna(row[roi_col]):
+                    weighted_roi += float(row[roi_col]) * share
+                    roi_count += 1
+                    break
+            
+            # Contribution: {var}_contribution or {var}_contrib
+            for contrib_col in [f"{var_name}_contribution", f"{var_name}_contrib", f"{var_name}_Contribution", f"{var_name}_Contrib"]:
+                if contrib_col in row and pd.notna(row[contrib_col]):
+                    weighted_contribution += float(row[contrib_col]) * share
+                    contribution_count += 1
+                    break
+        
+        # Store weighted values
+        if beta_count > 0:
+            weighted_metrics[f"{var_name}_beta"] = weighted_beta
+        if avg_count > 0:
+            weighted_metrics[f"{var_name}_avg"] = weighted_avg
+        if elasticity_count > 0:
+            weighted_metrics[f"{var_name}_elasticity"] = weighted_elasticity
+            logger.debug(f"✅ Stored weighted elasticity for {var_name}: {weighted_elasticity}")
+        elif beta_count > 0 and avg_count > 0:
+            # Calculate elasticity if not in file: elasticity = beta * (avg / y_avg)
+            # Try to get y_avg from volume_av or similar columns
+            y_avg = None
+            for y_col in ['volume_av', 'volume_avg', 'sales_av', 'sales_avg', 'value_av', 'value_avg']:
+                if y_col in filtered_frame.columns:
+                    # Get weighted y_avg
+                    weighted_y_avg = 0.0
+                    for _, row in filtered_frame.iterrows():
+                        model_name = str(row[model_column])
+                        if model_name in model_composition and pd.notna(row.get(y_col)):
+                            share = model_composition[model_name]
+                            weighted_y_avg += float(row[y_col]) * share
+                    if weighted_y_avg > 0:
+                        y_avg = weighted_y_avg
+                        break
+            
+            if y_avg and y_avg > 0 and weighted_avg != 0:
+                calculated_elasticity = weighted_beta * (weighted_avg / y_avg)
+                weighted_metrics[f"{var_name}_elasticity"] = calculated_elasticity
+                logger.debug(f"✅ Calculated elasticity for {var_name}: {calculated_elasticity} (beta={weighted_beta}, avg={weighted_avg}, y_avg={y_avg})")
+        
+        if roi_count > 0:
+            weighted_metrics[f"{var_name}_roi"] = weighted_roi
+        if contribution_count > 0:
+            weighted_metrics[f"{var_name}_contribution"] = weighted_contribution
+        elif beta_count > 0 and avg_count > 0:
+            # Calculate contribution if not in file: beta * avg
+            weighted_metrics[f"{var_name}_contribution"] = abs(weighted_beta * weighted_avg)
     
-    # Calculate weighted intercept (average of intercepts weighted by model performance)
-    # Note: Intercept calculation would need to come from MongoDB coefficients
-    # For now, we'll set it to 0 and it should be calculated elsewhere
-    weighted_intercept = 0.0
-    
-    # Build model composition dictionary
-    model_composition = {}
-    for model, weight in weights:
-        share = weight / weight_sum
-        model_composition[model.model_name] = round(share, 4)
+    # Store weighted performance metrics
+    weighted_metrics["mape_train"] = round(weighted_mape_train, 4)
+    weighted_metrics["mape_test"] = round(weighted_mape_test, 4)
+    weighted_metrics["r2_train"] = round(weighted_r2_train, 4)
+    weighted_metrics["r2_test"] = round(weighted_r2_test, 4)
+    weighted_metrics["aic"] = round(weighted_aic, 2)
+    weighted_metrics["bic"] = round(weighted_bic, 2)
+    weighted_metrics["intercept"] = weighted_intercept
     
     # Group by combination_id
     combos: List[Dict[str, Any]] = []

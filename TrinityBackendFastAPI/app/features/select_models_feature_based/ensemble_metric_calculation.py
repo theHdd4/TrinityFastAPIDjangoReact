@@ -84,15 +84,6 @@ async def calculate_weighted_ensemble_metrics(
         
         # Extract y_variable from weighted metrics or use a default
         y_variable = weighted_metrics.get("y_variable", "")
-        if not y_variable:
-            # Try to find y_variable from other keys in weighted_metrics
-            for key in weighted_metrics.keys():
-                if key.lower() in ['target', 'y', 'dependent', 'sales', 'volume', 'value']:
-                    y_variable = key
-                    break
-            # If still not found, use a default
-            if not y_variable:
-                y_variable = "target"  # Default fallback
         
         return {
             "success": True,

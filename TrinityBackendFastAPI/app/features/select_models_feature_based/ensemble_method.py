@@ -10,7 +10,7 @@ from typing import Any, Dict
 import pandas as pd
 import numpy as np
 
-from .database import MINIO_BUCKET
+from .database import MINIO_BUCKET, minio_client
 from .service import calculate_weighted_ensemble
 
 logger = logging.getLogger("app.features.select_models_feature_based.ensemble_method")
@@ -270,14 +270,54 @@ def get_ensemble_actual_vs_predicted(file_key: str, combination_id: str, client_
             # Get ensemble intercept and betas
             intercept = weighted_metrics.get("intercept", 0)
             
+            # Get y_variable from build_config to exclude it from x_variables
+            y_variable_from_config = None
+            if build_config:
+                model_coefficients = build_config.get("model_coefficients", {})
+                combination_coefficients = model_coefficients.get(combination_id, {})
+                # Try to get y_variable from any model in the combination
+                for model_name in model_composition.keys():
+                    model_coeffs = combination_coefficients.get(model_name, {})
+                    y_var = model_coeffs.get("y_variable", "")
+                    if y_var:
+                        y_variable_from_config = y_var.lower() if isinstance(y_var, str) else str(y_var).lower()
+                        break
+            
+            # If not found, use common y_variable names
+            if not y_variable_from_config:
+                common_y_names = ['target', 'y', 'dependent', 'sales', 'volume', 'value']
+                for common_name in common_y_names:
+                    if common_name in [key.replace('_beta', '').lower() for key in weighted_metrics.keys() if key.endswith('_beta')]:
+                        y_variable_from_config = common_name.lower()
+                        break
+            
             # Extract x_variables from weighted_metrics (variables that have betas)
-            x_variables = [key.replace('_beta', '') for key in weighted_metrics.keys() if key.endswith('_beta')]
+            # Exclude y_variable from x_variables
+            x_variables = []
+            for key in weighted_metrics.keys():
+                if key.endswith('_beta'):
+                    var_name = key.replace('_beta', '').lower()
+                    # Exclude y_variable
+                    if y_variable_from_config and var_name == y_variable_from_config:
+                        continue
+                    x_variables.append(var_name)
+            
             # Also try Beta_ pattern
-            x_variables.extend([key.replace('Beta_', '') for key in weighted_metrics.keys() if key.startswith('Beta_')])
-            # Remove duplicates and convert to lowercase for matching
-            x_variables = list(set([x.lower() for x in x_variables if x]))
+            for key in weighted_metrics.keys():
+                if key.startswith('Beta_'):
+                    var_name = key.replace('Beta_', '').lower()
+                    # Exclude y_variable
+                    if y_variable_from_config and var_name == y_variable_from_config:
+                        continue
+                    if var_name not in x_variables:
+                        x_variables.append(var_name)
+            
+            # Remove duplicates
+            x_variables = list(set([x for x in x_variables if x]))
             
             logger.info(f"🔍 Using {len(x_variables)} x_variables for prediction: {x_variables[:5]}...")
+            if y_variable_from_config:
+                logger.info(f"🔍 Excluded y_variable '{y_variable_from_config}' from x_variables")
             
             # Calculate predicted values using ensemble betas
             actual_values = df[y_variable].tolist()
@@ -377,8 +417,27 @@ def get_ensemble_actual_vs_predicted(file_key: str, combination_id: str, client_
             else:
                 mae = mse = rmse = r2 = mape = 0
             
-            # Extract x_variables from weighted_metrics
-            x_variables = [key.replace('_beta', '') for key in weighted_metrics.keys() if key.endswith('_beta')]
+            # Extract x_variables from weighted_metrics, excluding y_variable
+            # Get y_variable from build_config
+            y_variable_from_config = None
+            if build_config:
+                model_coefficients = build_config.get("model_coefficients", {})
+                combination_coefficients = model_coefficients.get(combination_id, {})
+                for model_name in model_composition.keys():
+                    model_coeffs = combination_coefficients.get(model_name, {})
+                    y_var = model_coeffs.get("y_variable", "")
+                    if y_var:
+                        y_variable_from_config = y_var.lower() if isinstance(y_var, str) else str(y_var).lower()
+                        break
+            
+            x_variables = []
+            for key in weighted_metrics.keys():
+                if key.endswith('_beta'):
+                    var_name = key.replace('_beta', '').lower()
+                    # Exclude y_variable
+                    if y_variable_from_config and var_name == y_variable_from_config:
+                        continue
+                    x_variables.append(var_name)
 
             return {
                 "success": True,
@@ -438,12 +497,13 @@ def get_ensemble_actual_vs_predicted(file_key: str, combination_id: str, client_
 
 
 def get_ensemble_contribution(file_key: str, combination_id: str, client_name: str, app_name: str, project_name: str) -> Dict[str, Any]:
-    """Get contribution data for ensemble using weighted ensemble metrics"""
+    """Get contribution data for ensemble by directly calculating weighted contribution from contribution columns"""
     logger.info(f"🔍 Getting ensemble contribution for combination: {combination_id}")
     async def _calculate():
         # Create a new MongoDB client for this event loop to avoid "attached to different loop" errors
         from motor.motor_asyncio import AsyncIOMotorClient
         from .database import MONGO_URI, MONGO_DB
+        import io
         
         # Create a new MongoDB client for this event loop with proper authentication
         loop_client = AsyncIOMotorClient(
@@ -457,14 +517,7 @@ def get_ensemble_contribution(file_key: str, combination_id: str, client_name: s
         loop_db = loop_client[MONGO_DB]
         
         try:
-            # Get the build configuration from MongoDB
-            document_id = f"{client_name}/{app_name}/{project_name}"
-            build_config = await loop_db["build-model_featurebased_configs"].find_one({"_id": document_id})
-            
-            if not build_config:
-                raise ValueError(f"No build configuration found for {document_id}")
-            
-            # Get weighted ensemble data
+            # Get weighted ensemble data to get model weights (model_composition)
             ensemble_request = {
                 "file_key": file_key,
                 "grouping_keys": ['combination_id'],
@@ -474,7 +527,7 @@ def get_ensemble_contribution(file_key: str, combination_id: str, client_name: s
                 "filtered_models": None
             }
             
-            logger.info(f"🔍 Calculating ensemble contribution for combination: {combination_id}")
+            logger.info(f"🔍 Getting ensemble weights for combination: {combination_id}")
             ensemble_result = calculate_weighted_ensemble(ensemble_request)
             
             if not ensemble_result.get("results") or len(ensemble_result["results"]) == 0:
@@ -482,76 +535,152 @@ def get_ensemble_contribution(file_key: str, combination_id: str, client_name: s
                 raise ValueError("No ensemble data found for the given combination")
             
             ensemble_data = ensemble_result["results"][0]
-            weighted_metrics = ensemble_data.get("weighted", {})
             model_composition = ensemble_data.get("model_composition", {})
             
-            if not weighted_metrics:
-                logger.error(f"❌ No weighted metrics found in ensemble data for combination: {combination_id}")
-                raise ValueError("No weighted metrics found in ensemble data")
+            if not model_composition:
+                logger.error(f"❌ No model composition found in ensemble data for combination: {combination_id}")
+                raise ValueError("No model composition found in ensemble data")
             
-            # Update weighted_metrics with intercepts and betas from MongoDB
-            logger.info(f"🔍 Fetching intercepts and betas from MongoDB for {len(model_composition)} models...")
-            weighted_metrics = await _update_weighted_metrics_from_mongodb(
-                loop_db, build_config, combination_id, weighted_metrics, model_composition
-            )
+            logger.info(f"🔍 Got weights for {len(model_composition)} models: {model_composition}")
             
-            # Extract contribution data from ensemble weighted metrics
-            contribution_data = []
+            # Get the build configuration from MongoDB to get y_variable
+            document_id = f"{client_name}/{app_name}/{project_name}"
+            build_config = await loop_db["build-model_featurebased_configs"].find_one({"_id": document_id})
             
-            # First, try to find contribution columns
-            for key in weighted_metrics.keys():
-                if key.endswith('_contribution'):
-                    variable_name = key.replace('_contribution', '').replace('_Contribution', '')
-                    value = weighted_metrics[key]
-                    if value is not None:
-                        contribution_data.append({
-                            "name": variable_name,
-                            "value": float(value)
-                        })
+            # Get y_variable from build_config to exclude it from contribution
+            y_variable = None
+            if build_config:
+                model_coefficients = build_config.get("model_coefficients", {})
+                combination_coefficients = model_coefficients.get(combination_id, {})
+                # Try to get y_variable from any model in the combination
+                for model_name, model_coeffs in combination_coefficients.items():
+                    y_var = model_coeffs.get("y_variable", "")
+                    if y_var:
+                        y_variable = y_var.lower() if isinstance(y_var, str) else str(y_var).lower()
+                        break
             
-            # If no contribution data found, try to calculate from betas and means
-            if not contribution_data:
-                intercept = weighted_metrics.get("intercept", 0)
+            logger.info(f"🔍 Excluding y_variable '{y_variable}' from contribution calculation")
+            
+            # Helper function to check if a variable name matches y_variable (case-insensitive, handles underscores/spaces)
+            def is_y_variable(var_name: str) -> bool:
+                if not y_variable:
+                    return False
+                # Normalize both names: lowercase, strip, replace spaces/underscores
+                normalized_var = var_name.lower().strip().replace('_', '').replace(' ', '')
+                normalized_y = y_variable.lower().strip().replace('_', '').replace(' ', '')
+                return normalized_var == normalized_y
+            
+            # Load the model results file directly from MinIO
+            if not minio_client:
+                raise ValueError("MinIO connection is not available")
+            
+            logger.info(f"🔍 Loading model results file: {file_key}")
+            response = minio_client.get_object(MINIO_BUCKET, file_key)
+            content = response.read()
+            response.close()
+            response.release_conn()
+            
+            # Read file based on extension
+            if file_key.endswith(".csv"):
+                df = pd.read_csv(io.BytesIO(content))
+            elif file_key.endswith(".xlsx"):
+                df = pd.read_excel(io.BytesIO(content))
+            elif file_key.endswith(".arrow"):
+                import pyarrow as pa
+                import pyarrow.ipc as ipc
+                reader = ipc.RecordBatchFileReader(pa.BufferReader(content))
+                df = reader.read_all().to_pandas()
+            else:
+                raise ValueError(f"Unsupported file type: {file_key}")
+            
+            # Find combination_id column
+            combination_id_column = None
+            for col in df.columns:
+                col_lower = col.lower()
+                if (col_lower == 'combination_id' or 
+                    col_lower == 'combo_id' or 
+                    col_lower == 'combinationid' or
+                    'combination_id' in col_lower or 
+                    'combo_id' in col_lower or 
+                    'combination' in col_lower):
+                    combination_id_column = col
+                    break
+            
+            if not combination_id_column:
+                raise ValueError("No combination_id column found")
+            
+            # Find model_name column
+            model_name_column = None
+            possible_model_columns = ['model_name', 'Model', 'model', 'MODEL_NAME', 'ModelName', 'model_id', 'Model_Name']
+            for col_name in possible_model_columns:
+                if col_name in df.columns:
+                    model_name_column = col_name
+                    break
+            
+            if not model_name_column:
+                raise ValueError("No model_name column found")
+            
+            # Filter by combination_id
+            filtered_df = df[df[combination_id_column] == combination_id].copy()
+            
+            if filtered_df.empty:
+                raise ValueError(f"No data found for combination_id: {combination_id}")
+            
+            logger.info(f"🔍 Found {len(filtered_df)} models for combination: {combination_id}")
+            
+            # Find all contribution columns
+            contribution_columns = []
+            for col in df.columns:
+                if col.lower().endswith('_contribution'):
+                    contribution_columns.append(col)
+            
+            if not contribution_columns:
+                raise ValueError("No contribution columns found (columns ending with _contribution)")
+            
+            logger.info(f"🔍 Found {len(contribution_columns)} contribution columns")
+            
+            # Calculate weighted contribution for each contribution column using weights from ensemble
+            # model_composition already contains normalized weights (sum to 1)
+            weighted_contributions = {}
+            
+            for contrib_col in contribution_columns:
+                variable_name = contrib_col.replace('_contribution', '').replace('_Contribution', '')
                 
-                for key in weighted_metrics.keys():
-                    if key.endswith('_beta'):
-                        variable_name = key.replace('_beta', '').replace('_Beta', '')
-                        beta_value = weighted_metrics[key]
-                        
-                        # Try to find corresponding mean value
-                        mean_key = f"{variable_name}_avg"
-                        if mean_key in weighted_metrics:
-                            mean_value = weighted_metrics[mean_key]
-                            if beta_value is not None and mean_value is not None:
-                                # Calculate contribution: abs(beta * mean)
-                                # Note: Using abs() to match regular method behavior
-                                contribution_value = abs(float(beta_value) * float(mean_value))
-                                contribution_data.append({
-                                    "name": variable_name,
-                                    "value": contribution_value
-                                })
+                # Exclude y_variable from contribution
+                if is_y_variable(variable_name):
+                    logger.info(f"🔍 Skipping y_variable '{variable_name}' in contribution calculation")
+                    continue
+                
+                weighted_value = 0.0
+                
+                for idx, row in filtered_df.iterrows():
+                    model_name = str(row[model_name_column])
+                    contrib_value = row[contrib_col]
+                    
+                    # Get weight from model_composition (already normalized to sum to 1)
+                    weight = model_composition.get(model_name, 0.0)
+                    
+                    if pd.notna(contrib_value) and weight > 0:
+                        # Contribution is already in percentage form, so just weight it
+                        weighted_value += float(contrib_value) * weight
+                
+                if weighted_value != 0:
+                    weighted_contributions[variable_name] = weighted_value
             
-            # If still no data, try using elasticities
-            if not contribution_data:
-                for key in weighted_metrics.keys():
-                    if key.endswith('_elasticity'):
-                        variable_name = key.replace('_elasticity', '').replace('_Elasticity', '')
-                        elasticity_value = weighted_metrics[key]
-                        
-                        if elasticity_value is not None:
-                            # Use absolute elasticity as contribution
-                            contribution_value = abs(float(elasticity_value))
-                            contribution_data.append({
-                                "name": variable_name,
-                                "value": contribution_value
-                            })
-            
-            if not contribution_data:
+            if not weighted_contributions:
                 logger.error("No contribution data could be calculated from ensemble results")
                 raise ValueError("No valid contribution data found in ensemble results")
             
-            # Calculate total contribution
-            total_contribution = sum(item["value"] for item in contribution_data)
+            # Convert to contribution_data format (contribution is already in percentage form)
+            contribution_data = []
+            for variable_name, value in weighted_contributions.items():
+                contribution_data.append({
+                    "name": variable_name,
+                    "value": float(value)  # Already in percentage form, no conversion needed
+                })
+            
+            # Calculate total contribution (sum of absolute values)
+            total_contribution = sum(abs(item["value"]) for item in contribution_data) or 1.0
             
             logger.info(f"✅ Successfully calculated ensemble contribution: {len(contribution_data)} variables")
             return {
@@ -570,7 +699,6 @@ def get_ensemble_contribution(file_key: str, combination_id: str, client_name: s
     try:
         # Try to get the current event loop
         loop = asyncio.get_running_loop()
-        # If we're in an async context, we need to run in a thread
         import threading
         result_container = {}
         exception_container = {}
@@ -807,11 +935,36 @@ def get_ensemble_yoy(file_key: str, combination_id: str, client_name: str, app_n
             x_variables = list(all_x_variables_set)
             
             if not x_variables:
-                # Fallback: extract from weighted_metrics keys
+                # Fallback: extract from weighted_metrics keys, excluding y_variable
                 logger.warning("⚠️ No x_variables found in MongoDB, falling back to weighted_metrics keys")
-                x_variables = [key.replace('_beta', '').replace('Beta_', '') for key in weighted_metrics.keys() 
-                              if key.endswith('_beta') or key.startswith('Beta_')]
-                x_variables = [x.lower() for x in x_variables if x]
+                
+                # Get y_variable to exclude it
+                y_variable_from_config = None
+                if build_config:
+                    model_coefficients = build_config.get("model_coefficients", {})
+                    combination_coefficients = model_coefficients.get(combination_id, {})
+                    for model_name in model_composition.keys():
+                        model_coeffs = combination_coefficients.get(model_name, {})
+                        y_var = model_coeffs.get("y_variable", "")
+                        if y_var:
+                            y_variable_from_config = y_var.lower() if isinstance(y_var, str) else str(y_var).lower()
+                            break
+                
+                x_variables = []
+                for key in weighted_metrics.keys():
+                    if key.endswith('_beta'):
+                        var_name = key.replace('_beta', '').lower()
+                        if y_variable_from_config and var_name == y_variable_from_config:
+                            continue
+                        x_variables.append(var_name)
+                    elif key.startswith('Beta_'):
+                        var_name = key.replace('Beta_', '').lower()
+                        if y_variable_from_config and var_name == y_variable_from_config:
+                            continue
+                        if var_name not in x_variables:
+                            x_variables.append(var_name)
+                
+                x_variables = [x for x in x_variables if x]
             
             logger.info(f"🔍 Processing {len(x_variables)} x_variables for YoY calculation")
             
