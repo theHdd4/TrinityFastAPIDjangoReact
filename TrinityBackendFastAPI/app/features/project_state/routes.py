@@ -503,12 +503,19 @@ async def get_atom_list_configuration(
             # Create card if it doesn't exist
             if canvas_pos not in cards_map:
                 card_id = atom_config.get("mode_meta", {}).get("card_id") or f"card-{canvas_pos}"
+                text_boxes = atom_config.get("text_boxes") or atom_config.get("textBoxes") or []
+                text_box_settings = atom_config.get("text_box_settings") or atom_config.get("textBoxSettings") or {}
                 card_data = {
                     "id": card_id,
                     "atoms": [],
                     "isExhibited": atom_config.get("exhibition_previews") == "yes",
                     "collapsed": atom_config.get("open_cards") == "no",
                     "scroll_position": atom_config.get("scroll_position", 0),
+                    "textBoxes": text_boxes,
+                    "textBoxEnabled": atom_config.get("text_box_enabled", False),
+                    "textBoxContent": atom_config.get("text_box_content", ""),
+                    "textBoxHtml": atom_config.get("text_box_html", ""),
+                    "textBoxSettings": text_box_settings,
                 }
                 # Set molecule and order fields if they exist
                 if molecule_id is not None:
@@ -643,11 +650,33 @@ async def save_atom_list_configuration(
         
         # Extract cards from atom_config_data
         cards = atom_config_data.get("cards", [])
-        
+
         for canvas_pos, card in enumerate(cards):
             open_card = "no" if card.get("collapsed") else "yes"
             exhibition_preview = "yes" if card.get("isExhibited") else "no"
             scroll_pos = card.get("scroll_position", 0)
+            # Normalize text box data so it can be persisted with each atom document
+            text_boxes = card.get("textBoxes") or card.get("text_boxes") or []
+            primary_text_box = text_boxes[0] if isinstance(text_boxes, list) and text_boxes else {}
+            text_box_enabled = card.get("textBoxEnabled") or card.get("text_box_enabled") or bool(text_boxes)
+            text_box_content = (
+                card.get("textBoxContent")
+                or card.get("text_box_content")
+                or primary_text_box.get("content")
+                or ""
+            )
+            text_box_html = (
+                card.get("textBoxHtml")
+                or card.get("text_box_html")
+                or primary_text_box.get("html")
+                or ""
+            )
+            text_box_settings = (
+                card.get("textBoxSettings")
+                or card.get("text_box_settings")
+                or primary_text_box.get("settings")
+                or {}
+            )
             # Extract molecule and order information from card
             molecule_id = card.get("moleculeId")
             molecule_title = card.get("moleculeTitle")
@@ -722,6 +751,12 @@ async def save_atom_list_configuration(
                     "scroll_position": scroll_pos,
                     "exhibition_previews": exhibition_preview,
                     "notes": atom_settings.get("notes", ""),
+                    # Persist text box data alongside each atom so card annotations restore correctly
+                    "text_boxes": text_boxes,
+                    "text_box_enabled": text_box_enabled,
+                    "text_box_content": text_box_content,
+                    "text_box_html": text_box_html,
+                    "text_box_settings": text_box_settings,
                     "last_edited": timestamp,
                     "version_hash": version_hash,
                     # Molecule information as top-level fields for easier querying
