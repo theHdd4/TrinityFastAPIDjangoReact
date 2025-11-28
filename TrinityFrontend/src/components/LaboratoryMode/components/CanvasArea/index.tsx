@@ -367,37 +367,37 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     return line;
   };
 
-  const toggleBulletedListContent = (value: string): string => {
-    const lines = value.split(LIST_LINE_SEPARATOR);
-    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+  const replaceSelectionWithHtml = (html: string) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
 
-    if (isBulleted) {
-      return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer)) return false;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+
+    const fragment = document.createDocumentFragment();
+    const nodes = Array.from(wrapper.childNodes);
+
+    nodes.forEach(node => fragment.appendChild(node));
+
+    range.deleteContents();
+    range.insertNode(fragment);
+
+    if (nodes.length > 0) {
+      const newRange = document.createRange();
+      newRange.setStartBefore(nodes[0]);
+      newRange.setEndAfter(nodes[nodes.length - 1]);
+      selection.removeAllRanges();
+      selection.addRange(newRange);
+      selectionRef.current = newRange;
     }
 
-    return lines
-      .map(line => {
-        const base = stripListPrefix(line).trimStart();
-        return base.length > 0 ? `• ${base}` : '• ';
-      })
-      .join('\n');
-  };
-
-  const toggleNumberedListContent = (value: string): string => {
-    const lines = value.split(LIST_LINE_SEPARATOR);
-    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
-
-    if (isNumbered) {
-      return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
-    }
-
-    return lines
-      .map((line, index) => {
-        const base = stripListPrefix(line).trimStart();
-        const prefix = `${index + 1}. `;
-        return base.length > 0 ? `${prefix}${base}` : prefix;
-      })
-      .join('\n');
+    handleInput();
+    return true;
   };
 
   const decodeHtmlEntities = (value: string): string => {
@@ -453,6 +453,31 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
         return `<div>${escapeHtml(line)}</div>`;
       })
       .join('');
+  };
+
+  const buildListHtml = (lines: string[], type: 'bullet' | 'number'): string => {
+    const cleanedLines = lines.length > 0 ? lines : [''];
+    const tag = type === 'bullet' ? 'ul' : 'ol';
+
+    const items = cleanedLines.map(rawLine => {
+      const line = stripListPrefix(rawLine).trimStart();
+      const content = line.length > 0 ? escapeHtml(line) : '<br>';
+      return `<li>${content}</li>`;
+    });
+
+    return `<${tag}>${items.join('')}</${tag}>`;
+  };
+
+  const transformListHtml = (mode: 'bullet' | 'number' | 'none', html: string): string => {
+    const plain = htmlToPlainText(html);
+    const lines = plain.split(LIST_LINE_SEPARATOR);
+
+    if (mode === 'none') {
+      const unlisted = lines.map(line => stripListPrefix(line)).join('\n');
+      return plainTextToHtml(unlisted);
+    }
+
+    return buildListHtml(lines, mode);
   };
 
   const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
@@ -675,15 +700,35 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     ? (settings.text_align as TextAlignOption)
     : 'left';
 
-  const applyListTransformation = (transformer: (value: string) => string) => {
-    const sourceHtml = editorRef.current?.innerHTML ?? '';
-    const plain = htmlToPlainText(sourceHtml);
-    const transformed = transformer(plain);
-    const nextValue = plainTextToHtml(transformed);
+  const applyListTransformation = (mode: 'bullet' | 'number' | 'none') => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
 
-    if (!editorRef.current || nextValue === sourceHtml) return false;
+    const selectionApplied = (() => {
+      restoreSelection();
 
-    editorRef.current.innerHTML = nextValue;
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return false;
+
+      const range = selection.getRangeAt(0);
+      if (!editorRef.current?.contains(range.commonAncestorContainer) || range.collapsed) {
+        return false;
+      }
+
+      const container = document.createElement('div');
+      container.appendChild(range.cloneContents());
+
+      const nextHtml = transformListHtml(mode, container.innerHTML);
+      return replaceSelectionWithHtml(nextHtml);
+    })();
+
+    if (selectionApplied) return true;
+
+    const sourceHtml = editorRef.current.innerHTML ?? '';
+    const nextHtml = transformListHtml(mode, sourceHtml);
+
+    if (nextHtml === sourceHtml) return false;
+
+    editorRef.current.innerHTML = nextHtml;
     handleInput();
     editorRef.current.focus();
     return true;
@@ -805,10 +850,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
               const nextType = settings.list_type === 'bullet' ? 'none' : 'bullet';
               const executed = runCommand('insertUnorderedList');
               if (!executed) {
-                const transformed = applyListTransformation(toggleBulletedListContent);
-                if (!transformed && !editorRef.current?.classList.contains('list-disc')) {
-                  editorRef.current?.classList.toggle('list-disc', nextType === 'bullet');
-                }
+                applyListTransformation(nextType);
               }
               onSettingsChange({ list_type: nextType });
             }}
@@ -818,10 +860,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
               const nextType = settings.list_type === 'number' ? 'none' : 'number';
               const executed = runCommand('insertOrderedList');
               if (!executed) {
-                const transformed = applyListTransformation(toggleNumberedListContent);
-                if (!transformed && !editorRef.current?.classList.contains('list-decimal')) {
-                  editorRef.current?.classList.toggle('list-decimal', nextType === 'number');
-                }
+                applyListTransformation(nextType);
               }
               onSettingsChange({ list_type: nextType });
             }}
@@ -860,9 +899,6 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
           }}
         />
 
-        <div className="text-sm text-muted-foreground text-left">
-          Click to edit text. Use the toolbar to format content and lists.
-        </div>
       </div>
     </div>
   );
@@ -1188,7 +1224,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         layoutCards.map(existing => {
           if (existing.id !== card.id) return existing;
 
-          const nextBoxes = updater(normalizedTextBoxes);
+          const current = normalizeCardTextBoxes(existing);
+          const nextBoxes = updater(current);
           return {
             ...existing,
             ...syncLegacyFields(nextBoxes),
@@ -1197,8 +1234,29 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       );
     };
 
+    const MAX_TEXTBOXES = 5;
+
+    const addTextBoxBelow = () => {
+      updateCardTextBoxes(boxes => {
+        if (boxes.length >= MAX_TEXTBOXES) return boxes;
+
+        const nextIndex = boxes.length + 1;
+        const newBox: TextBoxConfig = {
+          id: `text-box-${nextIndex}-${Date.now()}`,
+          title: `Text Box ${nextIndex}`,
+          content: '',
+          html: '',
+          settings: { ...DEFAULT_TEXTBOX_SETTINGS },
+        };
+
+        return [...boxes, newBox];
+      });
+    };
+
+    const canAddMore = normalizedTextBoxes.length < MAX_TEXTBOXES;
+
     return (
-      <div className="mt-10 space-y-8">
+      <div className="mt-10 space-y-6">
         {normalizedTextBoxes.map(box => {
           const rawTextContent = box.content ?? '';
           const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
@@ -1241,6 +1299,21 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             />
           );
         })}
+
+        <div className="text-sm text-muted-foreground text-left">
+          Click to edit text. Use the toolbar to format content and lists.
+        </div>
+
+        {canAddMore ? (
+          <button
+            type="button"
+            onClick={addTextBoxBelow}
+            className="inline-flex items-center gap-2 text-primary hover:text-primary/80 text-sm font-medium"
+          >
+            <Plus className="h-4 w-4" />
+            Add text box
+          </button>
+        ) : null}
       </div>
     );
   };
