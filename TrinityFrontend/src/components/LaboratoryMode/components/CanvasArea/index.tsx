@@ -317,6 +317,116 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   const selectionRef = useRef<Range | null>(null);
   const [showToolbar, setShowToolbar] = useState(false);
 
+  const hasEditableSelection = () => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : selectionRef.current;
+
+    if (!range || range.collapsed) return false;
+
+    const container = editorRef.current;
+    return container.contains(range.commonAncestorContainer);
+  };
+
+  const LIST_LINE_SEPARATOR = /\r?\n/;
+  const BULLET_PATTERN = /^\s*[•-]\s+/;
+  const NUMBERED_PATTERN = /^\s*\d+[.)]?\s+/;
+
+  const stripListPrefix = (line: string): string => {
+    if (BULLET_PATTERN.test(line)) return line.replace(BULLET_PATTERN, '');
+    if (NUMBERED_PATTERN.test(line)) return line.replace(NUMBERED_PATTERN, '');
+    return line;
+  };
+
+  const toggleBulletedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+
+    if (isBulleted) {
+      return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map(line => {
+        const base = stripListPrefix(line).trimStart();
+        return base.length > 0 ? `• ${base}` : '• ';
+      })
+      .join('\n');
+  };
+
+  const toggleNumberedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+    if (isNumbered) {
+      return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map((line, index) => {
+        const base = stripListPrefix(line).trimStart();
+        const prefix = `${index + 1}. `;
+        return base.length > 0 ? `${prefix}${base}` : prefix;
+      })
+      .join('\n');
+  };
+
+  const decodeHtmlEntities = (value: string): string => {
+    if (typeof window === 'undefined') return value;
+
+    const textarea = window.document.createElement('textarea');
+    textarea.innerHTML = value;
+    return textarea.value;
+  };
+
+  const htmlToPlainText = (rawValue: string): string => {
+    if (!rawValue) return '';
+
+    let working = rawValue
+      .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/(div|p|li)>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '')
+      .replace(/<div[^>]*>/gi, '')
+      .replace(/<p[^>]*>/gi, '')
+      .replace(/<span[^>]*>/gi, '')
+      .replace(/<\/span>/gi, '')
+      .replace(/<\/ul>/gi, '\n')
+      .replace(/<\/ol>/gi, '\n')
+      .replace(/<[^>]+>/g, '');
+
+    working = working.replace(/\u00a0/g, ' ');
+    working = decodeHtmlEntities(working);
+
+    while (working.endsWith('\n')) {
+      working = working.slice(0, -1);
+    }
+
+    return working;
+  };
+
+  const escapeHtml = (value: string): string =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const plainTextToHtml = (value: string): string => {
+    if (!value) return '';
+
+    return value
+      .split(LIST_LINE_SEPARATOR)
+      .map(line => {
+        if (line.length === 0) {
+          return '<div><br></div>';
+        }
+        return `<div>${escapeHtml(line)}</div>`;
+      })
+      .join('');
+  };
+
   const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
     if (!editorRef.current) return;
 
@@ -351,19 +461,24 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   };
 
   const saveSelection = () => {
-    const selection = typeof window !== 'undefined' ? window.getSelection() : null;
-    if (selection?.rangeCount) {
-      selectionRef.current = selection.getRangeAt(0);
+    if (typeof window === 'undefined' || !editorRef.current) return;
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+
+    const range = selection.getRangeAt(0);
+    if (editorRef.current.contains(range.commonAncestorContainer)) {
+      selectionRef.current = range;
     }
   };
 
   const restoreSelection = () => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !editorRef.current) return;
 
     const selection = window.getSelection();
     const range = selectionRef.current;
 
-    if (selection && range) {
+    if (selection && range && editorRef.current.contains(range.commonAncestorContainer)) {
       selection.removeAllRanges();
       selection.addRange(range);
     }
@@ -372,6 +487,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   const runCommand = (command: string, value?: string) => {
     if (typeof document === 'undefined') return false;
 
+    editorRef.current?.focus();
     restoreSelection();
 
     try {
@@ -390,12 +506,13 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   const applyStyleToSelection = (styles: Partial<CSSStyleDeclaration>) => {
     if (typeof window === 'undefined' || !editorRef.current) return false;
 
+    restoreSelection();
+
     const selection = window.getSelection();
     if (!selection?.rangeCount) return false;
 
     const range = selection.getRangeAt(0);
-    if (!editorRef.current.contains(range.commonAncestorContainer)) return false;
-    if (range.collapsed) return false;
+    if (!editorRef.current.contains(range.commonAncestorContainer) || range.collapsed) return false;
 
     const span = document.createElement('span');
     Object.assign(span.style, styles);
@@ -412,6 +529,52 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     handleInput();
     return true;
   };
+
+  const applyFontSizeToSelection = (nextSize: number) => {
+    if (!hasEditableSelection() || typeof document === 'undefined') return false;
+
+    editorRef.current?.focus();
+    restoreSelection();
+
+    try {
+      document.execCommand('fontSize', false, '7');
+    } catch {
+      return false;
+    }
+
+    const container = editorRef.current;
+    if (!container) return false;
+
+    const targets = Array.from(container.querySelectorAll('font[size="7"]'));
+    if (targets.length === 0) return false;
+
+    targets.forEach(node => {
+      const span = document.createElement('span');
+      span.style.fontSize = `${nextSize}px`;
+      span.innerHTML = node.innerHTML;
+      node.replaceWith(span);
+    });
+
+    handleInput();
+    return true;
+  };
+
+  useEffect(() => {
+    if (!showToolbar || typeof document === 'undefined') return undefined;
+
+    const handleSelectionChange = () => {
+      if (!editorRef.current) return;
+      const selection = document.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      if (editorRef.current.contains(range.commonAncestorContainer)) {
+        selectionRef.current = range;
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, [showToolbar]);
 
   useEffect(() => {
     if (!editorRef.current) return;
@@ -482,6 +645,90 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     ? (settings.text_align as TextAlignOption)
     : 'left';
 
+  const applyListTransformation = (transformer: (value: string) => string) => {
+    const sourceHtml = editorRef.current?.innerHTML ?? '';
+    const plain = htmlToPlainText(sourceHtml);
+    const transformed = transformer(plain);
+    const nextValue = plainTextToHtml(transformed);
+
+    if (!editorRef.current || nextValue === sourceHtml) return false;
+
+    editorRef.current.innerHTML = nextValue;
+    handleInput();
+    editorRef.current.focus();
+    return true;
+  };
+
+  const handleToggleStyle = (key: 'bold' | 'italics' | 'underline' | 'strikethrough') => {
+    const commandMap: Record<typeof key, string> = {
+      bold: 'bold',
+      italics: 'italic',
+      underline: 'underline',
+      strikethrough: 'strikeThrough',
+    };
+
+    if (hasEditableSelection()) {
+      const executed = runCommand(commandMap[key]);
+      if (executed) return;
+    }
+
+    onSettingsChange({ [key]: !settings[key] } as Partial<TextBoxSettings>);
+  };
+
+  const handleAlign = (align: TextAlignOption) => {
+    if (hasEditableSelection()) {
+      const command = align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
+      runCommand(command);
+    }
+
+    onSettingsChange({ text_align: align });
+  };
+
+  const handleFontFamilyChange = (font: string) => {
+    if (hasEditableSelection()) {
+      const executed = runCommand('fontName', font);
+      if (executed) return;
+    }
+
+    onSettingsChange({ font_family: font });
+  };
+
+  const handleIncreaseFontSize = () => {
+    const next = clampFontSize(settings.font_size + 1);
+    if (applyFontSizeToSelection(next)) return;
+    onSettingsChange({ font_size: next });
+  };
+
+  const handleDecreaseFontSize = () => {
+    const next = clampFontSize(settings.font_size - 1);
+    if (applyFontSizeToSelection(next)) return;
+    onSettingsChange({ font_size: next });
+  };
+
+  const handleColorChange = (color: string) => {
+    const hasSelection = hasEditableSelection();
+    const executed = hasSelection ? runCommand('foreColor', color) : false;
+    const styled = executed || (hasSelection ? applyStyleToSelection({ color }) : false);
+
+    if (!styled) {
+      applyImmediateStyles({ text_color: color });
+    }
+
+    onSettingsChange({ text_color: color });
+  };
+
+  const handleBackgroundColorChange = (color: string) => {
+    const hasSelection = hasEditableSelection();
+    const executed = hasSelection ? runCommand('hiliteColor', color) || runCommand('backColor', color) : false;
+    const styled = executed || (hasSelection ? applyStyleToSelection({ backgroundColor: color }) : false);
+
+    if (!styled) {
+      applyImmediateStyles({ background_color: color });
+    }
+
+    onSettingsChange({ background_color: color });
+  };
+
   return (
     <div
       ref={containerRef}
@@ -493,59 +740,47 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
         <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full">
           <TextBoxToolbar
             fontFamily={settings.font_family}
-            onFontFamilyChange={(font) => onSettingsChange({ font_family: font })}
+            onFontFamilyChange={handleFontFamilyChange}
             fontSize={settings.font_size}
-            onIncreaseFontSize={() => onSettingsChange({ font_size: clampFontSize(settings.font_size + 1) })}
-            onDecreaseFontSize={() => onSettingsChange({ font_size: clampFontSize(settings.font_size - 1) })}
+            onIncreaseFontSize={handleIncreaseFontSize}
+            onDecreaseFontSize={handleDecreaseFontSize}
             onApplyTextStyle={handleApplyTextStyle}
             bold={settings.bold}
             italic={settings.italics}
             underline={settings.underline}
             strikethrough={Boolean(settings.strikethrough)}
-            onToggleBold={() => onSettingsChange({ bold: !settings.bold })}
-            onToggleItalic={() => onSettingsChange({ italics: !settings.italics })}
-            onToggleUnderline={() => onSettingsChange({ underline: !settings.underline })}
-            onToggleStrikethrough={() => onSettingsChange({ strikethrough: !settings.strikethrough })}
+            onToggleBold={() => handleToggleStyle('bold')}
+            onToggleItalic={() => handleToggleStyle('italics')}
+            onToggleUnderline={() => handleToggleStyle('underline')}
+            onToggleStrikethrough={() => handleToggleStyle('strikethrough')}
             align={toolbarAlign}
-            onAlign={(align) => onSettingsChange({ text_align: align })}
+            onAlign={handleAlign}
             onBulletedList={() => {
               const nextType = settings.list_type === 'bullet' ? 'none' : 'bullet';
               const executed = runCommand('insertUnorderedList');
-              if (!executed && !editorRef.current?.classList.contains('list-disc')) {
-                editorRef.current?.classList.toggle('list-disc', nextType === 'bullet');
+              if (!executed) {
+                const transformed = applyListTransformation(toggleBulletedListContent);
+                if (!transformed && !editorRef.current?.classList.contains('list-disc')) {
+                  editorRef.current?.classList.toggle('list-disc', nextType === 'bullet');
+                }
               }
               onSettingsChange({ list_type: nextType });
             }}
             onNumberedList={() => {
               const nextType = settings.list_type === 'number' ? 'none' : 'number';
               const executed = runCommand('insertOrderedList');
-              if (!executed && !editorRef.current?.classList.contains('list-decimal')) {
-                editorRef.current?.classList.toggle('list-decimal', nextType === 'number');
+              if (!executed) {
+                const transformed = applyListTransformation(toggleNumberedListContent);
+                if (!transformed && !editorRef.current?.classList.contains('list-decimal')) {
+                  editorRef.current?.classList.toggle('list-decimal', nextType === 'number');
+                }
               }
               onSettingsChange({ list_type: nextType });
             }}
             color={settings.text_color}
-            onColorChange={(color) => {
-              const executed = runCommand('foreColor', color);
-              const styled = executed || applyStyleToSelection({ color });
-
-              if (!styled) {
-                applyImmediateStyles({ text_color: color });
-              }
-
-              onSettingsChange({ text_color: color });
-            }}
+            onColorChange={handleColorChange}
             backgroundColor={settings.background_color ?? 'transparent'}
-            onBackgroundColorChange={(color) => {
-              const executed = runCommand('hiliteColor', color) || runCommand('backColor', color);
-              const styled = executed || applyStyleToSelection({ backgroundColor: color });
-
-              if (!styled) {
-                applyImmediateStyles({ background_color: color });
-              }
-
-              onSettingsChange({ background_color: color });
-            }}
+            onBackgroundColorChange={handleBackgroundColorChange}
           />
         </div>
       ) : null}
