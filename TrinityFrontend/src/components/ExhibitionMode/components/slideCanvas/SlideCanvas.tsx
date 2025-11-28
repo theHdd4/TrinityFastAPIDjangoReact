@@ -2076,9 +2076,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }));
 
         setClipboard(snapshots);
-        if (explicitIds && explicitIds.length > 0) {
-          setSelectedIds(targetIds);
-        }
         focusCanvas();
         toast({
           title: snapshots.length === 1 ? 'Object copied' : 'Objects copied',
@@ -2087,6 +2084,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? 'Copied the selected object.'
               : `Copied ${snapshots.length} objects to the clipboard.`,
         });
+        setSelectedIds([]);
       },
       [focusCanvas, resolveTargetIds, resolveTargetObjects],
     );
@@ -2141,7 +2139,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           onRemoveObject(object.id);
         });
 
-        setSelectedIds(prev => prev.filter(id => !removedIds.has(id)));
+        setSelectedIds([]);
         focusCanvas();
         toast({
           title: snapshots.length === 1 ? 'Object cut' : 'Objects cut',
@@ -2185,6 +2183,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         title: 'Style copied',
         description: 'Copied the selected object styling for reuse.',
       });
+      setSelectedIds([]);
     }, [captureColorStyle, selectedObjects]);
 
     const handleDeleteSelection = useCallback(
@@ -2335,6 +2334,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           default:
             break;
         }
+        setSelectedIds([]);
       },
       [
         objectsMap,
@@ -3660,7 +3660,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         if (typeof document === 'undefined') {
           return MIN_TEXT_OBJECT_HEIGHT;
         }
-
         // Ensure font is loaded before measuring
         const resolvedFontFamily = resolveFontFamily(formatting.fontFamily);
         if (typeof document.fonts !== 'undefined' && document.fonts.ready) {
@@ -4174,7 +4173,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         onInteract();
         onBringToFront(duplicatedIds);
-        setSelectedIds(duplicatedIds);
         focusCanvas();
         toast({
           title: duplicatedIds.length === 1 ? 'Object duplicated' : 'Objects duplicated',
@@ -4183,6 +4181,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? 'Added a copy of the selected object.'
               : `Added ${duplicatedIds.length} duplicated objects to the slide.`,
         });
+        setSelectedIds([]);
       },
       [
         canEdit,
@@ -4355,6 +4354,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           title: 'Objects aligned',
           description: 'Updated the selection alignment on the slide.',
         });
+        setSelectedIds([]);
       },
       [
         onBulkUpdate,
@@ -5857,7 +5857,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             }}
           >
             <Copy className="mr-2 h-4 w-4" />
-            Copy
+            Copyy
             <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuItem

@@ -122,6 +122,9 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   renderPostLockContent,
 }) => {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    console.log('[SlideObjectContextMenu] open state changed:', open);
+  }, [open]);
   const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setOpen(false), []);
 
@@ -200,9 +203,10 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
         <div onContextMenu={handleTriggerContextMenu}>{children}</div>
       </ContextMenuTrigger>
       <ContextMenuContent
+        key={open ? 'open' : 'closed'}
         ref={menuRef}
         className="w-64"
-        style={{ zIndex: 9999 }}
+        style={{ zIndex: 9999, display: open ? undefined : 'none' }}
         data-context-menu-root="true"
         onPointerDown={event => {
           // Prevent canvas deselection when clicking inside the menu
