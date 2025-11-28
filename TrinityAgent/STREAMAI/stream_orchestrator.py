@@ -23,39 +23,28 @@ from datetime import datetime
 logger = logging.getLogger("trinity.trinityai.orchestrator")
 
 # Import STREAMAI modules - try relative imports first (Docker), then absolute (local dev)
-# These modules may not exist (were in old TrinityAI folder) - create stubs if missing
+# These modules now exist in STREAMAI folder (copied from 28_NOV working version)
 try:
     from .file_loader import FileLoader
     from .file_analyzer import FileAnalyzer
     from .file_context_resolver import FileContextResolver, FileContextResult
+    logger.info("✅ File handling modules imported from STREAMAI folder")
 except ImportError:
     try:
         from STREAMAI.file_loader import FileLoader
         from STREAMAI.file_analyzer import FileAnalyzer
         from STREAMAI.file_context_resolver import FileContextResolver, FileContextResult
+        logger.info("✅ File handling modules imported from STREAMAI (absolute)")
     except ImportError:
         # Fallback: try direct imports (if in same directory)
         try:
             from file_loader import FileLoader
             from file_analyzer import FileAnalyzer
             from file_context_resolver import FileContextResolver, FileContextResult
+            logger.info("✅ File handling modules imported directly")
         except ImportError:
-            # Create stub classes if modules don't exist
-            # Logger is already defined above, so this is safe
-            # This is expected if file handling modules are optional or not available
-            logger.info("ℹ️ File handling modules not found - using stub implementations (file context features disabled)")
-            class FileLoader:
-                def __init__(self, **kwargs):
-                    pass
-            class FileAnalyzer:
-                def __init__(self, **kwargs):
-                    pass
-            class FileContextResult:
-                def __init__(self, **kwargs):
-                    pass
-            class FileContextResolver:
-                def __init__(self, **kwargs):
-                    pass
+            logger.error("❌ File handling modules not found - STREAMAI will not work properly")
+            raise ImportError("File handling modules (file_loader, file_analyzer, file_context_resolver) are required for STREAMAI")
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
     from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
@@ -72,7 +61,20 @@ PARENT_DIR = Path(__file__).resolve().parent.parent
 if str(PARENT_DIR) not in sys.path:
     sys.path.append(str(PARENT_DIR))
 
-from main_api import get_llm_config
+# Import centralized settings
+try:
+    from BaseAgent.config import settings
+except ImportError:
+    try:
+        from TrinityAgent.BaseAgent.config import settings
+    except ImportError:
+        # Fallback: import from main_api if BaseAgent not available
+        from main_api import get_llm_config
+        # Create a minimal settings-like object for backward compatibility
+        class SettingsWrapper:
+            def get_llm_config(self):
+                return get_llm_config()
+        settings = SettingsWrapper()
 
 # Import result storage
 try:
@@ -96,11 +98,28 @@ class StreamOrchestrator:
     
     def __init__(self):
         """Initialize the orchestrator"""
-        self.config = get_llm_config()
+        # Use centralized settings
+        self.config = settings.get_llm_config() if hasattr(settings, 'get_llm_config') else {}
         
-        # Base URLs for different services (use Docker service names)
-        self.fastapi_base = os.getenv("FASTAPI_BASE_URL", "http://fastapi:8001")
-        self.django_base = os.getenv("DJANGO_BASE_URL", "http://web:8000")
+        # Base URLs for different services (use centralized settings)
+        # For atom execution, we need to call the Trinity AI service itself (where we're running)
+        # Use AI_SERVICE_URL if available, otherwise construct from host/port
+        ai_service_url = getattr(settings, 'AI_SERVICE_URL', None)
+        if not ai_service_url:
+            # Fallback: construct from host and port
+            host_ip = getattr(settings, 'HOST_IP', '127.0.0.1')
+            api_port = getattr(settings, 'API_PORT', 8002)
+            # In Docker, use service name; locally use localhost
+            if os.getenv("RUNNING_IN_DOCKER") or os.getenv("DOCKER_ENV"):
+                ai_service_url = f"http://trinity-ai:{api_port}"
+            else:
+                ai_service_url = f"http://{host_ip}:{api_port}"
+        
+        # fastapi_base is used for atom execution (calls Trinity AI service)
+        self.fastapi_base = ai_service_url
+        # fastapi_backend is for backend API calls (laboratory cards, etc.)
+        self.fastapi_backend = getattr(settings, 'FASTAPI_BASE_URL', 'http://fastapi:8001')
+        self.django_base = getattr(settings, 'DJANGO_BASE_URL', 'http://web:8000')
         
         # Initialize result storage
         self.storage = None
@@ -119,13 +138,16 @@ class StreamOrchestrator:
         self._last_context_selection: Optional[FileContextResult] = None
 
         try:
-            minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
-            minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minio")
-            minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minio123")
-            minio_bucket = os.getenv("MINIO_BUCKET", "trinity")
-            minio_prefix = os.getenv("MINIO_OBJECT_PREFIX", "")
-            minio_secure = os.getenv("MINIO_SECURE", "false").lower() == "true"
-
+            # Use centralized settings for MinIO configuration (same as 28_NOV working version)
+            minio_config = settings.get_minio_config() if hasattr(settings, 'get_minio_config') else {}
+            minio_endpoint = minio_config.get("endpoint", getattr(settings, 'MINIO_ENDPOINT', "minio:9000"))
+            minio_access_key = minio_config.get("access_key", getattr(settings, 'MINIO_ACCESS_KEY', "minio"))
+            minio_secret_key = minio_config.get("secret_key", getattr(settings, 'MINIO_SECRET_KEY', "minio123"))
+            minio_bucket = minio_config.get("bucket", getattr(settings, 'MINIO_BUCKET', "trinity"))
+            minio_prefix = minio_config.get("prefix", getattr(settings, 'MINIO_PREFIX', ""))
+            minio_secure = (getattr(settings, 'MINIO_SECURE', 'false') or 'false').lower() == "true"
+            
+            # Initialize FileLoader (same as 28_NOV working version)
             self.file_loader = FileLoader(
                 minio_endpoint=minio_endpoint,
                 minio_access_key=minio_access_key,
@@ -133,6 +155,9 @@ class StreamOrchestrator:
                 minio_bucket=minio_bucket,
                 object_prefix=minio_prefix
             )
+            logger.info("✅ FileLoader initialized (from STREAMAI/file_loader.py)")
+            
+            # Initialize FileAnalyzer (same as 28_NOV working version)
             self.file_analyzer = FileAnalyzer(
                 minio_endpoint=minio_endpoint,
                 access_key=minio_access_key,
@@ -141,12 +166,16 @@ class StreamOrchestrator:
                 prefix=minio_prefix,
                 secure=minio_secure
             )
+            logger.info("✅ FileAnalyzer initialized (from STREAMAI/file_analyzer.py)")
+            
+            # Initialize FileContextResolver (same as 28_NOV working version)
             self.file_context_resolver = FileContextResolver(
                 file_loader=self.file_loader,
                 file_analyzer=self.file_analyzer
             )
+            logger.info("✅ FileContextResolver initialized (from STREAMAI/file_context_resolver.py)")
         except Exception as e:
-            logger.warning(f"⚠️ File context utilities unavailable: {e}")
+            logger.error(f"❌ File context utilities initialization failed: {e}")
             self.file_loader = None
             self.file_analyzer = None
             self.file_context_resolver = FileContextResolver()
@@ -157,7 +186,10 @@ class StreamOrchestrator:
         self,
         sequence: Dict[str, Any],
         session_id: str,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        client_name: str = "",
+        app_name: str = "",
+        project_name: str = ""
     ) -> Dict[str, Any]:
         """
         Execute an atom sequence with the 3-step pattern for each atom.
@@ -166,6 +198,9 @@ class StreamOrchestrator:
             sequence: Sequence JSON with atoms
             session_id: Session identifier
             progress_callback: Optional callback for progress updates
+            client_name: Client name for file context
+            app_name: App name for file context
+            project_name: Project name for file context
             
         Returns:
             Execution result dict
@@ -173,12 +208,26 @@ class StreamOrchestrator:
         logger.info(f"🚀 Starting sequence execution for session {session_id}")
         logger.info(f"📊 Total atoms: {sequence.get('total_atoms', 0)}")
         
+        # Extract context from sequence if not provided
+        if not client_name and sequence.get("file_context"):
+            file_ctx = sequence.get("file_context", {})
+            client_name = file_ctx.get("client_name", "")
+            app_name = file_ctx.get("app_name", "")
+            project_name = file_ctx.get("project_name", "")
+        
+        # Store context for use in other methods
+        self._current_context = {
+            "client_name": client_name,
+            "app_name": app_name,
+            "project_name": project_name
+        }
+        
         # Create session in storage
         if self.storage:
             self.storage.create_session(session_id)
 
-        # Refresh file context for this run
-        self._refresh_file_context()
+        # Refresh file context for this run with context (gets maximum file info)
+        self._refresh_file_context(client_name, app_name, project_name)
         
         atoms = sequence.get("sequence", [])
         total_atoms = len(atoms)
@@ -385,7 +434,17 @@ class StreamOrchestrator:
             prompt = self.storage.inject_results_into_prompt(session_id, prompt)
             logger.info(f"  📝 Injected results into prompt")
 
-        prompt = self._augment_prompt_with_context(prompt, atom)
+        # Get context from sequence if available
+        client_name = ""
+        app_name = ""
+        project_name = ""
+        if hasattr(self, '_current_context'):
+            ctx = getattr(self, '_current_context', {})
+            client_name = ctx.get("client_name", "")
+            app_name = ctx.get("app_name", "")
+            project_name = ctx.get("project_name", "")
+        
+        prompt = self._augment_prompt_with_context(prompt, atom, client_name, app_name, project_name)
 
         logger.info("🔍 ===== STREAM AI PROMPT (BEGIN) =====")
         logger.info(f"Atom: {atom.get('atom_id', 'unknown')} | Endpoint: {atom.get('endpoint')}")
@@ -413,7 +472,9 @@ class StreamOrchestrator:
         logger.info(f"  ✅ Atom executed successfully")
 
         # Refresh file context so subsequent atoms see newly generated files/columns
-        self._refresh_file_context()
+        # Use same context as sequence execution (stored in instance or passed)
+        # If context not available, use empty strings (will use default prefix)
+        self._refresh_file_context("", "", "")
         
         duration = time.time() - start_time
         
@@ -438,7 +499,7 @@ class StreamOrchestrator:
             Result dict with card_id
         """
         try:
-            url = f"{self.fastapi_base}/api/laboratory/cards"
+            url = f"{self.fastapi_backend}/api/laboratory/cards"
             
             payload = {
                 "atomId": atom_id,
@@ -479,7 +540,7 @@ class StreamOrchestrator:
     
     async def _step2_fetch_atom(self, atom_id: str) -> Dict[str, Any]:
         """
-        Step 2: Fetch atom using TrinityAgent fetch-atom endpoint.
+        Step 2: Fetch atom directly using SingleLLMProcessor (no HTTP call - faster).
         
         Args:
             atom_id: Atom identifier
@@ -488,38 +549,56 @@ class StreamOrchestrator:
             Result dict
         """
         try:
-            url = f"{self.fastapi_base}/trinityai/fetch-atom"
+            logger.info(f"    🔍 Fetching atom directly (no API call): {atom_id}")
             
-            payload = {
-                "message": f"fetch {atom_id} atom",
-                "session_id": f"streamai_{int(time.time())}"
+            # Import SingleLLMProcessor directly (same process - faster than HTTP)
+            try:
+                from Agent_FetchAtom.single_llm_processor import SingleLLMProcessor
+            except ImportError:
+                try:
+                    from TrinityAgent.Agent_FetchAtom.single_llm_processor import SingleLLMProcessor
+                except ImportError:
+                    logger.error("    ❌ SingleLLMProcessor not available - cannot fetch atom directly")
+                    return {
+                        "success": False,
+                        "error": "SingleLLMProcessor not available"
+                    }
+            
+            # Get LLM config for SingleLLMProcessor initialization
+            try:
+                from BaseAgent.config import settings
+                llm_config = settings.get_llm_config()
+            except ImportError:
+                try:
+                    from TrinityAgent.BaseAgent.config import settings
+                    llm_config = settings.get_llm_config()
+                except ImportError:
+                    logger.error("    ❌ Could not get LLM config for SingleLLMProcessor")
+                    return {
+                        "success": False,
+                        "error": "LLM config not available"
+                    }
+            
+            # Create processor instance with LLM config
+            processor = SingleLLMProcessor(
+                api_url=llm_config["api_url"],
+                model_name=llm_config["model_name"],
+                bearer_token=llm_config["bearer_token"]
+            )
+            
+            # Process query directly (no HTTP overhead)
+            query = f"fetch {atom_id} atom"
+            result = processor.process_query(query)
+            
+            logger.info(f"    ✅ Atom fetched directly: {result.get('status', 'unknown')}")
+            
+            return {
+                "success": True,
+                "response": result
             }
-            
-            logger.debug(f"    POST {url}")
-            
-            # Use async aiohttp instead of blocking requests
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=60)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return {
-                            "success": True,
-                            "response": data
-                        }
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"    ❌ Fetch atom failed: {response.status}")
-                        return {
-                            "success": False,
-                            "error": f"HTTP {response.status}: {error_text[:200]}"
-                        }
         
         except Exception as e:
-            logger.error(f"    ❌ Exception fetching atom: {e}")
+            logger.error(f"    ❌ Exception fetching atom directly: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e)
@@ -557,17 +636,28 @@ class StreamOrchestrator:
             
             url = f"{self.fastapi_base}{endpoint}"
             
-            # Base payload
+            # Base payload - match DataUploadValidateRequest format
+            # DataUploadValidateRequest expects: prompt, session_id, client_name, app_name, project_name
             payload = {
-                "message": prompt,
                 "prompt": prompt,
                 "session_id": f"streamai_{int(time.time())}"
             }
             
-            # Add atom-specific parameters if provided
+            # Add context if available (from current context stored in instance)
+            if hasattr(self, '_current_context'):
+                ctx = getattr(self, '_current_context', {})
+                if ctx.get("client_name"):
+                    payload["client_name"] = ctx["client_name"]
+                if ctx.get("app_name"):
+                    payload["app_name"] = ctx["app_name"]
+                if ctx.get("project_name"):
+                    payload["project_name"] = ctx["project_name"]
+            
+            # Add atom-specific parameters if provided (like file_path)
             if "parameters" in atom and atom["parameters"]:
                 params = atom["parameters"]
                 logger.info(f"    📝 Adding parameters: {params}")
+                # Merge parameters into payload (file_path, etc.)
                 payload.update(params)
             
             logger.debug(f"    POST {url}")
@@ -687,9 +777,9 @@ class StreamOrchestrator:
                 "available_files": list(self._raw_files_with_columns.keys()),
                 "generated_files": [],
                 "additional_context": "",
-                "client_name": sequence.get("client_name", os.getenv("CLIENT_NAME", "")),
-                "app_name": sequence.get("app_name", os.getenv("APP_NAME", "")),
-                "project_name": sequence.get("project_name", os.getenv("PROJECT_NAME", "")),
+                "client_name": sequence.get("client_name", getattr(settings, 'CLIENT_NAME', None) or os.getenv("CLIENT_NAME", "")),
+                "app_name": sequence.get("app_name", getattr(settings, 'APP_NAME', None) or os.getenv("APP_NAME", "")),
+                "project_name": sequence.get("project_name", getattr(settings, 'PROJECT_NAME', None) or os.getenv("PROJECT_NAME", "")),
                 "metadata": {"total_steps": len(step_records)},
             }
 
@@ -699,12 +789,25 @@ class StreamOrchestrator:
         except Exception as exc:
             logger.warning("⚠️ Failed to append workflow insight: %s", exc)
 
-    def _refresh_file_context(self) -> None:
-        """Reload available files and update the shared resolver cache."""
+    def _refresh_file_context(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """
+        Reload available files and update the shared resolver cache.
+        Same as 28_NOV working version, but with context parameter support.
+        
+        Args:
+            client_name: Client name for context (optional)
+            app_name: App name for context (optional)
+            project_name: Project name for context (optional)
+        """
         if not self.file_loader or not self.file_context_resolver:
             return
         try:
-            files = self.file_loader.load_files()
+            # Set context if provided (FileLoader supports this)
+            if client_name or app_name or project_name:
+                self.file_loader.set_context(client_name, app_name, project_name)
+            
+            # Load files (FileLoader will use context from set_context or env vars)
+            files = self.file_loader.load_files(client_name, app_name, project_name)
             self._raw_files_with_columns = files or {}
             self.file_context_resolver.update_files(self._raw_files_with_columns)
             self._last_context_selection = None
@@ -712,19 +815,35 @@ class StreamOrchestrator:
         except Exception as e:
             logger.warning(f"⚠️ Failed to refresh file context: {e}")
 
-    def _ensure_file_context_loaded(self) -> None:
-        """Ensure file context is available before attempting resolution."""
-        if not self.file_context_resolver:
+    def _ensure_file_context_loaded(self, client_name: str = "", app_name: str = "", project_name: str = "") -> None:
+        """Ensure file context is loaded with maximum file info (columns) in minimum context.
+        
+        Args:
+            client_name: Client name for context
+            app_name: App name for context
+            project_name: Project name for context
+        """
+        if not self.file_loader:
+            logger.warning("⚠️ FileLoader not available - cannot load file context")
             return
+            
         if not self._raw_files_with_columns:
-            self._refresh_file_context()
+            self._refresh_file_context(client_name, app_name, project_name)
 
-    def _augment_prompt_with_context(self, prompt: str, atom: Dict[str, Any]) -> str:
-        """Append condensed file context to the prompt when relevant."""
+    def _augment_prompt_with_context(self, prompt: str, atom: Dict[str, Any], client_name: str = "", app_name: str = "", project_name: str = "") -> str:
+        """Append condensed file context to the prompt when relevant.
+        
+        Args:
+            prompt: Original prompt
+            atom: Atom configuration
+            client_name: Client name for context
+            app_name: App name for context
+            project_name: Project name for context
+        """
         if not self.file_context_resolver or not prompt or "--- STREAM FILE CONTEXT ---" in prompt:
             return prompt
 
-        self._ensure_file_context_loaded()
+        self._ensure_file_context_loaded(client_name, app_name, project_name)
         if not self._raw_files_with_columns:
             return prompt
 

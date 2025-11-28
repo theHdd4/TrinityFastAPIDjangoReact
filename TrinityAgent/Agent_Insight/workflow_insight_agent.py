@@ -31,15 +31,22 @@ logger = logging.getLogger("trinity.ai.workflow_insight")
 
 
 def get_llm_config() -> Dict[str, str]:
-    """Return LLM configuration using the same pattern as other agents."""
-    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
-    llm_port = os.getenv("OLLAMA_PORT", "11434")
-    api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
-    return {
-        "api_url": api_url,
-        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
-        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
-    }
+    """Return LLM configuration from centralized settings."""
+    try:
+        from BaseAgent.config import settings
+        return settings.get_llm_config()
+    except ImportError:
+        try:
+            from TrinityAgent.BaseAgent.config import settings
+            return settings.get_llm_config()
+        except ImportError:
+            # Final fallback - should not happen if BaseAgent is properly installed
+            logger.warning("⚠️ BaseAgent settings not available, using minimal fallback config")
+            return {
+                "api_url": "http://127.0.0.1:11434/api/chat",
+                "model_name": "deepseek-r1:32b",
+                "bearer_token": "aakash_api_key",
+            }
 
 
 class WorkflowInsightAgent:
@@ -184,8 +191,8 @@ class WorkflowInsightAgent:
         handler = None
         try:
             handler = self._ensure_file_handler()
-            if handler and any([client_name, app_name, project_name]):
-                handler.set_context(client_name=client_name, app_name=app_name, project_name=project_name)
+            # FileReader doesn't have set_context - context is passed directly to load_files() when needed
+            # No need to set context here, it will be used when load_files is called
         except Exception as exc:
             logger.warning("⚠️ FileHandler unavailable for workflow insight: %s", exc)
 

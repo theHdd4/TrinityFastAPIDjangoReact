@@ -378,6 +378,7 @@ class DataUploadValidateRequest(BaseModel):
     project_name: str = ""
 
 @router.get("/data-upload-validate/test")
+@router.get("/df-validate/test")  # Backward compatibility alias
 def test_endpoint() -> Dict[str, Any]:
     return {
         "success": True,
@@ -387,6 +388,7 @@ def test_endpoint() -> Dict[str, Any]:
     }
 
 @router.post("/data-upload-validate")
+@router.post("/df-validate")  # Backward compatibility alias
 def perform_data_upload_validate(request: DataUploadValidateRequest) -> Dict[str, Any]:
     import time
     start_time = time.time()
@@ -540,6 +542,7 @@ def get_history(session_id: str) -> Dict[str, Any]:
         }
 
 @router.get("/data-upload-validate/files")
+@router.get("/df-validate/files")  # Backward compatibility alias
 def list_files() -> Dict[str, Any]:
     if not agent_initialized or agent is None:
         return {
@@ -561,6 +564,7 @@ def list_files() -> Dict[str, Any]:
         }
 
 @router.get("/data-upload-validate/health")
+@router.get("/df-validate/health")  # Backward compatibility alias
 def health_check() -> Dict[str, Any]:
     if not agent_initialized or agent is None:
         return {

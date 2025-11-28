@@ -43,6 +43,48 @@ except ImportError:
         def get_workflow_insight_agent():
             return None
 
+logger = logging.getLogger("trinity.trinityai.websocket")
+
+# Import centralized settings
+try:
+    from BaseAgent.config import settings
+except ImportError:
+    try:
+        from TrinityAgent.BaseAgent.config import settings
+    except ImportError:
+        # Fallback: create minimal settings wrapper if BaseAgent not available
+        class SettingsWrapper:
+            OLLAMA_IP = None
+            OLLAMA_PORT = "11434"
+            HOST_IP = "127.0.0.1"
+            LLM_API_URL = None
+            LLM_MODEL_NAME = "deepseek-r1:32b"
+            LLM_BEARER_TOKEN = "aakash_api_key"
+            FASTAPI_BASE_URL = None
+            FASTAPI_HOST = None
+            FASTAPI_PORT = "8001"
+            CLIENT_NAME = None
+            APP_NAME = None
+            PROJECT_NAME = None
+            STREAM_AI_ATOM_RETRY_ATTEMPTS = 3
+            STREAM_AI_ATOM_RETRY_DELAY_SECONDS = 2.0
+            RUNNING_IN_DOCKER = None
+        settings = SettingsWrapper()
+
+# Import ReAct orchestrator - try both paths
+try:
+    from .react_workflow_orchestrator import get_react_orchestrator
+    REACT_AVAILABLE = True
+except ImportError:
+    try:
+        from STREAMAI.react_workflow_orchestrator import get_react_orchestrator
+        REACT_AVAILABLE = True
+    except ImportError:
+        REACT_AVAILABLE = False
+        logger.warning("⚠️ ReAct orchestrator not available, using legacy workflow")
+        def get_react_orchestrator():
+            return None
+
 try:
     import aiohttp  # type: ignore
 except ImportError:  # pragma: no cover
@@ -54,8 +96,6 @@ try:
 except Exception:  # pragma: no cover - memory service optional
     memory_storage_module = None
     summarize_chat_messages = None
-
-logger = logging.getLogger("trinity.trinityai.websocket")
 
 # Atom capability metadata for file/alias handling
 DATASET_OUTPUT_ATOMS = {
@@ -247,13 +287,16 @@ class StreamWebSocketOrchestrator:
         self.concat_perform_endpoint = f"{self.fastapi_base_url}/api/concat/perform"
         logger.info(f"🔗 FastAPI base URL for auto-save: {self.fastapi_base_url}")
 
-        # Get LLM config (same as merge/concat agents)
-        ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
-        llm_port = os.getenv("OLLAMA_PORT", "11434")
+        # Get LLM config from centralized settings
+        ollama_ip = settings.OLLAMA_IP or settings.HOST_IP
+        llm_port = settings.OLLAMA_PORT
         # Use OpenAI-compatible endpoint for workflow generation
-        self.llm_api_url = f"http://{ollama_ip}:{llm_port}/v1/chat/completions"
-        self.llm_model = os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b")
-        self.bearer_token = os.getenv("LLM_BEARER_TOKEN", "aakash_api_key")
+        if settings.LLM_API_URL:
+            self.llm_api_url = settings.LLM_API_URL.replace("/api/chat", "/v1/chat/completions")
+        else:
+            self.llm_api_url = f"http://{ollama_ip}:{llm_port}/v1/chat/completions"
+        self.llm_model = settings.LLM_MODEL_NAME
+        self.bearer_token = settings.LLM_BEARER_TOKEN
         
         logger.info(f"🔗 LLM Config: {self.llm_api_url} | Model: {self.llm_model}")
         
@@ -262,10 +305,10 @@ class StreamWebSocketOrchestrator:
 
         # Atom execution retry configuration
         self.atom_retry_attempts = max(
-            1, int(os.getenv("STREAM_AI_ATOM_RETRY_ATTEMPTS", "3"))
+            1, settings.STREAM_AI_ATOM_RETRY_ATTEMPTS
         )
         self.atom_retry_delay = max(
-            0.0, float(os.getenv("STREAM_AI_ATOM_RETRY_DELAY_SECONDS", "2"))
+            0.0, float(settings.STREAM_AI_ATOM_RETRY_DELAY_SECONDS)
         )
         logger.info(
             "🔁 Atom retry configuration | attempts=%s delay=%ss",
@@ -280,7 +323,110 @@ class StreamWebSocketOrchestrator:
         else:
             logger.info("ℹ️ Chat memory summaries disabled (memory service unavailable)")
         
+        # Initialize ReAct orchestrator if available
+        self.react_orchestrator = None
+        if REACT_AVAILABLE:
+            try:
+                self.react_orchestrator = get_react_orchestrator()
+                logger.info("✅ ReAct orchestrator initialized for WebSocket")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not initialize ReAct orchestrator: {e}")
+        
         logger.info("✅ StreamWebSocketOrchestrator initialized")
+    
+    async def execute_react_workflow(
+        self,
+        user_prompt: str,
+        session_id: str,
+        websocket,
+        file_context: Optional[Dict[str, Any]] = None,
+        project_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute workflow using ReAct orchestrator with WebSocket events.
+        
+        Args:
+            user_prompt: User's prompt
+            session_id: Session identifier
+            websocket: WebSocket connection
+            file_context: Optional file context
+            project_context: Optional project context
+            
+        Returns:
+            Workflow execution result
+        """
+        if not self.react_orchestrator:
+            logger.warning("⚠️ ReAct orchestrator not available, cannot execute ReAct workflow")
+            return {"success": False, "error": "ReAct orchestrator not available"}
+        
+        try:
+            # Progress callback for WebSocket events
+            async def progress_callback(progress: Dict[str, Any]):
+                event_type = progress.get("type", "progress")
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(f"react_{event_type}", progress),
+                        f"ReAct {event_type} event"
+                    )
+                except WebSocketDisconnect:
+                    raise
+                except Exception as e:
+                    logger.debug(f"Could not send ReAct progress event: {e}")
+            
+            # Prepare file context
+            if not file_context and project_context:
+                file_context = {
+                    "files": project_context.get("available_files", []),
+                    "client_name": project_context.get("client_name", ""),
+                    "app_name": project_context.get("app_name", ""),
+                    "project_name": project_context.get("project_name", "")
+                }
+            
+            # Execute ReAct workflow
+            result = await self.react_orchestrator.execute_workflow(
+                user_prompt=user_prompt,
+                session_id=session_id,
+                file_context=file_context,
+                progress_callback=progress_callback
+            )
+            
+            # Send final result event
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent("react_workflow_complete", {
+                        "session_id": session_id,
+                        "success": result.get("success", False),
+                        "intent": result.get("intent", "workflow"),
+                        "final_response": result.get("final_response"),
+                        "final_insight": result.get("final_insight")
+                    }),
+                    "ReAct workflow complete event"
+                )
+            except WebSocketDisconnect:
+                raise
+            except Exception as e:
+                logger.debug(f"Could not send ReAct complete event: {e}")
+            
+            return result
+            
+        except WebSocketDisconnect:
+            raise
+        except Exception as e:
+            logger.error(f"❌ Error executing ReAct workflow: {e}", exc_info=True)
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent("react_workflow_error", {
+                        "session_id": session_id,
+                        "error": str(e)
+                    }),
+                    "ReAct workflow error event"
+                )
+            except:
+                pass
+            return {"success": False, "error": str(e)}
     
     async def _retry_llm_json_generation(
         self,
@@ -4381,12 +4527,12 @@ WORKFLOW PLANNING:
 
     def _determine_fastapi_base_url(self) -> str:
         """Resolve FastAPI base URL for downstream atom services."""
-        base_url = os.getenv("FASTAPI_BASE_URL")
+        base_url = getattr(settings, 'FASTAPI_BASE_URL', None)
         if base_url:
             return base_url.rstrip("/")
 
-        host = os.getenv("FASTAPI_HOST") or os.getenv("HOST_IP")
-        port = os.getenv("FASTAPI_PORT")
+        host = getattr(settings, 'FASTAPI_HOST', None) or settings.HOST_IP
+        port = str(getattr(settings, 'FASTAPI_PORT', None) or '')
 
         if host and port:
             return f"http://{host}:{port}".rstrip("/")
@@ -4394,7 +4540,7 @@ WORKFLOW PLANNING:
         # Heuristic defaults
         default_host = host or "localhost"
         # If running inside docker compose, fastapi service usually on 8001
-        default_port = "8001" if os.getenv("RUNNING_IN_DOCKER") else "8002"
+        default_port = "8001" if getattr(settings, 'RUNNING_IN_DOCKER', None) else "8002"
 
         return f"http://{default_host}:{port or default_port}".rstrip("/")
 
@@ -6174,12 +6320,35 @@ WORKFLOW PLANNING:
                 logger.info(f"🔧 Added project context for {atom_id}: client={client_name}, app={app_name}, project={project_name}")
             else:
                 logger.warning(f"⚠️ No project context available for {atom_id} (session_id={session_id}). Available contexts: {list(self._sequence_project_context.keys())}")
-                # Fallback: try to get from environment variables
-                import os
-                payload["client_name"] = os.getenv("CLIENT_NAME", "")
-                payload["app_name"] = os.getenv("APP_NAME", "")
-                payload["project_name"] = os.getenv("PROJECT_NAME", "")
-                logger.info(f"🔧 Using environment variables for {atom_id}: client={payload['client_name']}, app={payload['app_name']}, project={payload['project_name']}")
+                # Fallback: try to fetch from database/Redis using main_api helper
+                try:
+                    from main_api import _fetch_names_from_db
+                    client_db, app_db, project_db, _ = _fetch_names_from_db()
+                    client_name = client_db or ""
+                    app_name = app_db or ""
+                    project_name = project_db or ""
+                    
+                    if client_name and app_name and project_name:
+                        payload["client_name"] = client_name
+                        payload["app_name"] = app_name
+                        payload["project_name"] = project_name
+                        # Store in context for future use
+                        self._sequence_project_context[session_id] = {
+                            "client_name": client_name,
+                            "app_name": app_name,
+                            "project_name": project_name
+                        }
+                        logger.info(f"🔧 Fetched project context from database for {atom_id}: client={client_name}, app={app_name}, project={project_name}")
+                    else:
+                        logger.warning(f"⚠️ Could not fetch project context from database for {atom_id}")
+                        payload["client_name"] = ""
+                        payload["app_name"] = ""
+                        payload["project_name"] = ""
+                except Exception as e:
+                    logger.error(f"❌ Error fetching project context from database: {e}")
+                    payload["client_name"] = ""
+                    payload["app_name"] = ""
+                    payload["project_name"] = ""
         
         logger.info(f"📡 Calling {full_url}")
         logger.info(f"📦 Payload: {payload}")

@@ -37,21 +37,19 @@ except ImportError:
 
 
 def get_llm_config() -> Dict[str, str]:
-    """Return LLM configuration using centralized settings or environment variables.
+    """Return LLM configuration using centralized settings.
 
-    Uses BaseAgent's centralized config if available, otherwise falls back to os.getenv.
+    Uses BaseAgent's centralized config. Falls back to minimal config if not available.
     """
     if USE_CENTRALIZED_CONFIG:
         return settings.get_llm_config()
     else:
-        # Fallback to environment variables if config not available
-        ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
-        llm_port = os.getenv("OLLAMA_PORT", "11434")
-        api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
+        # Minimal fallback - should not happen if BaseAgent is properly installed
+        logger.warning("⚠️ Using minimal LLM config fallback - BaseAgent settings not available")
         return {
-            "api_url": api_url,
-            "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
-            "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
+            "api_url": "http://127.0.0.1:11434/api/chat",
+            "model_name": "deepseek-r1:32b",
+            "bearer_token": "aakash_api_key",
         }
 
 # Initialize workflow composition agent
@@ -203,9 +201,15 @@ async def compose_workflow_websocket(websocket: WebSocket):
         if not client_name and not app_name and not project_name:
             logger.info("🔍 No context in request, using get_minio_config() to get current path...")
             try:
-                from main_api import get_minio_config
-                minio_config = get_minio_config()
-                prefix = minio_config.get('prefix', '')
+                # Use centralized settings
+                if USE_CENTRALIZED_CONFIG:
+                    minio_config = settings.get_minio_config()
+                    prefix = minio_config.get('prefix', '')
+                else:
+                    # Fallback to main_api if settings not available
+                    from main_api import get_minio_config
+                    minio_config = get_minio_config()
+                    prefix = minio_config.get('prefix', '')
                 
                 logger.info(f"✅ MinIO config prefix: {prefix}")
                 
@@ -230,16 +234,12 @@ async def compose_workflow_websocket(websocket: WebSocket):
         logger.info(f"📨 WS Workflow request: {message[:100]}...")
         logger.info(f"🔧 Project context FINAL: {client_name}/{app_name}/{project_name}")
         
-        # Set context on FileHandler before processing (if available)
-        if hasattr(workflow_agent, 'file_handler') and workflow_agent.file_handler:
+        # FileReader doesn't have set_context - context is passed directly to load_files() when needed
+        # No need to set context here, it will be used when load_files is called
+        if hasattr(workflow_agent, 'file_reader') and workflow_agent.file_reader:
             try:
-                logger.info(f"🔧 Setting FileHandler context with: {client_name}/{app_name}/{project_name}")
-                workflow_agent.file_handler.set_context(
-                    client_name=client_name,
-                    app_name=app_name,
-                    project_name=project_name
-                )
-                logger.info("✅ Set FileHandler context for workflow agent")
+                logger.info(f"🔧 FileReader available for workflow agent (context will be passed to load_files when needed)")
+                logger.info(f"   Context: {client_name}/{app_name}/{project_name}")
                 
             except Exception as e:
                 logger.warning(f"⚠️ Failed to set FileHandler context: {e}")

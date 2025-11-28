@@ -411,10 +411,24 @@ def get_workflow_composition_agent(api_url: str = None, model_name: str = None, 
     global _workflow_composition_agent
     
     if _workflow_composition_agent is None:
-        # Get LLM config from main_api
-        from main_api import get_llm_config
-        config = get_llm_config()
+        # Get LLM config from centralized settings
+        try:
+            from BaseAgent.config import settings
+        except ImportError:
+            try:
+                from TrinityAgent.BaseAgent.config import settings
+            except ImportError:
+                # Fallback: import from main_api if BaseAgent not available
+                from main_api import get_llm_config
+                config = get_llm_config()
+                _workflow_composition_agent = WorkflowCompositionAgent(
+                    api_url=api_url or config["api_url"],
+                    model_name=model_name or config["model_name"],
+                    bearer_token=bearer_token or config["bearer_token"]
+                )
+                return _workflow_composition_agent
         
+        config = settings.get_llm_config()
         _workflow_composition_agent = WorkflowCompositionAgent(
             api_url=api_url or config["api_url"],
             model_name=model_name or config["model_name"],
@@ -426,9 +440,25 @@ def get_workflow_composition_agent(api_url: str = None, model_name: str = None, 
 
 if __name__ == "__main__":
     # Test the workflow composition agent
-    from main_api import get_llm_config
+    try:
+        from BaseAgent.config import settings
+    except ImportError:
+        try:
+            from TrinityAgent.BaseAgent.config import settings
+        except ImportError:
+            # Fallback
+            from main_api import get_llm_config
+            config = get_llm_config()
+            agent = WorkflowCompositionAgent(
+                api_url=config["api_url"],
+                model_name=config["model_name"],
+                bearer_token=config["bearer_token"]
+            )
+            print("=== Testing Workflow Composition Agent ===\n")
+            # ... rest of test code continues below
+            exit()
     
-    config = get_llm_config()
+    config = settings.get_llm_config()
     agent = WorkflowCompositionAgent(
         api_url=config["api_url"],
         model_name=config["model_name"],

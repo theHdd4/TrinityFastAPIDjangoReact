@@ -23,19 +23,23 @@ except ImportError:
         # Fallback for docker image layout
         from redis_client import get_redis_client
 
+# Import centralized settings
+try:
+    from BaseAgent.config import settings
+except ImportError:
+    try:
+        from TrinityAgent.BaseAgent.config import settings
+    except ImportError:
+        # Fallback: create a minimal settings object if import fails
+        from BaseAgent.config import Settings
+        settings = Settings()
+
 logger = logging.getLogger("trinity.ai")
 
 
 def get_llm_config() -> Dict[str, str]:
-    """Return LLM configuration from environment variables."""
-    ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
-    llm_port = os.getenv("OLLAMA_PORT", "11434")
-    api_url = os.getenv("LLM_API_URL", f"http://{ollama_ip}:{llm_port}/api/chat")
-    return {
-        "api_url": api_url,
-        "model_name": os.getenv("LLM_MODEL_NAME", "deepseek-r1:32b"),
-        "bearer_token": os.getenv("LLM_BEARER_TOKEN", "aakash_api_key"),
-    }
+    """Return LLM configuration from centralized settings."""
+    return settings.get_llm_config()
 
 
 # Path to backend helpers mounted via volume in docker-compose
@@ -73,9 +77,19 @@ except ModuleNotFoundError:
     )
 
     def _first_non_empty(vars_: Iterable[str], default: str) -> str:
-        """Return the first non-empty environment variable value."""
+        """Return the first non-empty value from settings or environment variables."""
 
         for name in vars_:
+            # Try settings first, then fallback to os.getenv for backward compatibility
+            try:
+                value = getattr(settings, name, None)
+                if value is not None:
+                    value = str(value).strip()
+                    if value:
+                        return value
+            except:
+                pass
+            
             value = os.getenv(name)
             if value is None:
                 continue
@@ -97,11 +111,12 @@ except ModuleNotFoundError:
         database: str | None = None,
         options: Mapping[str, str] | None = None,
     ) -> str:
-        """Construct a MongoDB URI using host information from the environment."""
+        """Construct a MongoDB URI using host information from settings or environment."""
 
-        host = _first_non_empty(host_env_vars, default_host)
-        port = _first_non_empty(port_env_vars, default_port)
-        auth_db = _first_non_empty(auth_source_env_vars, auth_source)
+        # Use settings first, fallback to environment variables
+        host = settings.MONGO_HOST or settings.HOST_IP or _first_non_empty(host_env_vars, default_host)
+        port = settings.MONGO_PORT or _first_non_empty(port_env_vars, default_port)
+        auth_db = settings.MONGO_AUTH_SOURCE or settings.MONGO_AUTH_DB or _first_non_empty(auth_source_env_vars, auth_source)
 
         credentials = ""
         if username and password:
@@ -147,17 +162,14 @@ redis_client = get_redis_client()
 
 DEFAULT_MONGO_URI = build_host_mongo_uri()
 MONGO_URI = (
-    os.getenv("CLASSIFY_MONGO_URI")
-    or os.getenv("MONGO_URI")
+    settings.CLASSIFY_MONGO_URI
+    or settings.MONGO_URI
     or DEFAULT_MONGO_URI
 )
 # Column classifier configurations are stored in the shared "trinity_db"
 # database under the "column_classifier_config" collection.
-CONFIG_DB = os.getenv("CLASSIFIER_CONFIG_DB", "trinity_db")
-CONFIG_COLLECTION = os.getenv(
-    "CLASSIFIER_CONFIGS_COLLECTION",
-    "column_classifier_config",
-)
+CONFIG_DB = settings.CONFIG_DB
+CONFIG_COLLECTION = settings.CONFIG_COLLECTION
 
 try:
     mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
@@ -233,9 +245,10 @@ def _fetch_names_from_db(
 ) -> tuple[str, str, str, dict]:
     """Retrieve client, app and project names using backend helpers."""
     load_env_from_redis()
-    client = client_override or os.getenv("CLIENT_NAME", "")
-    app = app_override or os.getenv("APP_NAME", "")
-    project = project_override or os.getenv("PROJECT_NAME", "")
+    # Use settings first, fallback to os.getenv for backward compatibility
+    client = client_override or (settings.CLIENT_NAME if settings.CLIENT_NAME else os.getenv("CLIENT_NAME", ""))
+    app = app_override or (settings.APP_NAME if settings.APP_NAME else os.getenv("APP_NAME", ""))
+    project = project_override or (settings.PROJECT_NAME if settings.PROJECT_NAME else os.getenv("PROJECT_NAME", ""))
     debug: Dict[str, Any] = {}
 
     try:
@@ -310,8 +323,8 @@ def _fetch_names_from_db(
                 from DataStorageRetrieval.db import fetch_client_app_project
                 from DataStorageRetrieval.db.connection import POSTGRES_HOST, POSTGRES_PORT
 
-                user_id = int(os.getenv("USER_ID", "0"))
-                project_id = int(os.getenv("PROJECT_ID", "0"))
+                user_id = int(settings.USER_ID or os.getenv("USER_ID", "0"))
+                project_id = int(settings.PROJECT_ID or os.getenv("PROJECT_ID", "0"))
                 if user_id and project_id:
                     debug.update(
                         {
@@ -365,15 +378,9 @@ def get_minio_config() -> Dict[str, str]:
     logger.debug("get_minio_config() called")
     client, app, project, _ = _fetch_names_from_db()
     prefix = f"{client}/{app}/{project}/" if client and app and project else ""
-    os.environ["MINIO_PREFIX"] = prefix
-    config = {
-        # Default to the development MinIO service if not explicitly configured
-        "endpoint": os.getenv("MINIO_ENDPOINT", "minio:9000"),
-        "access_key": os.getenv("MINIO_ACCESS_KEY", "minio"),
-        "secret_key": os.getenv("MINIO_SECRET_KEY", "minio123"),
-        "bucket": os.getenv("MINIO_BUCKET", "trinity"),
-        "prefix": prefix,
-    }
+    os.environ["MINIO_PREFIX"] = prefix  # Keep for backward compatibility
+    # Use centralized settings
+    config = settings.get_minio_config(prefix=prefix)
     logger.debug("minio config resolved: %s", config)
     return config
 
@@ -440,7 +447,7 @@ try:
     
     # Strategy 3: Environment variable (for Docker/container setups)
     if not TRINITY_AGENT_PATH.exists():
-        env_path = os.getenv("TRINITY_AGENT_PATH")
+        env_path = os.getenv("TRINITY_AGENT_PATH")  # Not in settings, keep os.getenv for this specific path override
         if env_path:
             TRINITY_AGENT_PATH = Path(env_path)
             print(f"Strategy 3 (Env Var) - TrinityAgent path: {TRINITY_AGENT_PATH}")
@@ -971,7 +978,7 @@ async def perform_operation(request: PerformRequest):
             # Call the backend concat API
             concat_url = os.getenv(
                 "CONCAT_PERFORM_URL",
-                f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/concat/perform",
+                f"http://{settings.HOST_IP}:{settings.FASTAPI_PORT}/api/concat/perform",
             )
             
             resp = requests.post(concat_url, json=payload, timeout=300)
@@ -1023,7 +1030,7 @@ async def perform_operation(request: PerformRequest):
                 # Call the backend createcolumn API
                 create_url = os.getenv(
                     "CREATE_PERFORM_URL",
-                    f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/create/perform",
+                    f"http://{settings.HOST_IP}:{settings.FASTAPI_PORT}/api/create/perform",
                 )
                 
                 resp = requests.post(create_url, data=payload, timeout=300)
@@ -1050,7 +1057,7 @@ async def perform_operation(request: PerformRequest):
             # Call the backend groupby API
             groupby_url = os.getenv(
                 "GROUPBY_PERFORM_URL",
-                f"http://{os.getenv('HOST_IP', 'localhost')}:{os.getenv('FASTAPI_PORT', '8001')}/api/groupby/run",
+                f"http://{settings.HOST_IP}:{settings.FASTAPI_PORT}/api/groupby/run",
             )
             
             resp = requests.post(groupby_url, data=payload, timeout=300)
@@ -1496,6 +1503,10 @@ if memory_router is not None:
 else:
     logger.warning("⚠️ Memory service router not available - chat persistence disabled")
 
+# Include STREAMAI HTTP router (for /streamai/chat endpoint)
+# Note: Will be included later with WebSocket router to avoid duplicates
+# (Moved to WebSocket initialization section to prevent duplicate inclusion)
+
 # Enable CORS for browser-based clients
 app.add_middleware(
     CORSMiddleware,
@@ -1694,8 +1705,8 @@ for route in app.routes:
         logger.info(f"  {route.path}")
 logger.info("=" * 80)
 
-# Include Trinity AI streaming router
-app.include_router(streamai_router)
+# Note: STREAMAI HTTP router will be included with WebSocket router below
+# to avoid duplicate registrations
 
 # =============================================================================
 # Initialize Trinity AI WebSocket components
@@ -1730,6 +1741,31 @@ try:
     
     # Include the WebSocket API router
     app.include_router(stream_ws_router)
+    logger.info("✅ Trinity AI WebSocket router included")
+    
+    # Include the HTTP API router (for /streamai/chat endpoint) - ONLY ONCE
+    # Check if already included to prevent duplicates
+    if 'streamai_router' in globals() and streamai_router is not None:
+        # Check if router is already included
+        router_paths = [route.path for route in app.routes if hasattr(route, 'path')]
+        if '/streamai/chat' not in router_paths:
+            app.include_router(streamai_router)
+            logger.info("✅ Trinity AI HTTP router included (POST /streamai/chat)")
+        else:
+            logger.info("ℹ️ Trinity AI HTTP router already included, skipping duplicate")
+    else:
+        try:
+            from STREAMAI.main_app import router as stream_http_router
+            router_paths = [route.path for route in app.routes if hasattr(route, 'path')]
+            if '/streamai/chat' not in router_paths:
+                app.include_router(stream_http_router)
+                logger.info("✅ Trinity AI HTTP router included via direct import (POST /streamai/chat)")
+            else:
+                logger.info("ℹ️ Trinity AI HTTP router already included, skipping duplicate")
+        except ImportError as e:
+            logger.warning(f"⚠️ Could not import STREAMAI HTTP router: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error including STREAMAI HTTP router: {e}")
     
     logger.info("✅ Trinity AI WebSocket components initialized successfully")
     
@@ -1745,6 +1781,6 @@ if __name__ == "__main__":
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=int(os.getenv("AI_PORT", 8002)),
+        port=settings.AI_PORT,
         reload=False,
     )

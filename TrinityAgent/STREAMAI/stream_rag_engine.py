@@ -285,6 +285,71 @@ class StreamRAGEngine:
         
         return context
     
+    def generate_rag_context_for_task_decomposition(self, query: str) -> str:
+        """
+        Generate RAG context specifically for task decomposition.
+        
+        Args:
+            query: User's query
+            
+        Returns:
+            Formatted context string for task decomposition
+        """
+        context = "# Task Decomposition Context\n\n"
+        
+        # Add relevant atoms
+        if self.workflow_rag:
+            try:
+                relevant_atoms = self.workflow_rag.search_atoms_by_keywords(query, limit=10)
+                if relevant_atoms:
+                    context += "## Available Atoms for Task Decomposition:\n\n"
+                    for i, atom in enumerate(relevant_atoms, 1):
+                        atom_id = atom.get("id", "unknown")
+                        context += f"{i}. **{atom['title']}** (`{atom_id}`)\n"
+                        context += f"   - {atom.get('description', 'N/A')[:200]}...\n\n"
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get atoms for task decomposition: {e}")
+        
+        # Add decomposition patterns
+        context += "\n## Task Decomposition Guidelines:\n\n"
+        context += "- Break complex tasks into atomic, sequential subtasks\n"
+        context += "- Each subtask should map to one or more atoms\n"
+        context += "- Consider dependencies between subtasks\n"
+        context += "- Ensure subtasks are specific and actionable\n"
+        context += "- Order subtasks logically (data loading → processing → analysis → visualization)\n"
+        
+        return context
+    
+    def get_atoms_for_subtask(self, subtask_description: str) -> List[Dict[str, Any]]:
+        """
+        Get recommended atoms for a specific subtask.
+        
+        Args:
+            subtask_description: Description of the subtask
+            
+        Returns:
+            List of recommended atoms with metadata
+        """
+        recommended = []
+        
+        if self.workflow_rag:
+            try:
+                atoms = self.workflow_rag.search_atoms_by_keywords(subtask_description, limit=5)
+                for atom in atoms:
+                    atom_id = atom.get("id", "unknown")
+                    recommended.append({
+                        "atom_id": atom_id,
+                        "title": atom.get("title", ""),
+                        "description": atom.get("description", ""),
+                        "metadata": self.get_atom_metadata(atom_id),
+                        "dependencies": self.get_atom_dependencies(atom_id),
+                        "requirements": self.get_atom_requirements(atom_id)
+                    })
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get atoms for subtask: {e}")
+        
+        return recommended
+    
     def get_typical_next_atoms(self, current_atom_id: str) -> List[str]:
         """
         Get typical next atoms after the current atom.

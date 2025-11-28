@@ -8,6 +8,7 @@ import uuid
 import logging
 import requests
 import time
+import os
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from abc import ABC, abstractmethod
@@ -337,6 +338,297 @@ class BaseAgent(BaseAgentInterface, ABC):
         return context
     
     # ========================================================================
+    # Intent Detection and Routing
+    # ========================================================================
+    
+    def _detect_intent(self, user_prompt: str) -> Dict[str, Any]:
+        """
+        Detect user intent: workflow (data science) or text_reply (normal question).
+        Uses LLM to classify the prompt.
+        
+        Args:
+            user_prompt: User's query/prompt
+            
+        Returns:
+            Dict with intent, confidence, and reasoning
+        """
+        logger.info(f"🔍 BaseAgent detecting intent for: {user_prompt[:100]}...")
+        
+        intent_prompt = f"""You are an intelligent intent classifier for Trinity AI.
+
+**USER PROMPT**: "{user_prompt}"
+
+## Your Task:
+
+Classify the user's intent into one of two categories:
+
+1. **"text_reply"**: Simple questions, explanations, general knowledge, or conversational queries that can be answered with text only. Examples:
+   - "What is machine learning?"
+   - "How does data analysis work?"
+   - "Explain regression"
+   - "What are the benefits of Python?"
+   - General questions that don't require data processing
+
+2. **"workflow"**: Data science tasks, data processing, analysis, transformations, or operations that require:
+   - Working with data files
+   - Data transformations
+   - Data analysis
+   - Creating charts/visualizations
+   - Data cleaning or processing
+   - Statistical operations
+   - Machine learning operations
+   - Any task that needs to process or analyze data
+
+## Output Format:
+
+Return ONLY a valid JSON object (no other text):
+
+```json
+{{
+  "intent": "text_reply" or "workflow",
+  "confidence": 0.0 to 1.0,
+  "reasoning": "Brief explanation of why this classification"
+}}
+```
+
+Now classify the intent:"""
+        
+        try:
+            response = self._call_llm(intent_prompt, temperature=0.2, num_predict=500)
+            
+            if not response:
+                logger.warning("⚠️ Empty LLM response for intent detection, defaulting to workflow")
+                return {
+                    "intent": "workflow",
+                    "confidence": 0.5,
+                    "reasoning": "LLM response was empty, defaulting to workflow"
+                }
+            
+            # Extract JSON from response
+            intent_result = self._extract_json(response)
+            
+            if not intent_result:
+                logger.warning("⚠️ Could not parse intent JSON, defaulting to workflow")
+                return {
+                    "intent": "workflow",
+                    "confidence": 0.5,
+                    "reasoning": "Could not parse LLM response, defaulting to workflow"
+                }
+            
+            # Validate intent value
+            intent = intent_result.get("intent", "workflow")
+            if intent not in ["workflow", "text_reply"]:
+                logger.warning(f"⚠️ Invalid intent value: {intent}, defaulting to workflow")
+                intent = "workflow"
+            
+            result = {
+                "intent": intent,
+                "confidence": float(intent_result.get("confidence", 0.5)),
+                "reasoning": intent_result.get("reasoning", "No reasoning provided")
+            }
+            
+            logger.info(f"✅ Intent detected: {result['intent']} (confidence: {result['confidence']:.2f})")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Error detecting intent: {e}")
+            return {
+                "intent": "workflow",
+                "confidence": 0.5,
+                "reasoning": f"Error during intent detection: {str(e)}"
+            }
+    
+    def _call_react_workflow(
+        self,
+        user_prompt: str,
+        session_id: str,
+        file_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Call ReAct workflow orchestrator.
+        Since BaseAgent runs in the same service, we call the function directly
+        instead of making an HTTP request.
+        
+        Args:
+            user_prompt: User's prompt
+            session_id: Session ID
+            file_context: Optional file context
+            
+        Returns:
+            Workflow execution result
+        """
+        try:
+            # Import the chat function directly since we're in the same service
+            try:
+                from STREAMAI.main_app import chat, ChatRequest, ChatResponse
+                import asyncio
+                
+                logger.info(f"🔄 Calling ReAct workflow directly (same process)")
+                
+                # Create request object
+                chat_request = ChatRequest(
+                    message=user_prompt,
+                    session_id=session_id,
+                    file_context=file_context or {}
+                )
+                
+                # Call the async function from sync context
+                # Since execute() is synchronous, we need to run the async function
+                # Check if we're already in an async context first
+                try:
+                    # Try to get existing event loop
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context, can't use asyncio.run()
+                    # Fall back to HTTP call immediately
+                    logger.warning("⚠️ Already in async context, falling back to HTTP call")
+                    return self._call_react_workflow_http(user_prompt, session_id, file_context)
+                except RuntimeError as no_loop_err:
+                    # No running loop, we can use asyncio.run()
+                    # But check if we're in a thread that can't create event loops
+                    try:
+                        # Try to create a new event loop
+                        try:
+                            chat_response = asyncio.run(chat(chat_request))
+                        except RuntimeError as run_err:
+                            # If asyncio.run() fails (e.g., nested event loop, or in thread), fall back to HTTP
+                            if "cannot be called from a running event loop" in str(run_err) or "There is no current event loop" in str(run_err):
+                                logger.warning(f"⚠️ Cannot create event loop: {run_err}, falling back to HTTP call")
+                                return self._call_react_workflow_http(user_prompt, session_id, file_context)
+                            else:
+                                raise
+                    except Exception as async_err:
+                        logger.warning(f"⚠️ Error calling async function directly: {async_err}")
+                        logger.info("🔄 Falling back to HTTP call")
+                        return self._call_react_workflow_http(user_prompt, session_id, file_context)
+                
+                logger.info(f"✅ ReAct workflow completed: {chat_response.response[:100] if chat_response.response else 'No response'}...")
+                
+                return {
+                    "success": True,
+                    "intent": "workflow",
+                    "response": chat_response.response or "",
+                    "session_id": chat_response.session_id,
+                    "data": {
+                        "response": chat_response.response,
+                        "session_id": chat_response.session_id,
+                        "sequence": chat_response.sequence
+                    }
+                }
+                
+            except ImportError as import_err:
+                logger.warning(f"⚠️ Could not import chat function directly: {import_err}")
+                logger.info("🔄 Falling back to HTTP call")
+                # Fallback to HTTP call
+                return self._call_react_workflow_http(user_prompt, session_id, file_context)
+            
+        except Exception as e:
+            logger.error(f"❌ Error calling ReAct workflow: {e}", exc_info=True)
+            # Try HTTP fallback
+            try:
+                return self._call_react_workflow_http(user_prompt, session_id, file_context)
+            except Exception as http_err:
+                logger.error(f"❌ HTTP fallback also failed: {http_err}")
+                return {
+                    "success": False,
+                    "intent": "workflow",
+                    "error": str(e),
+                    "response": f"I encountered an error executing the workflow: {str(e)}"
+                }
+    
+    def _call_react_workflow_http(
+        self,
+        user_prompt: str,
+        session_id: str,
+        file_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Fallback: Call ReAct workflow via HTTP endpoint.
+        
+        IMPORTANT: Since BaseAgent runs in the same service as the FastAPI app,
+        we ALWAYS use localhost with AI_PORT, ignoring FASTAPI_BASE_URL.
+        
+        Args:
+            user_prompt: User's prompt
+            session_id: Session ID
+            file_context: Optional file context
+            
+        Returns:
+            Workflow execution result
+        """
+        # CRITICAL: Always use localhost with AI_PORT since we're in the same service
+        # Ignore FASTAPI_BASE_URL to avoid port mismatches
+        ai_port = os.getenv("AI_PORT", "8002")
+        fastapi_base_url = f"http://localhost:{ai_port}"
+        
+        endpoint = f"{fastapi_base_url}/streamai/chat"
+        logger.info(f"🔄 Calling ReAct workflow endpoint via HTTP: {endpoint}")
+        logger.info(f"   AI_PORT env: {os.getenv('AI_PORT', 'not set')} (using this port)")
+        logger.info(f"   FASTAPI_BASE_URL env: {os.getenv('FASTAPI_BASE_URL', 'not set')} (ignored - using localhost)")
+        logger.info(f"   Resolved URL: {fastapi_base_url}")
+        
+        payload = {
+            "message": user_prompt,
+            "session_id": session_id,
+            "file_context": file_context or {}
+        }
+        
+        try:
+            response = requests.post(
+                endpoint,
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=600  # 10 minutes timeout for workflows
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f"✅ ReAct workflow completed via HTTP: {result.get('response', '')[:100]}...")
+            
+            return {
+                "success": True,
+                "intent": "workflow",
+                "response": result.get("response", ""),
+                "data": result
+            }
+        except requests.exceptions.ConnectionError as conn_err:
+            error_msg = str(conn_err)
+            logger.error(f"❌ Connection error calling {endpoint}: {error_msg}")
+            
+            # Try alternative ports if connection fails (in order: 8002, 8001, 8000)
+            alternative_ports = ["8002", "8001", "8000"]
+            current_port = ai_port
+            if current_port in alternative_ports:
+                alternative_ports.remove(current_port)
+            # Add current port at the beginning
+            alternative_ports.insert(0, current_port)
+            
+            for alt_port in alternative_ports:
+                try:
+                    alt_url = f"http://localhost:{alt_port}/streamai/chat"
+                    logger.info(f"🔄 Trying port: {alt_url}")
+                    response = requests.post(
+                        alt_url,
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=10
+                    )
+                    response.raise_for_status()
+                    result = response.json()
+                    logger.info(f"✅ ReAct workflow completed via HTTP on port {alt_port}")
+                    return {
+                        "success": True,
+                        "intent": "workflow",
+                        "response": result.get("response", ""),
+                        "data": result
+                    }
+                except Exception as alt_err:
+                    logger.debug(f"   Port {alt_port} failed: {alt_err}")
+                    continue
+            
+            # All ports failed
+            raise Exception(f"Could not connect to /streamai/chat on any port. Tried: {', '.join([f'localhost:{p}' for p in alternative_ports])}")
+    
+    # ========================================================================
     # Abstract Methods (to be implemented by subclasses)
     # ========================================================================
     
@@ -446,40 +738,101 @@ class BaseAgent(BaseAgentInterface, ABC):
                     session_id=context.session_id
                 )
             
-            # Build context
-            conversation_context = self._build_conversation_context(context.session_id)
-            file_context = self._build_file_context()
-            full_context = f"{conversation_context}\n{file_context}"
+            # ========================================================================
+            # NOTE: Intent detection is handled ONCE at the entry point (STREAMAI/main_app.py)
+            # Agents should NOT call intent detection - they should just execute their logic
+            # If we reach here, it means intent was already detected as "workflow"
+            # ========================================================================
+            logger.info("ℹ️ Intent already detected at entry point - executing agent logic (no intent detection here)")
             
-            # Build prompt
+            # Skip intent detection - assume we're here because intent is "workflow"
+            # If text_reply was needed, it would have been handled at the entry point
+            intent = "workflow"
+            
+            # ========================================================================
+            # AGENT EXECUTION PATH: Execute agent-specific logic
+            # ========================================================================
+            logger.info("🔄 Executing agent-specific logic (workflow path)")
+            
+            # Build file context for agent execution
+            file_context = {
+                "files": self.files_with_columns,
+                "client_name": context.client_name,
+                "app_name": context.app_name,
+                "project_name": context.project_name
+            }
+            
+            # Build conversation context
+            conversation_context = self._build_conversation_context(context.session_id)
+            file_context_str = self._build_file_context()
+            full_context = f"{conversation_context}\n{file_context_str}"
+            
+            # Build agent-specific prompt
             prompt = self._build_prompt(
                 user_prompt=context.user_prompt,
                 available_files=self.files_with_columns,
                 context=full_context
             )
             
-            # Call LLM
+            # Call LLM with agent-specific prompt (NOT intent detection prompt)
             llm_response = self._call_llm(prompt)
             
-            # Extract JSON
-            result = self._extract_json(llm_response)
+            # Extract JSON from agent response
+            agent_result = self._extract_json(llm_response)
             
-            if not result:
-                logger.warning("JSON extraction failed, using fallback")
-                result = self._create_fallback_response(context.session_id)
+            if not agent_result:
+                return AgentResult(
+                    success=False,
+                    data={},
+                    message="Could not parse agent response.",
+                    error="JSON extraction failed",
+                    session_id=context.session_id
+                )
+            
+            # Validate and normalize agent result
+            if hasattr(self, '_validate_json'):
+                if not self._validate_json(agent_result):
+                    return AgentResult(
+                        success=False,
+                        data={},
+                        message="Agent response validation failed.",
+                        error="Invalid response structure",
+                        session_id=context.session_id
+                    )
+            
+            # Normalize result if method exists
+            if hasattr(self, '_normalize_result'):
+                agent_result = self._normalize_result(agent_result)
+            
+            # Build result
+            result = {
+                "response": agent_result.get("smart_response", agent_result.get("response", "")),
+                "intent": "workflow",
+                "agent_data": agent_result,
+                "reasoning": agent_result.get("reasoning", "Agent execution completed")
+            }
+            
+            # Normalize result format (always workflow path now)
+            if "error" in result:
+                normalized_result = {
+                    "message": result.get("response", "Agent execution failed"),
+                    "error": result.get("error", "Unknown error"),
+                    "intent": "workflow",
+                    "agent_data": result.get("agent_data", {})
+                }
             else:
-                # Validate JSON
-                if not self._validate_json(result):
-                    logger.warning("JSON validation failed, using fallback")
-                    result = self._create_fallback_response(context.session_id)
-                else:
-                    # Normalize result
-                    result = self._normalize_result(result)
+                normalized_result = {
+                    "message": result.get("response", ""),
+                    "intent": "workflow",
+                    "agent_data": result.get("agent_data", {}),
+                    "reasoning": result.get("reasoning", "")
+                }
             
             # Store interaction
             interaction = {
                 "user_prompt": context.user_prompt,
-                "system_response": result,
+                "system_response": normalized_result,
+                "intent": intent,
                 "timestamp": datetime.now().isoformat()
             }
             self.sessions[context.session_id].append(interaction)
@@ -495,16 +848,27 @@ class BaseAgent(BaseAgentInterface, ABC):
             
             processing_time = time.time() - start_time
             
-            # Convert to AgentResult
-            return AgentResult(
-                success=result.get("success", True),
-                data=result.get("data", result),
-                message=result.get("message", ""),
-                error=result.get("error"),
-                artifacts=result.get("artifacts", []),
-                session_id=context.session_id,
-                processing_time=processing_time
-            )
+            # Convert to AgentResult (always workflow path now - intent already detected at entry point)
+            if "error" in normalized_result:
+                return AgentResult(
+                    success=False,
+                    data=normalized_result.get("agent_data", {}),
+                    message=normalized_result.get("message", "Agent execution failed"),
+                    error=normalized_result.get("error", "Unknown error"),
+                    artifacts=[],
+                    session_id=context.session_id,
+                    processing_time=processing_time
+                )
+            else:
+                return AgentResult(
+                    success=True,
+                    data=normalized_result.get("agent_data", {}),
+                    message=normalized_result.get("message", ""),
+                    error=None,
+                    artifacts=[],
+                    session_id=context.session_id,
+                    processing_time=processing_time
+                )
             
         except Exception as e:
             logger.error(f"Error during execution: {e}", exc_info=True)
