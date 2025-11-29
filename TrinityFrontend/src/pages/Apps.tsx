@@ -13,6 +13,8 @@ import { REGISTRY_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
+import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
+import { startProjectTransition } from '@/utils/projectTransition';
 
 interface BackendApp {
   id: number;
@@ -35,46 +37,6 @@ interface ModeStatus {
   laboratory: boolean;
   exhibition: boolean;
 }
-
-// Recent projects data
-const recentProjects = [
-  {
-    id: 'proj-1',
-    name: 'Q4 Marketing Campaign Analysis',
-    appId: 'marketing-mix',
-    appTitle: 'Marketing Mix Modeling',
-    lastModified: new Date(Date.now() - 2 * 60 * 60 * 1000),
-    icon: Target,
-    modes: { workflow: true, laboratory: true, exhibition: false },
-  },
-  {
-    id: 'proj-2',
-    name: 'Holiday Sales Forecast 2024',
-    appId: 'forecasting',
-    appTitle: 'Forecasting Analysis',
-    lastModified: new Date(Date.now() - 5 * 60 * 60 * 1000),
-    icon: LineChart,
-    modes: { workflow: true, laboratory: false, exhibition: false },
-  },
-  {
-    id: 'proj-3',
-    name: 'Black Friday Promo Impact',
-    appId: 'promo-effectiveness',
-    appTitle: 'Promo Effectiveness',
-    lastModified: new Date(Date.now() - 24 * 60 * 60 * 1000),
-    icon: Zap,
-    modes: { workflow: true, laboratory: true, exhibition: true },
-  },
-  {
-    id: 'proj-4',
-    name: 'Customer Behavior Clusters',
-    appId: 'customer-segmentation',
-    appTitle: 'Customer Segmentation',
-    lastModified: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-    icon: Users,
-    modes: { workflow: false, laboratory: false, exhibition: false },
-  },
-];
 
 const formatRelativeTime = (date: Date) => {
   const now = new Date();
@@ -428,6 +390,79 @@ const Apps = () => {
     navigate(`/projects?app=${appId}`);
   };
 
+  const openRecentProject = async (project: {
+    id: string;
+    name: string;
+    appId: string;
+    appTitle: string;
+    lastModified: Date;
+    icon: any;
+    modes: ModeStatus;
+  }) => {
+    // Get app ID from appMap
+    const appId = appMap[project.appId];
+    if (!appId) {
+      console.error('❌ App ID not found for slug:', project.appId);
+      return;
+    }
+
+    // Clear project state
+    clearProjectState();
+
+    // Set up current-app in localStorage
+    localStorage.setItem('current-app', JSON.stringify({ id: appId, slug: project.appId }));
+
+    // Construct initial environment
+    let env: Record<string, string> = {
+      APP_NAME: project.appId || '',
+      APP_ID: appId.toString(),
+      PROJECT_NAME: project.name,
+      PROJECT_ID: project.id || '',
+    };
+
+    // Preserve existing CLIENT_NAME and CLIENT_ID if available
+    try {
+      const envStr = localStorage.getItem('env');
+      const baseEnv = envStr ? JSON.parse(envStr) : {};
+      if (baseEnv.CLIENT_NAME) env.CLIENT_NAME = baseEnv.CLIENT_NAME;
+      if (baseEnv.CLIENT_ID) env.CLIENT_ID = baseEnv.CLIENT_ID;
+    } catch {
+      /* ignore parse errors */
+    }
+    localStorage.setItem('env', JSON.stringify(env));
+
+    // Fetch full project details from API
+    try {
+      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { 
+        credentials: 'include' 
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.environment) {
+          // Update environment with full project data from API
+          env = {
+            ...env,
+            ...data.environment,
+            APP_NAME: project.appId || env.APP_NAME,
+            APP_ID: appId.toString() || env.APP_ID,
+            PROJECT_NAME: project.name,
+            PROJECT_ID: project.id || env.PROJECT_ID,
+          };
+          localStorage.setItem('env', JSON.stringify(env));
+        }
+
+        // Save project to localStorage
+        saveCurrentProject(data);
+      }
+    } catch (err) {
+      console.log('Project env fetch error', err);
+      // Still proceed with navigation even if API call fails
+    }
+
+    // Navigate to laboratory mode
+    startProjectTransition(navigate);
+  };
+
   const categories = [
     { id: 'all', label: 'All', icon: LayoutGrid },
     { id: 'marketing', label: 'Marketing', icon: Target },
@@ -547,8 +582,8 @@ const Apps = () => {
         </div>
 
         <ScrollArea className="h-[calc(100vh-80px)]">
-          {/* Recent Projects Section */}
-          {(recentProjectsState.length > 0 ? recentProjectsState : recentProjects).length > 0 && (
+          {/* Recent Projects Section - Only show if there are projects */}
+          {recentProjectsState.length > 0 && (
             <section className="border-b border-border/40 bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
               <div className="max-w-7xl mx-auto px-6 py-8">
                 <div className="flex items-center justify-between mb-6">
@@ -572,7 +607,7 @@ const Apps = () => {
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {(recentProjectsState.length > 0 ? recentProjectsState : recentProjects).map((project) => {
+                  {recentProjectsState.map((project) => {
                     const Icon = project.icon;
                     return (
                       <Card
@@ -583,10 +618,7 @@ const Apps = () => {
                           "shadow-sm hover:shadow-[0_12px_28px_rgba(var(--color-primary-rgb, 59,130,246),0.12)]",
                           "transition-all duration-300 hover:-translate-y-2"
                         )}
-                        onClick={() => {
-                          localStorage.setItem('current-app', JSON.stringify({ id: appMap[project.appId] || 0, slug: project.appId }));
-                          navigate(`/projects?app=${project.appId}`);
-                        }}
+                        onClick={() => openRecentProject(project)}
                       >
                         <div className="p-4">
                           <div className="flex items-start gap-3 mb-4">
