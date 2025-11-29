@@ -136,6 +136,15 @@ const Apps = () => {
   const [introBaseDelay, setIntroBaseDelay] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [recentProjectsState, setRecentProjectsState] = useState<Array<{
+    id: string;
+    name: string;
+    appId: string;
+    appTitle: string;
+    lastModified: Date;
+    icon: any;
+    modes: ModeStatus;
+  }>>([]);
 
   const { isAuthenticated, user } = useAuth();
 
@@ -199,6 +208,140 @@ const Apps = () => {
 
     loadApps();
   }, [isAuthenticated, user]);
+
+  // Fetch and transform all projects for recent projects section
+  useEffect(() => {
+    // Clear state on mount to ensure fresh data on reload
+    setRecentProjectsState([]);
+
+    const loadAllProjects = async () => {
+      // Check if user is authenticated and apps are loaded
+      if (!isAuthenticated || !user || apps.length === 0) {
+        return;
+      }
+
+      // Check if REGISTRY_API is defined
+      if (!REGISTRY_API) {
+        console.error('❌ REGISTRY_API is not defined');
+        return;
+      }
+
+      console.log('🔍 Fetching all user projects from registry API...');
+      const apiUrl = `${REGISTRY_API}/projects/`;
+      console.log('🔗 API URL:', apiUrl);
+      console.log('👤 User:', user.username);
+      
+      try {
+        // Fetch all projects (without app filter)
+        const projectsRes = await fetch(apiUrl, { 
+          method: 'GET',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+    
+        if (projectsRes.ok) {
+          const projectsData = await projectsRes.json();
+          console.log('✅ Loaded all user projects:', projectsData);
+          console.log('📁 Number of projects:', projectsData.length);
+          
+          if (Array.isArray(projectsData)) {
+            // Create mapping from app ID to app slug and name
+            const appIdToInfoMap: Record<number, { slug: string; name: string }> = {};
+            apps.forEach((app) => {
+              appIdToInfoMap[app.id] = {
+                slug: app.slug,
+                name: app.name
+              };
+            });
+
+            // Transform projects to recentProjects format
+            const transformedProjects = projectsData
+              .map((project: any) => {
+                // Get app ID (handle both object and ID formats)
+                const appId = typeof project.app === 'object' ? project.app?.id : project.app;
+                const appInfo = appIdToInfoMap[appId];
+                
+                if (!appInfo) {
+                  console.warn(`⚠️ App not found for project ${project.id}, app_id: ${appId}`);
+                  return null;
+                }
+
+                // Extract mode status from project.state
+                const state = project.state || {};
+                const modes: ModeStatus = {
+                  workflow: !!(state.workflow_config && (
+                    (state.workflow_config.cards && state.workflow_config.cards.length > 0) ||
+                    (typeof state.workflow_config === 'object' && Object.keys(state.workflow_config).length > 0)
+                  )),
+                  laboratory: !!(state.laboratory_config && (
+                    (state.laboratory_config.cards && state.laboratory_config.cards.length > 0) ||
+                    (typeof state.laboratory_config === 'object' && Object.keys(state.laboratory_config).length > 0)
+                  )),
+                  exhibition: !!(state.exhibition_config && (
+                    (state.exhibition_config.cards && state.exhibition_config.cards.length > 0) ||
+                    (typeof state.exhibition_config === 'object' && Object.keys(state.exhibition_config).length > 0)
+                  )),
+                };
+
+                return {
+                  id: project.id?.toString() || '',
+                  name: project.name,
+                  appId: appInfo.slug,
+                  appTitle: appInfo.name,
+                  lastModified: new Date(project.updated_at),
+                  icon: getAppIcon(appInfo.slug),
+                  modes: modes,
+                };
+              })
+              .filter((p: any) => p !== null) // Remove projects with unknown apps
+              .sort((a: any, b: any) => {
+                // Sort by updated_at (most recent first)
+                return b.lastModified.getTime() - a.lastModified.getTime();
+              })
+              .slice(0, 4); // Get top 4 most recent
+
+            console.log('📋 Transformed recent projects:', transformedProjects);
+            setRecentProjectsState(transformedProjects);
+          } else {
+            console.log('❌ Response is not an array:', typeof projectsData);
+          }
+        } else {
+          const text = await projectsRes.text();
+          console.log('❌ Failed to load projects:', text);
+          console.log('❌ Status:', projectsRes.status, projectsRes.statusText);
+          
+          // If 403, the session might be expired
+          if (projectsRes.status === 403) {
+            console.log('🔄 Session expired, redirecting to login...');
+          }
+        }
+      } catch (err: any) {
+        console.error('💥 Projects fetch error:', err);
+        if (err instanceof TypeError && err.message === 'Failed to fetch') {
+          console.error('❌ Network error - possible causes:');
+          console.error('   - CORS issue');
+          console.error('   - Network connectivity problem');
+          console.error('   - API server not reachable');
+          console.error('   - REGISTRY_API:', REGISTRY_API);
+          console.error('   - Full API URL:', `${REGISTRY_API}/projects/`);
+        } else {
+          console.error('❌ Error details:', err);
+          console.error('❌ Error name:', err?.name);
+          console.error('❌ Error message:', err?.message);
+        }
+        // Don't set empty state on error, keep previous data or fallback
+      }
+    };
+
+    loadAllProjects();
+
+    // Cleanup function to reset state on unmount
+    return () => {
+      setRecentProjectsState([]);
+    };
+  }, [isAuthenticated, user, apps]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -405,7 +548,7 @@ const Apps = () => {
 
         <ScrollArea className="h-[calc(100vh-80px)]">
           {/* Recent Projects Section */}
-          {recentProjects.length > 0 && (
+          {(recentProjectsState.length > 0 ? recentProjectsState : recentProjects).length > 0 && (
             <section className="border-b border-border/40 bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
               <div className="max-w-7xl mx-auto px-6 py-8">
                 <div className="flex items-center justify-between mb-6">
@@ -429,7 +572,7 @@ const Apps = () => {
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {recentProjects.map((project) => {
+                  {(recentProjectsState.length > 0 ? recentProjectsState : recentProjects).map((project) => {
                     const Icon = project.icon;
                     return (
                       <Card
