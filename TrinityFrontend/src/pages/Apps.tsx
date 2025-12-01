@@ -112,7 +112,7 @@ const Apps = () => {
     icon: any;
     modes: ModeStatus;
   }>>([]);
-  const [activeTab, setActiveTab] = useState<'workspace' | 'my-projects'>('workspace');
+  const [activeTab, setActiveTab] = useState<'workspace' | 'my-projects'>('my-projects');
   const [myProjectsState, setMyProjectsState] = useState<Array<{
     id: string;
     name: string;
@@ -349,7 +349,7 @@ const Apps = () => {
     };
   }, [isAuthenticated, user, apps]);
 
-  // Fetch and transform user-specific projects for "My Projects" tab
+  // Fetch and transform user-specific projects for "Your Workspace" tab
   useEffect(() => {
     // Clear state on mount to ensure fresh data on reload
     setMyProjectsState([]);
@@ -795,8 +795,8 @@ const Apps = () => {
                   className="w-full mb-6"
                 >
                   <TabsList className="grid w-full max-w-md grid-cols-2">
-                    <TabsTrigger value="workspace">Your Workspace</TabsTrigger>
-                    <TabsTrigger value="my-projects">My Projects</TabsTrigger>
+                    <TabsTrigger value="my-projects">Your Workspace</TabsTrigger>
+                    <TabsTrigger value="workspace">Companies Workspace</TabsTrigger>
                   </TabsList>
                 </Tabs>
 
@@ -807,10 +807,10 @@ const Apps = () => {
                     </div>
                     <div>
                       <h2 className="text-base font-semibold text-foreground">
-                        {activeTab === 'workspace' ? 'Your Workspace' : 'My Projects'}
+                        {activeTab === 'my-projects' ? 'Your Workspace' : 'Companies Workspace'}
                       </h2>
                       <p className="text-xs text-muted-foreground">
-                        {activeTab === 'workspace' ? 'Continue where you left off' : 'Your recent work'}
+                        {activeTab === 'my-projects' ? 'Your recent work' : 'Continue where you left off'}
                       </p>
                     </div>
                   </div>
@@ -825,9 +825,9 @@ const Apps = () => {
                 </div>
                 
                 {/* Show projects if available, otherwise show empty state */}
-                {(activeTab === 'workspace' ? recentProjectsState.length > 0 : myProjectsState.length > 0) ? (
+                {(activeTab === 'my-projects' ? myProjectsState.length > 0 : recentProjectsState.length > 0) ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {(activeTab === 'workspace' ? recentProjectsState : myProjectsState).map((project) => {
+                    {(activeTab === 'my-projects' ? myProjectsState : recentProjectsState).map((project) => {
                     const Icon = project.icon;
                     const appColorValue = getAppColorValue(project.appId);
                     return (
@@ -884,9 +884,9 @@ const Apps = () => {
                 ) : (
                   <div className="text-center py-12">
                     <p className="text-muted-foreground text-sm">
-                      {activeTab === 'workspace' 
-                        ? 'No recent projects. Start a new project to see it here.'
-                        : 'No projects found. Create or modify a project to see it here.'}
+                      {activeTab === 'my-projects' 
+                        ? 'No projects found. Create or modify a project to see it here.'
+                        : 'No recent projects. Start a new project to see it here.'}
                     </p>
                   </div>
                 )}
