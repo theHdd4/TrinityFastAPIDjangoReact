@@ -782,6 +782,95 @@ const LaboratoryMode = () => {
     };
   }, [canEdit, handleSave]);
 
+  // Handle Ctrl+Alt+I keyboard shortcut to toggle AI panel
+  // Use refs to always access latest state values
+  const auxActiveRef = useRef(auxActive);
+  const isTrinityAIVisibleRef = useRef(isTrinityAIVisible);
+  const trinityAILayoutRef = useRef(trinityAILayout);
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    auxActiveRef.current = auxActive;
+    isTrinityAIVisibleRef.current = isTrinityAIVisible;
+    trinityAILayoutRef.current = trinityAILayout;
+  }, [auxActive, isTrinityAIVisible, trinityAILayout]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Debug: Log all Ctrl+Alt key combinations to help troubleshoot
+      if ((event.ctrlKey || event.metaKey) && event.altKey) {
+        console.log('🔍 Ctrl+Alt key detected:', {
+          key: event.key,
+          code: event.code,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          target: (event.target as HTMLElement)?.tagName
+        });
+      }
+      
+      // Check for Ctrl+Alt+I (or Cmd+Alt+I on Mac)
+      const isCtrlAltI = (event.ctrlKey || event.metaKey) && event.altKey && 
+                         (event.key.toLowerCase() === 'i' || event.code === 'KeyI');
+      
+      if (isCtrlAltI) {
+        console.log('✅ Ctrl+Alt+I detected!');
+        
+        // Don't trigger if user is typing in an input field
+        const target = event.target as HTMLElement;
+        const isInputField = 
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.contentEditable === 'true' ||
+          target.getAttribute('role') === 'textbox';
+        
+        if (isInputField) {
+          console.log('⚠️ Ignored: user is typing in input field');
+          return;
+        }
+
+        // Prevent default and stop propagation
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        
+        console.log('⌨️ Ctrl+Alt+I pressed - toggling AI panel', {
+          currentActive: auxActiveRef.current,
+          isVisible: isTrinityAIVisibleRef.current,
+          layout: trinityAILayoutRef.current
+        });
+        
+        // Directly toggle the AI panel state (same logic as clicking the icon)
+        const currentActive = auxActiveRef.current;
+        const newActive = currentActive === 'trinity' ? null : 'trinity';
+        
+        // If panel was hidden, show it again
+        if (newActive === 'trinity' && !isTrinityAIVisibleRef.current) {
+          setIsTrinityAIVisible(true);
+        }
+        
+        // In horizontal view, toggle collapse state
+        if (trinityAILayoutRef.current === 'horizontal' && newActive === 'trinity') {
+          setIsHorizontalAICollapsed(false); // Expand when opening
+        } else if (trinityAILayoutRef.current === 'horizontal' && newActive === null && currentActive === 'trinity') {
+          setIsHorizontalAICollapsed(true); // Collapse when closing
+        }
+        
+        // Update the active state
+        setAuxActive(newActive);
+        console.log('✅ AI panel toggled to:', newActive);
+      }
+    };
+
+    // Use capture phase to ensure this handler runs before others
+    window.addEventListener('keydown', handleKeyDown, true);
+    console.log('🎹 Keyboard shortcut handler registered: Ctrl+Alt+I');
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []); // Empty deps - we use refs for state access
+
   return (
     <div
       data-lab-preparing={isPreparingAnimation ? 'true' : undefined}

@@ -41,6 +41,20 @@ class InsightResponse(BaseModel):
     processing_time: float = Field(..., description="Time taken to generate insight")
     session_id: Optional[str] = Field(None, description="Session ID")
 
+class AtomInsightRequest(BaseModel):
+    smart_response: str = Field(..., description="User-friendly smart response from agent")
+    response: str = Field(..., description="Raw response/thinking from agent")
+    reasoning: str = Field(..., description="Reasoning behind the agent's actions")
+    data_summary: Dict[str, Any] = Field(..., description="Standardized data summary with atom_type, summary_data, metadata")
+    atom_type: str = Field(..., description="Type of atom (chart-maker, merge, concat, etc.)")
+    session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
+
+class AtomInsightResponse(BaseModel):
+    success: bool = Field(..., description="Whether insight generation was successful")
+    insight: str = Field(..., description="Generated insight explaining what happened in this step")
+    processing_time: float = Field(..., description="Time taken to generate insight")
+    session_id: Optional[str] = Field(None, description="Session ID")
+
 def analyze_chart_data(chart_data: List[Dict], chart_config: Dict) -> Dict[str, Any]:
     """Analyze chart data to extract key statistics and patterns."""
     
@@ -307,6 +321,173 @@ async def generate_insights(request: InsightRequest):
         return InsightResponse(
             success=False,
             insight=f"Failed to generate insights: {str(e)}",
+            processing_time=time.time() - start_time,
+            session_id=request.session_id
+        )
+
+def build_atom_insight_prompt(smart_response: str, response: str, reasoning: str, data_summary: Dict[str, Any], atom_type: str) -> str:
+    """Build AI prompt for atom insight generation."""
+    
+    atom_type_display = atom_type.replace('-', ' ').replace('_', ' ').title()
+    summary_data = data_summary.get('summary_data', {})
+    metadata = data_summary.get('metadata', {})
+    
+    # Build data summary section
+    data_summary_text = f"Atom Type: {atom_type_display}\n"
+    
+    if metadata.get('file_name'):
+        data_summary_text += f"File: {metadata['file_name']}\n"
+    if metadata.get('row_count'):
+        data_summary_text += f"Rows: {metadata['row_count']:,}\n"
+    if metadata.get('column_count'):
+        data_summary_text += f"Columns: {metadata['column_count']}\n"
+    
+    # Add atom-specific summary data
+    if atom_type == 'chart-maker' and summary_data.get('chart_config'):
+        chart_config = summary_data['chart_config']
+        if isinstance(chart_config, list) and len(chart_config) > 0:
+            chart_config = chart_config[0]
+        data_summary_text += f"Chart Type: {chart_config.get('chartType', chart_config.get('chart_type', 'Unknown'))}\n"
+        data_summary_text += f"X-Axis: {chart_config.get('xAxis', chart_config.get('x_axis', 'Unknown'))}\n"
+        if chart_config.get('yAxes') and len(chart_config.get('yAxes', [])) > 0:
+            data_summary_text += f"Y-Axis: {chart_config['yAxes'][0]}\n"
+        elif chart_config.get('y_axis'):
+            data_summary_text += f"Y-Axis: {chart_config['y_axis']}\n"
+    elif atom_type == 'merge' and summary_data.get('merge_keys'):
+        data_summary_text += f"Merge Keys: {', '.join(summary_data['merge_keys'])}\n"
+    elif atom_type == 'concat' and summary_data.get('files'):
+        data_summary_text += f"Files Concatenated: {len(summary_data['files'])}\n"
+    elif atom_type == 'groupby-wtg-avg' and summary_data.get('group_by'):
+        data_summary_text += f"Group By: {', '.join(summary_data['group_by'])}\n"
+    elif atom_type == 'create-column' and summary_data.get('column_name'):
+        data_summary_text += f"New Column: {summary_data['column_name']}\n"
+    elif atom_type == 'correlation':
+        if summary_data.get('method'):
+            data_summary_text += f"Correlation Method: {summary_data['method']}\n"
+        if summary_data.get('measure_columns'):
+            measure_cols = summary_data['measure_columns']
+            if isinstance(measure_cols, list) and len(measure_cols) > 0:
+                data_summary_text += f"Numeric Columns: {', '.join(measure_cols[:10])}{'...' if len(measure_cols) > 10 else ''}\n"
+            elif len(measure_cols) == 0:
+                data_summary_text += f"All numeric columns used (auto-detected)\n"
+        if summary_data.get('identifier_columns'):
+            identifier_cols = summary_data['identifier_columns']
+            if isinstance(identifier_cols, list) and len(identifier_cols) > 0:
+                data_summary_text += f"Filter Columns: {', '.join(identifier_cols)}\n"
+        if summary_data.get('include_date_analysis'):
+            data_summary_text += f"Date Analysis: Enabled\n"
+    
+    prompt = f"""You are an intelligent data analysis assistant. Your task is to explain what happened in a data processing step in a clear, user-friendly way.
+
+STEP INFORMATION:
+{data_summary_text}
+
+AGENT RESPONSES:
+Smart Response (User-friendly): {smart_response}
+
+Response (Raw thinking): {response}
+
+Reasoning: {reasoning}
+
+TASK: Generate a concise, valuable insight (2-4 sentences) that:
+1. Explains what operation was performed in this step
+2. Highlights key outcomes or changes to the data
+3. Provides context about why this step matters
+4. Uses clear, non-technical language that helps users understand what happened
+
+The insight should be informative and help users understand the value and impact of this data processing step.
+
+Provide only the insight text - no JSON, no formatting, just the explanation.
+
+EXAMPLE OUTPUT STYLE:
+"I've successfully merged two datasets using the 'product_id' key, combining sales data with product information. This created a unified dataset with {metadata.get('row_count', 'N')} rows, allowing you to analyze sales performance alongside product details. The merge operation ensures data integrity by matching records on the specified key."
+"""
+    
+    return prompt
+
+@router.post("/generate-atom-insight", response_model=AtomInsightResponse)
+async def generate_atom_insight(request: AtomInsightRequest):
+    """
+    Generate AI-powered insights explaining what happened in an atom step.
+    Uses smart_response, response, reasoning, and data summary to create valuable insights.
+    """
+    start_time = time.time()
+    
+    try:
+        # 📝 LOG: What we received from frontend
+        print("\n" + "="*80)
+        print("📥 BACKEND: Received Insight Request (from Frontend)")
+        print("="*80)
+        print(f"Atom Type: {request.atom_type}")
+        print(f"Session ID: {request.session_id or 'N/A'}")
+        print("\n--- Smart Response (User-friendly): ---")
+        print(request.smart_response or "(empty)")
+        print("\n--- Response (Raw thinking): ---")
+        print(request.response or "(empty)")
+        print("\n--- Reasoning: ---")
+        print(request.reasoning or "(empty)")
+        print("\n--- Data Summary: ---")
+        print(json.dumps(request.data_summary, indent=2))
+        print("="*80 + "\n")
+        
+        logger.info(f"🤖 Atom insight generation request - Atom type: {request.atom_type}")
+        
+        # Build prompt for atom insight
+        prompt = build_atom_insight_prompt(
+            request.smart_response,
+            request.response,
+            request.reasoning,
+            request.data_summary,
+            request.atom_type
+        )
+        
+        # 📝 LOG: What we're sending to LLM
+        print("\n" + "="*80)
+        print("📤 BACKEND: Sending to LLM (Full Prompt)")
+        print("="*80)
+        print(f"API URL: {cfg['api_url']}")
+        print(f"Model: {cfg['model_name']}")
+        print(f"Prompt Length: {len(prompt)} characters")
+        print("\n--- Full Prompt (what LLM will see): ---")
+        print(prompt)
+        print("="*80 + "\n")
+        
+        logger.info(f"🤖 Generated atom insight prompt (length: {len(prompt)})")
+        
+        # Call LLM for insight generation
+        ai_insight = call_llm_for_insights(
+            cfg["api_url"], 
+            cfg["model_name"], 
+            cfg["bearer_token"], 
+            prompt
+        )
+        
+        processing_time = time.time() - start_time
+        
+        # 📝 LOG: What we received from LLM
+        print("\n" + "="*80)
+        print("📥 BACKEND: Received from LLM (Generated Insight)")
+        print("="*80)
+        print(f"Processing Time: {processing_time:.2f}s")
+        print(f"Insight Length: {len(ai_insight)} characters")
+        print("\n--- Generated Insight (what will be sent to frontend/UI): ---")
+        print(ai_insight)
+        print("="*80 + "\n")
+        
+        logger.info(f"✅ Atom insight generated successfully in {processing_time:.2f}s")
+        
+        return AtomInsightResponse(
+            success=True,
+            insight=ai_insight,
+            processing_time=processing_time,
+            session_id=request.session_id
+        )
+        
+    except Exception as e:
+        logger.error(f"Atom insight generation failed: {e}")
+        return AtomInsightResponse(
+            success=False,
+            insight=f"Failed to generate insight: {str(e)}",
             processing_time=time.time() - start_time,
             session_id=request.session_id
         )

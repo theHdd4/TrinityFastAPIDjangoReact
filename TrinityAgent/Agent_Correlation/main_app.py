@@ -1,5 +1,5 @@
 """
-Standardized DataUploadValidate Agent using BaseAgent infrastructure
+Standardized Correlation Agent using BaseAgent infrastructure
 Connects to backend via FastAPI router
 """
 
@@ -7,7 +7,7 @@ import sys
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Union
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from .router import router
 
 # Initialize logger early
-logger = logging.getLogger("trinity.agent_data_upload_validate")
+logger = logging.getLogger("trinity.agent_correlation")
 
 # Add parent directory to path to import BaseAgent
 parent_dir = Path(__file__).parent.parent
@@ -32,17 +32,17 @@ BaseAgent = None
 AgentContext = None
 AgentResult = None
 settings = None
-DataUploadValidatePromptBuilder = None
+CorrelationPromptBuilder = None
 
 logger.info("=" * 80)
-logger.info("ATTEMPTING TO IMPORT BASEAGENT FOR DATA UPLOAD VALIDATE")
+logger.info("ATTEMPTING TO IMPORT BASEAGENT FOR CORRELATION")
 logger.info("=" * 80)
 
 try:
     try:
         logger.info("Strategy 1: Importing from BaseAgent.__init__.py (package import)...")
         from BaseAgent import BaseAgent, AgentContext, AgentResult, settings
-        from .data_upload_validate_prompt import DataUploadValidatePromptBuilder
+        from .correlation_prompt import CorrelationPromptBuilder
         logger.info("✅ Imported BaseAgent from BaseAgent package (__init__.py)")
     except ImportError as e1:
         logger.warning(f"Strategy 1 failed: {e1}")
@@ -51,14 +51,14 @@ try:
             from BaseAgent.base_agent import BaseAgent
             from BaseAgent.interfaces import AgentContext, AgentResult
             from BaseAgent.config import settings
-            from .data_upload_validate_prompt import DataUploadValidatePromptBuilder
+            from .correlation_prompt import CorrelationPromptBuilder
             logger.info("✅ Imported BaseAgent from local BaseAgent modules")
         except ImportError as e2:
             logger.warning(f"Strategy 2 failed: {e2}")
             try:
                 logger.info("Strategy 3: Importing from TrinityAgent.BaseAgent (absolute)...")
                 from TrinityAgent.BaseAgent import BaseAgent, AgentContext, AgentResult, settings
-                from .data_upload_validate_prompt import DataUploadValidatePromptBuilder
+                from .correlation_prompt import CorrelationPromptBuilder
                 logger.info("✅ Imported BaseAgent from TrinityAgent.BaseAgent package")
             except ImportError as e3:
                 logger.error(f"Strategy 3 also failed: {e3}")
@@ -70,27 +70,35 @@ except Exception as e:
     logger.error("Router will be available but agent functionality will not work")
     logger.error("=" * 80)
 
-# Only define DataUploadValidateAgent if BaseAgent was imported successfully
+# Only define CorrelationAgent if BaseAgent was imported successfully
 if BaseAgent is not None:
-    class DataUploadValidateAgent(BaseAgent):
+    class CorrelationAgent(BaseAgent):
         """
-        Standardized DataUploadValidate Agent using BaseAgent infrastructure.
-        Only implements data_upload_validate-specific logic.
+        Standardized Correlation Agent using BaseAgent infrastructure.
+        Only implements correlation-specific logic.
         """
+        
+        def __init__(self, *args, **kwargs):
+            """Initialize CorrelationAgent with optional attributes."""
+            super().__init__(*args, **kwargs)
+            # Initialize optional attributes used in _build_prompt
+            self.current_file_details = None
+            self.other_files = None
+            self.matched_columns = None
         
         @property
         def name(self) -> str:
-            return "data_upload_validate"
+            return "correlation"
         
         @property
         def description(self) -> str:
-            return "Loads files into the data upload atom and applies dtype conversions (int64, float64, datetime64, object, bool)"
+            return "Calculates correlation matrices and analyzes relationships between numeric variables"
         
         def _call_llm(self, prompt: str, temperature: float = 0.1, num_predict: int = 4000) -> str:
             """Override to add logging for raw LLM response."""
             llm_response = super()._call_llm(prompt, temperature, num_predict)
             logger.info("=" * 80)
-            logger.info("📥 RECEIVED FROM DATA UPLOAD VALIDATE LLM:")
+            logger.info("📥 RECEIVED FROM CORRELATION LLM:")
             logger.info("=" * 80)
             logger.info(f"Response Length: {len(llm_response)} characters")
             logger.info("-" * 80)
@@ -124,71 +132,17 @@ if BaseAgent is not None:
             available_files: Dict[str, Any],
             context: str
         ) -> str:
-            """Build data_upload_validate-specific prompt using DataUploadValidatePromptBuilder."""
-            # Resolve file context using FileContextResolver to get file details
-            file_details = {}
-            other_files = []
-            matched_columns = {}
-            
-            try:
-                import os
-                
-                # Import FileContextResolver
-                try:
-                    from STREAMAI.file_context_resolver import FileContextResolver
-                except ImportError:
-                    try:
-                        from TrinityAgent.STREAMAI.file_context_resolver import FileContextResolver
-                    except ImportError:
-                        logger.warning("⚠️ FileContextResolver not available - file details will be empty")
-                        FileContextResolver = None
-                
-                if FileContextResolver and available_files:
-                    # Initialize FileContextResolver with available files
-                    # Convert available_files format to the format expected by FileContextResolver
-                    files_index = {}
-                    for file_path, file_info in available_files.items():
-                        if isinstance(file_info, dict) and "columns" in file_info:
-                            columns = file_info["columns"]
-                        elif isinstance(file_info, list):
-                            columns = file_info
-                        else:
-                            columns = []
-                        # Use basename as display name
-                        display_name = os.path.basename(file_path)
-                        files_index[display_name] = columns
-                    
-                    if files_index:
-                        resolver = FileContextResolver()
-                        resolver.update_files(files_index)
-                        
-                        # Resolve file context based on user prompt
-                        selection = resolver.resolve(
-                            prompt=user_prompt,
-                            top_k=3,
-                            include_metadata=True,
-                            fallback_limit=10
-                        )
-                        
-                        if selection:
-                            file_details = selection.file_details or {}
-                            other_files = selection.other_files or []
-                            matched_columns = selection.matched_columns or {}
-                            logger.info(f"✅ Resolved file context: {len(file_details)} file details, {len(other_files)} other files, {len(matched_columns)} matched columns")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to resolve file context: {e}")
-                # Continue with empty file details
-            
-            prompt = DataUploadValidatePromptBuilder.build_data_upload_validate_prompt(
+            """Build correlation-specific prompt using CorrelationPromptBuilder."""
+            prompt = CorrelationPromptBuilder.build_correlation_prompt(
                 user_prompt=user_prompt,
                 available_files_with_columns=available_files,
                 context=context,
-                file_details=file_details,
-                other_files=other_files,
-                matched_columns=matched_columns
+                file_details=self.current_file_details,
+                other_files=self.other_files,
+                matched_columns=self.matched_columns
             )
             logger.info("=" * 80)
-            logger.info("📤 SENDING TO DATA UPLOAD VALIDATE LLM:")
+            logger.info("📤 SENDING TO CORRELATION LLM:")
             logger.info("=" * 80)
             logger.info(f"Prompt Length: {len(prompt)} characters")
             logger.info(f"User Prompt: {user_prompt}")
@@ -201,27 +155,29 @@ if BaseAgent is not None:
             return prompt
         
         def _validate_json(self, result: Dict[str, Any]) -> bool:
-            """Validate data_upload_validate-specific JSON structure."""
+            """Validate correlation-specific JSON structure."""
             if not isinstance(result, dict):
                 return False
             
-            # If success is True, must have validate_json
+            # If success is True, must have correlation_config
             if result.get("success") is True:
-                if "validate_json" not in result:
+                if "correlation_config" not in result:
                     return False
                 
-                validate_json = result.get("validate_json", {})
-                if not isinstance(validate_json, dict):
+                correlation_config = result.get("correlation_config", {})
+                if not isinstance(correlation_config, dict):
                     return False
                 
-                # Must have file_name
-                if "file_name" not in validate_json:
+                # Required fields: file_path and method
+                if "file_path" not in correlation_config:
+                    return False
+                if "method" not in correlation_config:
                     return False
                 
-                # dtype_changes is optional (can be empty dict)
-                if "dtype_changes" in validate_json:
-                    if not isinstance(validate_json["dtype_changes"], dict):
-                        return False
+                # Method must be valid
+                valid_methods = ["pearson", "spearman", "phi_coefficient", "cramers_v"]
+                if correlation_config.get("method", "").lower() not in valid_methods:
+                    logger.warning(f"Invalid correlation method: {correlation_config.get('method')}")
             
             # Must have smart_response
             if "smart_response" not in result:
@@ -231,9 +187,7 @@ if BaseAgent is not None:
         
         def _normalize_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
             """
-            Normalize data_upload_validate result to ensure consistent format.
-            🔧 CRITICAL: File name and column names MUST preserve original case.
-            Only dtype names are normalized to lowercase.
+            Normalize correlation result to ensure consistent format.
             """
             normalized = {
                 "success": result.get("success", False),
@@ -241,73 +195,38 @@ if BaseAgent is not None:
                 "smart_response": result.get("smart_response", ""),
             }
             
-            if "validate_json" in result:
-                validate_json = result["validate_json"]
+            # Process correlation_config
+            if "correlation_config" in result:
+                correlation_config = result["correlation_config"]
+                if not isinstance(correlation_config, dict):
+                    correlation_config = {}
                 
-                if not isinstance(validate_json, dict):
-                    validate_json = {}
-                
-                # Extract file name (preserve original case)
-                file_name = validate_json.get("file_name", "")
-                if isinstance(file_name, list):
-                    file_name = file_name[0] if file_name else ""
-                elif not isinstance(file_name, str):
-                    file_name = str(file_name)
-                
-                # Validate file exists if data_validator is available
-                validation_errors = []
-                if file_name and self.data_validator:
-                    resolved_file_path = self.data_validator._resolve_file_path(file_name)
-                    if not resolved_file_path:
-                        validation_errors.append(f"File '{file_name}' could not be resolved or found.")
-                    elif not self.data_validator._file_exists_in_minio(resolved_file_path):
-                        validation_errors.append(f"File '{resolved_file_path}' does not exist in MinIO.")
-                    else:
-                        logger.info(f"✅ File '{resolved_file_path}' validated for data upload/validate.")
-                        file_name = resolved_file_path  # Use resolved path
-                elif file_name:
-                    logger.warning("⚠️ DataValidator not available - skipping file existence validation.")
-                
-                # Process dtype_changes (preserve column names, normalize dtype names)
-                dtype_changes = validate_json.get("dtype_changes", {})
-                if not isinstance(dtype_changes, dict):
-                    dtype_changes = {}
-                
-                normalized_dtype_changes = {}
-                for col_name, dtype_spec in dtype_changes.items():
-                    # Preserve original column name (case-sensitive)
-                    if isinstance(dtype_spec, dict):
-                        # Complex dtype with format (e.g., datetime64 with format)
-                        normalized_dtype_spec = {
-                            "dtype": dtype_spec.get("dtype", "").lower() if isinstance(dtype_spec.get("dtype"), str) else str(dtype_spec.get("dtype", "")).lower(),
-                            "format": dtype_spec.get("format", "")  # Preserve format as-is
-                        }
-                        normalized_dtype_changes[col_name] = normalized_dtype_spec
-                    elif isinstance(dtype_spec, str):
-                        # Simple dtype string (e.g., "int64", "float64")
-                        normalized_dtype_changes[col_name] = dtype_spec.lower()
-                    else:
-                        # Fallback: convert to string and lowercase
-                        normalized_dtype_changes[col_name] = str(dtype_spec).lower()
-                
-                if validation_errors:
-                    error_msg = "Data validation failed. " + "; ".join(validation_errors)
-                    logger.error(f"❌ DATA UPLOAD VALIDATE VALIDATION ERRORS: {error_msg}")
-                    normalized["success"] = False
-                    normalized["smart_response"] = (
-                        f"I found some issues with the data upload/validate configuration: {error_msg}. "
-                        "Please check that the file exists."
-                    )
-                    normalized["validation_errors"] = validation_errors
-                    return normalized
-                
-                normalized["validate_json"] = {
-                    "file_name": file_name,
-                    "dtype_changes": normalized_dtype_changes
+                # Normalize correlation config
+                normalized_config = {
+                    "file_path": correlation_config.get("file_path", ""),
+                    "method": correlation_config.get("method", "pearson").lower(),
+                    "identifier_columns": correlation_config.get("identifier_columns", []),
+                    "measure_columns": correlation_config.get("measure_columns", []),
+                    "identifier_filters": correlation_config.get("identifier_filters", []),
+                    "measure_filters": correlation_config.get("measure_filters", []),
+                    "include_preview": correlation_config.get("include_preview", True),
+                    "include_date_analysis": correlation_config.get("include_date_analysis", False),
+                    "date_column": correlation_config.get("date_column"),
+                    "date_range_filter": correlation_config.get("date_range_filter"),
+                    "aggregation_level": correlation_config.get("aggregation_level")
                 }
+                
+                # Remove None values
+                normalized_config = {k: v for k, v in normalized_config.items() if v is not None}
+                
+                normalized["correlation_config"] = normalized_config
+            
+            # Add file_name if present
+            if "file_name" in result:
+                normalized["file_name"] = result["file_name"]
             
             # Add other optional fields
-            for key in ["reasoning", "used_memory", "suggestions", "next_steps", "available_files"]:
+            for key in ["reasoning", "used_memory", "suggestions", "next_steps", "file_analysis"]:
                 if key in result:
                     normalized[key] = result[key]
             
@@ -326,36 +245,36 @@ if BaseAgent is not None:
             return {
                 "success": False,
                 "response": "Raw thinking: I encountered an issue processing the request. Based on the user's history, I can see they have used these files before. Let me provide helpful suggestions to guide them.",
-                "smart_response": f"I had trouble processing your request. {'Let me suggest based on your previous usage: ' + ', '.join(favorite_files) if favorite_files else 'Please try with specific file names and dtype conversion requirements.'}",
+                "smart_response": f"I had trouble processing your correlation request. {'Let me suggest based on your previous usage: ' + ', '.join(favorite_files) if favorite_files else 'Please try with specific correlation requirements.'}",
                 "suggestions": [
                     "I had trouble processing your request",
                     f"Files you've used before: {', '.join(favorite_files) if favorite_files else 'None yet'}",
                     f"Available files: {', '.join(list(self.files_with_columns.keys())[:5])}",
-                    "Example: 'load file.csv and convert volume to int64'"
+                    "Example: 'analyze correlations in sales data' or 'find relationships between price and quantity'"
                 ],
                 "recommended_files": favorite_files,
                 "next_steps": [
-                    "Please try with specific file names and dtype conversion requirements",
+                    "Please try with specific correlation requirements",
                     "Or say 'yes' if you want to use suggested files",
                     "Or say 'show me available files' to see all options"
                 ]
             }
 else:
-    DataUploadValidateAgent = None
+    CorrelationAgent = None
 
 agent = None
 agent_initialized = False
 
 if BaseAgent is not None and settings is not None:
     logger.info("=" * 80)
-    logger.info("INITIALIZING DATA UPLOAD VALIDATE AGENT")
+    logger.info("INITIALIZING CORRELATION AGENT")
     logger.info("=" * 80)
     
     try:
         llm_config = settings.get_llm_config()
         minio_config = settings.get_minio_config()
         
-        agent = DataUploadValidateAgent(
+        agent = CorrelationAgent(
             api_url=llm_config["api_url"],
             model_name=llm_config["model_name"],
             bearer_token=llm_config["bearer_token"],
@@ -370,36 +289,36 @@ if BaseAgent is not None and settings is not None:
         try:
             from BaseAgent.registry import registry
             registry.register(agent)
-            logger.info(f"✅ Registered DataUploadValidateAgent in BaseAgent registry")
+            logger.info(f"✅ Registered CorrelationAgent in BaseAgent registry")
         except ImportError:
             try:
                 from TrinityAgent.BaseAgent.registry import registry
                 registry.register(agent)
-                logger.info(f"✅ Registered DataUploadValidateAgent in BaseAgent registry (absolute import)")
+                logger.info(f"✅ Registered CorrelationAgent in BaseAgent registry (absolute import)")
             except ImportError as e:
                 logger.warning(f"⚠️ Could not register agent in registry: {e}")
         
         agent_initialized = True
-        logger.info("✅ DataUploadValidateAgent initialized successfully")
+        logger.info("✅ CorrelationAgent initialized successfully")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize DataUploadValidateAgent: {e}", exc_info=True)
+        logger.error(f"❌ Failed to initialize CorrelationAgent: {e}", exc_info=True)
         agent = None
         agent_initialized = False
 else:
     logger.warning("=" * 80)
-    logger.warning("⚠️ BaseAgent not imported - Data Upload Validate agent will not be initialized")
+    logger.warning("⚠️ BaseAgent not imported - Correlation agent will not be initialized")
     logger.warning("Router and routes will still be available")
     logger.warning("Agent will attempt to initialize on first request")
     logger.warning("=" * 80)
 
-def _retry_baseagent_import_data_upload_validate():
+def _retry_baseagent_import_correlation():
     """Retry BaseAgent import if it failed initially."""
-    global BaseAgent, AgentContext, AgentResult, settings, DataUploadValidatePromptBuilder
+    global BaseAgent, AgentContext, AgentResult, settings, CorrelationPromptBuilder
     
     if BaseAgent is not None:
         return True
     
-    logger.info("Retrying BaseAgent import for Data Upload Validate...")
+    logger.info("Retrying BaseAgent import for Correlation...")
     parent_dir = Path(__file__).parent.parent
     if str(parent_dir) not in sys.path:
         sys.path.insert(0, str(parent_dir))
@@ -407,81 +326,79 @@ def _retry_baseagent_import_data_upload_validate():
     try:
         try:
             from BaseAgent import BaseAgent, AgentContext, AgentResult, settings
-            from .data_upload_validate_prompt import DataUploadValidatePromptBuilder
-            logger.info("✅ BaseAgent imported successfully on retry for Data Upload Validate")
+            from .correlation_prompt import CorrelationPromptBuilder
+            logger.info("✅ BaseAgent imported successfully on retry for Correlation")
             return True
         except ImportError as e1:
-            logger.warning(f"Retry Strategy 1 failed for Data Upload Validate: {e1}")
+            logger.warning(f"Retry Strategy 1 failed for Correlation: {e1}")
             try:
                 from BaseAgent.base_agent import BaseAgent
                 from BaseAgent.interfaces import AgentContext, AgentResult
                 from BaseAgent.config import settings
-                from .data_upload_validate_prompt import DataUploadValidatePromptBuilder
-                logger.info("✅ BaseAgent imported successfully on retry (modules) for Data Upload Validate")
+                from .correlation_prompt import CorrelationPromptBuilder
+                logger.info("✅ BaseAgent imported successfully on retry (modules) for Correlation")
                 return True
             except ImportError as e2:
-                logger.warning(f"Retry Strategy 2 failed for Data Upload Validate: {e2}")
+                logger.warning(f"Retry Strategy 2 failed for Correlation: {e2}")
                 try:
                     from TrinityAgent.BaseAgent import BaseAgent, AgentContext, AgentResult, settings
-                    from .data_upload_validate_prompt import DataUploadValidatePromptBuilder
-                    logger.info("✅ BaseAgent imported successfully on retry (absolute) for Data Upload Validate")
+                    from .correlation_prompt import CorrelationPromptBuilder
+                    logger.info("✅ BaseAgent imported successfully on retry (absolute) for Correlation")
                     return True
                 except ImportError as e3:
-                    logger.error(f"All retry strategies failed for Data Upload Validate: {e1}, {e2}, {e3}")
+                    logger.error(f"All retry strategies failed for Correlation: {e1}, {e2}, {e3}")
                     return False
     except Exception as e:
-        logger.error(f"Unexpected error during BaseAgent retry import for Data Upload Validate: {e}", exc_info=True)
+        logger.error(f"Unexpected error during BaseAgent retry import for Correlation: {e}", exc_info=True)
         return False
 
-class DataUploadValidateRequest(BaseModel):
+class CorrelationRequest(BaseModel):
     prompt: str
     session_id: Optional[str] = None
     client_name: str = ""
     app_name: str = ""
     project_name: str = ""
 
-@router.get("/data-upload-validate/test")
-@router.get("/df-validate/test")  # Backward compatibility alias
+@router.get("/correlation/test")
 def test_endpoint() -> Dict[str, Any]:
     return {
         "success": True,
-        "message": "Data Upload Validate router is working!",
+        "message": "Correlation router is working!",
         "router_created": router is not None,
         "agent_initialized": agent_initialized if 'agent_initialized' in globals() else False
     }
 
-@router.post("/data-upload-validate")
-@router.post("/df-validate")  # Backward compatibility alias
-def perform_data_upload_validate(request: DataUploadValidateRequest) -> Dict[str, Any]:
+@router.post("/correlation")
+def perform_correlation(request: CorrelationRequest) -> Dict[str, Any]:
     import time
     start_time = time.time()
     
-    global agent, agent_initialized, BaseAgent, settings, DataUploadValidateAgent
+    global agent, agent_initialized, BaseAgent, settings, CorrelationAgent
     
     if not agent_initialized or agent is None:
-        logger.warning("DataUploadValidateAgent not initialized - attempting to initialize now...")
+        logger.warning("CorrelationAgent not initialized - attempting to initialize now...")
         
         if BaseAgent is None or settings is None:
             logger.info("BaseAgent not imported - attempting to retry import...")
-            if not _retry_baseagent_import_data_upload_validate():
+            if not _retry_baseagent_import_correlation():
                 logger.error("BaseAgent import retry failed - cannot initialize agent")
                 return {
                     "success": False,
-                    "error": "DataUploadValidateAgent not initialized - BaseAgent import failed",
-                    "smart_response": "The Data Upload Validate agent is not available. BaseAgent could not be imported. Please check server logs for details.",
+                    "error": "CorrelationAgent not initialized - BaseAgent import failed",
+                    "smart_response": "The Correlation agent is not available. BaseAgent could not be imported. Please check server logs for details.",
                     "processing_time": round(time.time() - start_time, 2)
                 }
             
-            if BaseAgent is not None and DataUploadValidateAgent is None:
-                logger.error("BaseAgent imported but DataUploadValidateAgent class not found - this should not happen")
+            if BaseAgent is not None and CorrelationAgent is None:
+                logger.error("BaseAgent imported but CorrelationAgent class not found - this should not happen")
         
         if BaseAgent is not None and settings is not None:
             try:
-                logger.info("Attempting to initialize DataUploadValidateAgent on-demand...")
+                logger.info("Attempting to initialize CorrelationAgent on-demand...")
                 llm_config = settings.get_llm_config()
                 minio_config = settings.get_minio_config()
                 
-                agent = DataUploadValidateAgent(
+                agent = CorrelationAgent(
                     api_url=llm_config["api_url"],
                     model_name=llm_config["model_name"],
                     bearer_token=llm_config["bearer_token"],
@@ -495,44 +412,44 @@ def perform_data_upload_validate(request: DataUploadValidateRequest) -> Dict[str
                 try:
                     from BaseAgent.registry import registry
                     registry.register(agent)
-                    logger.info(f"✅ Registered DataUploadValidateAgent in BaseAgent registry (on-demand)")
+                    logger.info(f"✅ Registered CorrelationAgent in BaseAgent registry (on-demand)")
                 except ImportError:
                     try:
                         from TrinityAgent.BaseAgent.registry import registry
                         registry.register(agent)
-                        logger.info(f"✅ Registered DataUploadValidateAgent in BaseAgent registry (on-demand, absolute import)")
+                        logger.info(f"✅ Registered CorrelationAgent in BaseAgent registry (on-demand, absolute import)")
                     except ImportError as e:
                         logger.warning(f"⚠️ Could not register agent in registry: {e}")
                 
                 agent_initialized = True
-                logger.info("✅ DataUploadValidateAgent initialized successfully on-demand")
+                logger.info("✅ CorrelationAgent initialized successfully on-demand")
             except Exception as init_error:
-                logger.error(f"❌ Failed to initialize DataUploadValidateAgent on-demand: {init_error}", exc_info=True)
+                logger.error(f"❌ Failed to initialize CorrelationAgent on-demand: {init_error}", exc_info=True)
                 return {
                     "success": False,
-                    "error": f"DataUploadValidateAgent initialization failed: {str(init_error)}",
-                    "smart_response": "The Data Upload Validate agent could not be initialized. Please check server logs for details.",
+                    "error": f"CorrelationAgent initialization failed: {str(init_error)}",
+                    "smart_response": "The Correlation agent could not be initialized. Please check server logs for details.",
                     "processing_time": round(time.time() - start_time, 2)
                 }
         else:
-            logger.error("BaseAgent or settings still not available after retry for Data Upload Validate")
+            logger.error("BaseAgent or settings still not available after retry for Correlation")
             return {
                 "success": False,
-                "error": "DataUploadValidateAgent not initialized - BaseAgent import failed",
-                "smart_response": "The Data Upload Validate agent is not available. BaseAgent could not be imported. Please check server logs for details.",
+                "error": "CorrelationAgent not initialized - BaseAgent import failed",
+                "smart_response": "The Correlation agent is not available. BaseAgent could not be imported. Please check server logs for details.",
                 "processing_time": round(time.time() - start_time, 2)
             }
     
     if not agent_initialized or agent is None:
-        logger.error("DataUploadValidateAgent still not initialized after retry")
+        logger.error("CorrelationAgent still not initialized after retry")
         return {
             "success": False,
-            "error": "DataUploadValidateAgent not initialized",
-            "smart_response": "The Data Upload Validate agent is not available. Please check server logs.",
+            "error": "CorrelationAgent not initialized",
+            "smart_response": "The Correlation agent is not available. Please check server logs.",
             "processing_time": round(time.time() - start_time, 2)
         }
     
-    logger.info(f"DATA UPLOAD VALIDATE REQUEST RECEIVED:")
+    logger.info(f"CORRELATION REQUEST RECEIVED:")
     logger.info(f"Prompt: {request.prompt}")
     logger.info(f"Session ID: {request.session_id}")
     logger.info(f"Context: {request.client_name}/{request.app_name}/{request.project_name}")
@@ -560,14 +477,12 @@ def perform_data_upload_validate(request: DataUploadValidateRequest) -> Dict[str
             "processing_time": round(time.time() - start_time, 2)
         }
         
-        if "validate_json" in result.data:
-            response["validate_json"] = result.data["validate_json"]
-        if "validate_config" in result.data:
-            response["validate_config"] = result.data["validate_config"]
+        if "correlation_config" in result.data:
+            response["correlation_config"] = result.data["correlation_config"]
         if "file_name" in result.data:
             response["file_name"] = result.data["file_name"]
-        if "available_files" in result.data:
-            response["available_files"] = result.data["available_files"]
+        if "file_analysis" in result.data:
+            response["file_analysis"] = result.data["file_analysis"]
         
         for key in ["reasoning", "used_memory", "suggestions", "next_steps"]:
             if key in result.data:
@@ -576,7 +491,7 @@ def perform_data_upload_validate(request: DataUploadValidateRequest) -> Dict[str
         if "message" not in response:
             response["message"] = response.get("smart_response", "")
         
-        logger.info(f"DATA UPLOAD VALIDATE REQUEST COMPLETED:")
+        logger.info(f"CORRELATION REQUEST COMPLETED:")
         logger.info(f"Success: {response.get('success', False)}")
         logger.info(f"Processing Time: {response.get('processing_time', 0)}s")
         logger.info(f"Response keys: {list(response.keys())}")
@@ -584,7 +499,7 @@ def perform_data_upload_validate(request: DataUploadValidateRequest) -> Dict[str
         return response
         
     except Exception as e:
-        logger.error(f"DATA UPLOAD VALIDATE REQUEST FAILED: {e}", exc_info=True)
+        logger.error(f"CORRELATION REQUEST FAILED: {e}", exc_info=True)
         processing_time = round(time.time() - start_time, 2)
         
         return {
@@ -595,12 +510,12 @@ def perform_data_upload_validate(request: DataUploadValidateRequest) -> Dict[str
             "processing_time": processing_time
         }
 
-@router.get("/data-upload-validate/history/{session_id}")
+@router.get("/correlation/history/{session_id}")
 def get_history(session_id: str) -> Dict[str, Any]:
     if not agent_initialized or agent is None:
         return {
             "success": False,
-            "error": "DataUploadValidateAgent not initialized"
+            "error": "CorrelationAgent not initialized"
         }
     try:
         history = agent.get_session_history(session_id)
@@ -617,13 +532,12 @@ def get_history(session_id: str) -> Dict[str, Any]:
             "error": str(e)
         }
 
-@router.get("/data-upload-validate/files")
-@router.get("/df-validate/files")  # Backward compatibility alias
+@router.get("/correlation/files")
 def list_files() -> Dict[str, Any]:
     if not agent_initialized or agent is None:
         return {
             "success": False,
-            "error": "DataUploadValidateAgent not initialized"
+            "error": "CorrelationAgent not initialized"
         }
     try:
         files = agent.files_with_columns
@@ -639,19 +553,18 @@ def list_files() -> Dict[str, Any]:
             "error": str(e)
         }
 
-@router.get("/data-upload-validate/health")
-@router.get("/df-validate/health")  # Backward compatibility alias
+@router.get("/correlation/health")
 def health_check() -> Dict[str, Any]:
     if not agent_initialized or agent is None:
         return {
             "status": "unhealthy",
-            "service": "data_upload_validate",
+            "service": "correlation",
             "error": "Agent not initialized",
             "version": "1.0.0"
         }
     status = {
         "status": "healthy",
-        "service": "data_upload_validate",
+        "service": "correlation",
         "agent_name": agent.name if agent else "unknown",
         "agent_description": agent.description if agent else "unknown",
         "version": "1.0.0",
@@ -661,8 +574,36 @@ def health_check() -> Dict[str, Any]:
     logger.info(f"Health check: {status}")
     return status
 
+# Register router in agent registry (for auto-discovery)
+try:
+    parent_dir = Path(__file__).parent.parent
+    if str(parent_dir) not in sys.path:
+        sys.path.insert(0, str(parent_dir))
+    
+    try:
+        from agent_registry import register_agent, set_agent_metadata
+        # Set metadata for PostgreSQL
+        set_agent_metadata("correlation", {
+            "name": "Correlation",
+            "description": "Calculates correlation matrices and analyzes relationships between numeric variables",
+            "category": "Data Analysis",
+            "tags": ["correlation", "data", "analysis", "relationship", "matrix", "statistics"]
+        })
+        # Register router
+        if router is not None:
+            success = register_agent("correlation", router)
+            if success:
+                logger.info("✅ Correlation router registered in agent registry")
+            else:
+                logger.warning("⚠️ Failed to register Correlation router in agent registry")
+    except ImportError:
+        # Agent registry not available, will be auto-discovered
+        logger.debug("Agent registry not available - router will be auto-discovered")
+except Exception as e:
+    logger.warning(f"Could not register Correlation router: {e}")
+
 logger.info("=" * 80)
-logger.info("DATA UPLOAD VALIDATE AGENT MODULE LOADED")
+logger.info("CORRELATION AGENT MODULE LOADED")
 logger.info(f"Router created: {router is not None}")
 logger.info(f"Router type: {type(router)}")
 logger.info(f"Agent initialized: {agent_initialized}")
@@ -683,5 +624,4 @@ if router:
     except Exception as e:
         logger.error(f"Error logging routes: {e}")
 logger.info("=" * 80)
-
 

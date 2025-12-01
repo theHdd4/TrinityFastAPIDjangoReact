@@ -628,6 +628,20 @@ if BaseAgent is not None and settings is not None:
         logger.info("✅ CreateTransformAgent initialized successfully")
         logger.info(f"Agent name: {agent.name}")
         logger.info(f"Agent description: {agent.description}")
+        
+        # Register agent in BaseAgent registry
+        try:
+            from BaseAgent.registry import registry
+            registry.register(agent)
+            logger.info(f"✅ Registered CreateTransformAgent in BaseAgent registry")
+        except ImportError:
+            try:
+                from TrinityAgent.BaseAgent.registry import registry
+                registry.register(agent)
+                logger.info(f"✅ Registered CreateTransformAgent in BaseAgent registry (absolute import)")
+            except ImportError as e:
+                logger.warning(f"⚠️ Could not register agent in registry: {e}")
+        
         agent_initialized = True
         logger.info("=" * 80)
     except Exception as e:
@@ -763,6 +777,19 @@ def create_transform_files(request: CreateTransformRequest) -> Dict[str, Any]:
                     supported_operations=DEFAULT_SUPPORTED_OPERATIONS,
                     operation_format=DEFAULT_OPERATION_FORMAT
                 )
+                # Register agent in BaseAgent registry
+                try:
+                    from BaseAgent.registry import registry
+                    registry.register(agent)
+                    logger.info(f"✅ Registered CreateTransformAgent in BaseAgent registry (on-demand)")
+                except ImportError:
+                    try:
+                        from TrinityAgent.BaseAgent.registry import registry
+                        registry.register(agent)
+                        logger.info(f"✅ Registered CreateTransformAgent in BaseAgent registry (on-demand, absolute import)")
+                    except ImportError as e:
+                        logger.warning(f"⚠️ Could not register agent in registry: {e}")
+                
                 agent_initialized = True
                 logger.info("✅ CreateTransformAgent initialized successfully on-demand")
             except Exception as init_error:

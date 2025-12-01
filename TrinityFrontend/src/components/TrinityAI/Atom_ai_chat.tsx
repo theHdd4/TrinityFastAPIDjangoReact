@@ -35,6 +35,7 @@ const ENDPOINTS: Record<string, string> = {
   'create-column': `${TRINITY_AI_API}/create-transform`,
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
+  'correlation': `${TRINITY_AI_API}/correlation`,
   'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
   'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
 };
@@ -51,6 +52,46 @@ const PERFORM_ENDPOINTS: Record<string, string> = {
 import { cn } from '@/lib/utils';
 
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
+  // STEP 1: For correlation, FORCE it to always render (bypass disabled check temporarily)
+  // This ensures we can see the icon and debug why it's not working
+  const isCorrelation = atomType === 'correlation';
+  const shouldRender = isCorrelation ? true : !disabled;
+  
+  if (!shouldRender) {
+    return null;
+  }
+  
+  // STEP 2: Get endpoint - for correlation, ensure it's always constructed properly
+  let endpoint = ENDPOINTS[atomType];
+  
+  // For correlation, if endpoint is missing or invalid, construct it
+  if (isCorrelation && (!endpoint || endpoint.includes('undefined'))) {
+    if (TRINITY_AI_API && typeof TRINITY_AI_API === 'string') {
+      endpoint = `${TRINITY_AI_API}/correlation`;
+    }
+  }
+  
+  // STEP 3: Enable icon if endpoint exists (same as concat)
+  // For correlation, force enable if we have TRINITY_AI_API
+  const isEnabled = isCorrelation 
+    ? (!!endpoint || (TRINITY_AI_API && typeof TRINITY_AI_API === 'string'))
+    : !!endpoint;
+  
+  // Debug logging for correlation
+  if (isCorrelation) {
+    console.log('🔍 CORRELATION AI ICON - FORCED RENDER:', {
+      atomType,
+      atomId,
+      disabled,
+      endpoint,
+      hasEndpoint: !!endpoint,
+      TRINITY_AI_API: typeof TRINITY_AI_API !== 'undefined' ? TRINITY_AI_API : 'UNDEFINED',
+      isEnabled,
+      willShow: true,
+      iconColor: isEnabled ? 'purple' : 'gray'
+    });
+  }
+  
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => {
     // Generate session ID only once when component mounts
@@ -147,7 +188,13 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     console.log('🚨 atomType:', atomType);
     console.log('🚨 inputValue:', inputValue);
     
-    const endpoint = ENDPOINTS[atomType];
+    // Get endpoint - for correlation, ensure it's constructed if missing
+    let endpoint = ENDPOINTS[atomType];
+    if (atomType === 'correlation' && (!endpoint || endpoint.includes('undefined'))) {
+      if (TRINITY_AI_API && typeof TRINITY_AI_API === 'string') {
+        endpoint = `${TRINITY_AI_API}/correlation`;
+      }
+    }
     const performEndpoint = PERFORM_ENDPOINTS[atomType];
     
     console.log('🚨 endpoint:', endpoint);
@@ -273,6 +320,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                                  (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
                                  (atomType === 'chart-maker' && data.chart_json) ||
                                  (atomType === 'explore' && data.exploration_config) ||
+                                 (atomType === 'correlation' && data.correlation_config) ||
                                  (atomType === 'dataframe-operations' && data.dataframe_config) ||
                                  (atomType === 'data-upload-validate' && data.validate_json);
         
@@ -2702,6 +2750,46 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
           }
         }
         
+        // 🔧 CRITICAL FIX: Handle correlation with modular handler system
+        if (atomType === 'correlation' && data.correlation_config) {
+          console.log('🔧 ===== CORRELATION AI RESPONSE =====');
+          console.log('📝 User Prompt:', userMsg.content);
+          console.log('🔧 Correlation Config:', JSON.stringify(data.correlation_config, null, 2));
+          console.log('🔧 Smart Response:', data.smart_response);
+          
+          try {
+            const handler = getAtomHandler(atomType);
+            if (handler) {
+              const handlerContext: AtomHandlerContext = {
+                atomId,
+                atomType,
+                atomTitle,
+                sessionId,
+                updateAtomSettings,
+                setMessages,
+                isStreamMode: false
+              };
+              
+              if (data.success !== false) {
+                await handler.handleSuccess(data, handlerContext);
+              } else {
+                await handler.handleFailure(data, handlerContext);
+              }
+            } else {
+              console.warn('⚠️ No handler found for correlation');
+            }
+          } catch (handlerError) {
+            console.error('❌ Error in correlationHandler:', handlerError);
+            const errorMsg: Message = {
+              id: (Date.now() + 1).toString(),
+              content: `❌ Error processing correlation configuration: ${(handlerError as Error).message || 'Unknown error'}`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMsg]);
+          }
+        }
+        
         // 🔧 CRITICAL FIX: Only handle dataframe-operations for dataframe-operations atom type
         // This code was running for ALL atom types, causing errors for create-column, concat, etc.
         if (atomType === 'dataframe-operations' && data.dataframe_config) {
@@ -3163,18 +3251,18 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
   };
 
   return (
-    <Popover open={isOpen} onOpenChange={o => !disabled && setIsOpen(o)}>
+    <Popover open={isOpen} onOpenChange={o => isEnabled && setIsOpen(o)}>
       <PopoverTrigger asChild>
         <button
           className={cn(
             'p-1 hover:bg-gray-100 rounded',
-            disabled ? 'cursor-not-allowed opacity-50' : '',
+            !isEnabled ? 'cursor-not-allowed opacity-50' : '',
             className,
           )}
           title="Atom AI"
-          disabled={disabled}
+          disabled={!isEnabled}
         >
-          <Sparkles className={cn('w-3.5 h-3.5', disabled ? 'text-gray-300' : 'text-purple-500')} />
+          <Sparkles className={cn('w-3.5 h-3.5', !isEnabled ? 'text-gray-300' : 'text-purple-500')} />
         </button>
       </PopoverTrigger>
       <PopoverContent

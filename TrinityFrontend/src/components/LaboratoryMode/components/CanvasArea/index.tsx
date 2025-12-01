@@ -201,6 +201,7 @@ const LLM_MAP: Record<string, string> = {
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
+  'correlation': 'Agent Correlation',
   'dataframe-operations': 'Agent DataFrame Operations',
   'pivot-table': 'Agent Pivot Table',
   'data-upload-validate': 'Agent Data Validation',
@@ -4928,6 +4929,15 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                     <div className="flex items-center justify-between mb-3">
                                       <div className="flex items-center space-x-1">
                                         <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        {atom.atomId === 'correlation' && console.log('🎯 CANVAS AREA - Rendering AtomAIChatBot for correlation:', {
+                                          atomId: atom.id,
+                                          atomType: atom.atomId,
+                                          atomTitle: atom.title,
+                                          inLLM_MAP: !!LLM_MAP[atom.atomId],
+                                          LLM_MAP_value: LLM_MAP[atom.atomId],
+                                          disabled: !LLM_MAP[atom.atomId],
+                                          willPassDisabled: !LLM_MAP[atom.atomId]
+                                        })}
                                         <AtomAIChatBot
                                           atomId={atom.id}
                                           atomType={atom.atomId}

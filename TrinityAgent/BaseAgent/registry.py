@@ -86,33 +86,53 @@ class AgentRegistry:
         
         for agent_dir in agent_dirs:
             try:
-                # Try to import the main_app module
-                agent_module_name = f"TrinityAI.{agent_dir.name}.main_app"
+                # Try multiple import strategies
+                agent_module_name = None
+                module = None
                 
+                # Strategy 1: Try as direct module (if we're in TrinityAgent directory)
                 try:
+                    agent_module_name = f"{agent_dir.name}.main_app"
                     module = importlib.import_module(agent_module_name)
-                    
-                    # Look for 'agent' instance
-                    if hasattr(module, 'agent'):
-                        agent_instance = module.agent
-                        
-                        # Check if it implements BaseAgentInterface
-                        if isinstance(agent_instance, BaseAgentInterface):
-                            self.register(agent_instance)
-                            logger.info(f"Auto-discovered agent: {agent_instance.name}")
-                        else:
-                            logger.warning(
-                                f"Agent in {agent_dir.name} doesn't implement BaseAgentInterface"
-                            )
-                    else:
-                        logger.debug(f"No 'agent' instance found in {agent_dir.name}")
-                        
-                except ImportError as e:
-                    logger.warning(f"Failed to import {agent_module_name}: {e}")
+                    logger.debug(f"Imported {agent_module_name} (direct)")
+                except ImportError:
+                    # Strategy 2: Try with TrinityAgent prefix
+                    try:
+                        agent_module_name = f"TrinityAgent.{agent_dir.name}.main_app"
+                        module = importlib.import_module(agent_module_name)
+                        logger.debug(f"Imported {agent_module_name} (TrinityAgent prefix)")
+                    except ImportError:
+                        # Strategy 3: Try with TrinityAI prefix (legacy)
+                        try:
+                            agent_module_name = f"TrinityAI.{agent_dir.name}.main_app"
+                            module = importlib.import_module(agent_module_name)
+                            logger.debug(f"Imported {agent_module_name} (TrinityAI prefix)")
+                        except ImportError as e3:
+                            logger.warning(f"Failed to import {agent_dir.name}.main_app: {e3}")
+                            continue
+                
+                if module is None:
                     continue
+                
+                # Look for 'agent' instance
+                if hasattr(module, 'agent'):
+                    agent_instance = module.agent
+                    
+                    # Check if agent is not None and implements BaseAgentInterface
+                    if agent_instance is not None and isinstance(agent_instance, BaseAgentInterface):
+                        self.register(agent_instance)
+                        logger.info(f"Auto-discovered agent: {agent_instance.name}")
+                    elif agent_instance is None:
+                        logger.debug(f"Agent instance is None in {agent_dir.name} (may initialize later)")
+                    else:
+                        logger.warning(
+                            f"Agent in {agent_dir.name} doesn't implement BaseAgentInterface (type: {type(agent_instance)})"
+                        )
+                else:
+                    logger.debug(f"No 'agent' instance found in {agent_dir.name}")
                     
             except Exception as e:
-                logger.error(f"Error discovering agent in {agent_dir.name}: {e}")
+                logger.error(f"Error discovering agent in {agent_dir.name}: {e}", exc_info=True)
                 continue
         
         logger.info(f"Auto-discovery complete. Registered {len(self._agents)} agents")

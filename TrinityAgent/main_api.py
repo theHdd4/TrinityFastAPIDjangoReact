@@ -3,10 +3,17 @@ import sys
 import time
 import logging
 import json
+from pathlib import Path
+
+# Ensure current directory is in sys.path for imports (critical for Docker)
+_current_dir = Path(__file__).resolve().parent
+if str(_current_dir) not in sys.path:
+    sys.path.insert(0, str(_current_dir))
+
 import requests
 import uvicorn
 import asyncio
-from pathlib import Path
+import importlib
 from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -14,14 +21,38 @@ from typing import Dict, Any, Tuple, Optional, Iterable, Mapping
 import numpy as np
 from pymongo import MongoClient
 from fastapi.encoders import jsonable_encoder
+# Import redis_client with proper fallback for Docker and local environments
 try:
     from BaseAgent.redis_client import get_redis_client
-except ImportError:
+except ImportError as e1:
     try:
         from TrinityAgent.BaseAgent.redis_client import get_redis_client
-    except ImportError:
-        # Fallback for docker image layout
-        from redis_client import get_redis_client
+    except ImportError as e2:
+        # Fallback for docker image layout - add BaseAgent to path if needed
+        backend_root = Path(__file__).resolve().parent
+        base_agent_path = backend_root / "BaseAgent"
+        redis_client_file = base_agent_path / "redis_client.py"
+        
+        if base_agent_path.exists() and redis_client_file.exists():
+            # Add parent directory to sys.path if not already there
+            parent_path = str(backend_root)
+            if parent_path not in sys.path:
+                sys.path.insert(0, parent_path)
+            try:
+                from BaseAgent.redis_client import get_redis_client
+            except ImportError as e3:
+                raise ImportError(
+                    f"Failed to import redis_client after adding {parent_path} to sys.path. "
+                    f"BaseAgent exists at {base_agent_path}, redis_client.py exists: {redis_client_file.exists()}. "
+                    f"Errors: e1={e1}, e2={e2}, e3={e3}"
+                ) from e3
+        else:
+            raise ImportError(
+                f"Failed to import redis_client. BaseAgent directory exists: {base_agent_path.exists()}, "
+                f"redis_client.py exists: {redis_client_file.exists() if base_agent_path.exists() else False}. "
+                f"Current directory: {backend_root}, sys.path: {sys.path[:3]}. "
+                f"Errors: e1={e1}, e2={e2}"
+            ) from e2
 
 # Import centralized settings
 try:
@@ -818,6 +849,14 @@ except ImportError:
         logger.error("❌ Failed to import explore router")
         explore_router = None
 
+# Import Correlation router from standardized Agent_Correlation
+try:
+    from Agent_Correlation.main_app import router as correlation_router
+    logger.info("✅ Correlation router imported successfully")
+except ImportError:
+    logger.warning("⚠️ Correlation router not available")
+    correlation_router = None
+
 # dataframe_operations_router is now loaded from TrinityAgent below
 # df_validate_router is now loaded from TrinityAgent below (as data_upload_validate_router)
 df_validate_router = None  # Will be set from standardized agent below
@@ -905,19 +944,118 @@ app = FastAPI(
     version="7.0"
 )
 
-# Import TrinityException for global error handling
-try:
-    from BaseAgent.exceptions import TrinityException
-except ImportError:
+# =============================================================================
+# Initialize BaseAgent Registry and Auto-Discover Agents
+# =============================================================================
+from BaseAgent.registry import registry
+logger.info("✅ Imported BaseAgent registry")
+
+# Auto-discover and register agents on startup
+@app.on_event("startup")
+async def initialize_agent_registry():
+    """
+    Initialize agent registry, auto-discover all agents, and sync to PostgreSQL.
+    This runs on every startup to ensure agents are registered in PostgreSQL.
+    """
+    if registry is None:
+        logger.warning("⚠️ Registry not available - skipping agent auto-discovery")
+        return
+    
     try:
-        from TrinityAgent.BaseAgent.exceptions import TrinityException
-    except ImportError:
-        # Fallback: define minimal exception if import fails
-        class TrinityException(Exception):
-            def __init__(self, message: str, code: str = "INTERNAL_ERROR"):
-                self.message = message
-                self.code = code
-                super().__init__(self.message)
+        logger.info("=" * 80)
+        logger.info("🔍 INITIALIZING AGENT REGISTRY AND AUTO-DISCOVERY")
+        logger.info("=" * 80)
+        
+        # Get the TrinityAgent directory path (where main_api.py is located)
+        trinity_agent_path = Path(__file__).resolve().parent
+        
+        # Auto-discover agents
+        # The auto_discover method will look for Agent_* directories in this path
+        registry.auto_discover(str(trinity_agent_path))
+        
+        # Also try to manually register agents that might have been initialized
+        # This helps catch agents that were initialized before auto-discovery
+        agent_modules = [
+            ("Agent_Merge", "merge_agent"),
+            ("Agent_Concat", "concat_agent"),
+            ("Agent_GroupBy", "groupby_agent"),
+            ("Agent_ChartMaker", "chartmaker_agent"),
+            ("Agent_CreateTransform", "create_transform_agent"),
+            ("Agent_DataFrameOperations", "dataframe_operations_agent"),
+            ("Agent_DataUploadValidate", "data_upload_validate_agent"),
+            ("Agent_Explore", "explore_agent"),
+            ("Agent_FetchAtom", "fetch_atom_agent"),
+        ]
+        
+        for module_name, var_name in agent_modules:
+            try:
+                module = importlib.import_module(f"{module_name}.main_app")
+                agent_instance = getattr(module, "agent", None)
+                if agent_instance is not None and hasattr(agent_instance, 'name'):
+                    registry.register(agent_instance)
+                    logger.info(f"Manually registered: {agent_instance.name}")
+            except Exception as e:
+                logger.debug(f"Could not register {module_name}: {e}")
+        
+        # List all registered agents
+        agents = registry.list_agents()
+        logger.info(f"✅ Registered {len(agents)} agents:")
+        for name, description in agents.items():
+            logger.info(f"  - {name}: {description}")
+        
+        # Sync agents to PostgreSQL on startup
+        logger.info("=" * 80)
+        logger.info("🔄 SYNCING AGENTS TO POSTGRESQL (STARTUP)")
+        logger.info("=" * 80)
+        
+        try:
+            # Import sync function
+            from agent_registry import sync_registry_to_postgres
+            from BaseAgent.agent_registry_db import get_host_ip_address
+            
+            # Get host IP
+            host_ip = get_host_ip_address()
+            logger.info(f"Detected host IP: {host_ip}")
+            
+            # Get all routers from agent registry
+            from agent_registry import get_all_routers
+            agent_routers = get_all_routers()
+            
+            if agent_routers:
+                # Sync all agents to PostgreSQL
+                sync_results = await sync_registry_to_postgres(host_ip=host_ip)
+                
+                success_count = sum(1 for v in sync_results.values() if v)
+                total_count = len(sync_results)
+                
+                if success_count == total_count and total_count > 0:
+                    sync_msg = f"✅✅✅ All {success_count} agents synced to PostgreSQL on startup (host_ip: {host_ip}) ✅✅✅"
+                    print(sync_msg)
+                    logger.info(sync_msg)
+                elif success_count > 0:
+                    sync_msg = f"⚠️ Only {success_count}/{total_count} agents synced to PostgreSQL on startup (host_ip: {host_ip})"
+                    print(sync_msg)
+                    logger.warning(sync_msg)
+                else:
+                    sync_msg = f"⚠️ Failed to sync any agents to PostgreSQL on startup (host_ip: {host_ip})"
+                    print(sync_msg)
+                    logger.warning(sync_msg)
+            else:
+                logger.warning("⚠️ No agent routers found to sync to PostgreSQL")
+                
+        except ImportError as e:
+            logger.warning(f"⚠️ Could not import sync functions: {e}")
+        except Exception as e:
+            logger.error(f"❌ Error syncing agents to PostgreSQL on startup: {e}", exc_info=True)
+        
+        logger.info("=" * 80)
+        logger.info("✅ AGENT REGISTRY INITIALIZATION COMPLETE")
+        logger.info("=" * 80)
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize agent registry: {e}", exc_info=True)
+
+# Import TrinityException for global error handling
+from BaseAgent.exceptions import TrinityException
 
 # Global exception handler for TrinityException
 from fastapi import Request
@@ -941,6 +1079,100 @@ async def trinity_exception_handler(request: Request, exc: TrinityException):
 
 # Router with a global prefix for all Trinity AI endpoints
 api_router = APIRouter(prefix="/trinityai")
+
+# =============================================================================
+# Unified Agent Executor (Phase 1: Standardization)
+# Uses registry to execute agents dynamically without hardcoded if/else logic
+# =============================================================================
+class AgentExecuteRequest(BaseModel):
+    """Request model for unified agent execution."""
+    agent_name: str  # e.g., "merge", "concat", "groupby"
+    prompt: str
+    session_id: Optional[str] = None
+    client_name: str = ""
+    app_name: str = ""
+    project_name: str = ""
+    chat_id: Optional[str] = None  # Optional chat_id for Redis cache isolation
+
+@api_router.post("/agent/execute")
+async def execute_agent(request: AgentExecuteRequest) -> Dict[str, Any]:
+    """
+    Unified agent execution endpoint using registry.
+    Replaces hardcoded if/else logic with dynamic agent lookup.
+    """
+    logger.info(f"📥 Received agent execution request: agent_name={request.agent_name}, prompt_length={len(request.prompt)}")
+    
+    if registry is None:
+        logger.error("❌ Agent registry not available")
+        raise HTTPException(
+            status_code=500,
+            detail="Agent registry not available"
+        )
+    
+    # Get agent from registry
+    agent = registry.get(request.agent_name)
+    if agent is None:
+        available_agents = list(registry.list_agents().keys())
+        logger.error(f"❌ Agent '{request.agent_name}' not found. Available: {available_agents}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{request.agent_name}' not found. Available agents: {available_agents}"
+        )
+    
+    logger.info(f"✅ Found agent '{request.agent_name}' in registry")
+    
+    try:
+        # Import AgentContext
+        from BaseAgent.interfaces import AgentContext
+        
+        # Create context
+        context = AgentContext(
+            session_id=request.session_id or f"session_{int(time.time())}",
+            user_prompt=request.prompt,
+            client_name=request.client_name,
+            app_name=request.app_name,
+            project_name=request.project_name
+        )
+        
+        # Execute agent using standard interface
+        result = agent.execute(context)
+        
+        # Convert AgentResult to dict for JSON response
+        return {
+            "success": result.success,
+            "data": result.data,
+            "message": result.message,
+            "error": result.error,
+            "artifacts": result.artifacts,
+            "session_id": result.session_id,
+            "processing_time": result.processing_time
+        }
+    except Exception as e:
+        logger.error(f"Error executing agent {request.agent_name}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent execution failed: {str(e)}"
+        )
+
+@api_router.get("/agent/list")
+async def list_agents() -> Dict[str, Any]:
+    """
+    List all registered agents and their descriptions.
+    Useful for LLM planner to know which agents are available.
+    """
+    if registry is None:
+        return {
+            "success": False,
+            "error": "Agent registry not available",
+            "agents": {}
+        }
+    
+    agents = registry.list_agents()
+    return {
+        "success": True,
+        "count": len(agents),
+        "agents": agents
+    }
 
 # Add perform endpoint for both concat and merge operations
 class PerformRequest(BaseModel):
@@ -1340,6 +1572,13 @@ if explore_router is not None:
     logger.info("✅ Explore router included in API")
 else:
     logger.warning("⚠️ Explore router is None - explore endpoint will not work")
+
+# Include Correlation router
+if correlation_router is not None:
+    api_router.include_router(correlation_router)
+    logger.info("✅ Correlation router included in API")
+else:
+    logger.warning("⚠️ Correlation router is None - correlation endpoint will not work")
 
 # Include standardized data_upload_validate router (from TrinityAgent via agent registry)
 # Router should already be initialized above, but ensure it's set if not

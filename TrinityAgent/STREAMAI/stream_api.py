@@ -189,6 +189,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
         # Check if project_context is missing, empty, or contains 'default' values
         has_valid_context = (
             project_context and 
+            isinstance(project_context, dict) and
             project_context.get("client_name") and 
             project_context.get("client_name") != "default" and
             project_context.get("app_name") and 
@@ -199,35 +200,38 @@ async def execute_workflow_websocket(websocket: WebSocket):
         
         if not has_valid_context:
             logger.warning("⚠️ No valid project_context provided (missing or contains 'default' values). Attempting to extract from file paths...")
+            logger.info(f"📦 Current project_context: {project_context}")
+            logger.info(f"📦 Available files: {available_files}")
+            
             # Try to extract from available_files
+            extracted_context = None
             for file_path in available_files:
                 if isinstance(file_path, str) and "/" in file_path:
-                    parts = file_path.split("/")
+                    # Handle both forward and backslash paths
+                    normalized_path = file_path.replace("\\", "/")
+                    parts = normalized_path.split("/")
+                    logger.info(f"🔍 Parsing file path: {file_path} -> {parts}")
+                    
                     if len(parts) >= 3:
                         extracted_client = parts[0]
                         extracted_app = parts[1]
                         extracted_project = parts[2]
-                        project_context = {
+                        extracted_context = {
                             "client_name": extracted_client,
                             "app_name": extracted_app,
-                            "project_name": extracted_project
+                            "project_name": extracted_project,
+                            "available_files": available_files  # Preserve available_files
                         }
-                        logger.info(f"✅ Extracted project context from file path: client={extracted_client}, app={extracted_app}, project={extracted_project}")
+                        logger.info(f"✅ Extracted project context from file path '{file_path}':")
+                        logger.info(f"   client_name: {extracted_client}")
+                        logger.info(f"   app_name: {extracted_app}")
+                        logger.info(f"   project_name: {extracted_project}")
                         break
             
-            # If still empty or contains 'default', try environment variables
-            # Re-check validity after extraction attempt
-            has_valid_context_after_extraction = (
-                project_context and 
-                project_context.get("client_name") and 
-                project_context.get("client_name") != "default" and
-                project_context.get("app_name") and 
-                project_context.get("app_name") != "default" and
-                project_context.get("project_name") and 
-                project_context.get("project_name") != "default"
-            )
-            
-            if not has_valid_context_after_extraction:
+            if extracted_context:
+                project_context = extracted_context
+            else:
+                # If still empty or contains 'default', try environment variables
                 import os
                 env_client = os.getenv("CLIENT_NAME", "")
                 env_app = os.getenv("APP_NAME", "")
@@ -236,15 +240,28 @@ async def execute_workflow_websocket(websocket: WebSocket):
                     project_context = {
                         "client_name": env_client,
                         "app_name": env_app,
-                        "project_name": env_project
+                        "project_name": env_project,
+                        "available_files": available_files
                     }
                     logger.info(f"✅ Using project context from environment variables: client={env_client}, app={env_app}, project={env_project}")
                 else:
                     logger.error("❌ Could not determine project context from message, files, or environment variables!")
                     logger.error(f"📦 Available files: {available_files}")
                     logger.error(f"📦 Message keys: {list(message.keys())}")
+                    # Set empty context but preserve available_files
+                    project_context = {
+                        "client_name": "",
+                        "app_name": "",
+                        "project_name": "",
+                        "available_files": available_files
+                    }
+        
+        # Ensure available_files is included in project_context
+        if "available_files" not in project_context:
+            project_context["available_files"] = available_files
         
         logger.info(f"🔧 Final project_context: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
+        logger.info(f"📦 Final available_files count: {len(project_context.get('available_files', []))}")
         if isinstance(mentioned_files, str):
             mentioned_files = [mentioned_files]
         elif isinstance(mentioned_files, list):
