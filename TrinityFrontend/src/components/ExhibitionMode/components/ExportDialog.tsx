@@ -27,7 +27,7 @@ import {
   type RenderedSlideScreenshot,
 } from '../utils/export';
 
-type ExportFormat = 'PDF' | 'PowerPoint' | 'Images';
+type ExportFormat = 'PDF' | 'PowerPoint' | 'PowerPointHighFidelity' | 'Images';
 
 type PresentationFormat = 'pdf' | 'pptx';
 
@@ -44,7 +44,9 @@ const formatLabel = (format: ExportFormat) => {
     case 'PDF':
       return 'PDF document';
     case 'PowerPoint':
-      return 'PowerPoint presentation';
+      return 'PowerPoint presentation (Low Fidelity)';
+    case 'PowerPointHighFidelity':
+      return 'PowerPoint presentation (High Fidelity)';
     case 'Images':
       return 'PNG image set';
     default:
@@ -54,6 +56,16 @@ const formatLabel = (format: ExportFormat) => {
 
 const presentationFormatFor = (format: ExportFormat): PresentationFormat =>
   format === 'PDF' ? 'pdf' : 'pptx';
+
+const getFidelityForFormat = (format: ExportFormat): 'low' | 'high' | undefined => {
+  if (format === 'PowerPointHighFidelity') {
+    return 'high';
+  }
+  if (format === 'PowerPoint') {
+    return 'low';
+  }
+  return undefined;
+};
 
 export const ExportDialog: React.FC<ExportDialogProps> = ({ 
   open, 
@@ -279,6 +291,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       );
 
       const presentationFormat = presentationFormatFor(format);
+      const fidelity = getFidelityForFormat(format);
+      
       if (format === 'PDF') {
         try {
           const blob = await requestPresentationExport(presentationFormat, payload);
@@ -328,7 +342,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         }
       }
 
-      const blob = await requestPresentationExport(presentationFormat, payload);
+      const blob = await requestPresentationExport(presentationFormat, payload, fidelity);
       const filename = `${sanitizeFileName(presentationTitle)}.${presentationFormat}`;
 
       downloadBlob(blob, filename);
@@ -443,46 +457,109 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             </div>
           </Button>
 
-          <Button
-            variant="outline"
-            className="justify-start h-auto py-5 px-5 border border-border/70 bg-card hover:bg-muted transition-colors"
-            onClick={() => handleExport('PowerPoint')}
-            disabled={isExporting}
-          >
-            <div className="flex items-center gap-4 w-full">
+          {/* PowerPoint Section with Container Box and 1x2 Grid */}
+          <div className="border border-border/70 bg-card rounded-lg py-5 px-5">
+            <div className="flex items-center gap-4 mb-4">
               <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <Presentation className="h-5 w-5" strokeWidth={2.25} />
               </div>
-              <div className="flex-1 text-left">
+              <div className="flex-1">
                 <span className="text-[10px] font-semibold uppercase tracking-[0.32em] text-muted-foreground/70">
                   Editable slide deck
                 </span>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 mt-0.5">
                   <span className="text-base font-semibold text-foreground">PowerPoint presentation</span>
-                  <Badge
-                    variant="secondary"
-                    className="text-[10px] font-medium px-2 py-0.5 bg-transparent text-primary border-primary/40"
-                  >
-                    Editable
-                  </Badge>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Export an editable .pptx deck ready for Microsoft Office or Google Slides.
-                </p>
-                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Fully editable
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Chart &amp; table support
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Check className="h-3 w-3" /> Layout overlays
-                  </span>
                 </div>
               </div>
             </div>
-          </Button>
+
+            {/* PowerPoint Options - 1x2 Grid */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* High Fidelity - First Position */}
+              <Button
+                variant="outline"
+                className="justify-start h-auto py-4 px-3 border border-border/70 bg-background hover:bg-muted transition-colors text-left"
+                onClick={() => handleExport('PowerPointHighFidelity')}
+                disabled={isExporting}
+              >
+                <div className="flex flex-col gap-2 w-full" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-sm font-semibold text-foreground" style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                      High Fidelity (PPTX)
+                    </span>
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] font-medium px-1.5 py-0.5 bg-transparent text-primary border-primary/40 flex-shrink-0 flex items-center justify-center"
+                    >
+                      Pixel-perfect
+                    </Badge>
+                  </div>
+                  <p 
+                    className="text-xs text-muted-foreground text-left" 
+                    style={{ wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}
+                  >
+                    Charts as images. Matches web version exactly.
+                  </p>
+                  <div className="mt-1 flex flex-col gap-1 text-[10px] text-muted-foreground">
+                    <span className="flex items-start gap-1">
+                      <Check className="h-3 w-3 flex-shrink-0 mt-0.5" /> 
+                      <span style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>Pixel-perfect charts</span>
+                    </span>
+                    <span className="flex items-start gap-1">
+                      <Check className="h-3 w-3 flex-shrink-0 mt-0.5" /> 
+                      <span style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>High-quality images</span>
+                    </span>
+                    <span className="flex items-start gap-1">
+                      <Check className="h-3 w-3 flex-shrink-0 mt-0.5" /> 
+                      <span style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>Web-accurate</span>
+                    </span>
+                  </div>
+                </div>
+              </Button>
+
+              {/* Low Fidelity - Second Position */}
+              <Button
+                variant="outline"
+                className="justify-start h-auto py-4 px-3 border border-border/70 bg-background hover:bg-muted transition-colors text-left"
+                onClick={() => handleExport('PowerPoint')}
+                disabled={isExporting}
+              >
+                <div className="flex flex-col gap-2 w-full" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-sm font-semibold text-foreground" style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
+                      Low Fidelity (PPTX)
+                    </span>
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px] font-medium px-1.5 py-0.5 bg-transparent text-primary border-primary/40 flex-shrink-0 flex items-center justify-center"
+                    >
+                      Fully editable
+                    </Badge>
+                  </div>
+                  <p 
+                    className="text-xs text-muted-foreground text-left" 
+                    style={{ wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'normal' }}
+                  >
+                    Fully editable charts and text. Best for customization.
+                  </p>
+                  <div className="mt-1 flex flex-col gap-1 text-[10px] text-muted-foreground">
+                    <span className="flex items-start gap-1">
+                      <Check className="h-3 w-3 flex-shrink-0 mt-0.5" /> 
+                      <span style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>Editable charts</span>
+                    </span>
+                    <span className="flex items-start gap-1">
+                      <Check className="h-3 w-3 flex-shrink-0 mt-0.5" /> 
+                      <span style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>Editable text</span>
+                    </span>
+                    <span className="flex items-start gap-1">
+                      <Check className="h-3 w-3 flex-shrink-0 mt-0.5" /> 
+                      <span style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>Full customization</span>
+                    </span>
+                  </div>
+                </div>
+              </Button>
+            </div>
+          </div>
 
           <Button
             variant="outline"

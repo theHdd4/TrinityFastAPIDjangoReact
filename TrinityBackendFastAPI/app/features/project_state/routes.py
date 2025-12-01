@@ -20,6 +20,8 @@ from app.session_state import load_state, save_state
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.disabled = True  # Disable all logs from project_state routes
+toolbar_logger = logging.getLogger("app.features.project_state.toolbar")
+toolbar_logger.disabled = False
 
 # MongoDB connection constants
 DEFAULT_MONGO_URI = build_host_mongo_uri()
@@ -96,6 +98,28 @@ class LaboratoryProjectStateIn(BaseModel):
 
 
 laboratory_project_state_router = APIRouter(dependencies=[Depends(timing_dependency)])
+
+
+class TextToolbarLog(BaseModel):
+    action: str = Field(..., min_length=1)
+    client: Optional[str] = None
+    app: Optional[str] = None
+    project: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+@laboratory_project_state_router.post("/log-text-toolbar", status_code=status.HTTP_200_OK)
+async def log_text_toolbar_event(event: TextToolbarLog):
+    toolbar_logger.info(
+        "project_state.laboratory.toolbar action=%s client=%s app=%s project=%s details=%s",
+        event.action,
+        event.client or "unknown",
+        event.app or "unknown",
+        event.project or "unknown",
+        json.dumps(event.details or {}, ensure_ascii=False),
+    )
+
+    return {"status": "ok"}
 
 
 @laboratory_project_state_router.post("/save", status_code=status.HTTP_200_OK)

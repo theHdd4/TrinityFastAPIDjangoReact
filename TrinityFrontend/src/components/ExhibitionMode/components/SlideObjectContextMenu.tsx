@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ContextMenu,
   ContextMenuContent,
@@ -122,6 +122,10 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
   renderPostLockContent,
 }) => {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    console.log('[SlideObjectContextMenu] open state changed:', open);
+  }, [open]);
+  const menuRef = useRef<HTMLDivElement>(null);
   const closeMenu = useCallback(() => setOpen(false), []);
 
   const handleTriggerContextMenu = useCallback(
@@ -130,6 +134,56 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
     },
     [onContextMenu],
   );
+
+  // Handle outside clicks and Escape key to close the menu
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (!menuRef.current) {
+        return;
+      }
+
+      const target = event.target as Node | null;
+      if (!target) {
+        closeMenu();
+        return;
+      }
+
+      // Check if the click is inside the menu
+      if (menuRef.current.contains(target)) {
+        return;
+      }
+
+      // Check if the click is inside any submenu (submenus are also portaled)
+      const submenuContent = (target as Element)?.closest('[data-radix-context-menu-sub-content]');
+      if (submenuContent) {
+        return;
+      }
+
+      // Click is outside the menu, close it
+      closeMenu();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closeMenu();
+      }
+    };
+
+    // Use capture phase to catch events early, before they reach canvas handlers
+    document.addEventListener('mousedown', handlePointerDown, true);
+    document.addEventListener('touchstart', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown, true);
+      document.removeEventListener('touchstart', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [open, closeMenu]);
 
   const handleAlign = useCallback(
     (action: AlignAction) => () => {
@@ -148,7 +202,21 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
       <ContextMenuTrigger asChild>
         <div onContextMenu={handleTriggerContextMenu}>{children}</div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-64" style={{ zIndex: 9999 }}>
+      <ContextMenuContent
+        key={open ? 'open' : 'closed'}
+        ref={menuRef}
+        className="w-64"
+        style={{ zIndex: 9999, display: open ? undefined : 'none' }}
+        data-context-menu-root="true"
+        onPointerDown={event => {
+          // Prevent canvas deselection when clicking inside the menu
+          event.stopPropagation();
+        }}
+        onMouseDown={event => {
+          // Prevent canvas deselection when clicking inside the menu
+          event.stopPropagation();
+        }}
+      >
         <ContextMenuItem disabled={!canEdit || disableCopy} onSelect={event => {
           event.preventDefault();
           closeMenu();
@@ -223,7 +291,11 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
             <Layers className="mr-2 h-4 w-4" />
             Layer
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-52">
+          <ContextMenuSubContent
+            className="w-52"
+            onPointerDown={event => event.stopPropagation()}
+            onMouseDown={event => event.stopPropagation()}
+          >
             <ContextMenuItem
               disabled={!canEdit || !canLayer}
               onSelect={event => {
@@ -276,7 +348,11 @@ const SlideObjectContextMenu: React.FC<SlideObjectContextMenuProps> = ({
             <WrapText className="mr-2 h-4 w-4" />
             Align
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-52">
+          <ContextMenuSubContent
+            className="w-52"
+            onPointerDown={event => event.stopPropagation()}
+            onMouseDown={event => event.stopPropagation()}
+          >
             <ContextMenuItem
               disabled={!canEdit || !canAlign}
               onSelect={event => {

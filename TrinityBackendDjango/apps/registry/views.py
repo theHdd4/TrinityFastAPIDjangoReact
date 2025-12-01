@@ -231,7 +231,47 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 else:
                     qs = qs.filter(app__slug=app_param)
 
+            # Handle ordering parameter (for sorting)
+            ordering = self.request.query_params.get("ordering")
+            if ordering:
+                # Validate ordering to prevent SQL injection
+                allowed_fields = ["updated_at", "-updated_at", "created_at", "-created_at", "name", "-name"]
+                if ordering in allowed_fields:
+                    qs = qs.order_by(ordering)
+                # If invalid ordering, don't apply any ordering (use model default)
+
             return qs
+
+    def list(self, request, *args, **kwargs):
+        """
+        Override list method to handle limit parameter for recent projects.
+        When limit is provided, return limited results without pagination.
+        """
+        # Get the queryset
+        queryset = self.filter_queryset(self.get_queryset())
+        
+        # Handle limit parameter (for limiting results without pagination)
+        limit_param = request.query_params.get("limit")
+        if limit_param:
+            try:
+                limit = int(limit_param)
+                if limit > 0:
+                    # Apply limit by slicing the queryset (evaluates to list)
+                    limited_queryset = list(queryset[:limit])
+                    serializer = self.get_serializer(limited_queryset, many=True)
+                    return Response(serializer.data)
+            except (ValueError, TypeError):
+                # Invalid limit parameter, ignore it and continue with normal pagination
+                pass
+        
+        # Normal pagination flow when no limit is provided
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
     def _can_edit(self, user):
         # Temporarily allow all authenticated users to edit for debugging
