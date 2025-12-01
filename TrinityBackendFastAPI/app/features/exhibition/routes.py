@@ -27,7 +27,8 @@ from .export import (
     ExportGenerationError,
     build_export_filename,
     build_pdf_bytes,
-    build_pptx_bytes,
+    build_pptx_bytes_animated,
+    build_pptx_bytes_high_fidelity,
     render_slide_screenshots,
 )
 
@@ -228,16 +229,58 @@ async def get_shared_layout(
 
 @router.post("/export/pptx")
 async def export_presentation_pptx(payload: ExhibitionExportRequest) -> Response:
+    """Export presentation as PPTX with configurable fidelity mode.
+    
+    Fidelity modes:
+    - 'low' (default): Fully editable charts and objects (preserves animations)
+    - 'high': Image-based charts for pixel-perfect rendering, editable text boxes
+    
+    Low fidelity uses object-based rendering (separate pipeline from PDF/JPG):
+    - Does NOT use Chromium screenshots (preserves animations)
+    - Uses object-based rendering (charts, shapes, text as native PowerPoint objects)
+    - Data loaded through metadata attachment
+    
+    High fidelity uses screenshot-based rendering:
+    - Uses Chromium screenshots for slide backgrounds
+    - Charts rendered as images (not editable as PowerPoint charts)
+    - Text boxes remain editable
+    """
     if not payload.slides:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No slides provided for export.",
         )
 
+    # Determine fidelity mode (default to 'low' for backward compatibility)
+    fidelity = (payload.fidelity or "low").lower()
+    if fidelity not in ("low", "high"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid fidelity mode: {fidelity}. Must be 'low' or 'high'.",
+        )
+
     try:
-        pptx_bytes = await run_in_threadpool(build_pptx_bytes, payload)
-    except ExportGenerationError as exc:  # pragma: no cover - defensive path
+        logging.info('Starting PPTX export for %d slide(s) with fidelity: %s', len(payload.slides), fidelity)
+        
+        # Route to appropriate export function based on fidelity
+        if fidelity == "high":
+            pptx_bytes = await run_in_threadpool(build_pptx_bytes_high_fidelity, payload)
+        else:
+            # Low fidelity (existing behavior)
+            pptx_bytes = await run_in_threadpool(build_pptx_bytes_animated, payload)
+        
+        logging.info('PPTX export completed successfully: %d bytes', len(pptx_bytes))
+    except ExportGenerationError as exc:
+        # Log export errors with full context
+        logging.error('PPTX export failed (ExportGenerationError): %s', exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        # Log unexpected errors with full stack trace
+        logging.exception('PPTX export failed with unexpected error: %s', exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export PPTX document: {str(exc)}"
+        ) from exc
 
     filename = build_export_filename(payload.title, "pptx")
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
@@ -257,9 +300,20 @@ async def export_presentation_pdf(payload: ExhibitionExportRequest) -> Response:
         )
 
     try:
+        logging.info('Starting PDF export for %d slide(s)', len(payload.slides))
         pdf_bytes = await run_in_threadpool(build_pdf_bytes, payload)
-    except ExportGenerationError as exc:  # pragma: no cover - defensive path
+        logging.info('PDF export completed successfully: %d bytes', len(pdf_bytes))
+    except ExportGenerationError as exc:
+        # Log export errors with full context
+        logging.error('PDF export failed (ExportGenerationError): %s', exc, exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        # Log unexpected errors with full stack trace
+        logging.exception('PDF export failed with unexpected error: %s', exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export PDF document: {str(exc)}"
+        ) from exc
 
     filename = build_export_filename(payload.title, "pdf")
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
