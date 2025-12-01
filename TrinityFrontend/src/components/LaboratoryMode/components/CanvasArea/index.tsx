@@ -1,10 +1,24 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { safeStringify } from '@/utils/safeStringify';
 import { sanitizeLabConfig, persistLaboratoryConfig } from '@/utils/projectStorage';
 import { Card, Card as AtomBox } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Plus, Grid3X3, Trash2, Settings, ChevronDown, Minus, RefreshCcw, Maximize2, X, HelpCircle, HelpCircleIcon, GripVertical } from 'lucide-react';
+import {
+  Plus,
+  Grid3X3,
+  Trash2,
+  Settings,
+  ChevronDown,
+  Minus,
+  RefreshCcw,
+  Maximize2,
+  X,
+  HelpCircle,
+  HelpCircleIcon,
+  GripVertical,
+  Type,
+} from 'lucide-react';
 import { useExhibitionStore } from '../../../ExhibitionMode/store/exhibitionStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -53,6 +67,8 @@ import {
   registerPrefillController,
   cancelPrefillController,
 } from '@/components/AtomList/atoms/column-classifier/prefillManager';
+import { TextBoxToolbar } from './text-box/TextBoxToolbar';
+import type { TextAlignOption, TextStylePreset } from './text-box/types';
 
 import {
   useLaboratoryStore,
@@ -60,6 +76,7 @@ import {
   DroppedAtom,
   CardVariable,
   DEFAULT_TEXTBOX_SETTINGS,
+  TextBoxConfig,
   createDefaultDataUploadSettings,
   DEFAULT_FEATURE_OVERVIEW_SETTINGS,
   DEFAULT_DATAFRAME_OPERATIONS_SETTINGS,
@@ -67,6 +84,7 @@ import {
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_SETTINGS,
   DEFAULT_AUTO_REGRESSIVE_MODELS_DATA,
+  TextBoxSettings,
   DataUploadSettings,
   ColumnClassifierColumn,
   DEFAULT_EXPLORE_SETTINGS,
@@ -77,6 +95,77 @@ import {
 import { deriveWorkflowMolecules, WorkflowMolecule, buildUnifiedRenderArray, UnifiedRenderItem } from './helpers';
 import { LABORATORY_PROJECT_STATE_API } from '@/lib/api';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+
+const normalizeTextBoxPlaceholder = (value?: string) => (value ?? '').replace(/\s+/g, ' ').trim();
+
+const normalizeTextBoxValue = (value?: string) =>
+  normalizeTextBoxPlaceholder(
+    value
+      ?.replace(/<br\s*\/?\s*>/gi, '\n')
+      .replace(/<[^>]+>/g, ' '),
+  );
+
+const TEXTBOX_PLACEHOLDER = '';
+const TEXTBOX_PLACEHOLDER_NORMALIZED = '';
+const isPlaceholderContent = (value?: string) => normalizeTextBoxValue(value) === TEXTBOX_PLACEHOLDER_NORMALIZED;
+
+const normalizeTextBoxes = (card: any): TextBoxConfig[] => {
+  const incoming = card?.textBoxes ?? card?.text_boxes;
+  const parsed = Array.isArray(incoming) ? incoming : [];
+
+  if (parsed.length > 0) {
+    return parsed.map((box: any, index: number) => ({
+      id: box.id ?? `text-box-${index + 1}`,
+      title: box.title ?? `Text Box ${index + 1}`,
+      content: box.content ?? box.text ?? card?.textBoxContent ?? '',
+      html: box.html ?? card?.textBoxHtml ?? '',
+      settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? box) },
+    }));
+  }
+
+  if (card?.textBoxEnabled ?? card?.text_box_enabled) {
+    return [
+      {
+        id: 'text-box-1',
+        title: 'Text Box 1',
+        content: card?.textBoxContent ?? card?.text_box_content ?? '',
+        html: card?.textBoxHtml ?? card?.text_box_html ?? '',
+        settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(card?.textBoxSettings ?? card?.text_box_settings ?? {}) },
+      },
+    ];
+  }
+
+  return [];
+};
+
+type NormalizedTextBox = TextBoxConfig & { settings: TextBoxSettings };
+
+const normalizeCardTextBoxes = (card: LayoutCard): NormalizedTextBox[] => {
+  const baseTextBoxes = (Array.isArray(card.textBoxes) && card.textBoxes.length > 0
+    ? card.textBoxes
+    : normalizeTextBoxes(card)) as NormalizedTextBox[];
+
+  const ensuredTextBoxes = baseTextBoxes.length > 0
+    ? baseTextBoxes
+    : [
+        {
+          id: 'text-box-1',
+          title: 'Text Box 1',
+          content: card.textBoxContent ?? '',
+          html: card.textBoxHtml ?? '',
+          settings: { ...DEFAULT_TEXTBOX_SETTINGS },
+        },
+      ];
+
+  return ensuredTextBoxes.map((box, index) => ({
+    ...box,
+    id: box.id ?? `text-box-${index + 1}`,
+    title: box.title ?? `Text Box ${index + 1}`,
+    content: box.content ?? '',
+    html: box.html ?? '',
+    settings: { ...DEFAULT_TEXTBOX_SETTINGS, ...(box.settings ?? {}) },
+  }));
+};
 
 
 interface CanvasAreaProps {
@@ -201,7 +290,676 @@ const hydrateLayoutCards = (rawCards: any): LayoutCard[] | null => {
     afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
     beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
     variables: normalizeCardVariables(card.variables, card.id),
+    textBoxEnabled: card.textBoxEnabled ?? card.text_box_enabled ?? false,
+    textBoxContent: card.textBoxContent ?? card.text_box_content,
+    textBoxHtml: card.textBoxHtml ?? card.text_box_html,
+    textBoxSettings: card.textBoxSettings
+      ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }
+      : card.text_box_settings
+      ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.text_box_settings }
+      : undefined,
+    textBoxes: normalizeTextBoxes(card),
   }));
+};
+
+interface CardTextBoxCanvasProps {
+  data: { text: string; html: string };
+  settings: TextBoxSettings;
+  onTextChange: (data: { text: string; html: string }) => void;
+  onSettingsChange: (updates: Partial<TextBoxSettings>) => void;
+  onDelete?: () => void;
+}
+
+const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
+
+const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange, onDelete }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const selectionRef = useRef<Range | null>(null);
+  const [showToolbar, setShowToolbar] = useState(false);
+
+  const logToolbarAction = (action: string, details: Record<string, unknown> = {}) => {
+    const projectContext = getActiveProjectContext();
+
+    console.log('[Laboratory Text Toolbar]', action, {
+      ...details,
+      project: projectContext?.project_name,
+      app: projectContext?.app_name,
+    });
+
+    fetch(`${LABORATORY_PROJECT_STATE_API}/log-text-toolbar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        action,
+        client: projectContext?.client_name,
+        app: projectContext?.app_name,
+        project: projectContext?.project_name,
+        details: {
+          ...details,
+          textLength: data?.text?.length ?? 0,
+        },
+      }),
+    }).catch(() => {
+      /* non-blocking logging */
+    });
+  };
+
+  const hasEditableSelection = () => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : selectionRef.current;
+
+    if (!range || range.collapsed) return false;
+
+    const container = editorRef.current;
+    return container.contains(range.commonAncestorContainer);
+  };
+
+  const LIST_LINE_SEPARATOR = /\r?\n/;
+  const BULLET_PATTERN = /^\s*[•-]\s+/;
+  const NUMBERED_PATTERN = /^\s*\d+[.)]?\s+/;
+
+  const stripListPrefix = (line: string): string => {
+    if (BULLET_PATTERN.test(line)) return line.replace(BULLET_PATTERN, '');
+    if (NUMBERED_PATTERN.test(line)) return line.replace(NUMBERED_PATTERN, '');
+    return line;
+  };
+
+  const toggleBulletedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+
+    if (isBulleted) {
+      return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map(line => {
+        const base = stripListPrefix(line).trimStart();
+        return base.length > 0 ? `• ${base}` : '• ';
+      })
+      .join('\n');
+  };
+
+  const toggleNumberedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+    if (isNumbered) {
+      return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map((line, index) => {
+        const base = stripListPrefix(line).trimStart();
+        const prefix = `${index + 1}. `;
+        return base.length > 0 ? `${prefix}${base}` : prefix;
+      })
+      .join('\n');
+  };
+
+  const replaceSelectionWithHtml = (html: string) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer)) return false;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+
+    const fragment = document.createDocumentFragment();
+    const nodes = Array.from(wrapper.childNodes);
+
+    nodes.forEach(node => fragment.appendChild(node));
+
+    range.deleteContents();
+    range.insertNode(fragment);
+
+    if (nodes.length > 0) {
+      const newRange = document.createRange();
+      newRange.setStartBefore(nodes[0]);
+      newRange.setEndAfter(nodes[nodes.length - 1]);
+      selection.removeAllRanges();
+      selection.addRange(newRange);
+      selectionRef.current = newRange;
+    }
+
+    handleInput();
+    return true;
+  };
+
+  const decodeHtmlEntities = (value: string): string => {
+    if (typeof window === 'undefined') return value;
+
+    const textarea = window.document.createElement('textarea');
+    textarea.innerHTML = value;
+    return textarea.value;
+  };
+
+  const htmlToPlainText = (rawValue: string): string => {
+    if (!rawValue) return '';
+
+    let working = rawValue
+      .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/(div|p|li)>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '')
+      .replace(/<div[^>]*>/gi, '')
+      .replace(/<p[^>]*>/gi, '')
+      .replace(/<span[^>]*>/gi, '')
+      .replace(/<\/span>/gi, '')
+      .replace(/<\/ul>/gi, '\n')
+      .replace(/<\/ol>/gi, '\n')
+      .replace(/<[^>]+>/g, '');
+
+    working = working.replace(/\u00a0/g, ' ');
+    working = decodeHtmlEntities(working);
+
+    while (working.endsWith('\n')) {
+      working = working.slice(0, -1);
+    }
+
+    return working;
+  };
+
+  const escapeHtml = (value: string): string =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const plainTextToHtml = (value: string): string => {
+    if (!value) return '';
+
+    return value
+      .split(LIST_LINE_SEPARATOR)
+      .map(line => {
+        if (line.length === 0) {
+          return '<div><br></div>';
+        }
+        return `<div>${escapeHtml(line)}</div>`;
+      })
+      .join('');
+  };
+
+  const deriveListTypeFromPlain = (plain: string): TextBoxSettings['list_type'] => {
+    const lines = plain.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+    if (isBulleted) return 'bullet';
+    if (isNumbered) return 'number';
+    return 'none';
+  };
+
+  const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
+    if (!editorRef.current) return;
+
+    if (typeof updates.text_color === 'string') {
+      editorRef.current.style.color = updates.text_color;
+    }
+
+    if (typeof updates.background_color === 'string') {
+      editorRef.current.style.backgroundColor = updates.background_color || 'transparent';
+    }
+  };
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== data.html) {
+      editorRef.current.innerHTML = data.html;
+    }
+  }, [data.html]);
+
+  useEffect(() => {
+    applyImmediateStyles({
+      text_color: settings.text_color,
+      background_color: settings.background_color,
+    });
+  }, [settings.background_color, settings.text_color]);
+
+  const handleInput = () => {
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      const text = editorRef.current.innerText;
+      onTextChange({ text, html });
+    }
+  };
+
+  const saveSelection = () => {
+    if (typeof window === 'undefined' || !editorRef.current) return;
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+
+    const range = selection.getRangeAt(0);
+    if (editorRef.current.contains(range.commonAncestorContainer)) {
+      selectionRef.current = range;
+    }
+  };
+
+  const restoreSelection = () => {
+    if (typeof window === 'undefined' || !editorRef.current) return;
+
+    const selection = window.getSelection();
+    const range = selectionRef.current;
+
+    if (selection && range && editorRef.current.contains(range.commonAncestorContainer)) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  };
+
+  const runCommand = (command: string, value?: string) => {
+    if (typeof document === 'undefined') return false;
+
+    editorRef.current?.focus();
+    restoreSelection();
+
+    try {
+      const executed = document.execCommand(command, false, value ?? undefined);
+
+      if (executed) {
+        handleInput();
+      }
+
+      return executed;
+    } catch {
+      return false;
+    }
+  };
+
+  const applyStyleToSelection = (styles: Partial<CSSStyleDeclaration>) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    restoreSelection();
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer) || range.collapsed) return false;
+
+    const span = document.createElement('span');
+    Object.assign(span.style, styles);
+
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+
+    selection.removeAllRanges();
+    const newRange = document.createRange();
+    newRange.selectNodeContents(span);
+    selection.addRange(newRange);
+    selectionRef.current = newRange;
+
+    handleInput();
+    return true;
+  };
+
+  const applyFontSizeToSelection = (nextSize: number) => {
+    if (!hasEditableSelection() || typeof document === 'undefined') return false;
+
+    editorRef.current?.focus();
+    restoreSelection();
+
+    try {
+      document.execCommand('fontSize', false, '7');
+    } catch {
+      return false;
+    }
+
+    const container = editorRef.current;
+    if (!container) return false;
+
+    const targets = Array.from(container.querySelectorAll('font[size="7"]'));
+    if (targets.length === 0) return false;
+
+    targets.forEach(node => {
+      const span = document.createElement('span');
+      span.style.fontSize = `${nextSize}px`;
+      span.innerHTML = node.innerHTML;
+      node.replaceWith(span);
+    });
+
+    handleInput();
+    return true;
+  };
+
+  useEffect(() => {
+    if (!showToolbar || typeof document === 'undefined') return undefined;
+
+    const handleSelectionChange = () => {
+      if (!editorRef.current) return;
+      const selection = document.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      if (editorRef.current.contains(range.commonAncestorContainer)) {
+        selectionRef.current = range;
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, [showToolbar]);
+
+  useEffect(() => {
+    if (!editorRef.current) return;
+
+    editorRef.current.style.color = settings.text_color;
+    editorRef.current.style.backgroundColor = settings.background_color ?? 'transparent';
+    editorRef.current.style.fontFamily = settings.font_family;
+    editorRef.current.style.fontSize = `${settings.font_size}px`;
+    editorRef.current.style.fontWeight = settings.bold ? 'bold' : 'normal';
+    editorRef.current.style.fontStyle = settings.italics ? 'italic' : 'normal';
+    editorRef.current.style.textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+    editorRef.current.style.textAlign = settings.text_align;
+
+    editorRef.current.classList.remove('list-disc', 'list-decimal', 'pl-8');
+    if (settings.list_type === 'bullet') {
+      editorRef.current.classList.add('list-disc', 'pl-8');
+      editorRef.current.style.listStyleType = 'disc';
+      editorRef.current.style.paddingLeft = '2rem';
+    } else if (settings.list_type === 'number') {
+      editorRef.current.classList.add('list-decimal', 'pl-8');
+      editorRef.current.style.listStyleType = 'decimal';
+      editorRef.current.style.paddingLeft = '2rem';
+    } else {
+      editorRef.current.style.listStyleType = 'none';
+      editorRef.current.style.paddingLeft = '0';
+    }
+  }, [
+    settings.background_color,
+    settings.text_color,
+    settings.bold,
+    settings.font_family,
+    settings.font_size,
+    settings.italics,
+    settings.list_type,
+    settings.strikethrough,
+    settings.text_align,
+    settings.underline,
+  ]);
+
+  const handleApplyTextStyle = (preset: TextStylePreset) => {
+    logToolbarAction('apply-text-style', { preset: preset.id });
+
+    const updates: Partial<TextBoxSettings> = {
+      font_size: clampFontSize(preset.fontSize),
+    };
+
+    if (typeof preset.bold === 'boolean') updates.bold = preset.bold;
+    if (typeof preset.italic === 'boolean') updates.italics = preset.italic;
+    if (typeof preset.underline === 'boolean') updates.underline = preset.underline;
+    if (typeof preset.strikethrough === 'boolean') updates.strikethrough = preset.strikethrough;
+
+    onSettingsChange(updates);
+  };
+
+  const handleContainerBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (!containerRef.current?.contains(nextTarget)) {
+      setShowToolbar(false);
+    }
+  };
+
+  const getListStyle = () => {
+    if (settings.list_type === 'bullet') return 'list-disc pl-8';
+    if (settings.list_type === 'number') return 'list-decimal pl-8';
+    return '';
+  };
+
+  const textDecoration = `${settings.underline ? 'underline' : ''} ${settings.strikethrough ? 'line-through' : ''}`.trim();
+  const toolbarAlign: TextAlignOption = ['left', 'center', 'right'].includes(settings.text_align)
+    ? (settings.text_align as TextAlignOption)
+    : 'left';
+
+  const updateListTypeFromContent = (plainOverride?: string) => {
+    const plain =
+      plainOverride ?? htmlToPlainText(editorRef.current?.innerHTML ?? settings.html ?? settings.content ?? '');
+    onSettingsChange({ list_type: deriveListTypeFromPlain(plain) });
+  };
+
+  const applyListTransformation = (
+    transformer: (value: string) => string,
+    onApplied?: (plain: string) => void,
+  ) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const applyToHtml = (html: string): string => {
+      const plain = htmlToPlainText(html);
+      const transformed = transformer(plain);
+      onApplied?.(transformed);
+      return plainTextToHtml(transformed);
+    };
+
+    const selectionApplied = (() => {
+      restoreSelection();
+
+      const selection = window.getSelection();
+      if (!selection?.rangeCount) return false;
+
+      const range = selection.getRangeAt(0);
+      if (!editorRef.current?.contains(range.commonAncestorContainer) || range.collapsed) {
+        return false;
+      }
+
+      const container = document.createElement('div');
+      container.appendChild(range.cloneContents());
+
+      const nextHtml = applyToHtml(container.innerHTML);
+      return replaceSelectionWithHtml(nextHtml);
+    })();
+
+    if (selectionApplied) return true;
+
+    const sourceHtml = editorRef.current.innerHTML ?? '';
+    const nextHtml = applyToHtml(sourceHtml);
+
+    if (nextHtml === sourceHtml) return false;
+
+    editorRef.current.innerHTML = nextHtml;
+    handleInput();
+    editorRef.current.focus();
+    return true;
+  };
+
+  const handleToggleStyle = (key: 'bold' | 'italics' | 'underline' | 'strikethrough') => {
+    logToolbarAction('toggle-style', { style: key });
+
+    const commandMap: Record<typeof key, string> = {
+      bold: 'bold',
+      italics: 'italic',
+      underline: 'underline',
+      strikethrough: 'strikeThrough',
+    };
+
+    if (hasEditableSelection()) {
+      const executed = runCommand(commandMap[key]);
+      if (executed) return;
+    }
+
+    onSettingsChange({ [key]: !settings[key] } as Partial<TextBoxSettings>);
+  };
+
+  const handleAlign = (align: TextAlignOption) => {
+    logToolbarAction('align-text', { align });
+
+    if (hasEditableSelection()) {
+      const command = align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
+      runCommand(command);
+    }
+
+    onSettingsChange({ text_align: align });
+  };
+
+  const handleFontFamilyChange = (font: string) => {
+    logToolbarAction('change-font-family', { font });
+
+    if (hasEditableSelection()) {
+      const executed = runCommand('fontName', font);
+      if (executed) return;
+    }
+
+    onSettingsChange({ font_family: font });
+  };
+
+  const handleIncreaseFontSize = () => {
+    const next = clampFontSize(settings.font_size + 1);
+    logToolbarAction('increase-font-size', { next });
+
+    if (applyFontSizeToSelection(next)) return;
+    onSettingsChange({ font_size: next });
+  };
+
+  const handleDecreaseFontSize = () => {
+    const next = clampFontSize(settings.font_size - 1);
+    logToolbarAction('decrease-font-size', { next });
+
+    if (applyFontSizeToSelection(next)) return;
+    onSettingsChange({ font_size: next });
+  };
+
+  const handleColorChange = (color: string) => {
+    logToolbarAction('text-color', { color });
+
+    const hasSelection = hasEditableSelection();
+    const executed = hasSelection ? runCommand('foreColor', color) : false;
+    const styled = executed || (hasSelection ? applyStyleToSelection({ color }) : false);
+
+    if (!styled) {
+      applyImmediateStyles({ text_color: color });
+    }
+
+    onSettingsChange({ text_color: color });
+  };
+
+  const handleBackgroundColorChange = (color: string) => {
+    logToolbarAction('background-color', { color });
+
+    const hasSelection = hasEditableSelection();
+    const executed = hasSelection ? runCommand('hiliteColor', color) || runCommand('backColor', color) : false;
+    const styled = executed || (hasSelection ? applyStyleToSelection({ backgroundColor: color }) : false);
+
+    if (!styled) {
+      applyImmediateStyles({ background_color: color });
+    }
+
+    onSettingsChange({ background_color: color });
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full h-full pt-6"
+      onFocusCapture={() => setShowToolbar(true)}
+      onBlurCapture={handleContainerBlur}
+    >
+      {showToolbar ? (
+        <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full">
+          <TextBoxToolbar
+            fontFamily={settings.font_family}
+            onFontFamilyChange={handleFontFamilyChange}
+            fontSize={settings.font_size}
+            onIncreaseFontSize={handleIncreaseFontSize}
+            onDecreaseFontSize={handleDecreaseFontSize}
+            onApplyTextStyle={handleApplyTextStyle}
+            bold={settings.bold}
+            italic={settings.italics}
+            underline={settings.underline}
+            strikethrough={Boolean(settings.strikethrough)}
+            onToggleBold={() => handleToggleStyle('bold')}
+            onToggleItalic={() => handleToggleStyle('italics')}
+            onToggleUnderline={() => handleToggleStyle('underline')}
+            onToggleStrikethrough={() => handleToggleStyle('strikethrough')}
+            align={toolbarAlign}
+            onAlign={handleAlign}
+            onBulletedList={() => {
+              logToolbarAction('toggle-list', { type: 'bullet' });
+
+              console.log('[Laboratory Text Toolbar] Bullet toggle requested', {
+                hasEditableSelection: hasEditableSelection(),
+                currentHtml: editorRef.current?.innerHTML,
+              });
+
+              const executed = runCommand('insertUnorderedList');
+              console.log('[Laboratory Text Toolbar] Native bullet command executed', executed);
+              if (executed) {
+                updateListTypeFromContent();
+                handleInput();
+                return;
+              }
+
+              applyListTransformation(toggleBulletedListContent, transformed => {
+                console.log('[Laboratory Text Toolbar] Fallback bullet transform applied', transformed);
+                updateListTypeFromContent(transformed);
+              });
+            }}
+            onNumberedList={() => {
+              logToolbarAction('toggle-list', { type: 'number' });
+
+              console.log('[Laboratory Text Toolbar] Numbered toggle requested', {
+                hasEditableSelection: hasEditableSelection(),
+                currentHtml: editorRef.current?.innerHTML,
+              });
+
+              const executed = runCommand('insertOrderedList');
+              console.log('[Laboratory Text Toolbar] Native numbered command executed', executed);
+              if (executed) {
+                updateListTypeFromContent();
+                handleInput();
+                return;
+              }
+
+              applyListTransformation(toggleNumberedListContent, transformed => {
+                console.log('[Laboratory Text Toolbar] Fallback numbered transform applied', transformed);
+                updateListTypeFromContent(transformed);
+              });
+            }}
+            color={settings.text_color}
+            onColorChange={handleColorChange}
+            backgroundColor={settings.background_color ?? 'transparent'}
+            onBackgroundColorChange={handleBackgroundColorChange}
+            onDelete={onDelete}
+          />
+        </div>
+      ) : null}
+
+      <div className="w-full h-full space-y-3">
+        <div
+          ref={editorRef}
+          contentEditable
+          onInput={handleInput}
+          onKeyUp={saveSelection}
+          onMouseUp={saveSelection}
+          suppressContentEditableWarning
+          className={`
+            w-full min-h-[100px] px-3 py-2
+            border-2 border-dashed border-border rounded-lg
+            focus:outline-none focus:border-primary
+            transition-colors duration-200
+            ${getListStyle()}
+          `}
+          style={{
+            fontFamily: settings.font_family,
+            fontSize: `${settings.font_size}px`,
+            fontWeight: settings.bold ? 'bold' : 'normal',
+            fontStyle: settings.italics ? 'italic' : 'normal',
+            textDecoration,
+            textAlign: settings.text_align,
+            color: settings.text_color,
+            backgroundColor: settings.background_color ?? 'transparent',
+          }}
+        />
+
+      </div>
+    </div>
+  );
 };
 
 // Function to fetch atom configurations from MongoDB
@@ -286,6 +1044,15 @@ const fetchAtomConfigurationsFromMongoDB = async (): Promise<{
           afterMoleculeId: card.afterMoleculeId ?? card.after_molecule_id ?? undefined,
           beforeMoleculeId: card.beforeMoleculeId ?? card.before_molecule_id ?? undefined,
           variables: normalizeCardVariables(card.variables, card.id),
+          textBoxEnabled: card.textBoxEnabled ?? card.text_box_enabled ?? false,
+          textBoxContent: card.textBoxContent ?? card.text_box_content,
+          textBoxHtml: card.textBoxHtml ?? card.text_box_html,
+          textBoxSettings: card.textBoxSettings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.textBoxSettings }
+            : card.text_box_settings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...card.text_box_settings }
+            : undefined,
+          textBoxes: normalizeTextBoxes(card),
         };
 
         // Validation: Log warning if we expected moleculeId but it's missing
@@ -480,6 +1247,130 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             </div>
           );
         })}
+      </div>
+    );
+  };
+
+  const renderCardTextBox = (card: LayoutCard) => {
+    if (!card.textBoxEnabled) {
+      return null;
+    }
+
+    const normalizedTextBoxes = normalizeCardTextBoxes(card);
+
+    const syncLegacyFields = (boxes: TextBoxConfig[]) => {
+      const primary = boxes[0];
+
+      return {
+        textBoxes: boxes,
+        textBoxContent: primary?.content ?? '',
+        textBoxHtml: primary?.html ?? '',
+        textBoxSettings: primary?.settings
+          ? { ...DEFAULT_TEXTBOX_SETTINGS, ...primary.settings }
+          : card.textBoxSettings,
+      };
+    };
+
+    const updateCardTextBoxes = (updater: (boxes: TextBoxConfig[]) => TextBoxConfig[]) => {
+      if (!Array.isArray(layoutCards)) return;
+
+      setLayoutCards(
+        layoutCards.map(existing => {
+          if (existing.id !== card.id) return existing;
+
+          const current = normalizeCardTextBoxes(existing);
+          const nextBoxes = updater(current);
+          return {
+            ...existing,
+            ...syncLegacyFields(nextBoxes),
+          };
+        }),
+      );
+    };
+
+    const MAX_TEXTBOXES = 5;
+
+    const addTextBoxBelow = () => {
+      updateCardTextBoxes(boxes => {
+        if (boxes.length >= MAX_TEXTBOXES) return boxes;
+
+        const nextIndex = boxes.length + 1;
+        const newBox: TextBoxConfig = {
+          id: `text-box-${nextIndex}-${Date.now()}`,
+          title: `Text Box ${nextIndex}`,
+          content: '',
+          html: '',
+          settings: { ...DEFAULT_TEXTBOX_SETTINGS },
+        };
+
+        return [...boxes, newBox];
+      });
+    };
+
+    const canAddMore = normalizedTextBoxes.length < MAX_TEXTBOXES;
+
+    return (
+      <div className="mt-10 space-y-6">
+        {normalizedTextBoxes.map(box => {
+          const rawTextContent = box.content ?? '';
+          const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
+          const rawHtmlContent = box.html?.trim()?.length ? box.html : '';
+          const htmlContent = rawHtmlContent && !isPlaceholderContent(rawHtmlContent)
+            ? rawHtmlContent
+            : textContent.replace(/\n/g, '<br />');
+          const textData = { text: textContent, html: htmlContent };
+
+          return (
+            <CardTextBoxCanvas
+              key={box.id}
+              data={textData}
+              settings={box.settings as TextBoxSettings}
+              onDelete={() =>
+                updateCardTextBoxes(boxes => {
+                  const filtered = boxes.filter(existing => existing.id !== box.id);
+                  return filtered;
+                })
+              }
+              onTextChange={(data) =>
+                updateCardTextBoxes((boxes) =>
+                  boxes.map(existing =>
+                    existing.id === box.id
+                      ? { ...existing, content: data.text, html: data.html }
+                      : existing,
+                  ),
+                )
+              }
+              onSettingsChange={(updates) =>
+                updateCardTextBoxes((boxes) =>
+                  boxes.map(existing =>
+                    existing.id === box.id
+                      ? {
+                          ...existing,
+                          settings: {
+                            ...DEFAULT_TEXTBOX_SETTINGS,
+                            ...(existing.settings ?? {}),
+                            ...updates,
+                          },
+                        }
+                      : existing,
+                  ),
+                )
+              }
+            />
+          );
+        })}
+        {canAddMore ? (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={addTextBoxBelow}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-primary text-primary transition-colors hover:bg-primary/10"
+              aria-label="Add text box"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -3280,6 +4171,34 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
     setExpandedCard(expandedCard === id ? null : id);
   };
 
+  const toggleCardTextBox = (cardId: string) => {
+    if (!Array.isArray(layoutCards)) return;
+
+    setLayoutCards(
+      layoutCards.map(card => {
+        if (card.id !== cardId) return card;
+
+        if (card.textBoxEnabled) {
+          return { ...card, textBoxEnabled: false };
+        }
+
+        const normalizedTextBoxes = normalizeCardTextBoxes(card);
+        const primary = normalizedTextBoxes[0];
+
+        return {
+          ...card,
+          textBoxEnabled: true,
+          textBoxes: normalizedTextBoxes,
+          textBoxContent: primary?.content ?? '',
+          textBoxHtml: primary?.html ?? '',
+          textBoxSettings: primary?.settings
+            ? { ...DEFAULT_TEXTBOX_SETTINGS, ...primary.settings }
+            : { ...DEFAULT_TEXTBOX_SETTINGS },
+        };
+      }),
+    );
+  };
+
   const toggleMoleculeCollapse = (moleculeId: string) => {
     setCollapsedMolecules(prev => ({ ...prev, [moleculeId]: !prev[moleculeId] }));
   };
@@ -4377,6 +5296,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               >
                                 <RefreshCcw className="w-4 h-4 text-gray-400" />
                               </button>
+                              <button
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  toggleCardTextBox(card.id);
+                                }}
+                                className={`p-1 rounded hover:bg-gray-100 ${
+                                  card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                                }`}
+                                title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                              >
+                                <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                              </button>
                             </div>
                             <div className="flex items-center space-x-2">
                               <button
@@ -4525,6 +5456,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 ))}
                               </div>
                             )}
+                            {renderCardTextBox(card)}
                             {renderAppendedVariables(card)}
                           </div>
                         </Card>
@@ -4644,6 +5576,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             title="Refresh Atom"
                           >
                             <RefreshCcw className="w-4 h-4 text-gray-400" />
+                          </button>
+                          <button
+                            onClick={e => {
+                              e.stopPropagation();
+                              toggleCardTextBox(card.id);
+                            }}
+                            className={`p-1 rounded hover:bg-gray-100 ${
+                              card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                            }`}
+                            title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                          >
+                            <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                           </button>
                         </div>
                         <div className="flex items-center space-x-2">
@@ -4806,6 +5750,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             ))}
                           </div>
                         )}
+                        {renderCardTextBox(card)}
                         {renderAppendedVariables(card)}
                       </div>
                     </Card>
@@ -5129,6 +6074,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 >
                   <RefreshCcw className="w-4 h-4 text-gray-400" />
                 </button>
+                <button
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleCardTextBox(card.id);
+                  }}
+                  className={`p-1 rounded hover:bg-gray-100 ${
+                    card.textBoxEnabled ? 'bg-blue-50 text-[#458EE2]' : ''
+                  }`}
+                  title={card.textBoxEnabled ? 'Hide text box' : 'Show text box'}
+                >
+                  <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
+                </button>
               </div>
               <div className="flex items-center space-x-2">
                 <button
@@ -5293,12 +6250,13 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         </div>
                       )}
                     </AtomBox>
-                  ))}
-                </div>
-              )}
-              {renderAppendedVariables(card)}
+              ))}
             </div>
-          </Card>
+          )}
+          {renderCardTextBox(card)}
+          {renderAppendedVariables(card)}
+        </div>
+      </Card>
           {index < (Array.isArray(layoutCards) ? layoutCards.length : 0) - 1 && (
             <div className="flex justify-center my-4">
               <button

@@ -130,6 +130,28 @@ def _store_create_config(document_id: str, payload: Dict[str, Any]) -> Dict[str,
     }
 
 
+def fetch_create_results_task(
+    *, bucket_name: str, object_name: str, object_prefix: str
+) -> Dict[str, Any]:
+    prefix = object_prefix or ""
+    full_object_path = (
+        object_name
+        if not prefix or object_name.startswith(prefix)
+        else f"{prefix}{object_name}"
+    )
+    create_key = f"{full_object_path}_create.csv"
+
+    create_obj = minio_client.get_object(bucket_name, create_key)
+    create_df = pd.read_csv(io.BytesIO(create_obj.read()))
+    clean_df = create_df.replace({np.nan: None, np.inf: None, -np.inf: None})
+
+    return {
+        "row_count": len(create_df),
+        "create_data": clean_df.to_dict(orient="records"),
+        "result_file": create_key,
+    }
+
+
 def perform_createcolumn_task(
     *,
     bucket_name: str,
@@ -766,6 +788,7 @@ def cardinality_task(
 
 __all__ = [
     "perform_createcolumn_task",
+    "fetch_create_results_task",
     "save_dataframe_task",
     "cached_dataframe_task",
     "classification_task",

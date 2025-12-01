@@ -185,6 +185,10 @@ const DataFrameOperationsProperties: React.FC<Props> = ({ atomId }) => {
         pinnedColumns: [],
         frozenColumns: 0,
         cellColors: {},
+        hiddenColumns: [],
+        // Preserve existing columnFormats when selecting a file
+        // Merge with any existing formats to maintain percentage/currency formatting
+        columnFormats: settings.tableData?.columnFormats || {},
       };
       updateSettings(atomId, {
         ...settings,
