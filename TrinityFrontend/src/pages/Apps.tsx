@@ -3,11 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, GitBranch, FlaskConical, Presentation } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, GitBranch, FlaskConical, Presentation, Info } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API, TENANTS_API } from '@/lib/api';
@@ -761,6 +760,21 @@ const Apps = () => {
 
   const customApps = displayApps.filter(app => app.custom);
 
+  // Filter recent projects based on search term and category
+  const filteredRecentProjects = recentProjectsState.filter(project => {
+    const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         project.appTitle.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || getAppCategory(project.appId) === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  const filteredMyProjects = myProjectsState.filter(project => {
+    const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         project.appTitle.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || getAppCategory(project.appId) === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
   const animationStyle = (offset: number) => ({
     animationDelay: `${(introBaseDelay + offset).toFixed(1)}s`,
     animationFillMode: 'both' as const,
@@ -784,6 +798,48 @@ const Apps = () => {
         </div>
 
         <ScrollArea className="h-[calc(100vh-80px)]">
+          {/* Search & Filters */}
+          <div className="max-w-7xl mx-auto px-6 pt-8 pb-6">
+            <div className="animate-fade-in" style={animationStyle(0.4)}>
+              <div className="flex flex-col sm:flex-row gap-3">
+                {/* Search */}
+                <div className="relative flex-1 max-w-md">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50" />
+                  <Input
+                    type="text"
+                    placeholder="Search projects and applications..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-9 h-9 bg-muted/30 border-border/50 focus:border-primary/50 focus:bg-card text-sm"
+                  />
+                </div>
+                
+                {/* Category Pills */}
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {categories.map((category) => {
+                    const CategoryIcon = category.icon;
+                    const isActive = selectedCategory === category.id;
+                    return (
+                      <button
+                        key={category.id}
+                        onClick={() => setSelectedCategory(category.id)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-medium transition-all duration-200 whitespace-nowrap border",
+                          isActive 
+                            ? "bg-primary text-primary-foreground border-primary" 
+                            : "bg-card text-muted-foreground border-border/50 hover:border-primary/40 hover:text-foreground"
+                        )}
+                      >
+                        <CategoryIcon className="w-3.5 h-3.5" />
+                        {category.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Recent Projects Section - Show if there are projects in either tab */}
           {(recentProjectsState.length > 0 || myProjectsState.length > 0) && (
             <section className="border-b border-border/40 bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
@@ -825,9 +881,9 @@ const Apps = () => {
                 </div>
                 
                 {/* Show projects if available, otherwise show empty state */}
-                {(activeTab === 'my-projects' ? myProjectsState.length > 0 : recentProjectsState.length > 0) ? (
+                {(activeTab === 'my-projects' ? filteredMyProjects.length > 0 : filteredRecentProjects.length > 0) ? (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {(activeTab === 'my-projects' ? myProjectsState : recentProjectsState).map((project) => {
+                    {(activeTab === 'my-projects' ? filteredMyProjects : filteredRecentProjects).map((project) => {
                     const Icon = project.icon;
                     const appColorValue = getAppColorValue(project.appId);
                     return (
@@ -884,9 +940,11 @@ const Apps = () => {
                 ) : (
                   <div className="text-center py-12">
                     <p className="text-muted-foreground text-sm">
-                      {activeTab === 'my-projects' 
-                        ? 'No projects found. Create or modify a project to see it here.'
-                        : 'No recent projects. Start a new project to see it here.'}
+                      {(searchTerm || selectedCategory !== 'all')
+                        ? `No projects found matching your filters. Try adjusting your search or category selection.`
+                        : activeTab === 'my-projects' 
+                          ? 'No projects found. Create or modify a project to see it here.'
+                          : 'No recent projects. Start a new project to see it here.'}
                     </p>
                   </div>
                 )}
@@ -903,139 +961,10 @@ const Apps = () => {
               </div>
             )}
 
-            {/* Section Header with Search & Filters */}
-            {!loading && (
-              <div className="mb-8 animate-fade-in" style={animationStyle(0.4)}>
-                <div className="flex items-center gap-3 mb-6">
-                  {/* dark, neutral icon to match Recent Projects' strong contrast */}
-                  <div className="w-9 h-9 rounded-xl bg-card flex items-center justify-center">
-                    <LayoutGrid className="w-4.5 h-4.5 text-foreground" />
-                  </div>
-
-                  <div>
-                    <h2 className="text-base font-semibold text-foreground">Choose Application</h2>
-                    <p className="text-xs text-muted-foreground">Select a template to start a new project</p>
-                  </div>
-                </div>
-                
-                <div className="flex flex-col sm:flex-row gap-3">
-                  {/* Search */}
-                  <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50" />
-                    <Input
-                      type="text"
-                      placeholder="Search applications..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="pl-9 h-9 bg-muted/30 border-border/50 focus:border-primary/50 focus:bg-card text-sm"
-                    />
-                  </div>
-                  
-                  {/* Category Pills */}
-                  <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                    {categories.map((category) => {
-                      const CategoryIcon = category.icon;
-                      const isActive = selectedCategory === category.id;
-                      return (
-                        <button
-                          key={category.id}
-                          onClick={() => setSelectedCategory(category.id)}
-                          className={cn(
-                            "inline-flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-medium transition-all duration-200 whitespace-nowrap border",
-                            isActive 
-                              ? "bg-primary text-primary-foreground border-primary" 
-                              : "bg-card text-muted-foreground border-border/50 hover:border-primary/40 hover:text-foreground"
-                          )}
-                        >
-                          <CategoryIcon className="w-3.5 h-3.5" />
-                          {category.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* All Applications */}
-            {!loading && filteredApps.length > 0 && (
-              <div className="animate-fade-in" style={animationStyle(1.0)}>
-                <div className="flex items-center gap-2 mb-6">
-                  <Sparkles className="w-5 h-5 text-primary" />
-                  <h3 className="text-lg font-bold text-foreground">All Applications</h3>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {filteredApps.map((app, index) => {
-                    const Icon = app.icon;
-                    return (
-                      <Card 
-                        key={app.id}
-                        className="group relative bg-card border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
-                        style={animationStyle(1.1 + index * 0.05)}
-                        onClick={() => handleAppSelect(app.id)}
-                      >
-                        {/* Gradient Overlay */}
-                        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                        
-                        <div className="relative p-4 h-full flex flex-col">
-                          <div className="flex items-start gap-3 mb-3">
-                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
-                              <Icon className="w-5 h-5 text-white" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-base font-bold text-foreground group-hover:text-primary transition-colors mb-1">
-                                {app.title}
-                              </h3>
-                              <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
-                                {app.description}
-                              </p>
-                            </div>
-                          </div>
-                          
-                          {app.modules.length > 0 && (
-                            <div className="mb-4 flex-1">
-                              <div className="flex flex-wrap gap-1.5">
-                                {app.modules.slice(0, 2).map((module, idx) => (
-                                  <Badge 
-                                    key={idx}
-                                    variant="secondary"
-                                    className="text-xs"
-                                  >
-                                    {module}
-                                  </Badge>
-                                ))}
-                                {app.modules.length > 2 && (
-                                  <Badge variant="secondary" className="text-xs">
-                                    +{app.modules.length - 2}
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                          
-                          <Button 
-                            variant="ghost"
-                            size="sm"
-                            className="w-full justify-between text-sm group-hover:bg-primary/5 group-hover:text-primary transition-colors mt-auto"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAppSelect(app.id);
-                            }}
-                          >
-                            Get Started
-                            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                          </Button>
-                        </div>
-                      </Card>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             {/* Custom Applications */}
             {!loading && customApps.length > 0 && (
-              <div className="mt-10 mb-12 animate-fade-in" style={animationStyle(1.4)}>
+              <div className="animate-fade-in" style={animationStyle(1.0)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Plus className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-bold text-foreground">Custom Applications</h3>
@@ -1047,40 +976,173 @@ const Apps = () => {
                       <Card 
                         key={app.id}
                         className="group relative bg-card border border-dashed border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
-                        style={animationStyle(1.5 + index * 0.1)}
+                        style={animationStyle(1.1 + index * 0.05)}
                         onClick={() => handleAppSelect(app.id)}
                       >
                         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                         
-                        <div className="relative p-4 h-full flex flex-col">
-                          <div className="flex items-start gap-3 mb-3">
+                        <div className="relative p-4">
+                          {/* Info Icon in top right */}
+                          <div className="absolute top-4 right-4 z-10">
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                    }}
+                                    className="w-6 h-6 rounded-full bg-muted/50 hover:bg-muted flex items-center justify-center transition-colors"
+                                  >
+                                    <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent 
+                                  side="left" 
+                                  sideOffset={8}
+                                  className="max-w-xs text-xs z-[9999]"
+                                >
+                                  <p>{app.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          <div className="flex items-start gap-3">
                             <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
                               <Icon className="w-5 h-5 text-white" />
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-base font-bold text-foreground mb-1 group-hover:text-primary transition-colors">
+                            <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
+                              <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors leading-tight">
                                 {app.title}
                               </h3>
-                              <p className="text-muted-foreground text-xs leading-relaxed line-clamp-2">
-                                {app.description}
-                              </p>
+                              <Button 
+                                variant="ghost"
+                                size="sm"
+                                className="w-fit h-7 px-2 text-xs group-hover:bg-primary/5 group-hover:text-primary transition-colors -ml-2"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAppSelect(app.id);
+                                }}
+                              >
+                                Get Started
+                                <ArrowRight className="w-3 h-3 ml-1 group-hover:translate-x-1 transition-transform" />
+                              </Button>
                             </div>
                           </div>
-                          
-                          <div className="flex-1"></div>
-                          
-                          <Button 
-                            variant="ghost"
-                            size="sm"
-                            className="w-full justify-between text-sm group-hover:bg-primary/5 group-hover:text-primary transition-colors mt-auto"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAppSelect(app.id);
-                            }}
-                          >
-                            Get Started
-                            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                          </Button>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                  {/* Placeholder Cards */}
+                  {[
+                    { id: 'placeholder-1', title: 'Data Analytics Pro', color: 'bg-indigo-600', icon: Database },
+                    { id: 'placeholder-2', title: 'Business Intelligence', color: 'bg-purple-600', icon: BarChart3 },
+                  ].map((placeholder, index) => {
+                    const PlaceholderIcon = placeholder.icon;
+                    return (
+                      <Card 
+                        key={placeholder.id}
+                        className="group relative bg-card border border-dashed border-border/50 hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in opacity-60"
+                        style={animationStyle(1.1 + (customApps.length + index) * 0.05)}
+                      >
+                        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        
+                        <div className="relative p-4">
+                          <div className="flex items-start gap-3">
+                            <div className={`${placeholder.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
+                              <PlaceholderIcon className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
+                              <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors leading-tight">
+                                {placeholder.title}
+                              </h3>
+                              <Button 
+                                variant="ghost"
+                                size="sm"
+                                className="w-fit h-7 px-2 text-xs group-hover:bg-primary/5 group-hover:text-primary transition-colors -ml-2"
+                                disabled
+                              >
+                                Coming Soon
+                                <ArrowRight className="w-3 h-3 ml-1 group-hover:translate-x-1 transition-transform" />
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* All Applications */}
+            {!loading && filteredApps.length > 0 && (
+              <div className="mt-10 mb-12 animate-fade-in" style={animationStyle(1.4)}>
+                <div className="flex items-center gap-2 mb-6">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  <h3 className="text-lg font-bold text-foreground">All Applications</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredApps.map((app, index) => {
+                    const Icon = app.icon;
+                    return (
+                      <Card 
+                        key={app.id}
+                        className="group relative bg-card border border-border hover:border-primary/50 hover:shadow-xl transition-all duration-300 overflow-hidden hover-scale cursor-pointer animate-scale-in"
+                        style={animationStyle(1.5 + index * 0.05)}
+                        onClick={() => handleAppSelect(app.id)}
+                      >
+                        {/* Gradient Overlay */}
+                        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                        
+                        <div className="relative p-4">
+                          {/* Info Icon in top right */}
+                          <div className="absolute top-4 right-4 z-10">
+                            <TooltipProvider delayDuration={200}>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                    }}
+                                    className="w-6 h-6 rounded-full bg-muted/50 hover:bg-muted flex items-center justify-center transition-colors"
+                                  >
+                                    <Info className="w-3.5 h-3.5 text-muted-foreground" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent 
+                                  side="left" 
+                                  sideOffset={8}
+                                  className="max-w-xs text-xs z-[9999]"
+                                >
+                                  <p>{app.description}</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
+
+                          <div className="flex items-start gap-3">
+                            <div className={`${app.color} w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-110 transition-transform duration-300`}>
+                              <Icon className="w-5 h-5 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0 pr-8 flex flex-col gap-2">
+                              <h3 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors leading-tight">
+                                {app.title}
+                              </h3>
+                              <Button 
+                                variant="ghost"
+                                size="sm"
+                                className="w-fit h-7 px-2 text-xs group-hover:bg-primary/5 group-hover:text-primary transition-colors -ml-2"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAppSelect(app.id);
+                                }}
+                              >
+                                Get Started
+                                <ArrowRight className="w-3 h-3 ml-1 group-hover:translate-x-1 transition-transform" />
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </Card>
                     );
