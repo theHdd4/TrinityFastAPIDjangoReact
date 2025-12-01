@@ -6,10 +6,10 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, GitBranch, FlaskConical, Presentation, Info } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, GitBranch, FlaskConical, Presentation, Info, User, Building2 } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
-import { REGISTRY_API, TENANTS_API } from '@/lib/api';
+import { REGISTRY_API, TENANTS_API, ACCOUNTS_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -121,13 +121,63 @@ const Apps = () => {
     icon: any;
     modes: ModeStatus;
   }>>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [userName, setUserName] = useState<string | null>(null);
 
   const { isAuthenticated, user } = useAuth();
 
-  // Log tenant name and username when user logs in
+  // Fetch user name and tenant information
   useEffect(() => {
     if (isAuthenticated && user) {
       console.log('👤 User logged in - Username:', user.username);
+      
+      // Fetch user details to get name
+      const fetchUserName = async () => {
+        try {
+          // First check if user object already has name (might not be in TypeScript interface)
+          const userWithName = user as any;
+          if (userWithName.name || userWithName.first_name || userWithName.full_name || userWithName.display_name) {
+            const name = userWithName.name || 
+                       (userWithName.first_name && userWithName.last_name 
+                         ? `${userWithName.first_name} ${userWithName.last_name}` 
+                         : userWithName.first_name) ||
+                       userWithName.full_name || 
+                       userWithName.display_name;
+            setUserName(name);
+            console.log('👤 User Name (from user object):', name);
+            return;
+          }
+
+          // If not in user object, fetch from API
+          const res = await fetch(`${ACCOUNTS_API}/users/me/`, {
+            credentials: 'include',
+          });
+          if (res.ok) {
+            const userData = await res.json();
+            // Check for name, first_name, last_name, or full_name fields
+            const name = userData.name || 
+                       (userData.first_name && userData.last_name 
+                         ? `${userData.first_name} ${userData.last_name}` 
+                         : userData.first_name) ||
+                       userData.full_name || 
+                       userData.display_name;
+            if (name) {
+              setUserName(name);
+              console.log('👤 User Name (from API):', name);
+            } else {
+              // Fallback to username if no name found
+              setUserName(user.username);
+            }
+          } else {
+            // Fallback to username if API call fails
+            setUserName(user.username);
+          }
+        } catch (err) {
+          console.log('⚠️ Error fetching user name:', err);
+          // Fallback to username on error
+          setUserName(user.username);
+        }
+      };
       
       // Fetch tenant information
       const fetchTenantInfo = async () => {
@@ -151,6 +201,7 @@ const Apps = () => {
         }
       };
       
+      fetchUserName();
       fetchTenantInfo();
     }
   }, [isAuthenticated, user]);
@@ -794,16 +845,123 @@ const Apps = () => {
       <div className="relative z-10 flex min-h-screen flex-col">
         {/* Header */}
         <div className="animate-slide-in-from-top" style={animationStyle(0.2)}>
-          <Header />
+          <Header 
+            sidebarOpen={sidebarOpen}
+            onSidebarToggle={() => setSidebarOpen(!sidebarOpen)}
+          />
         </div>
 
-        <ScrollArea className="h-[calc(100vh-80px)]">
+        {/* Main Content Area with Sidebar */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar */}
+          <div
+            className={cn(
+              "bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col shrink-0 overflow-hidden",
+              sidebarOpen ? "w-[260px]" : "w-0"
+            )}
+            style={{
+              height: 'calc(100vh - 80px)',
+            }}
+          >
+            <div className={cn(
+              "p-4 flex flex-col h-full transition-opacity duration-300",
+              sidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
+            )}>
+              {/* Sidebar Header */}
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-semibold">
+                  {(userName || user?.username || 'User').charAt(0).toUpperCase()}
+                </div>
+                <span className="text-sm font-semibold truncate">{userName || user?.username || 'User'}</span>
+              </div>
+              
+              {/* Menu Options */}
+              <div className="flex-1 space-y-1">
+                <button
+                  onClick={() => setActiveTab('my-projects')}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                    activeTab === 'my-projects'
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground hover:bg-muted"
+                  )}
+                >
+                  <User className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Your Workspace</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('workspace')}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                    activeTab === 'workspace'
+                      ? "bg-primary text-primary-foreground"
+                      : "text-foreground hover:bg-muted"
+                  )}
+                >
+                  <Building2 className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Companies Workspace</span>
+                </button>
+                
+                {/* Divider */}
+                <div className="my-2 border-t border-border"></div>
+                
+                {/* Application Navigation */}
+                <button
+                  onClick={() => {
+                    const element = document.getElementById('custom-applications-section');
+                    if (element) {
+                      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-foreground hover:bg-muted"
+                >
+                  <Plus className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Custom Application</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const element = document.getElementById('all-applications-section');
+                    if (element) {
+                      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-foreground hover:bg-muted"
+                >
+                  <Sparkles className="w-4 h-4 shrink-0" />
+                  <span className="truncate">All Application</span>
+                </button>
+              </div>
+
+              {/* Project Statistics - At Bottom */}
+              <div className="mt-auto pt-4 border-t border-border">
+                <h3 className="text-xs font-semibold text-foreground mb-2">Project Statistics</h3>
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-muted-foreground">Your Projects</span>
+                    <span className="font-medium">{myProjectsState.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-muted-foreground">Company Projects</span>
+                    <span className="font-medium">{recentProjectsState.length}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-muted-foreground">Total Applications</span>
+                    <span className="font-medium">{apps.length}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Content */}
+          <div className="flex-1 overflow-hidden min-w-0">
+            <ScrollArea className="h-[calc(100vh-80px)]">
           {/* Search & Filters */}
           <div className="max-w-7xl mx-auto px-6 pt-8 pb-6">
             <div className="animate-fade-in" style={animationStyle(0.4)}>
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex items-center gap-4">
                 {/* Search */}
-                <div className="relative flex-1 max-w-md">
+                <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/50" />
                   <Input
                     type="text"
@@ -815,7 +973,7 @@ const Apps = () => {
                 </div>
                 
                 {/* Category Pills */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <div className="flex items-center gap-2 shrink-0">
                   {categories.map((category) => {
                     const CategoryIcon = category.icon;
                     const isActive = selectedCategory === category.id;
@@ -844,22 +1002,14 @@ const Apps = () => {
           {(recentProjectsState.length > 0 || myProjectsState.length > 0) && (
             <section className="border-b border-border/40 bg-muted/30 animate-fade-in" style={animationStyle(0.3)}>
               <div className="max-w-7xl mx-auto px-6 py-8">
-                {/* Tabs */}
-                <Tabs 
-                  value={activeTab} 
-                  onValueChange={(v) => setActiveTab(v as 'workspace' | 'my-projects')}
-                  className="w-full mb-6"
-                >
-                  <TabsList className="grid w-full max-w-md grid-cols-2">
-                    <TabsTrigger value="my-projects">Your Workspace</TabsTrigger>
-                    <TabsTrigger value="workspace">Companies Workspace</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3">
                     <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <Clock className="w-4.5 h-4.5 text-primary" />
+                      {activeTab === 'my-projects' ? (
+                        <User className="w-4.5 h-4.5 text-primary" />
+                      ) : (
+                        <Building2 className="w-4.5 h-4.5 text-primary" />
+                      )}
                     </div>
                     <div>
                       <h2 className="text-base font-semibold text-foreground">
@@ -964,7 +1114,7 @@ const Apps = () => {
 
             {/* Custom Applications */}
             {!loading && customApps.length > 0 && (
-              <div className="animate-fade-in" style={animationStyle(1.0)}>
+              <div id="custom-applications-section" className="animate-fade-in scroll-mt-8" style={animationStyle(1.0)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Plus className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-bold text-foreground">Custom Applications</h3>
@@ -1077,7 +1227,7 @@ const Apps = () => {
 
             {/* All Applications */}
             {!loading && filteredApps.length > 0 && (
-              <div className="mt-10 mb-12 animate-fade-in" style={animationStyle(1.4)}>
+              <div id="all-applications-section" className="mt-10 mb-12 animate-fade-in scroll-mt-8" style={animationStyle(1.4)}>
                 <div className="flex items-center gap-2 mb-6">
                   <Sparkles className="w-5 h-5 text-primary" />
                   <h3 className="text-lg font-bold text-foreground">All Applications</h3>
@@ -1171,7 +1321,9 @@ const Apps = () => {
               "The Matrix has you" – pick your path
             </div>
           </div>
-        </ScrollArea>
+            </ScrollArea>
+          </div>
+        </div>
       </div>
     </div>
   );
