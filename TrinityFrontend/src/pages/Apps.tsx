@@ -706,9 +706,11 @@ const Apps = () => {
             {!loading && (
               <div className="mb-8 animate-fade-in" style={animationStyle(0.4)}>
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="w-9 h-9 rounded-xl bg-secondary/10 flex items-center justify-center">
-                    <LayoutGrid className="w-4.5 h-4.5 text-secondary" />
+                  {/* dark, neutral icon to match Recent Projects' strong contrast */}
+                  <div className="w-9 h-9 rounded-xl bg-card flex items-center justify-center">
+                    <LayoutGrid className="w-4.5 h-4.5 text-foreground" />
                   </div>
+
                   <div>
                     <h2 className="text-base font-semibold text-foreground">Choose Application</h2>
                     <p className="text-xs text-muted-foreground">Select a template to start a new project</p>
