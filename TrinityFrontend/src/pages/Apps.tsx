@@ -78,7 +78,11 @@ const ModeStatusIndicator = ({ modes }: { modes: ModeStatus }) => {
                   <Icon className="w-3.5 h-3.5" />
                 </div>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
+              <TooltipContent 
+                side="bottom" 
+                sideOffset={8}
+                className="text-xs z-[9999]"
+              >
                 <p>{mode.configured ? `${mode.label} configured` : `${mode.label} not configured`}</p>
               </TooltipContent>
             </Tooltip>
@@ -188,13 +192,14 @@ const Apps = () => {
         return;
       }
 
-      console.log('🔍 Fetching all user projects from registry API...');
-      const apiUrl = `${REGISTRY_API}/projects/`;
+      console.log('🔍 Fetching recent projects from registry API...');
+      // Fetch recent projects with backend sorting and limiting
+      const apiUrl = `${REGISTRY_API}/projects/?ordering=-updated_at&limit=4`;
       console.log('🔗 API URL:', apiUrl);
       console.log('👤 User:', user.username);
       
       try {
-        // Fetch all projects (without app filter)
+        // Fetch recent projects (sorted by updated_at desc, limited to 4)
         const projectsRes = await fetch(apiUrl, { 
           method: 'GET',
           credentials: 'include',
@@ -205,8 +210,8 @@ const Apps = () => {
     
         if (projectsRes.ok) {
           const projectsData = await projectsRes.json();
-          console.log('✅ Loaded all user projects:', projectsData);
-          console.log('📁 Number of projects:', projectsData.length);
+          console.log('✅ Loaded recent projects:', projectsData);
+          console.log('📁 Number of projects:', Array.isArray(projectsData) ? projectsData.length : 'N/A');
           
           if (Array.isArray(projectsData)) {
             // Create mapping from app ID to app slug and name
@@ -219,6 +224,7 @@ const Apps = () => {
             });
 
             // Transform projects to recentProjects format
+            // Backend already sorted by updated_at desc and limited to 4
             const transformedProjects = projectsData
               .map((project: any) => {
                 // Get app ID (handle both object and ID formats)
@@ -257,12 +263,8 @@ const Apps = () => {
                   modes: modes,
                 };
               })
-              .filter((p: any) => p !== null) // Remove projects with unknown apps
-              .sort((a: any, b: any) => {
-                // Sort by updated_at (most recent first)
-                return b.lastModified.getTime() - a.lastModified.getTime();
-              })
-              .slice(0, 4); // Get top 4 most recent
+              .filter((p: any) => p !== null); // Remove projects with unknown apps
+              // No need to sort or slice - backend handles it
 
             console.log('📋 Transformed recent projects:', transformedProjects);
             setRecentProjectsState(transformedProjects);
@@ -513,6 +515,32 @@ const Apps = () => {
     return colorMap[slug] || 'bg-gray-600';
   };
 
+  // Get text color for app (white text for all colored backgrounds)
+  const getAppTextColor = (slug: string) => {
+    return 'text-white';
+  };
+
+  // Get the actual color value for hover state (convert bg-*-600 to hex/rgb)
+  const getAppColorValue = (slug: string) => {
+    const colorValueMap: Record<string, string> = {
+      'marketing-mix': '#2563eb', // blue-600
+      'forecasting': '#16a34a', // green-600
+      'promo-effectiveness': '#ea580c', // orange-600
+      'exploratory-data-analysis': '#9333ea', // purple-600
+      'customer-segmentation': '#4f46e5', // indigo-600
+      'demand-forecasting': '#059669', // emerald-600
+      'price-optimization': '#e11d48', // rose-600
+      'churn-prediction': '#d97706', // amber-600
+      'blank': '#475569', // slate-600
+      'customer-analytics': '#7c3aed', // violet-600
+      'price-ladder-analytics': '#0d9488', // teal-600
+      'revenue-mix-optimization': '#db2777', // pink-600
+      'ecom-promo-planning': '#ca8a04', // yellow-600
+      'ecom-media-planning': '#65a30d', // lime-600
+    };
+    return colorValueMap[slug] || '#4b5563'; // gray-600
+  };
+
   // Category mapping for apps
   const getAppCategory = (slug: string) => {
     const categoryMap: Record<string, string> = {
@@ -592,7 +620,7 @@ const Apps = () => {
                       <Clock className="w-4.5 h-4.5 text-primary" />
                     </div>
                     <div>
-                      <h2 className="text-base font-semibold text-foreground">Recent Projects</h2>
+                      <h2 className="text-base font-semibold text-foreground">Your Workspace</h2>
                       <p className="text-xs text-muted-foreground">Continue where you left off</p>
                     </div>
                   </div>
@@ -609,6 +637,7 @@ const Apps = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   {recentProjectsState.map((project) => {
                     const Icon = project.icon;
+                    const appColorValue = getAppColorValue(project.appId);
                     return (
                       <Card
                         key={project.id}
@@ -619,16 +648,21 @@ const Apps = () => {
                           "transition-all duration-300 hover:-translate-y-2"
                         )}
                         onClick={() => openRecentProject(project)}
+                        style={{
+                          '--app-hover-color': appColorValue,
+                        } as React.CSSProperties & { '--app-hover-color': string }}
                       >
                         <div className="p-4">
                           <div className="flex items-start gap-3 mb-4">
-                            <div className={cn(
-                              "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-                              "bg-primary/10 text-primary",
-                              "transition-all duration-300 group-hover:bg-primary group-hover:text-primary-foreground",
-                              "group-hover:scale-105"
-                            )}>
-                              <Icon className="w-5 h-5" />
+                            <div 
+                              className={cn(
+                                "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
+                                "bg-primary/10 text-primary",
+                                "transition-all duration-300 group-hover:scale-105",
+                                "group-hover:[background-color:var(--app-hover-color)]"
+                              )}
+                            >
+                              <Icon className="w-5 h-5 transition-colors duration-300 group-hover:text-white" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <h4 className="font-medium text-foreground text-sm truncate group-hover:text-primary transition-colors duration-300">
@@ -638,12 +672,6 @@ const Apps = () => {
                                 {project.appTitle}
                               </p>
                             </div>
-                          </div>
-                          
-                          {/* Mode Status Tabs */}
-                          <div className="mb-4">
-                            <p className="text-[10px] text-muted-foreground font-medium mb-2 uppercase tracking-wider">Mode Status</p>
-                            <ModeStatusIndicator modes={project.modes} />
                           </div>
                           
                           <div className="flex items-center justify-between pt-3 border-t border-border/40">
