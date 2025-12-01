@@ -9,7 +9,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, GitBranch, FlaskConical, Presentation } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
-import { REGISTRY_API } from '@/lib/api';
+import { REGISTRY_API, TENANTS_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -113,6 +113,37 @@ const Apps = () => {
   }>>([]);
 
   const { isAuthenticated, user } = useAuth();
+
+  // Log tenant name and username when user logs in
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      console.log('👤 User logged in - Username:', user.username);
+      
+      // Fetch tenant information
+      const fetchTenantInfo = async () => {
+        try {
+          const res = await fetch(`${TENANTS_API}/tenants/`, {
+            credentials: 'include',
+          });
+          if (res.ok) {
+            const tenantsData = await res.json();
+            if (Array.isArray(tenantsData) && tenantsData.length > 0) {
+              const tenantName = tenantsData[0].name;
+              console.log('🏢 Tenant Name:', tenantName);
+            } else {
+              console.log('⚠️ No tenant data found');
+            }
+          } else {
+            console.log('⚠️ Failed to fetch tenant information:', res.status);
+          }
+        } catch (err) {
+          console.log('⚠️ Error fetching tenant information:', err);
+        }
+      };
+      
+      fetchTenantInfo();
+    }
+  }, [isAuthenticated, user]);
 
   useEffect(() => {
     const loadApps = async () => {
