@@ -10,6 +10,7 @@ rank-bm25
 sentence-transformers
 faiss-cpu
 pyyaml
+diskcache
 requests
 aiohttp>=3.8.0
 pandas

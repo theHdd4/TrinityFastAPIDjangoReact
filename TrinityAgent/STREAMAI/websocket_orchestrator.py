@@ -7,6 +7,7 @@ Implements the Trinity AI streaming pattern for card and result handling.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +17,8 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Callable, Set
 from dataclasses import dataclass
 import uuid
+
+from TrinityAgent.atoms.insights import generate_insights
 
 try:
     from starlette.websockets import WebSocketDisconnect  # type: ignore
@@ -3335,14 +3338,21 @@ WORKFLOW PLANNING:
                 execution_result=execution_result,
                 execution_success=execution_success
             )
-            
+
+            atom_insights = await self._generate_atom_insights(
+                goal=original_prompt,
+                step=step,
+                execution_result=execution_result,
+            )
+
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
             self._record_step_execution_result(
                 sequence_id=sequence_id,
                 step_number=step_number,
                 atom_id=atom_id,
                 execution_result=execution_result,
-                insight=insight_text
+                insight=insight_text,
+                atom_insights=atom_insights,
             )
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
@@ -3361,7 +3371,8 @@ WORKFLOW PLANNING:
                         "sequence_id": sequence_id,
                         "output_alias": step.output_alias,
                         "summary": f"Executed {atom_id}",
-                        "insight": insight_text
+                        "insight": insight_text,
+                        "atom_insights": atom_insights,
                     }
                 ),
                 f"agent_executed event (step {step_number})"
@@ -3381,7 +3392,8 @@ WORKFLOW PLANNING:
                         "card_id": card_id,
                         "summary": f"Step {step_number} completed",
                         "sequence_id": sequence_id,
-                        "insight": insight_text
+                        "insight": insight_text,
+                        "atom_insights": atom_insights,
                     }
                 ),
                 f"step_completed event (step {step_number})"
@@ -3504,6 +3516,98 @@ WORKFLOW PLANNING:
         except Exception as insight_error:
             logger.warning(f"⚠️ Step insight generation failed: {insight_error}")
             return None
+
+    async def _generate_atom_insights(
+        self,
+        goal: str,
+        step: WorkflowStepPlan,
+        execution_result: Dict[str, Any],
+    ) -> List[Dict[str, str]]:
+        """Generate structured business-first insights for an atom output."""
+
+        goal_text = goal or ""
+        facts = self._build_atom_facts(step, execution_result)
+        data_hash = self._compute_data_hash(facts)
+
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                lambda: generate_insights(
+                    goal=goal_text,
+                    facts=facts,
+                    data_hash=data_hash,
+                    atom_id=step.atom_id,
+                ),
+            )
+        except Exception as atom_insight_error:  # noqa: BLE001
+            logger.debug(
+                "🔇 Atom insight generation failed for %s: %s",
+                step.atom_id,
+                atom_insight_error,
+                exc_info=True,
+            )
+            return [
+                {
+                    "insight": "No actionable insight",
+                    "impact": "Insufficient context from this step.",
+                    "risk": "LLM or parsing error encountered.",
+                    "next_action": "Review the atom output manually and retry later.",
+                }
+            ]
+
+    def _build_atom_facts(
+        self, step: WorkflowStepPlan, execution_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Summarize execution payload into facts for business insight prompts."""
+
+        execution_result = execution_result or {}
+        facts: Dict[str, Any] = {
+            "atom_id": step.atom_id,
+            "description": step.description,
+            "result_keys": list(execution_result.keys()),
+            "result_preview": self._extract_result_preview(execution_result, max_chars=600),
+        }
+
+        for meta_key in ("schema", "columns", "chart_json", "metadata", "summary", "stats"):
+            if meta_key in execution_result:
+                facts[meta_key] = execution_result.get(meta_key)
+
+        tabular_rows = self._extract_tabular_rows(execution_result)
+        if tabular_rows:
+            facts["rows"] = tabular_rows[:50]
+            facts["row_count"] = len(tabular_rows)
+
+        return facts
+
+    def _extract_tabular_rows(self, execution_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find tabular payloads from known atom result shapes."""
+
+        for candidate in (
+            "table_json",
+            "merge_json",
+            "groupby_json",
+            "concat_json",
+            "rows",
+            "data",
+            "preview",
+        ):
+            value = execution_result.get(candidate)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                if isinstance(value.get("data"), list):
+                    return value.get("data")  # type: ignore
+                if isinstance(value.get("rows"), list):
+                    return value.get("rows")  # type: ignore
+
+        return []
+
+    def _compute_data_hash(self, facts: Dict[str, Any]) -> str:
+        """Create a stable hash for caching atom-level insights."""
+
+        serialized = self._safe_json_dumps(facts, fallback="")
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     def _compose_business_context(
         self,
@@ -4222,7 +4326,8 @@ WORKFLOW PLANNING:
         step_number: int,
         atom_id: str,
         execution_result: Dict[str, Any],
-        insight: Optional[str] = None
+        insight: Optional[str] = None,
+        atom_insights: Optional[List[Dict[str, str]]] = None,
     ) -> None:
         """Cache step execution results and generated insights for later use."""
         cache = self._step_execution_cache.setdefault(sequence_id, {})
@@ -4230,7 +4335,8 @@ WORKFLOW PLANNING:
             "atom_id": atom_id,
             "execution_result": execution_result,
             "recorded_at": datetime.utcnow().isoformat(),
-            "insight": insight
+            "insight": insight,
+            "atom_insights": atom_insights or [],
         }
 
     def _collect_workflow_step_records(
@@ -4257,6 +4363,7 @@ WORKFLOW PLANNING:
                 "agent": step.atom_id,
                 "description": step.description,
                 "insight": step_cache.get("insight"),
+                "atom_insights": step_cache.get("atom_insights") or [],
                 "result_preview": self._extract_result_preview(execution_result),
                 "output_files": [],
             }
