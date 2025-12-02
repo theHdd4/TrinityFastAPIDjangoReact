@@ -1,15 +1,62 @@
 import json
+import logging
 import pickle
-import os
+import re
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import faiss
 import numpy as np
-from typing import List, Dict, Optional
+from rank_bm25 import BM25Okapi
+from sentence_transformers import SentenceTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from datetime import datetime
-import re
 
 def canonicalize(text: str) -> str:
     return re.sub(r"\s+", "", text.lower())
+
+
+def normalize_text(text: str) -> str:
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower())
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def safe_min_max_scale(values: List[float]) -> List[float]:
+    if not values:
+        return []
+    v_min = min(values)
+    v_max = max(values)
+    if v_max == v_min:
+        return [1.0 for _ in values]
+    return [(v - v_min) / (v_max - v_min) for v in values]
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CorpusDocument:
+    doc_id: str
+    title: str
+    body: str
+    metadata: Dict[str, str] = field(default_factory=dict)
+
+    def normalized_body(self) -> str:
+        return normalize_text(self.body)
+
+
+@dataclass
+class RetrievalTrace:
+    query: str
+    lexical_top_k: List[Dict]
+    embedding_top_m: List[Dict]
+    hybrid_top_n: List[Dict]
+    reranked: List[Dict]
+    timings: Dict[str, float]
+    metadata: Dict[str, str]
 
 class AtomKnowledgeBase:
     UNIQUE_ATOM_KNOWLEDGE = {
@@ -663,210 +710,340 @@ class AtomKnowledgeBase:
         return cls.UNIQUE_ATOM_KNOWLEDGE.get(canon)
 
 class RAGRetriever:
-    def __init__(self, model_name: str = './models/all-MiniLM-L6-v2', embeddings_file: str = "atom_rag_embeddings.pkl"):
-        # The model_name argument is kept for backward compatibility but is
-        # unused in this lightweight implementation.
-        self.vectorizer = TfidfVectorizer(stop_words="english")
-        self.embeddings_file = embeddings_file
-        self.atom_embeddings = None
-        self.atom_texts = []
-        self.keyword_index = {}
-        self.semantic_index = {}
-        self.category_index = {}
-        self.function_type_index = {}
-        self.setup_rag_system()
+    def __init__(
+        self,
+        model_name: str = "all-MiniLM-L6-v2",
+        storage_dir: str | Path = ".",
+        embeddings_file: str = "atom_rag_embeddings.pkl",
+        lexical_weight: float = 0.6,
+        hybrid_weight: float = 0.5,
+        shortlist_k: int = 200,
+        embedding_candidates: int = 80,
+        top_n: int = 30,
+    ):
+        self.model_name = model_name
+        self.storage_dir = Path(storage_dir)
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.embeddings_file = self.storage_dir / embeddings_file
+        self.corpus_file = self.storage_dir / "atom_corpus.jsonl"
+        self.faiss_index_file = self.storage_dir / "atom_faiss.index"
 
-    def setup_rag_system(self):
-        if os.path.exists(self.embeddings_file):
-            try:
-                self._load_embeddings()
-            except Exception as e:
-                self._create_embeddings()
-        else:
-            self._create_embeddings()
+        self.vectorizer = TfidfVectorizer(
+            ngram_range=(1, 2), min_df=2, stop_words="english"
+        )
+        self.lexical_weight = lexical_weight
+        self.hybrid_weight = hybrid_weight
+        self.shortlist_k = shortlist_k
+        self.embedding_candidates = embedding_candidates
+        self.top_n = top_n
 
-    def _create_embeddings(self):
-        self.atom_texts = []
-        self.keyword_index = {}
-        self.semantic_index = {}
-        self.category_index = {}
-        self.function_type_index = {}
+        self.atom_embeddings: np.ndarray | None = None
+        self.atom_texts: List[str] = []
+        self.keyword_index: Dict[str, List[str]] = {}
+        self.semantic_index: Dict[str, List[str]] = {}
+        self.category_index: Dict[str, List[str]] = {}
+        self.function_type_index: Dict[str, List[str]] = {}
+        self.faiss_index: faiss.IndexFlatIP | None = None
+        self.doc_id_to_index: Dict[str, int] = {}
+        self.traces: List[RetrievalTrace] = []
+        self.metrics: Dict[str, float] = {"queries": 0, "last_query_ms": 0.0}
+        self.model: SentenceTransformer | None = None
 
-        knowledge_base = AtomKnowledgeBase.UNIQUE_ATOM_KNOWLEDGE
-        for atom_name, atom_info in knowledge_base.items():
-            text_parts = [
-                f"Function: {atom_name}",
-                f"Description: {atom_info['description']}",
-                f"Keywords: {', '.join(atom_info['unique_keywords'])}",
-                f"Semantic markers: {', '.join(atom_info['semantic_markers'])}",
-                f"Category: {atom_info['category']}",
-                f"Function type: {atom_info['function_type']}",
-                f"Working process: {atom_info.get('working_process', '')}",
-                f"Output: {atom_info.get('output', '')}",
-                f"When to use: {atom_info.get('when_to_use', '')}",
-                f"How it helps: {atom_info.get('how_it_helps', '')}",
-                f"Examples: {', '.join(atom_info.get('example_user_prompts', []))}"
+        self.corpus = self._build_corpus()
+        self._persist_corpus()
+        self._build_lexical_indexes()
+        self._prepare_embeddings()
+
+    def _build_corpus(self) -> List[CorpusDocument]:
+        documents: List[CorpusDocument] = []
+        for atom_name, atom_info in AtomKnowledgeBase.UNIQUE_ATOM_KNOWLEDGE.items():
+            body_parts = [
+                atom_info["description"],
+                " ".join(atom_info.get("unique_keywords", [])),
+                " ".join(atom_info.get("semantic_markers", [])),
+                atom_info.get("working_process", ""),
+                atom_info.get("output", ""),
+                atom_info.get("when_to_use", ""),
+                atom_info.get("how_it_helps", ""),
+                " ".join(atom_info.get("example_user_prompts", [])),
             ]
-            full_text = ". ".join(text_parts)
-            self.atom_texts.append(full_text)
+            body = " \n".join(filter(None, body_parts))
+            documents.append(
+                CorpusDocument(
+                    doc_id=canonicalize(atom_name),
+                    title=atom_info.get("display_name", atom_name),
+                    body=body,
+                    metadata={
+                        "category": atom_info.get("category", ""),
+                        "function_type": atom_info.get("function_type", ""),
+                    },
+                )
+            )
+        return documents
 
-            canon_name = canonicalize(atom_name)
-            for keyword in atom_info['unique_keywords']:
-                canon_kw = canonicalize(keyword)
-                if canon_kw not in self.keyword_index:
-                    self.keyword_index[canon_kw] = []
-                self.keyword_index[canon_kw].append(canon_name)
-            for marker in atom_info['semantic_markers']:
-                canon_marker = canonicalize(marker)
-                if canon_marker not in self.semantic_index:
-                    self.semantic_index[canon_marker] = []
-                self.semantic_index[canon_marker].append(canon_name)
-            canon_cat = canonicalize(atom_info['category'])
-            if canon_cat not in self.category_index:
-                self.category_index[canon_cat] = []
-            self.category_index[canon_cat].append(canon_name)
-            canon_ft = canonicalize(atom_info['function_type'])
-            if canon_ft not in self.function_type_index:
-                self.function_type_index[canon_ft] = []
-            self.function_type_index[canon_ft].append(canon_name)
+    def _persist_corpus(self) -> None:
+        with self.corpus_file.open("w", encoding="utf-8") as f:
+            for doc in self.corpus:
+                json.dump(
+                    {
+                        "id": doc.doc_id,
+                        "title": doc.title,
+                        "body": doc.body,
+                        "metadata": doc.metadata,
+                    },
+                    f,
+                )
+                f.write("\n")
 
-        self.atom_embeddings = self.vectorizer.fit_transform(self.atom_texts)
-        self._save_embeddings()
+    def _tokenize(self, text: str) -> List[str]:
+        return normalize_text(text).split()
 
-    def _save_embeddings(self):
+    def _build_lexical_indexes(self) -> None:
+        corpus_texts = [doc.normalized_body() for doc in self.corpus]
+        tokenized_docs = [self._tokenize(text) for text in corpus_texts]
+        self.bm25 = BM25Okapi(tokenized_docs)
+
         try:
-            with open(self.embeddings_file, 'wb') as f:
-                pickle.dump({
-                    'embeddings': self.atom_embeddings,
-                    'vectorizer': self.vectorizer,
-                    'texts': self.atom_texts,
-                    'keyword_index': self.keyword_index,
-                    'semantic_index': self.semantic_index,
-                    'category_index': self.category_index,
-                    'function_type_index': self.function_type_index,
-                    'created_at': datetime.now().isoformat()
-                }, f)
-        except Exception as e:
-            pass
+            self.tfidf_matrix = self.vectorizer.fit_transform(corpus_texts)
+        except ValueError:
+            fallback_vectorizer = TfidfVectorizer(
+                ngram_range=(1, 2), min_df=1, stop_words="english"
+            )
+            self.vectorizer = fallback_vectorizer
+            self.tfidf_matrix = self.vectorizer.fit_transform(corpus_texts)
 
-    def _load_embeddings(self):
-        with open(self.embeddings_file, 'rb') as f:
-            data = pickle.load(f)
-            self.atom_embeddings = data['embeddings']
-            self.vectorizer = data.get('vectorizer', self.vectorizer)
-            self.atom_texts = data['texts']
-            self.keyword_index = data['keyword_index']
-            self.semantic_index = data['semantic_index']
-            self.category_index = data['category_index']
-            self.function_type_index = data['function_type_index']
+    def _prepare_embeddings(self) -> None:
+        self.model = SentenceTransformer(self.model_name)
 
-    def retrieve_relevant_atoms(self, query: str, top_k: int = 5, min_score: float = 0.1) -> List[Dict]:
+        rebuild_embeddings = True
+        if self.embeddings_file.exists():
+            data = pickle.load(self.embeddings_file.open("rb"))
+            embeddings = data.get("embeddings")
+            if isinstance(embeddings, np.ndarray) and len(embeddings) == len(
+                self.corpus
+            ):
+                self.atom_embeddings = embeddings
+                self.atom_texts = data.get("texts", [])
+                rebuild_embeddings = False
+
+        if rebuild_embeddings:
+            texts = [doc.normalized_body() for doc in self.corpus]
+            embeddings = self.model.encode(
+                texts, normalize_embeddings=True, convert_to_numpy=True
+            )
+            self.atom_embeddings = embeddings.astype(np.float32)
+            self.atom_texts = texts
+            pickle.dump(
+                {"embeddings": self.atom_embeddings, "texts": self.atom_texts},
+                self.embeddings_file.open("wb"),
+            )
+
+        self.doc_id_to_index = {
+            doc.doc_id: idx for idx, doc in enumerate(self.corpus)
+        }
         if self.atom_embeddings is None:
-            return []
+            return
 
-        query_lower = query.lower()
-        query_words = set(re.findall(r'\b\w+\b', query_lower))
-        all_matches = {}
+        self.faiss_index = faiss.IndexFlatIP(self.atom_embeddings.shape[1])
+        self.faiss_index.add(self.atom_embeddings)
+        faiss.write_index(self.faiss_index, str(self.faiss_index_file))
 
-        # Strategy 1: Exact keyword matching (case/space-insensitive)
-        for word in query_words:
-            canon_word = canonicalize(word)
-            if canon_word in self.keyword_index:
-                for canon_atom in self.keyword_index[canon_word]:
-                    atom_info = AtomKnowledgeBase.get_atom_info(canon_atom)
-                    score = atom_info['priority_score'] * 1.0
-                    if canon_atom not in all_matches or score > all_matches[canon_atom]['score']:
-                        all_matches[canon_atom] = {
-                            'atom': canon_atom,
-                            'score': score,
-                            'match_type': 'exact_keyword',
-                            'matched_term': word,
-                            'strategy': 'keyword_matching'
-                        }
+        self.keyword_index = {}
+        self.semantic_index = {}
+        self.category_index = {}
+        self.function_type_index = {}
+        for atom_name, atom_info in AtomKnowledgeBase.UNIQUE_ATOM_KNOWLEDGE.items():
+            canon_name = canonicalize(atom_name)
+            for keyword in atom_info.get("unique_keywords", []):
+                canon_kw = canonicalize(keyword)
+                self.keyword_index.setdefault(canon_kw, []).append(canon_name)
+            for marker in atom_info.get("semantic_markers", []):
+                canon_marker = canonicalize(marker)
+                self.semantic_index.setdefault(canon_marker, []).append(canon_name)
+            canon_cat = canonicalize(atom_info.get("category", ""))
+            self.category_index.setdefault(canon_cat, []).append(canon_name)
+            canon_ft = canonicalize(atom_info.get("function_type", ""))
+            self.function_type_index.setdefault(canon_ft, []).append(canon_name)
 
-        # Strategy 2: Semantic marker matching
-        for marker in self.semantic_index:
-            marker_words = set(re.findall(r'\b\w+\b', marker))
-            if marker_words.intersection({canonicalize(w) for w in query_words}):
-                for canon_atom in self.semantic_index[marker]:
-                    atom_info = AtomKnowledgeBase.get_atom_info(canon_atom)
-                    score = atom_info['priority_score'] * 0.8
-                    if canon_atom not in all_matches or score > all_matches[canon_atom]['score']:
-                        all_matches[canon_atom] = {
-                            'atom': canon_atom,
-                            'score': score,
-                            'match_type': 'semantic_marker',
-                            'matched_term': marker,
-                            'strategy': 'semantic_matching'
-                        }
+    def _lexical_shortlist(self, query: str) -> List[Dict]:
+        tokens = self._tokenize(query)
+        bm25_scores = self.bm25.get_scores(tokens)
+        tfidf_query = self.vectorizer.transform([normalize_text(query)])
+        tfidf_scores = cosine_similarity(tfidf_query, self.tfidf_matrix)[0]
 
-        # Strategy 3: Category matching
-        for category in self.category_index:
-            category_words = set(re.findall(r'\b\w+\b', category))
-            if category_words.intersection({canonicalize(w) for w in query_words}):
-                for canon_atom in self.category_index[category]:
-                    atom_info = AtomKnowledgeBase.get_atom_info(canon_atom)
-                    score = atom_info['priority_score'] * 0.6
-                    if canon_atom not in all_matches:
-                        all_matches[canon_atom] = {
-                            'atom': canon_atom,
-                            'score': score,
-                            'match_type': 'category_match',
-                            'matched_term': category,
-                            'strategy': 'category_matching'
-                        }
+        norm_bm25 = safe_min_max_scale(bm25_scores.tolist())
+        norm_tfidf = safe_min_max_scale(tfidf_scores.tolist())
 
-        # Strategy 4: Embedding similarity
-        query_embedding = self.vectorizer.transform([query])
-        similarities = cosine_similarity(query_embedding, self.atom_embeddings)[0]
-        atom_names = AtomKnowledgeBase.get_all_atoms()
-        for idx, similarity in enumerate(similarities):
-            if similarity > min_score:
-                canon_atom = atom_names[idx]
-                atom_info = AtomKnowledgeBase.get_atom_info(canon_atom)
-                score = similarity * atom_info['priority_score'] * 0.7
-                if canon_atom not in all_matches:
-                    all_matches[canon_atom] = {
-                        'atom': canon_atom,
-                        'score': score,
-                        'match_type': 'embedding_similarity',
-                        'matched_term': f'semantic_similarity_{similarity:.3f}',
-                        'strategy': 'embedding_matching'
-                    }
+        combined_scores = []
+        for idx, doc in enumerate(self.corpus):
+            lexical_score = (
+                self.lexical_weight * norm_bm25[idx]
+                + (1 - self.lexical_weight) * norm_tfidf[idx]
+            )
+            combined_scores.append(
+                {
+                    "doc_id": doc.doc_id,
+                    "lexical_score": lexical_score,
+                    "bm25": norm_bm25[idx],
+                    "tfidf": norm_tfidf[idx],
+                }
+            )
 
-        sorted_matches = sorted(all_matches.values(), key=lambda x: x['score'], reverse=True)
-        top_matches = sorted_matches[:top_k]
+        combined_scores.sort(key=lambda x: x["lexical_score"], reverse=True)
+        return combined_scores[: self.shortlist_k]
 
-        # Enrich with full atom information and use display_name for output
-        enriched_results = []
-        for match in top_matches:
-            atom_info = AtomKnowledgeBase.get_atom_info(match['atom'])
-            enriched_match = {
-                **match,
-                'display_name': atom_info.get('display_name', match['atom']),
-                'description': atom_info['description'],
-                'unique_keywords': atom_info['unique_keywords'],
-                'semantic_markers': atom_info['semantic_markers'],
-                'category': atom_info['category'],
-                'function_type': atom_info['function_type'],
-                'priority_score': atom_info['priority_score'],
-                'working_process': atom_info.get('working_process', ''),
-                'output': atom_info.get('output', ''),
-                'when_to_use': atom_info.get('when_to_use', ''),
-                'how_it_helps': atom_info.get('how_it_helps', ''),
-                'example_user_prompts': atom_info.get('example_user_prompts', [])
-            }
-            enriched_results.append(enriched_match)
+    def _embedding_scores(
+        self, query: str, shortlist: List[str], top_m: Optional[int] = None
+    ) -> Dict[str, float]:
+        if self.atom_embeddings is None or not shortlist:
+            return {}
+        top_m = top_m or self.embedding_candidates
 
-        return enriched_results
+        active_model = self.model or SentenceTransformer(self.model_name)
+        query_vector = active_model.encode(
+            [normalize_text(query)], normalize_embeddings=True, convert_to_numpy=True
+        )[0].astype(np.float32)
+
+        shortlist_indices = [self.doc_id_to_index[doc_id] for doc_id in shortlist]
+        shortlist_embeddings = self.atom_embeddings[shortlist_indices]
+        temp_index = faiss.IndexFlatIP(shortlist_embeddings.shape[1])
+        temp_index.add(shortlist_embeddings)
+        scores, indices = temp_index.search(
+            query_vector.reshape(1, -1), min(top_m, len(shortlist_indices))
+        )
+
+        embeddings_scores: Dict[str, float] = {}
+        for score, idx in zip(scores[0], indices[0]):
+            doc_id = shortlist[idx]
+            embeddings_scores[doc_id] = float(score)
+        return embeddings_scores
+
+    def _hybrid_rank(
+        self, lexical: List[Dict], embedding_scores: Dict[str, float]
+    ) -> List[Dict]:
+        embed_values = list(embedding_scores.values())
+        norm_embed = safe_min_max_scale(embed_values)
+        embed_norm_map = {
+            doc_id: norm_embed[i] for i, doc_id in enumerate(embedding_scores.keys())
+        }
+
+        ranked: List[Dict] = []
+        for entry in lexical:
+            embed_score = embed_norm_map.get(entry["doc_id"], 0.0)
+            hybrid_score = (
+                self.hybrid_weight * entry["lexical_score"]
+                + (1 - self.hybrid_weight) * embed_score
+            )
+            ranked.append(
+                {
+                    "doc_id": entry["doc_id"],
+                    "lexical_score": entry["lexical_score"],
+                    "embedding_score": embed_score,
+                    "hybrid_score": hybrid_score,
+                }
+            )
+        ranked.sort(key=lambda x: x["hybrid_score"], reverse=True)
+        return ranked[: self.top_n]
+
+    def _generate_insight(self, atom_info: Dict, query: str) -> Dict[str, str]:
+        focus = atom_info.get("category", "").replace("_", " ")
+        action = atom_info.get("function_type", "")
+        return {
+            "focus": focus,
+            "action": action,
+            "business_fit": f"Great for {focus} and {action} use cases similar to '{query}'.",
+            "data_needs": atom_info.get("working_process", "")[:240],
+        }
+
+    def _rerank_with_llm(self, query: str, candidates: List[Dict]) -> List[Dict]:
+        reranked: List[Dict] = []
+        query_terms = set(self._tokenize(query))
+        for candidate in candidates:
+            atom_info = AtomKnowledgeBase.get_atom_info(candidate["doc_id"]) or {}
+            keywords = {canonicalize(k) for k in atom_info.get("unique_keywords", [])}
+            marker_overlap = len(query_terms.intersection(keywords))
+            rerank_score = candidate["hybrid_score"] + 0.05 * marker_overlap
+            reranked.append(
+                {
+                    **candidate,
+                    "rerank_score": rerank_score,
+                    "insights": self._generate_insight(atom_info, query),
+                }
+            )
+        reranked.sort(key=lambda x: x["rerank_score"], reverse=True)
+        return reranked
+
+    def _enrich_result(self, candidate: Dict) -> Dict:
+        atom_info = AtomKnowledgeBase.get_atom_info(candidate["doc_id"]) or {}
+        return {
+            "atom": candidate["doc_id"],
+            "display_name": atom_info.get("display_name", candidate["doc_id"]),
+            "description": atom_info.get("description", ""),
+            "unique_keywords": atom_info.get("unique_keywords", []),
+            "semantic_markers": atom_info.get("semantic_markers", []),
+            "category": atom_info.get("category", ""),
+            "function_type": atom_info.get("function_type", ""),
+            "priority_score": atom_info.get("priority_score", 0.0),
+            "working_process": atom_info.get("working_process", ""),
+            "output": atom_info.get("output", ""),
+            "when_to_use": atom_info.get("when_to_use", ""),
+            "how_it_helps": atom_info.get("how_it_helps", ""),
+            "example_user_prompts": atom_info.get("example_user_prompts", []),
+            "scores": {
+                "lexical": candidate.get("lexical_score", 0.0),
+                "embedding": candidate.get("embedding_score", 0.0),
+                "hybrid": candidate.get("hybrid_score", 0.0),
+                "rerank": candidate.get("rerank_score", 0.0),
+            },
+            "insights": candidate.get("insights", {}),
+        }
+
+    def retrieve_relevant_atoms(
+        self, query: str, top_k: int = 5, min_score: float = 0.05
+    ) -> List[Dict]:
+        start = time.time()
+        lexical_shortlist = self._lexical_shortlist(query)
+        shortlist_ids = [entry["doc_id"] for entry in lexical_shortlist]
+        embedding_scores = self._embedding_scores(
+            query, shortlist_ids, self.embedding_candidates
+        )
+        hybrid_ranked = self._hybrid_rank(lexical_shortlist, embedding_scores)
+        reranked = self._rerank_with_llm(query, hybrid_ranked)
+
+        results = [self._enrich_result(c) for c in reranked if c["hybrid_score"] >= min_score]
+        final_results = results[:top_k]
+
+        end = time.time()
+        self.metrics["queries"] += 1
+        self.metrics["last_query_ms"] = (end - start) * 1000
+        self.traces.append(
+            RetrievalTrace(
+                query=query,
+                lexical_top_k=lexical_shortlist,
+                embedding_top_m=[
+                    {"doc_id": doc_id, "score": score}
+                    for doc_id, score in embedding_scores.items()
+                ],
+                hybrid_top_n=hybrid_ranked,
+                reranked=reranked,
+                timings={"elapsed_ms": self.metrics["last_query_ms"]},
+                metadata={"model": self.model_name},
+            )
+        )
+        return final_results
 
     def get_system_stats(self) -> Dict:
         return {
-            'total_atoms': len(AtomKnowledgeBase.get_all_atoms()),
-            'total_keywords': len(self.keyword_index),
-            'total_semantic_markers': len(self.semantic_index),
-            'total_categories': len(self.category_index),
-            'total_function_types': len(self.function_type_index),
-            'embedding_dimensions': self.atom_embeddings.shape[1] if self.atom_embeddings is not None else 0,
-            'embeddings_file': self.embeddings_file
+            "total_atoms": len(AtomKnowledgeBase.get_all_atoms()),
+            "total_keywords": len(self.keyword_index),
+            "total_semantic_markers": len(self.semantic_index),
+            "total_categories": len(self.category_index),
+            "total_function_types": len(self.function_type_index),
+            "embedding_dimensions": self.atom_embeddings.shape[1]
+            if self.atom_embeddings is not None
+            else 0,
+            "embeddings_file": str(self.embeddings_file),
+            "faiss_index": str(self.faiss_index_file),
+            "last_query_ms": self.metrics.get("last_query_ms", 0.0),
+            "total_queries": self.metrics.get("queries", 0),
         }

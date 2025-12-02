@@ -1,0 +1,30 @@
+lexical:
+  bm25_weight: 0.6
+  tfidf_weight: 0.4
+  top_k: 200
+  min_df: 2
+  ngram_range: [1, 2]
+embedding:
+  model_name: sentence-transformers/all-MiniLM-L6-v2
+  top_m: 80
+  normalize: true
+  faiss_index_path: artifacts/retrieval/faiss.index
+  embeddings_path: artifacts/retrieval/embeddings.npy
+hybrid:
+  lexical_weight: 0.5
+  embedding_weight: 0.5
+  top_n: 30
+rerank:
+  hybrid_weight: 0.7
+  llm_weight: 0.3
+  batch_size: 5
+  snippet_chars: 300
+  model_name: gpt-3.5-turbo
+  api_url: "${LLM_API_URL:-}"
+paths:
+  corpus_jsonl: data/corpus.jsonl
+  bm25_index_path: artifacts/retrieval/bm25.pkl
+  tfidf_vectorizer_path: artifacts/retrieval/tfidf_vectorizer.joblib
+  tfidf_matrix_path: artifacts/retrieval/tfidf_matrix.joblib
+  docid_mapping_path: artifacts/retrieval/doc_id_mapping.json
+  metadata_path: artifacts/retrieval/index_meta.json

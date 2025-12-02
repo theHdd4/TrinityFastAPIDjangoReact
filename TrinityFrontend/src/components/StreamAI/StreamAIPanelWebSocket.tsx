@@ -1621,10 +1621,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                   // 🔧 CRITICAL FIX: Await handler completion and ensure state is updated
                   await handler.handleSuccess(handlerData, handlerContext);
                   
-                  console.log('✅ Handler completed, verifying atom state...');
-                  
-                  // 🔧 CRITICAL FIX: Verify atom exists and has settings
-                  const verifyAtom = useLaboratoryStore.getState().getAtom(atomInstanceId);
+                    console.log('✅ Handler completed, verifying atom state...');
+
+                    // 🔧 CRITICAL FIX: Verify atom exists and has settings
+                    const verifyAtom = useLaboratoryStore.getState().getAtom(atomInstanceId);
                   console.log('🔍 Atom verification:', {
                     atomExists: !!verifyAtom,
                     hasSettings: !!verifyAtom?.settings,
@@ -1634,24 +1634,37 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                     chartsCount: (verifyAtom?.settings as any)?.charts?.length || 0
                   });
 
-                  try {
-                    await autoSaveStepResult({
-                      atomType: data.atom_id,
-                      atomId: atomInstanceId,
-                      stepAlias,
+                    try {
+                      await autoSaveStepResult({
+                        atomType: data.atom_id,
+                        atomId: atomInstanceId,
+                        stepAlias,
                       result: data.result,
                       updateAtomSettings: handlerContext.updateAtomSettings,
                       setMessages,
                       isStreamMode: handlerContext.isStreamMode,
-                    });
-                  } catch (autoSaveError) {
-                    console.error('❌ Auto-save error:', autoSaveError);
-                  }
-                  
-                  // 🔧 CRITICAL FIX: Force React to re-render by updating cards state
-                  // This ensures the UI updates even when called from central AI
-                  const cards = useLaboratoryStore.getState().cards;
-                  safeSetLocalStorage('laboratory-layout', JSON.stringify(cards));
+                      });
+                    } catch (autoSaveError) {
+                      console.error('❌ Auto-save error:', autoSaveError);
+                    }
+
+                    const rawBusinessInsights = data.business_insights ?? data.result?.business_insights;
+                    const rawAtomInsight = data.insight ?? data.result?.insight;
+                    const hasInsightPayload =
+                      (Array.isArray(rawBusinessInsights) && rawBusinessInsights.length > 0) ||
+                      (typeof rawAtomInsight === 'string' && rawAtomInsight.trim().length > 0);
+
+                    if (hasInsightPayload) {
+                      useLaboratoryStore.getState().updateAtomSettings(atomInstanceId, {
+                        businessInsights: rawBusinessInsights ?? [],
+                        atomInsight: rawAtomInsight ?? '',
+                      });
+                    }
+
+                    // 🔧 CRITICAL FIX: Force React to re-render by updating cards state
+                    // This ensures the UI updates even when called from central AI
+                    const cards = useLaboratoryStore.getState().cards;
+                    safeSetLocalStorage('laboratory-layout', JSON.stringify(cards));
                   
                   // Force multiple state updates to ensure React detects changes
                   setCards([...cards]);

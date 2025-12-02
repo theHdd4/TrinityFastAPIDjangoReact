@@ -3,8 +3,12 @@ uvicorn
 pydantic
 wikipedia
 numpy
+faiss-cpu
+rank-bm25
+sentence-transformers
 langgraph
 scikit-learn
+pyyaml
 requests
 pandas
 pyarrow>=15.0.0
