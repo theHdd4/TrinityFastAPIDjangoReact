@@ -563,7 +563,7 @@ async def compute_variables(payload: VariableComputeRequest) -> VariableComputeR
                             "data_source": object_name,
                             "compute_mode": payload.computeMode,
                             "identifier_combination": identifier_combination,
-                            "identifiers": {id_col: str(row[id_col]) for id_col in payload.identifiers},
+                            "identifiers": {id_col.lower(): str(row[id_col]) for id_col in payload.identifiers},
                             "operation": {
                                 "numericalColumn": op.numericalColumn,
                                 "method": op.method,
@@ -669,7 +669,7 @@ async def assign_constant_variables(payload: VariableAssignRequest) -> VariableA
         return VariableAssignResponse(
             success=False,
             error=str(e),
-        )
+    )
 
 
 @router.post("/variables", response_model=LaboratoryVariableResponse)
@@ -756,7 +756,7 @@ async def list_variable_definitions(
     doc_id = f"{client_id}/{app_id}/{project_id}"
     
     document = await collection.find_one({"_id": doc_id})
-    
+
     records = []
     if document:
         variables = document.get("variables", {})

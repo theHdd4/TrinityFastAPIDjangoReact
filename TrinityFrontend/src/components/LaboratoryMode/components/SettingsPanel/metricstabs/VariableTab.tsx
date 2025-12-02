@@ -528,8 +528,8 @@ const VariableTab: React.FC<VariableTabProps> = ({
           if (resp.ok) {
             const data = await resp.json();
             if (Array.isArray(data.identifiers) && data.identifiers.length > 0) {
-              // Store unfiltered identifiers (same as compute_metrics_within_group in MetricsColOps)
-              const allIds = data.identifiers || [];
+              // Store unfiltered identifiers and convert to lowercase (same as numerical columns)
+              const allIds = (data.identifiers || []).map((id: string) => id.toLowerCase());
               
               // Fetch unique counts for identifiers from column_summary
               try {
@@ -540,7 +540,7 @@ const VariableTab: React.FC<VariableTabProps> = ({
                   const summary = (summaryData.summary || []).filter(Boolean);
                   const uniqueCountsMap: Record<string, number> = {};
                   summary.forEach((c: any) => {
-                    const colName = (c.column || '').trim();
+                    const colName = (c.column || '').trim().toLowerCase();
                     if (allIds.includes(colName) && c.unique_count !== undefined) {
                       uniqueCountsMap[colName] = c.unique_count || 0;
                     }
@@ -569,32 +569,32 @@ const VariableTab: React.FC<VariableTabProps> = ({
         if (res.ok) {
           const raw = await res.json();
           const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
-          const summary = (data.summary || []).filter(Boolean);
-          // Get categorical columns (unfiltered, same as compute_metrics_within_group in MetricsColOps)
-          const cats = summary.filter((c: any) =>
-            c.data_type && (
-              c.data_type.toLowerCase().includes('object') ||
-              c.data_type.toLowerCase().includes('string') ||
-              c.data_type.toLowerCase().includes('category')
-            )
-          ).map((c: any) => (c.column || '').trim());
-          
-          // Store unique counts for identifiers
-          const uniqueCountsMap: Record<string, number> = {};
-          summary.forEach((c: any) => {
-            const colName = (c.column || '').trim();
-            if (cats.includes(colName) && c.unique_count !== undefined) {
-              uniqueCountsMap[colName] = c.unique_count || 0;
-            }
-          });
-          setIdentifierUniqueCounts(uniqueCountsMap);
-          
-          // Store unfiltered categorical columns
-          updateMetricsInputs({ variableIdentifiers: cats });
-          // Set all categorical columns as selected by default (only for within-group mode)
-          if (variableType === 'dataframe' && computeWithinGroup) {
-            updateMetricsInputs({ selectedVariableIdentifiers: cats });
+        const summary = (data.summary || []).filter(Boolean);
+        // Get categorical columns (unfiltered, same as compute_metrics_within_group in MetricsColOps) and convert to lowercase
+        const cats = summary.filter((c: any) =>
+          c.data_type && (
+            c.data_type.toLowerCase().includes('object') ||
+            c.data_type.toLowerCase().includes('string') ||
+            c.data_type.toLowerCase().includes('category')
+          )
+        ).map((c: any) => (c.column || '').trim().toLowerCase());
+        
+        // Store unique counts for identifiers
+        const uniqueCountsMap: Record<string, number> = {};
+        summary.forEach((c: any) => {
+          const colName = (c.column || '').trim().toLowerCase();
+          if (cats.includes(colName) && c.unique_count !== undefined) {
+            uniqueCountsMap[colName] = c.unique_count || 0;
           }
+        });
+        setIdentifierUniqueCounts(uniqueCountsMap);
+        
+        // Store unfiltered categorical columns
+        updateMetricsInputs({ variableIdentifiers: cats });
+        // Set all categorical columns as selected by default (only for within-group mode)
+        if (variableType === 'dataframe' && computeWithinGroup) {
+          updateMetricsInputs({ selectedVariableIdentifiers: cats });
+        }
         }
       } catch {}
       
