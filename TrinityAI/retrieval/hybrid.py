@@ -223,6 +223,15 @@ def hybrid_search(query: str, k: int = 30, config_path: str = "configs/retrieval
             }
         )
 
+    rerank_enabled = config.get("rerank", {}).get("enabled") or config.get("retrieval", {}).get("llm_rerank")
+    if rerank_enabled:
+        try:
+            from TrinityAI.rerank.llm_rerank import rerank
+
+            results = rerank(query, results, config_path=config_path)
+        except Exception as exc:  # pragma: no cover - resilient fallback
+            logger.warning("LLM rerank failed, using hybrid scores: %s", exc)
+
     return results
 
 

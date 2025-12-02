@@ -30,3 +30,10 @@ embedding:
 retrieval:
   top_n: 30
   llm_rerank: false
+
+rerank:
+  enabled: false
+  batch_size: 5
+  snippet_chars: 300
+  hybrid_weight: 0.7
+  llm_weight: 0.3
