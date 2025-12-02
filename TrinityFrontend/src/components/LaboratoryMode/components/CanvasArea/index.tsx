@@ -904,9 +904,10 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
           onMouseUp={saveSelection}
           suppressContentEditableWarning
           className={`
-            w-full min-h-[100px] px-3 py-2
-            border-2 border-dashed border-border rounded-lg
-            focus:outline-none focus:border-primary
+            w-full min-h-[120px] px-4 py-3
+            border border-[#9bbce8] bg-[#f2f7ff]
+            rounded-xl shadow-[0_1px_3px_rgba(69,142,226,0.15)]
+            focus:outline-none focus:border-[#458EE2] focus:ring-2 focus:ring-[#cfe2ff]
             transition-colors duration-200
             ${getListStyle()}
           `}
@@ -918,7 +919,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             textDecoration,
             textAlign: settings.text_align,
             color: settings.text_color,
-            backgroundColor: settings.background_color ?? 'transparent',
+            backgroundColor: settings.background_color ?? '#f2f7ff',
           }}
         />
 
