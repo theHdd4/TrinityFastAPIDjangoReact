@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, GitBranch, FlaskConical, Presentation, Info, User, Building2 } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, ChevronLeft, GitBranch, FlaskConical, Presentation, Info, User, Building2 } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API, TENANTS_API, ACCOUNTS_API } from '@/lib/api';
@@ -90,6 +90,255 @@ const ModeStatusIndicator = ({ modes }: { modes: ModeStatus }) => {
         })}
       </div>
     </TooltipProvider>
+  );
+};
+
+// Horizontal Scroll Container Component
+interface HorizontalScrollContainerProps {
+  children: React.ReactNode;
+  className?: string;
+  'aria-label'?: string;
+}
+
+const HorizontalScrollContainer: React.FC<HorizontalScrollContainerProps> = ({ 
+  children, 
+  className = '',
+  'aria-label': ariaLabel = 'Scrollable content'
+}) => {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [startX, setStartX] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [touchStart, setTouchStart] = useState(0);
+  const [touchScrollLeft, setTouchScrollLeft] = useState(0);
+
+  const updateScrollButtons = useCallback(() => {
+    if (!scrollRef.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+    setCanScrollLeft(scrollLeft > 0);
+    setCanScrollRight(scrollLeft < scrollWidth - clientWidth - 1);
+  }, []);
+
+  const scroll = (direction: 'left' | 'right') => {
+    if (!scrollRef.current) return;
+    const scrollAmount = scrollRef.current.clientWidth * 0.8;
+    const targetScroll = direction === 'left' 
+      ? scrollRef.current.scrollLeft - scrollAmount
+      : scrollRef.current.scrollLeft + scrollAmount;
+    
+    scrollRef.current.scrollTo({
+      left: targetScroll,
+      behavior: 'smooth'
+    });
+  };
+
+  // Mouse drag handlers
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!scrollRef.current) return;
+    setIsDragging(true);
+    setStartX(e.pageX - scrollRef.current.offsetLeft);
+    setScrollLeft(scrollRef.current.scrollLeft);
+    scrollRef.current.style.cursor = 'grabbing';
+    scrollRef.current.style.userSelect = 'none';
+  };
+
+  const handleMouseLeave = () => {
+    setIsDragging(false);
+    if (scrollRef.current) {
+      scrollRef.current.style.cursor = 'grab';
+      scrollRef.current.style.userSelect = '';
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+    if (scrollRef.current) {
+      scrollRef.current.style.cursor = 'grab';
+      scrollRef.current.style.userSelect = '';
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging || !scrollRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - scrollRef.current.offsetLeft;
+    const walk = (x - startX) * 2;
+    scrollRef.current.scrollLeft = scrollLeft - walk;
+  };
+
+  // Keyboard navigation
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!scrollRef.current) return;
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      scrollRef.current.scrollBy({ left: -300, behavior: 'smooth' });
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      scrollRef.current.scrollBy({ left: 300, behavior: 'smooth' });
+    }
+  };
+
+  // Touch handlers for swipe
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!scrollRef.current) return;
+    setTouchStart(e.touches[0].pageX);
+    setTouchScrollLeft(scrollRef.current.scrollLeft);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!scrollRef.current) return;
+    const touchCurrent = e.touches[0].pageX;
+    const touchDiff = touchStart - touchCurrent;
+    scrollRef.current.scrollLeft = touchScrollLeft + touchDiff;
+  };
+
+  // Update visible count
+  useEffect(() => {
+    if (!scrollRef.current) return;
+    const container = scrollRef.current;
+    const cards = container.querySelectorAll('[data-scroll-card]');
+    setTotalCount(cards.length);
+    
+    const updateVisibleCount = () => {
+      const containerRect = container.getBoundingClientRect();
+      let visible = 0;
+      cards.forEach((card) => {
+        const cardRect = card.getBoundingClientRect();
+        if (cardRect.left < containerRect.right && cardRect.right > containerRect.left) {
+          visible++;
+        }
+      });
+      setVisibleCount(visible);
+    };
+
+    updateVisibleCount();
+    const observer = new ResizeObserver(updateVisibleCount);
+    observer.observe(container);
+    
+    return () => observer.disconnect();
+  }, [children]);
+
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    updateScrollButtons();
+    container.addEventListener('scroll', updateScrollButtons);
+    window.addEventListener('resize', updateScrollButtons);
+
+    return () => {
+      container.removeEventListener('scroll', updateScrollButtons);
+      window.removeEventListener('resize', updateScrollButtons);
+    };
+  }, [updateScrollButtons, children]);
+
+  return (
+    <div className={cn("relative", className)}>
+      {/* Left Gradient Mask */}
+      {canScrollLeft && (
+        <div 
+          className="absolute left-0 top-0 bottom-0 w-16 bg-gradient-to-r from-background via-background/80 to-transparent pointer-events-none z-10 transition-opacity duration-200"
+          aria-hidden="true"
+        />
+      )}
+      
+      {/* Right Gradient Mask */}
+      {canScrollRight && (
+        <div 
+          className="absolute right-0 top-0 bottom-0 w-16 bg-gradient-to-l from-background via-background/80 to-transparent pointer-events-none z-10 transition-opacity duration-200"
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Arrow Buttons - Show on scroll area hover */}
+      {canScrollLeft && (
+        <button
+          onClick={() => scroll('left')}
+          className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-background/95 backdrop-blur-sm border border-border shadow-lg flex items-center justify-center text-foreground hover:bg-card hover:scale-110 transition-all duration-200 opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+          aria-label="Scroll left"
+          type="button"
+        >
+          <ChevronLeft className="w-5 h-5" />
+        </button>
+      )}
+
+      {canScrollRight && (
+        <button
+          onClick={() => scroll('right')}
+          className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-10 h-10 rounded-full bg-background/95 backdrop-blur-sm border border-border shadow-lg flex items-center justify-center text-foreground hover:bg-card hover:scale-110 transition-all duration-200 opacity-0 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+          aria-label="Scroll right"
+          type="button"
+        >
+          <ChevronRight className="w-5 h-5" />
+        </button>
+      )}
+
+      {/* Scrollable Container */}
+      <div
+        ref={scrollRef}
+        className={cn(
+          "overflow-x-auto overflow-y-hidden group",
+          "scroll-smooth",
+          "cursor-grab active:cursor-grabbing",
+          "select-none",
+          "[&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2",
+          "[&::-webkit-scrollbar-track]:bg-transparent",
+          "[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[#FFBD59]/60",
+          "hover:[&::-webkit-scrollbar-thumb]:bg-[#FFBD59]/80",
+          "[scrollbar-width:thin] [scrollbar-color:#FFBD59_transparent]"
+        )}
+        onMouseDown={handleMouseDown}
+        onMouseLeave={handleMouseLeave}
+        onMouseUp={handleMouseUp}
+        onMouseMove={handleMouseMove}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onKeyDown={handleKeyDown}
+        onScroll={updateScrollButtons}
+        tabIndex={0}
+        role="region"
+        aria-label={ariaLabel}
+        aria-live="polite"
+        style={{
+          scrollSnapType: 'x mandatory',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
+        <div 
+          className="flex gap-4 pb-4"
+          style={{
+            scrollSnapAlign: 'start',
+          }}
+        >
+          {React.Children.map(children, (child, index) => (
+            <div
+              key={index}
+              data-scroll-card
+              className="flex-shrink-0"
+              style={{
+                scrollSnapAlign: 'start',
+                scrollSnapStop: 'always',
+              }}
+            >
+              {child}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Screen Reader Announcement */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {visibleCount > 0 && totalCount > 0 && (
+          <span>
+            Showing {visibleCount} of {totalCount} items
+          </span>
+        )}
+      </div>
+    </div>
   );
 };
 
@@ -285,8 +534,8 @@ const Apps = () => {
       }
 
       console.log('🔍 Fetching recent projects from registry API...');
-      // Fetch recent projects with backend sorting and limiting
-      const apiUrl = `${REGISTRY_API}/projects/?ordering=-updated_at&limit=4`;
+      // Fetch recent projects with backend sorting (no limit - fetch all)
+      const apiUrl = `${REGISTRY_API}/projects/?ordering=-updated_at`;
       console.log('🔗 API URL:', apiUrl);
       console.log('👤 User:', user.username);
       
@@ -417,8 +666,8 @@ const Apps = () => {
       }
 
       console.log('🔍 Fetching user-specific projects from registry API...');
-      // Fetch user-specific projects with scope=user parameter
-      const apiUrl = `${REGISTRY_API}/projects/?scope=user&ordering=-updated_at&limit=4`;
+      // Fetch user-specific projects with scope=user parameter (no limit - fetch all)
+      const apiUrl = `${REGISTRY_API}/projects/?scope=user&ordering=-updated_at`;
       console.log('🔗 API URL:', apiUrl);
       console.log('👤 User:', user.username);
       
@@ -1032,7 +1281,9 @@ const Apps = () => {
                 
                 {/* Show projects if available, otherwise show empty state */}
                 {(activeTab === 'my-projects' ? filteredMyProjects.length > 0 : filteredRecentProjects.length > 0) ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <HorizontalScrollContainer
+                    aria-label={`${activeTab === 'my-projects' ? 'Your Workspace' : 'Companies Workspace'} projects`}
+                  >
                     {(activeTab === 'my-projects' ? filteredMyProjects : filteredRecentProjects).map((project) => {
                     const Icon = project.icon;
                     const appColorValue = getAppColorValue(project.appId);
@@ -1041,6 +1292,7 @@ const Apps = () => {
                         key={project.id}
                         className={cn(
                           "group bg-card cursor-pointer overflow-hidden",
+                          "w-[280px] sm:w-[300px] lg:w-[320px]",
                           "border border-border/50 hover:border-primary/40",
                           "shadow-sm hover:shadow-[0_12px_28px_rgba(var(--color-primary-rgb, 59,130,246),0.12)]",
                           "transition-all duration-300 hover:-translate-y-2"
@@ -1056,8 +1308,8 @@ const Apps = () => {
                               className={cn(
                                 "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
                                 "bg-primary/10 text-primary",
-                                "transition-all duration-300 group-hover:scale-105",
-                                "group-hover:[background-color:var(--app-hover-color)]"
+                                "transition-all duration-300",
+                                "group-hover:scale-105 group-hover:[background-color:var(--app-hover-color)]"
                               )}
                             >
                               <Icon className="w-5 h-5 transition-colors duration-300 group-hover:text-white" />
@@ -1086,7 +1338,7 @@ const Apps = () => {
                       </Card>
                     );
                   })}
-                  </div>
+                  </HorizontalScrollContainer>
                 ) : (
                   <div className="text-center py-12">
                     <p className="text-muted-foreground text-sm">
@@ -1168,7 +1420,7 @@ const Apps = () => {
                               <Button 
                                 variant="ghost"
                                 size="sm"
-                                className="w-fit h-7 px-2 text-xs group-hover:bg-primary/5 group-hover:text-primary transition-colors -ml-2"
+                                className="w-fit font-normal h-7 px-2 text-xs group-hover:bg-primary/5 group-hover:text-primary transition-colors -ml-2"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleAppSelect(app.id);
@@ -1283,10 +1535,7 @@ const Apps = () => {
                                 variant="ghost"
                                 size="sm"
                                 className="w-fit h-7 px-2 text-xs group-hover:bg-primary/5 group-hover:text-primary transition-colors -ml-2"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleAppSelect(app.id);
-                                }}
+                                disabled={true}
                               >
                                 Get Started
                                 <ArrowRight className="w-3 h-3 ml-1 group-hover:translate-x-1 transition-transform" />
