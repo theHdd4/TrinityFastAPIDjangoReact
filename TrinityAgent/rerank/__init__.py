@@ -1,4 +1,4 @@
-"""Re-ranking utilities for Trinity AI."""
+"""Re-ranking utilities for Trinity Agent."""
 
 from .llm_rerank import rerank
 

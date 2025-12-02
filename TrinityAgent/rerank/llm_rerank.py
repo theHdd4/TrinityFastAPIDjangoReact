@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 
-from TrinityAI.retrieval.hybrid import load_config
+from TrinityAgent.retrieval.hybrid import load_config
 from TrinityAgent.llm_client import LLMClient
 
 logger = logging.getLogger("trinity.llm_rerank")
