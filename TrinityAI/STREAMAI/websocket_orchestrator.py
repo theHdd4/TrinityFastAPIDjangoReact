@@ -33,6 +33,7 @@ from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
 from Agent_insight.workflow_insight_agent import get_workflow_insight_agent
+from TrinityAI.atoms.insights import InsightConfig, generate_insights, hash_payload
 
 try:
     import aiohttp  # type: ignore
@@ -2721,6 +2722,7 @@ WORKFLOW PLANNING:
                     "files_used": next_step.files_used or [],  # Track files for loop detection
                     "description": next_step.description,  # Track description for context
                     "result": execution_result,
+                    "business_insights": business_insights,
                     "evaluation": evaluation.__dict__
                 })
                 previous_results.append(execution_result)
@@ -3122,6 +3124,14 @@ WORKFLOW PLANNING:
                 logger.warning(f"⚠️ Chart-maker atom result missing 'chart_json' key. Available keys: {list(execution_result.keys())}")
 
             execution_success = bool(execution_result.get("success", True))
+            business_insights = await self._generate_business_insights(
+                goal=original_prompt,
+                step=step,
+                parameters=parameters,
+                execution_result=execution_result,
+            )
+            if business_insights:
+                execution_result["business_insights"] = business_insights
             insight_text = await self._generate_step_insight(
                 step=step,
                 total_steps=plan.total_steps,
@@ -3137,7 +3147,8 @@ WORKFLOW PLANNING:
                 step_number=step_number,
                 atom_id=atom_id,
                 execution_result=execution_result,
-                insight=insight_text
+                insight=insight_text,
+                business_insights=business_insights
             )
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
@@ -3155,6 +3166,7 @@ WORKFLOW PLANNING:
                         "sequence_id": sequence_id,
                         "output_alias": step.output_alias,
                         "summary": f"Executed {atom_id}",
+                        "business_insights": business_insights,
                         "insight": insight_text
                     }
                 ),
@@ -3175,6 +3187,7 @@ WORKFLOW PLANNING:
                         "card_id": card_id,
                         "summary": f"Step {step_number} completed",
                         "sequence_id": sequence_id,
+                        "business_insights": business_insights,
                         "insight": insight_text
                     }
                 ),
@@ -3298,6 +3311,66 @@ WORKFLOW PLANNING:
         except Exception as insight_error:
             logger.warning(f"⚠️ Step insight generation failed: {insight_error}")
             return None
+
+    async def _generate_business_insights(
+        self,
+        goal: str,
+        step: WorkflowStepPlan,
+        parameters: Dict[str, Any],
+        execution_result: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Generate business-first insights for an atom output."""
+        facts = self._build_atom_facts(
+            step=step,
+            parameters=parameters,
+            execution_result=execution_result,
+        )
+        data_hash = hash_payload(execution_result)
+        config = InsightConfig(
+            llm_api_url=self.llm_api_url,
+            llm_model=self.llm_model,
+            bearer_token=self.bearer_token,
+        )
+
+        try:
+            return await generate_insights(
+                goal=goal,
+                facts=facts,
+                data_hash=data_hash,
+                atom_id=step.atom_id,
+                config=config,
+            )
+        except Exception as insight_error:
+            logger.warning(
+                "⚠️ Business insight generation failed for step %s: %s",
+                step.step_number,
+                insight_error,
+            )
+            return [
+                {
+                    "insight": "No actionable insight generated.",
+                    "impact": "n/a",
+                    "risk": str(insight_error),
+                    "next_action": "Review the atom output manually and retry if needed.",
+                }
+            ]
+
+    def _build_atom_facts(
+        self,
+        step: WorkflowStepPlan,
+        parameters: Dict[str, Any],
+        execution_result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Summarize atom output into facts for downstream insight generation."""
+        return {
+            "atom_id": step.atom_id,
+            "description": step.description,
+            "output_alias": step.output_alias,
+            "files_used": step.files_used or [],
+            "parameters": parameters,
+            "result": execution_result,
+            "result_preview": self._extract_result_preview(execution_result, max_chars=1200),
+        }
 
     def _build_step_insight_prompt(
         self,
@@ -3952,7 +4025,8 @@ WORKFLOW PLANNING:
         step_number: int,
         atom_id: str,
         execution_result: Dict[str, Any],
-        insight: Optional[str] = None
+        insight: Optional[str] = None,
+        business_insights: Optional[List[Dict[str, Any]]] = None
     ) -> None:
         """Cache step execution results and generated insights for later use."""
         cache = self._step_execution_cache.setdefault(sequence_id, {})
@@ -3960,7 +4034,8 @@ WORKFLOW PLANNING:
             "atom_id": atom_id,
             "execution_result": execution_result,
             "recorded_at": datetime.utcnow().isoformat(),
-            "insight": insight
+            "insight": insight,
+            "business_insights": business_insights,
         }
 
     def _collect_workflow_step_records(
@@ -3987,6 +4062,7 @@ WORKFLOW PLANNING:
                 "agent": step.atom_id,
                 "description": step.description,
                 "insight": step_cache.get("insight"),
+                "business_insights": step_cache.get("business_insights"),
                 "result_preview": self._extract_result_preview(execution_result),
                 "output_files": [],
             }
