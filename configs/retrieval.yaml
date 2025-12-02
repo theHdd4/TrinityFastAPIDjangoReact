@@ -1,0 +1,32 @@
+paths:
+  corpus: data/lab_corpus.jsonl
+  artifacts: artifacts/retrieval
+  tfidf_vectorizer: artifacts/retrieval/tfidf_vectorizer.joblib
+  tfidf_matrix: artifacts/retrieval/tfidf_matrix.npz
+  bm25_index: artifacts/retrieval/bm25_index.joblib
+  embeddings: artifacts/retrieval/embeddings.npy
+  faiss_index: artifacts/retrieval/faiss.index
+  doc_id_mapping: artifacts/retrieval/doc_id_to_offset.json
+
+weights:
+  lexical: 0.5
+  embedding: 0.5
+
+lexical:
+  bm25_weight: 0.6
+  tfidf_weight: 0.4
+  top_k: 200
+  min_df: 2
+  ngram_range: [1, 2]
+
+embedding:
+  model: sentence-transformers/all-MiniLM-L6-v2
+  top_m: 80
+  index_type: flat
+  hnsw_m: 32
+  hnsw_ef_construction: 200
+  hnsw_ef_search: 64
+
+retrieval:
+  top_n: 30
+  llm_rerank: false
