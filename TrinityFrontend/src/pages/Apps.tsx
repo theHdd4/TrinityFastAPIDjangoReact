@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, ChevronLeft, GitBranch, FlaskConical, Presentation, Info, User, Building2 } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, ChevronLeft, GitBranch, FlaskConical, Presentation, Info, User, Building2, PanelLeft } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API, TENANTS_API, ACCOUNTS_API } from '@/lib/api';
@@ -1115,29 +1115,35 @@ const Apps = () => {
             }}
           >
             <div className={cn(
-              "p-4 flex flex-col h-full transition-opacity duration-300",
+              "p-4 flex flex-col h-full transition-opacity duration-300 relative",
               sidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
             )}>
-              {/* Sidebar Header */}
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-semibold">
-                  {(userName || user?.username || 'User').charAt(0).toUpperCase()}
+              {/* Sidebar Toggle Button - Inside Sidebar */}
+              {sidebarOpen && (
+                <div className="absolute top-4 right-4 z-20">
+                  <button
+                    type="button"
+                    onClick={() => setSidebarOpen(!sidebarOpen)}
+                    className="p-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors shadow-sm"
+                    title="Toggle Sidebar"
+                    aria-label="Toggle Sidebar"
+                  >
+                    <PanelLeft className="w-4 h-4 text-foreground" />
+                  </button>
                 </div>
-                <span className="text-sm font-semibold truncate">{userName || user?.username || 'User'}</span>
-              </div>
-              
+              )}
               {/* Menu Options */}
-              <div className="flex-1 space-y-1">
+              <div className="flex-1 space-y-1 mt-8">
                 <button
                   onClick={() => setActiveTab('my-projects')}
                   className={cn(
                     "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                     activeTab === 'my-projects'
-                      ? "bg-primary text-primary-foreground"
+                      ? "bg-yellow-100 text-foreground"
                       : "text-foreground hover:bg-muted"
                   )}
                 >
-                  <User className="w-4 h-4 shrink-0" />
+                  <User className="w-4 h-4 shrink-0" style={{ color: '#FFE28A' }} />
                   <span className="truncate">Your Workspace</span>
                 </button>
                 <button
@@ -1145,11 +1151,11 @@ const Apps = () => {
                   className={cn(
                     "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                     activeTab === 'workspace'
-                      ? "bg-primary text-primary-foreground"
+                      ? "bg-blue-100 text-foreground"
                       : "text-foreground hover:bg-muted"
                   )}
                 >
-                  <Building2 className="w-4 h-4 shrink-0" />
+                  <Building2 className="w-4 h-4 shrink-0 text-blue-400" />
                   <span className="truncate">Companies Workspace</span>
                 </button>
                 
@@ -1183,8 +1189,18 @@ const Apps = () => {
                 </button>
               </div>
 
+              {/* User Info - At Bottom */}
+              <div className="mt-auto pt-4 pb-4 border-t border-border">
+                <div className="flex items-center justify-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-semibold">
+                    {(userName || user?.username || 'User').charAt(0).toUpperCase()}
+                  </div>
+                  <span className="text-sm font-semibold">{userName || user?.username || 'User'}</span>
+                </div>
+              </div>
+
               {/* Project Statistics - At Bottom */}
-              <div className="mt-auto pt-4 border-t border-border">
+              <div className="pt-4 border-t border-border">
                 <h3 className="text-xs font-semibold text-foreground mb-2">Project Statistics</h3>
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center text-xs">
@@ -1205,10 +1221,24 @@ const Apps = () => {
           </div>
 
           {/* Main Content */}
-          <div className="flex-1 overflow-hidden min-w-0">
+          <div className="flex-1 overflow-hidden min-w-0 relative">
+            {/* Sidebar Toggle Button - Only show when sidebar is closed */}
+            {!sidebarOpen && (
+              <div className="absolute top-4 left-4 z-20">
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen(!sidebarOpen)}
+                  className="p-2 rounded-lg bg-card border border-border hover:bg-muted transition-colors shadow-sm"
+                  title="Toggle Sidebar"
+                  aria-label="Toggle Sidebar"
+                >
+                  <PanelLeft className="w-5 h-5 text-foreground" />
+                </button>
+              </div>
+            )}
             <ScrollArea className="h-[calc(100vh-80px)]">
-          {/* Search & Filters */}
-          <div className="max-w-7xl mx-auto px-6 pt-8 pb-6">
+              {/* Search & Filters */}
+              <div className="max-w-7xl mx-auto px-6 pt-8 pb-6">
             <div className="animate-fade-in" style={animationStyle(0.4)}>
               <div className="flex items-center gap-4">
                 {/* Search */}
@@ -1255,11 +1285,14 @@ const Apps = () => {
               <div className="max-w-7xl mx-auto px-6 py-8">
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <div 
+                      className="w-9 h-9 rounded-xl flex items-center justify-center"
+                      style={activeTab === 'my-projects' ? { backgroundColor: '#FFF4D6' } : { backgroundColor: '#DBEAFE' }}
+                    >
                       {activeTab === 'my-projects' ? (
-                        <User className="w-4.5 h-4.5 text-primary" />
+                        <User className="w-4.5 h-4.5" style={{ color: '#FFE28A' }} />
                       ) : (
-                        <Building2 className="w-4.5 h-4.5 text-primary" />
+                        <Building2 className="w-4.5 h-4.5 text-blue-400" />
                       )}
                     </div>
                     <div>
@@ -1301,21 +1334,21 @@ const Apps = () => {
                           "transition-all duration-300 hover:-translate-y-2"
                         )}
                         onClick={() => openRecentProject(project)}
-                        style={{
-                          '--app-hover-color': appColorValue,
-                        } as React.CSSProperties & { '--app-hover-color': string }}
                       >
                         <div className="p-4">
                           <div className="flex items-start gap-3 mb-4">
                             <div 
                               className={cn(
                                 "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0",
-                                "bg-primary/10 text-primary",
+                                "text-white",
                                 "transition-all duration-300",
-                                "group-hover:scale-105 group-hover:[background-color:var(--app-hover-color)]"
+                                "group-hover:scale-105"
                               )}
+                              style={{
+                                backgroundColor: appColorValue,
+                              }}
                             >
-                              <Icon className="w-5 h-5 transition-colors duration-300 group-hover:text-white" />
+                              <Icon className="w-5 h-5" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <h4 className="font-medium text-foreground text-sm truncate group-hover:text-primary transition-colors duration-300">

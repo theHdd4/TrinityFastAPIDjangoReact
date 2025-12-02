@@ -9,7 +9,7 @@ import {
   MyProfile,
   Navigation,
 } from '@/components/PrimaryMenu';
-import { Target, BarChart3, Zap, Plus, FolderOpen, PanelLeft } from 'lucide-react';
+import { Target, BarChart3, Zap, Plus, FolderOpen } from 'lucide-react';
 
 interface HeaderProps {
   projectCount?: number;
@@ -96,17 +96,6 @@ const Header: React.FC<HeaderProps> = ({ projectCount = 0, sidebarOpen = false, 
     >
       <div className="flex items-center space-x-10">
         <div className="flex items-center space-x-3">
-          {simpleHeader && location.pathname.startsWith('/apps') && onSidebarToggle && (
-            <button
-              type="button"
-              onClick={onSidebarToggle}
-              className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-              title="Toggle Sidebar"
-              aria-label="Toggle Sidebar"
-            >
-              <PanelLeft className="w-5 h-5 text-gray-600" />
-            </button>
-          )}
           <Link to="/apps" className="flex items-center space-x-3 group">
             <TrinityAssets.AnimatedLogo className="w-12 h-12 group-hover:shadow-xl transition-all duration-300" />
             <TrinityAssets.LogoText />

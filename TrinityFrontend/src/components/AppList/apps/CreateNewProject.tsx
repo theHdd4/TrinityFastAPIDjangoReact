@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Dialog,
@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Sparkles, ArrowRight, Plus, LucideIcon, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { Sparkles, ArrowRight, Plus, LucideIcon, ChevronDown, ChevronUp, Loader2, X } from 'lucide-react';
 import { REGISTRY_API } from '@/lib/api';
 import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
 import { startProjectTransition } from '@/utils/projectTransition';
@@ -68,6 +68,11 @@ const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange,
   // Custom collapse state for the two groups
   const [collapsedCustom, setCollapsedCustom] = useState(false);
   const [collapsedAll, setCollapsedAll] = useState(false);
+
+  // Search-in-trigger state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSelectOpen, setIsSelectOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Separate apps into custom and all applications
   const customApps = apps.filter(app => app.custom);
@@ -125,6 +130,7 @@ const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange,
   const handleAppChange = (value: string) => {
     setSelectedApp(value);
     setSelectedTemplate(''); // Reset template selection when app changes
+    setSearchQuery(''); // Clear search query when app is selected
     loadTemplates(value);
   };
 
@@ -132,6 +138,27 @@ const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange,
     setSelectedTemplate(value);
     console.log('Selected template:', value);
   };
+
+  // Filter apps based on search query
+  const filterApps = (appsList: App[], query: string): App[] => {
+    if (!query.trim()) return appsList;
+    const lowerQuery = query.toLowerCase();
+    return appsList.filter(app => app.title.toLowerCase().includes(lowerQuery));
+  };
+
+  const filteredCustomApps = filterApps(customApps, searchQuery);
+  const filteredAllApps = filterApps(allApps, searchQuery);
+  const allFilteredApps = [...filteredCustomApps, ...filteredAllApps];
+
+  // Auto-focus search input when Select opens
+  useEffect(() => {
+    if (isSelectOpen && inputRef.current) {
+      // Small delay to ensure SelectContent is rendered
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 0);
+    }
+  }, [isSelectOpen]);
 
   // Navigate to laboratory mode after project creation
   const navigateToLaboratory = async (project: Project) => {
@@ -306,6 +333,8 @@ const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange,
       setTemplatesLoading(false);
       setIsCreating(false);
       setValidationError('');
+      setSearchQuery('');
+      setIsSelectOpen(false);
     }
   }, [open]);
 
@@ -352,79 +381,151 @@ const CreateNewProject: React.FC<CreateNewProjectProps> = ({ open, onOpenChange,
               Application Type <span className="text-red-500">*</span>
             </Label>
 
-            <Select value={selectedApp} onValueChange={handleAppChange}>
+            <Select 
+              value={selectedApp} 
+              onValueChange={handleAppChange}
+              open={isSelectOpen}
+              onOpenChange={setIsSelectOpen}
+            >
               <SelectTrigger id="application-type" className="w-full">
-                <SelectValue placeholder="Select an application">
-                  {selectedApp && (() => {
-                    const selected = apps.find(app => app.id === selectedApp);
-                    return selected ? selected.title : '';
-                  })()}
-                </SelectValue>
+                {isSelectOpen ? (
+                  // Search input when Select is open
+                  <div className="flex items-center gap-2 w-full px-2 py-1">
+                    <input
+                      ref={inputRef}
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Prevent Select from closing or handling keyboard shortcuts
+                        e.stopPropagation();
+                        // Prevent arrow keys from navigating Select items while typing
+                        if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) {
+                          e.preventDefault();
+                        }
+                        // Enter key: select first filtered result if available
+                        if (e.key === 'Enter' && allFilteredApps.length > 0 && !e.defaultPrevented) {
+                          e.preventDefault();
+                          handleAppChange(allFilteredApps[0].id);
+                          setIsSelectOpen(false);
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="Search applications..."
+                      className="w-full px-2 py-1 text-sm bg-transparent outline-none flex-1"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSearchQuery('');
+                          inputRef.current?.focus();
+                        }}
+                        className="flex-shrink-0 text-gray-400 hover:text-gray-600 focus:outline-none"
+                        aria-label="Clear search"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  // Selected value or placeholder when Select is closed
+                  <SelectValue placeholder="Select an application">
+                    {selectedApp && (() => {
+                      const selected = apps.find(app => app.id === selectedApp);
+                      return selected ? selected.title : '';
+                    })()}
+                  </SelectValue>
+                )}
               </SelectTrigger>
 
-              {/* ---------- Custom SelectContent with collapsible groups ---------- */}
+              {/* ---------- Custom SelectContent with collapsible groups or filtered results ---------- */}
               <SelectContent className="z-[12020] max-h-72 overflow-auto">
-                {/* CUSTOM APPS GROUP HEADER */}
-                {customApps.length > 0 && (
-                  <div className="px-2 py-1">
-                    <button
-                      type="button"
-                      aria-expanded={!collapsedCustom}
-                      onClick={() => setCollapsedCustom(prev => !prev)}
-                      className="w-full flex items-center justify-between px-2 py-2 rounded hover:bg-slate-50 focus:outline-none"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Plus className="w-4 h-4" />
-                        <span className="text-sm font-medium">Custom Applications</span>
-                      </div>
-                      <span className="flex items-center">
-                        {collapsedCustom ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                      </span>
-                    </button>
-
-                    {/* Animated/conditional list - use simple conditional rendering + tailwind for max-h transition */}
-                    {!collapsedCustom && (
-                      <div className="mt-1 space-y-0">
-                        {customApps.map((app) => {
+                {searchQuery.trim() ? (
+                  // Filtered flat list when searching
+                  <>
+                    {allFilteredApps.length > 0 ? (
+                      <div className="py-1">
+                        {allFilteredApps.map((app) => {
                           const Icon = app.icon;
                           return (
                             <SelectItemKeyWrapped app={app} Icon={Icon} key={app.id} />
                           );
                         })}
                       </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ALL APPS GROUP HEADER */}
-                {allApps.length > 0 && (
-                  <div className="px-2 py-1">
-                    <button
-                      type="button"
-                      aria-expanded={!collapsedAll}
-                      onClick={() => setCollapsedAll(prev => !prev)}
-                      className="w-full flex items-center justify-between px-2 py-2 rounded hover:bg-slate-50 focus:outline-none"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4" />
-                        <span className="text-sm font-medium">All Applications</span>
-                      </div>
-                      <span className="flex items-center">
-                        {collapsedAll ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
-                      </span>
-                    </button>
-
-                    {!collapsedAll && (
-                      <div className="mt-1 space-y-0">
-                        {allApps.map((app) => {
-                          const Icon = app.icon;
-                          return (
-                            <SelectItemKeyWrapped app={app} Icon={Icon} key={app.id} />
-                          );
-                        })}
+                    ) : (
+                      <div className="px-2 py-4 text-sm text-muted-foreground text-center">
+                        No applications found
                       </div>
                     )}
-                  </div>
+                  </>
+                ) : (
+                  // Original collapsible groups when not searching
+                  <>
+                    {/* CUSTOM APPS GROUP HEADER */}
+                    {customApps.length > 0 && (
+                      <div className="px-2 py-1">
+                        <button
+                          type="button"
+                          aria-expanded={!collapsedCustom}
+                          onClick={() => setCollapsedCustom(prev => !prev)}
+                          className="w-full flex items-center justify-between px-2 py-2 rounded hover:bg-slate-50 focus:outline-none"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Plus className="w-4 h-4" />
+                            <span className="text-sm font-medium">Custom Applications</span>
+                          </div>
+                          <span className="flex items-center">
+                            {collapsedCustom ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                          </span>
+                        </button>
+
+                        {/* Animated/conditional list - use simple conditional rendering + tailwind for max-h transition */}
+                        {!collapsedCustom && (
+                          <div className="mt-1 space-y-0">
+                            {customApps.map((app) => {
+                              const Icon = app.icon;
+                              return (
+                                <SelectItemKeyWrapped app={app} Icon={Icon} key={app.id} />
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ALL APPS GROUP HEADER */}
+                    {allApps.length > 0 && (
+                      <div className="px-2 py-1">
+                        <button
+                          type="button"
+                          aria-expanded={!collapsedAll}
+                          onClick={() => setCollapsedAll(prev => !prev)}
+                          className="w-full flex items-center justify-between px-2 py-2 rounded hover:bg-slate-50 focus:outline-none"
+                        >
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="w-4 h-4" />
+                            <span className="text-sm font-medium">All Applications</span>
+                          </div>
+                          <span className="flex items-center">
+                            {collapsedAll ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                          </span>
+                        </button>
+
+                        {!collapsedAll && (
+                          <div className="mt-1 space-y-0">
+                            {allApps.map((app) => {
+                              const Icon = app.icon;
+                              return (
+                                <SelectItemKeyWrapped app={app} Icon={Icon} key={app.id} />
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </SelectContent>
             </Select>
