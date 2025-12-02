@@ -4,6 +4,9 @@ pydantic
 pydantic-settings
 wikipedia
 numpy
+rank-bm25>=0.2.0
+sentence-transformers
+faiss-cpu
 langgraph
 scikit-learn
 requests
