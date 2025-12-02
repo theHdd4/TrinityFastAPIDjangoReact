@@ -15,6 +15,7 @@ export const atomHandlers: Record<string, AtomHandler> = {
   'merge': mergeHandler,
   'dataframe-operations': dataframeOperationsHandler,
   'create-column': createColumnHandler,
+  'create-transform': createColumnHandler, // create-transform uses the same handler as create-column
   'groupby-wtg-avg': groupbyHandler,
   'chart-maker': chartMakerHandler,
   'explore': exploreHandler,
@@ -42,6 +43,7 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
       case 'merge':
         return !!(data.merge_json);
       case 'create-column':
+      case 'create-transform':
         return !!(data.json);
       case 'groupby-wtg-avg':
         return !!(data.groupby_json);
@@ -67,6 +69,7 @@ export const hasAtomData = (atomType: string, data: any): boolean => {
     case 'merge':
       return !!(data.merge_json);
     case 'create-column':
+    case 'create-transform':
       return !!(data.json);
     case 'groupby-wtg-avg':
       return !!(data.groupby_json);
@@ -97,7 +100,3 @@ export {
   correlationHandler,
   dfValidateHandler 
 };
-
-// Export insight utilities
-export * from './insightGenerator';
-export * from './dataSummaryExtractors';

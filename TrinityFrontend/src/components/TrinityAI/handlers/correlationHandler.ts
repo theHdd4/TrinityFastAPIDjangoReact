@@ -1,5 +1,91 @@
 import { CORRELATION_API } from '@/lib/api';
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+
+/**
+ * Extract top correlations from correlation matrix
+ */
+const extractTopCorrelations = (correlationMatrix: any, columns: string[], topN: number = 5): Array<{var1: string, var2: string, value: number}> => {
+  const correlations: Array<{var1: string, var2: string, value: number}> = [];
+  
+  for (let i = 0; i < columns.length; i++) {
+    for (let j = i + 1; j < columns.length; j++) {
+      const var1 = columns[i];
+      const var2 = columns[j];
+      const rowData = correlationMatrix[var1];
+      if (rowData && typeof rowData === 'object') {
+        const value = rowData[var2];
+        if (typeof value === 'number' && isFinite(value) && var1 !== var2) {
+          correlations.push({ var1, var2, value: Math.abs(value) });
+        }
+      }
+    }
+  }
+  
+  // Sort by absolute value and return top N
+  return correlations
+    .sort((a, b) => b.value - a.value)
+    .slice(0, topN)
+    .map(corr => ({
+      var1: corr.var1,
+      var2: corr.var2,
+      value: correlationMatrix[corr.var1]?.[corr.var2] || 0 // Get original signed value
+    }));
+};
+
+/**
+ * Calculate correlation statistics
+ */
+const calculateCorrelationStats = (correlationMatrix: any, columns: string[]): {
+  total_pairs: number;
+  strong_positive: number; // > 0.7
+  moderate_positive: number; // 0.3 to 0.7
+  weak: number; // -0.3 to 0.3
+  moderate_negative: number; // -0.7 to -0.3
+  strong_negative: number; // < -0.7
+  average_correlation: number;
+} => {
+  const correlations: number[] = [];
+  
+  for (let i = 0; i < columns.length; i++) {
+    for (let j = i + 1; j < columns.length; j++) {
+      const var1 = columns[i];
+      const var2 = columns[j];
+      const rowData = correlationMatrix[var1];
+      if (rowData && typeof rowData === 'object') {
+        const value = rowData[var2];
+        if (typeof value === 'number' && isFinite(value)) {
+          correlations.push(value);
+        }
+      }
+    }
+  }
+  
+  const stats = {
+    total_pairs: correlations.length,
+    strong_positive: 0,
+    moderate_positive: 0,
+    weak: 0,
+    moderate_negative: 0,
+    strong_negative: 0,
+    average_correlation: 0,
+  };
+  
+  if (correlations.length > 0) {
+    const sum = correlations.reduce((a, b) => a + b, 0);
+    stats.average_correlation = sum / correlations.length;
+    
+    correlations.forEach(val => {
+      if (val > 0.7) stats.strong_positive++;
+      else if (val > 0.3) stats.moderate_positive++;
+      else if (val > -0.3) stats.weak++;
+      else if (val > -0.7) stats.moderate_negative++;
+      else stats.strong_negative++;
+    });
+  }
+  
+  return stats;
+};
 import { 
   getEnvironmentContext, 
   getFilename, 
@@ -8,15 +94,19 @@ import {
   createErrorMessage,
   processSmartResponse,
   validateFileInput,
-  updateCardTextBox
+  addCardTextBox,
+  updateCardTextBox,
+  formatAgentResponseForTextBox
 } from './utils';
-import { generateAndFormatInsight } from './insightGenerator';
+import { generateAtomInsight } from './insightGenerator';
 
 export const correlationHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
-    // Show smart_response FIRST (user-friendly message)
+    // All detailed logging happens on backend - check terminal for logs
+    
+    // Show smart_response in chat FIRST (user-friendly message)
     const smartResponseText = processSmartResponse(data);
     if (smartResponseText) {
       const smartMsg: Message = {
@@ -26,10 +116,9 @@ export const correlationHandler: AtomHandler = {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user:', smartResponseText);
     }
     
-    // Show response and reasoning in chat box (3 keys total: smart_response, response, reasoning)
+    // Show response and reasoning in chat
     const responseText = data.response || data.data?.response || '';
     const reasoningText = data.reasoning || data.data?.reasoning || '';
     
@@ -41,7 +130,6 @@ export const correlationHandler: AtomHandler = {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, responseMsg]);
-      console.log('✅ Displayed response to user');
     }
     
     if (reasoningText) {
@@ -52,17 +140,22 @@ export const correlationHandler: AtomHandler = {
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, reasoningMsg]);
-      console.log('✅ Displayed reasoning to user');
+    }
+    
+    // STEP 1: Add the 3 keys (smart_response, response, reasoning) to a TEXT BOX
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+    } catch (textBoxError) {
+      console.error('❌ Error adding 3 keys to text box:', textBoxError);
+      // Continue even if text box update fails
     }
     
     if (!data.correlation_config) {
       return { success: false, error: 'No correlation configuration found in AI response' };
     }
 
-    console.log('🔍 ===== CORRELATION AI RESPONSE =====');
-    console.log('📝 User Prompt received for session:', sessionId);
-    console.log('🔧 Correlation Config:', data.correlation_config);
-    
     const correlationConfig = data.correlation_config;
     
     // Get target file from AI response - use the FULL path (as it appears in available files)
@@ -76,16 +169,12 @@ export const correlationHandler: AtomHandler = {
       if (filePath.includes('/')) {
         // It's already a full path - use it as-is (matches manual mode)
         filePathForRequest = filePath;
-        console.log('📄 Using full path from AI response:', filePathForRequest);
       } else {
         // It's just a filename - we need to find the full path
         // This shouldn't happen if LLM returns full paths, but handle it gracefully
-        console.warn('⚠️ LLM returned just filename, not full path. Filename:', filePath);
-        console.warn('⚠️ Attempting to use filename directly - this may fail if file not in root bucket');
         filePathForRequest = filePath; // Use filename and hope backend can find it
       }
     } else {
-      console.log('⚠️ No file_path found in correlation config');
       const errorMsg = createMessage(
         data.smart_response || `I couldn't find a data file to analyze. Please make sure you have selected or uploaded a data file first, then try your correlation request again.`
       );
@@ -94,9 +183,6 @@ export const correlationHandler: AtomHandler = {
     }
     
     try {
-      console.log('🎯 Processing correlation configuration...');
-      console.log('📋 Using full file path (like manual mode):', filePathForRequest);
-      
       // Build the filter and correlate request - match manual mode structure
       // Backend will auto-detect columns if not provided (like manual mode)
       const request: any = {
@@ -112,18 +198,12 @@ export const correlationHandler: AtomHandler = {
       // If empty, backend will auto-detect (like manual mode)
       if (correlationConfig.identifier_columns && Array.isArray(correlationConfig.identifier_columns) && correlationConfig.identifier_columns.length > 0) {
         request.identifier_columns = correlationConfig.identifier_columns;
-        console.log('📋 Using AI-provided identifier_columns:', correlationConfig.identifier_columns);
-      } else {
-        console.log('📋 No identifier_columns provided - backend will auto-detect (like manual mode)');
       }
       
       // Only add measure columns if explicitly provided and non-empty
       // If empty, backend will auto-detect all numeric columns (like manual mode)
       if (correlationConfig.measure_columns && Array.isArray(correlationConfig.measure_columns) && correlationConfig.measure_columns.length > 0) {
         request.measure_columns = correlationConfig.measure_columns;
-        console.log('📋 Using AI-provided measure_columns:', correlationConfig.measure_columns);
-      } else {
-        console.log('📋 No measure_columns provided - backend will auto-detect all numeric columns (like manual mode)');
       }
       
       // Add identifier filters if specified
@@ -150,10 +230,7 @@ export const correlationHandler: AtomHandler = {
         request.aggregation_level = correlationConfig.aggregation_level;
       }
       
-      console.log('📋 Correlation request (matching manual mode structure):', JSON.stringify(request, null, 2));
-      
       // Call the filter-and-correlate endpoint
-      console.log('🔄 Calling filter-and-correlate endpoint...');
       const response = await fetch(`${CORRELATION_API}/filter-and-correlate`, {
         method: 'POST',
         headers: {
@@ -173,17 +250,16 @@ export const correlationHandler: AtomHandler = {
       }
       
       const correlationResult = await response.json();
-      console.log('✅ Correlation result received:', correlationResult);
       
       // Transform correlation matrix from dict to 2D array
-      const correlationMatrix = correlationResult.correlation_results?.correlation_matrix || {};
+      const correlationMatrixDict = correlationResult.correlation_results?.correlation_matrix || {};
       const columnsUsed = correlationResult.columns_used || [];
       
       // Build 2D matrix
       const matrix: number[][] = columnsUsed.map((rowVar: string) => {
         return columnsUsed.map((colVar: string) => {
           if (rowVar === colVar) return 1.0;
-          const rowData = correlationMatrix[rowVar];
+          const rowData = correlationMatrixDict[rowVar];
           if (rowData && typeof rowData === 'object') {
             const value = rowData[colVar];
             return (typeof value === 'number' && isFinite(value)) ? value : 0.0;
@@ -192,9 +268,13 @@ export const correlationHandler: AtomHandler = {
         });
       });
       
+      // Calculate top correlations and statistics for insights
+      const topCorrelations = extractTopCorrelations(correlationMatrixDict, columnsUsed);
+      const correlationStats = calculateCorrelationStats(correlationMatrixDict, columnsUsed);
+      
       // Update atom settings with correlation configuration (matching manual mode structure)
       const updatedSettings: any = {
-        selectedFile: filePathForRequest, // Use filename (like manual mode)
+        selectedFile: filePathForRequest, // Use full path
         variables: columnsUsed,
         correlationMatrix: matrix,
         selectedVar1: null,
@@ -220,6 +300,18 @@ export const correlationHandler: AtomHandler = {
             return acc;
           }, {}) || {},
         },
+        // Store correlation results for insight generation
+        correlationResults: {
+          correlationMatrixDict: correlationMatrixDict, // Original dict format
+          correlationMatrix2D: matrix, // 2D array format
+          columnsUsed: columnsUsed,
+          topCorrelations: topCorrelations,
+          correlationStats: correlationStats,
+          originalRows: correlationResult.original_rows,
+          filteredRows: correlationResult.filtered_rows,
+          processingTimeMs: correlationResult.processing_time_ms,
+          dateAnalysis: correlationResult.date_analysis,
+        }
       };
       
       // Initialize selected numeric columns for matrix (first 15 if > 15, else all)
@@ -246,7 +338,6 @@ export const correlationHandler: AtomHandler = {
         updatedSettings.filteredFilePath = correlationResult.filtered_file_path;
       }
       
-      console.log('✅ Updating correlation atom settings...');
       updateAtomSettings(atomId, updatedSettings);
       
       // Create success message
@@ -256,19 +347,60 @@ export const correlationHandler: AtomHandler = {
       );
       setMessages(prev => [...prev, successMsg]);
       
-      // Generate and display insight in text box (using smart_response, response, reasoning)
-      console.log('🔍 Generating insight with 3 keys (smart_response, response, reasoning)...');
-      generateAndFormatInsight({
-        data,
+      // STEP 2: Generate insight AFTER all 3 keys are shown in text box and correlation results are obtained
+      // This ensures the insight LLM has access to both the original response AND the correlation results
+      // All detailed logging happens on backend - check terminal for logs
+      
+      // Prepare enhanced data with correlation results for insight generation
+      // Include the 3 keys from the original AI response (they're in 'data')
+      // Include correlation results from backend API call
+      const enhancedDataForInsight = {
+        ...data, // This includes smart_response, response, reasoning (the 3 keys)
+        correlation_config: correlationConfig, // Original config from first LLM call
+        correlation_results: {
+          correlation_matrix: correlationMatrixDict, // Original dict format from backend
+          correlation_matrix_2d: matrix, // 2D array format for UI
+          columns_used: columnsUsed,
+          method: correlationConfig.method || 'pearson',
+          original_rows: correlationResult.original_rows,
+          filtered_rows: correlationResult.filtered_rows,
+          processing_time_ms: correlationResult.processing_time_ms,
+          date_analysis: correlationResult.date_analysis,
+          preview_data: correlationResult.preview_data,
+          filtered_file_path: correlationResult.filtered_file_path,
+          top_correlations: topCorrelations,
+          correlation_statistics: correlationStats,
+        },
+        file_details: {
+          file_path: filePathForRequest,
+          file_name: getFilename(filePathForRequest),
+          filtered_file_path: correlationResult.filtered_file_path,
+        },
+        metadata: {
+          original_rows: correlationResult.original_rows,
+          filtered_rows: correlationResult.filtered_rows,
+          row_count: correlationResult.filtered_rows || correlationResult.original_rows,
+        }
+      };
+      
+      // Generate insight - this is the 2nd LLM call
+      // All detailed logging happens on backend - check terminal for logs
+      
+      // Add a small delay to ensure first text box is fully saved
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      generateAtomInsight({
+        data: enhancedDataForInsight,
         atomType: 'correlation',
         sessionId,
       }).then(async (result) => {
-        console.log('✅ Insight generated by LLM - will be displayed in text box');
-        try {
-          await updateCardTextBox(atomId, result.formattedContent);
-          console.log('✅ Card text box updated with insight');
-        } catch (textBoxError) {
-          console.error('❌ Error updating card text box with insight:', textBoxError);
+        if (result.success && result.insight) {
+          try {
+            // Add insight to a NEW text box (separate from the text box with 3 keys)
+            await addCardTextBox(atomId, result.insight, 'AI Insight');
+          } catch (textBoxError) {
+            console.error('❌ Error adding new text box with insight:', textBoxError);
+          }
         }
       }).catch((error) => {
         console.error('❌ Error generating insight:', error);

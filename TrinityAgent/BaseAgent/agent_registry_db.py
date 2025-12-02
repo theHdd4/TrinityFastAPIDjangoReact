@@ -5,6 +5,7 @@ Follows the pattern from trinity_v1_atoms table structure.
 
 import logging
 import socket
+import os
 from typing import Optional, Dict, List, Any
 from datetime import datetime
 from fastapi import APIRouter
@@ -25,55 +26,56 @@ def get_host_ip_address() -> str:
     """
     Get the host IP address that can be accessed from other machines.
     Uses multiple strategies to detect the correct IP address.
+    PRIORITY: Environment variable HOST_IP > Settings HOST_IP > Socket detection > Hostname resolution
     
     Returns:
         IP address string (defaults to "127.0.0.1" if detection fails)
     """
+    # Strategy 1: Use HOST_IP from environment variable (HIGHEST PRIORITY)
+    # This is set by docker-compose.yml env_file or directly in environment
+    env_ip = os.getenv("HOST_IP")
+    if env_ip and env_ip.strip() and env_ip != "127.0.0.1" and env_ip != "localhost":
+        logger.info(f"✅ Using HOST_IP from environment variable: {env_ip.strip()}")
+        return env_ip.strip()
+    
+    # Strategy 2: Use HOST_IP from settings (loaded from .env file by Pydantic)
     try:
-        # Strategy 1: Use HOST_IP from settings/environment
         from .config import settings
         host_ip = settings.HOST_IP
         if host_ip and host_ip != "127.0.0.1" and host_ip != "localhost":
-            logger.debug(f"Using HOST_IP from settings: {host_ip}")
+            logger.info(f"✅ Using HOST_IP from settings: {host_ip}")
             return host_ip
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Could not load HOST_IP from settings: {e}")
     
+    # Strategy 3: Socket detection (connects to 8.8.8.8 to find local IP)
     try:
-        # Strategy 2: Connect to external service to get public IP
-        # This gets the IP that other machines can use to connect
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            # Connect to a public DNS server (doesn't actually send data)
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
             s.close()
             if ip and ip != "127.0.0.1":
-                logger.debug(f"Detected IP via socket connection: {ip}")
+                logger.warning(f"⚠️ Detected IP via socket connection: {ip} (HOST_IP env var not set)")
                 return ip
         except Exception:
             s.close()
     except Exception:
         pass
     
+    # Strategy 4: Hostname resolution
     try:
-        # Strategy 3: Get hostname and resolve to IP
         hostname = socket.gethostname()
         ip = socket.gethostbyname(hostname)
         if ip and ip != "127.0.0.1":
-            logger.debug(f"Detected IP via hostname resolution: {ip}")
+            logger.warning(f"⚠️ Detected IP via hostname resolution: {ip} (HOST_IP env var not set)")
             return ip
     except Exception:
         pass
     
-    # Fallback: Use environment variable or default
-    import os
-    env_ip = os.getenv("HOST_IP")
-    if env_ip and env_ip != "127.0.0.1":
-        logger.debug(f"Using HOST_IP from environment: {env_ip}")
-        return env_ip
-    
-    logger.warning("Could not detect host IP address, using default 127.0.0.1")
+    # Fallback
+    logger.warning("⚠️ Could not detect host IP address, using default 127.0.0.1. "
+                  "Set HOST_IP environment variable to specify your IP address.")
     return "127.0.0.1"
 
 
@@ -143,6 +145,51 @@ async def create_trinity_v1_agents_table() -> bool:
                 )
             """)
             
+            # Migrate existing table: add host_ip column if it doesn't exist
+            try:
+                await conn.execute("""
+                    ALTER TABLE public.trinity_v1_agents 
+                    ADD COLUMN IF NOT EXISTS host_ip VARCHAR(45) DEFAULT '127.0.0.1' NOT NULL
+                """)
+            except Exception:
+                pass  # Column might already exist or table structure is different
+            
+            # Migrate: drop old unique constraint on agent_id if it exists, add new one on (agent_id, host_ip)
+            try:
+                # Check if old unique constraint exists and drop it
+                await conn.execute("""
+                    DO $$ 
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM pg_constraint 
+                            WHERE conname = 'trinity_v1_agents_agent_id_key'
+                        ) THEN
+                            ALTER TABLE public.trinity_v1_agents 
+                            DROP CONSTRAINT trinity_v1_agents_agent_id_key;
+                        END IF;
+                    END $$;
+                """)
+            except Exception:
+                pass  # Constraint might not exist
+            
+            # Add new unique constraint on (agent_id, host_ip) if it doesn't exist
+            try:
+                await conn.execute("""
+                    DO $$ 
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint 
+                            WHERE conname = 'trinity_v1_agents_agent_id_host_ip_key'
+                        ) THEN
+                            ALTER TABLE public.trinity_v1_agents 
+                            ADD CONSTRAINT trinity_v1_agents_agent_id_host_ip_key 
+                            UNIQUE (agent_id, host_ip);
+                        END IF;
+                    END $$;
+                """)
+            except Exception:
+                pass  # Constraint might already exist
+            
             # Create indexes for faster lookups
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_trinity_v1_agents_agent_id 
@@ -157,7 +204,7 @@ async def create_trinity_v1_agents_table() -> bool:
                 ON public.trinity_v1_agents(agent_id, host_ip)
             """)
             
-            logger.info("✅ Created trinity_v1_agents table (or it already exists)")
+            logger.info("✅ Created/updated trinity_v1_agents table (or it already exists)")
             return True
         finally:
             await conn.close()
@@ -250,13 +297,12 @@ async def save_agent_to_postgres(
         return False
 
 
-async def get_agent_from_postgres(agent_id: str, host_ip: Optional[str] = None) -> Optional[Dict[str, Any]]:
+async def get_agent_from_postgres(agent_id: str) -> Optional[Dict[str, Any]]:
     """
     Get agent metadata from PostgreSQL.
     
     Args:
         agent_id: Agent identifier
-        host_ip: Optional host IP address (if None, gets latest for agent_id)
         
     Returns:
         Agent metadata dictionary or None if not found
@@ -273,25 +319,13 @@ async def get_agent_from_postgres(agent_id: str, host_ip: Optional[str] = None) 
             port=int(POSTGRES_PORT),
         )
         try:
-            if host_ip:
-                row = await conn.fetchrow("""
-                    SELECT 
-                        id, agent_id, name, description, category, tags,
-                        route_count, routes, host_ip, is_active, created_at, updated_at
-                    FROM public.trinity_v1_agents
-                    WHERE agent_id = $1 AND host_ip = $2
-                """, agent_id, host_ip)
-            else:
-                # Get latest by updated_at
-                row = await conn.fetchrow("""
-                    SELECT 
-                        id, agent_id, name, description, category, tags,
-                        route_count, routes, host_ip, is_active, created_at, updated_at
-                    FROM public.trinity_v1_agents
-                    WHERE agent_id = $1
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                """, agent_id)
+            row = await conn.fetchrow("""
+                SELECT 
+                    id, agent_id, name, description, category, tags,
+                    route_count, routes, is_active, created_at, updated_at
+                FROM public.trinity_v1_agents
+                WHERE agent_id = $1
+            """, agent_id)
             
             if row:
                 return dict(row)
@@ -303,12 +337,9 @@ async def get_agent_from_postgres(agent_id: str, host_ip: Optional[str] = None) 
         return None
 
 
-async def get_all_agents_from_postgres(host_ip: Optional[str] = None) -> List[Dict[str, Any]]:
+async def get_all_agents_from_postgres() -> List[Dict[str, Any]]:
     """
     Get all agents from PostgreSQL.
-    
-    Args:
-        host_ip: Optional host IP address to filter by
     
     Returns:
         List of agent metadata dictionaries
@@ -325,23 +356,13 @@ async def get_all_agents_from_postgres(host_ip: Optional[str] = None) -> List[Di
             port=int(POSTGRES_PORT),
         )
         try:
-            if host_ip:
-                rows = await conn.fetch("""
-                    SELECT 
-                        id, agent_id, name, description, category, tags,
-                        route_count, routes, host_ip, is_active, created_at, updated_at
-                    FROM public.trinity_v1_agents
-                    WHERE host_ip = $1
-                    ORDER BY name
-                """, host_ip)
-            else:
-                rows = await conn.fetch("""
-                    SELECT 
-                        id, agent_id, name, description, category, tags,
-                        route_count, routes, host_ip, is_active, created_at, updated_at
-                    FROM public.trinity_v1_agents
-                    ORDER BY name, host_ip
-                """)
+            rows = await conn.fetch("""
+                SELECT 
+                    id, agent_id, name, description, category, tags,
+                    route_count, routes, is_active, created_at, updated_at
+                FROM public.trinity_v1_agents
+                ORDER BY name
+            """)
             
             return [dict(row) for row in rows]
         finally:
@@ -351,14 +372,13 @@ async def get_all_agents_from_postgres(host_ip: Optional[str] = None) -> List[Di
         return []
 
 
-async def update_agent_status(agent_id: str, is_active: bool, host_ip: Optional[str] = None) -> bool:
+async def update_agent_status(agent_id: str, is_active: bool) -> bool:
     """
     Update agent availability status in PostgreSQL.
     
     Args:
         agent_id: Agent identifier
         is_active: Whether agent is active
-        host_ip: Optional host IP address (if None, updates all instances)
         
     Returns:
         True if updated successfully, False otherwise
@@ -375,21 +395,14 @@ async def update_agent_status(agent_id: str, is_active: bool, host_ip: Optional[
             port=int(POSTGRES_PORT),
         )
         try:
-            if host_ip:
-                result = await conn.execute("""
-                    UPDATE public.trinity_v1_agents
-                    SET is_active = $1, updated_at = NOW()
-                    WHERE agent_id = $2 AND host_ip = $3
-                """, is_active, agent_id, host_ip)
-            else:
-                result = await conn.execute("""
-                    UPDATE public.trinity_v1_agents
-                    SET is_active = $1, updated_at = NOW()
-                    WHERE agent_id = $2
-                """, is_active, agent_id)
+            result = await conn.execute("""
+                UPDATE public.trinity_v1_agents
+                SET is_active = $1, updated_at = NOW()
+                WHERE agent_id = $2
+            """, is_active, agent_id)
             
-            if "UPDATE" in result and int(result.split()[-1]) > 0:
-                logger.info(f"✅ Updated agent '{agent_id}' status to is_active={is_active} (host_ip: {host_ip or 'all'})")
+            if result == "UPDATE 1":
+                logger.info(f"✅ Updated agent '{agent_id}' status to is_active={is_active}")
                 return True
             else:
                 logger.warning(f"⚠️ Agent '{agent_id}' not found for status update")

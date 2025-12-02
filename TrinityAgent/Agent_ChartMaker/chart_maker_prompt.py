@@ -106,6 +106,7 @@ class ChartMakerPromptBuilder:
     
     # ChartMaker-specific intelligence rules
     INTELLIGENCE_RULES = [
+        "Match the user’s partial file name to the closest exact filename from the available list and return only that filename",
         "USE COMPLETE HISTORY: Reference previous interactions, successful chart creations, and user preferences",
         "SMART FILE SELECTION: Analyze user's request to identify the most appropriate file from the available list",
         "CONTEXT AWARENESS: Understand \"yes\", \"no\", \"use that\", \"create chart with those\" based on conversation",

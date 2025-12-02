@@ -1004,6 +1004,9 @@ async def initialize_agent_registry():
             logger.info(f"  - {name}: {description}")
         
         # Sync agents to PostgreSQL on startup
+        # NOTE: This is the PRIMARY sync location for trinity-ai service.
+        # The background thread sync in agent_registry.py is disabled to avoid duplicate syncs.
+        # Django management command sync_agents_to_postgres can be used for manual syncs.
         logger.info("=" * 80)
         logger.info("🔄 SYNCING AGENTS TO POSTGRESQL (STARTUP)")
         logger.info("=" * 80)

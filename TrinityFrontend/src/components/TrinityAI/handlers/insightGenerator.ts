@@ -1,15 +1,182 @@
 /**
  * Insight Generator Utility
  * Generates insights for atom steps by calling the insight API in parallel
+ * Includes a global queue manager to ensure insights complete even when new atoms start
  */
 
 import { INSIGHT_API } from '@/lib/api';
 import { getDataSummary, StandardizedDataSummary } from './dataSummaryExtractors';
+import { updateInsightTextBox } from './utils';
+
+/**
+ * Global insight queue manager
+ * Tracks pending insights to ensure they complete even when new atoms start
+ */
+interface PendingInsight {
+  atomId: string;
+  promise: Promise<InsightResult>;
+  startTime: number;
+}
+
+class InsightQueueManager {
+  private pendingInsights: Map<string, PendingInsight> = new Map();
+  private readonly MAX_PENDING_AGE = 5 * 60 * 1000; // 5 minutes
+
+  /**
+   * Add an insight generation task to the queue
+   * Returns a promise that will complete even if the component unmounts
+   */
+  addInsightTask(
+    atomId: string,
+    insightPromise: Promise<InsightResult>
+  ): Promise<InsightResult> {
+    console.log(`📋 Adding insight task to queue for atomId: ${atomId}`);
+    
+    // Store the promise with metadata
+    const pendingInsight: PendingInsight = {
+      atomId,
+      promise: insightPromise,
+      startTime: Date.now(),
+    };
+    
+    this.pendingInsights.set(atomId, pendingInsight);
+    
+    // Set up completion handler that persists even if component unmounts
+    const completionPromise = insightPromise
+      .then(async (result) => {
+        console.log(`✅ Insight generation completed for atomId: ${atomId}`);
+        
+        if (result.success && result.insight) {
+          // Update the text box with retry logic (handles state changes)
+          console.log(`📝 Updating insight text box for atomId: ${atomId}`);
+          const updateSuccess = await updateInsightTextBox(atomId, result.insight, 5, 1000); // More retries, longer delay
+          
+          if (updateSuccess) {
+            console.log(`✅ Successfully updated insight text box for atomId: ${atomId}`);
+          } else {
+            console.warn(`⚠️ Failed to update insight text box after retries for atomId: ${atomId}`);
+            // Store in a retry queue for later
+            this.scheduleRetry(atomId, result.insight);
+          }
+        }
+        
+        // Remove from pending queue after a delay (in case we need to retry)
+        setTimeout(() => {
+          this.pendingInsights.delete(atomId);
+        }, 10000); // Keep for 10 seconds after completion
+        
+        return result;
+      })
+      .catch((error) => {
+        console.error(`❌ Insight generation failed for atomId: ${atomId}:`, error);
+        // Remove from pending queue
+        this.pendingInsights.delete(atomId);
+        throw error;
+      });
+    
+    return completionPromise;
+  }
+
+  /**
+   * Schedule a retry for updating the text box
+   */
+  private scheduleRetry(atomId: string, insight: string, delay: number = 2000): void {
+    console.log(`🔄 Scheduling retry for atomId: ${atomId} in ${delay}ms`);
+    
+    setTimeout(async () => {
+      console.log(`🔄 Retrying insight text box update for atomId: ${atomId}`);
+      const success = await updateInsightTextBox(atomId, insight, 3, 500);
+      
+      if (success) {
+        console.log(`✅ Retry successful for atomId: ${atomId}`);
+      } else {
+        console.warn(`⚠️ Retry failed for atomId: ${atomId}, will try again later`);
+        // Schedule another retry with exponential backoff
+        this.scheduleRetry(atomId, insight, delay * 2);
+      }
+    }, delay);
+  }
+
+  /**
+   * Get pending insights count
+   */
+  getPendingCount(): number {
+    // Clean up old pending insights
+    const now = Date.now();
+    for (const [atomId, pending] of this.pendingInsights.entries()) {
+      if (now - pending.startTime > this.MAX_PENDING_AGE) {
+        console.warn(`⚠️ Removing stale insight task for atomId: ${atomId}`);
+        this.pendingInsights.delete(atomId);
+      }
+    }
+    
+    return this.pendingInsights.size;
+  }
+
+  /**
+   * Check if an insight is pending for an atom
+   */
+  isPending(atomId: string): boolean {
+    return this.pendingInsights.has(atomId);
+  }
+}
+
+// Global instance
+const insightQueueManager = new InsightQueueManager();
+
+/**
+ * Get example insights for each atom type to guide the LLM
+ */
+const getExampleInsights = (atomType: string): string[] => {
+  const examples: Record<string, string[]> = {
+    'concat': [
+      'The concatenation successfully combined 2 files (UK Beans and UK Mayo) vertically, resulting in a dataset with 15,234 rows and 12 columns. Both files had identical column structures, making vertical concatenation ideal. The combined dataset preserves all original data and maintains consistent column types.',
+      'Files were concatenated vertically, stacking rows from both sources. The operation preserved all columns and data types. The result contains 8,500 rows total, combining 4,200 rows from file1 and 4,300 rows from file2. All 15 columns are present in the final dataset.',
+    ],
+    'merge': [
+      'The merge operation successfully joined two datasets using an inner join on the "product_id" column. The result contains 12,450 rows with 18 columns, combining data from both files. The join preserved all matching records while excluding non-matching rows, ensuring data integrity.',
+      'Files were merged using a left join on "customer_id" and "date" columns. The operation resulted in 25,000 rows and 22 columns, preserving all records from the left file while adding matching data from the right file. The join type ensures no data loss from the primary dataset.',
+    ],
+    'chart-maker': [
+      'A bar chart was created showing sales by region, revealing that the North region has the highest sales at $2.5M, followed by South at $1.8M. The visualization effectively highlights regional performance differences and can help identify top-performing markets.',
+      'Two charts were generated: a line chart showing sales trends over time and a pie chart displaying market share by brand. The line chart reveals a steady upward trend, while the pie chart shows Brand A dominates with 45% market share.',
+    ],
+    'create-transform': [
+      'A new column "total_revenue" was created by multiplying "quantity" and "unit_price". The operation successfully processed 10,000 rows, adding the calculated revenue values. This transformation enables revenue analysis without modifying the original data.',
+      'Three transformations were applied: renamed "cust_name" to "customer_name", created "discount_amount" by calculating 10% of "price", and filtered rows where "status" equals "active". The operations resulted in 8,500 active records with enhanced column names.',
+    ],
+    'groupby-wtg-avg': [
+      'Data was grouped by "region" and "product_category", with sales volume aggregated using sum. The operation resulted in 45 grouped rows, showing total sales volume per region-category combination. The weighted average calculation provides accurate insights into regional product performance.',
+      'Grouping by "month" and "channel" with sum aggregation on "revenue" produced 24 summary rows. The operation revealed that online channels generated $3.2M in Q1, significantly higher than retail channels at $1.8M. This insight helps identify the most profitable sales channels.',
+    ],
+    'correlation': [
+      'Correlation analysis revealed a strong positive correlation (0.85) between "advertising_spend" and "sales_revenue", indicating that increased advertising directly impacts sales. A moderate negative correlation (-0.42) was found between "price" and "quantity_sold", suggesting price sensitivity.',
+      'The correlation matrix shows "customer_satisfaction" and "repeat_purchases" have a high correlation of 0.78, while "discount_rate" and "profit_margin" show a negative correlation of -0.65. These relationships help understand customer behavior and pricing strategies.',
+    ],
+    'dataframe-operations': [
+      'Three operations were executed: loaded a dataset with 50,000 rows, filtered for records where "status" equals "active" (resulting in 35,000 rows), and sorted by "date" in descending order. The final dataset is ready for analysis with active records in chronological order.',
+      'A series of operations transformed the data: loaded file, applied formula to create "profit" column (revenue - cost), filtered rows with profit > 0, and sorted by profit descending. The final dataset contains 12,000 profitable transactions, sorted by profitability.',
+    ],
+    'explore': [
+      'Exploration generated two visualizations: a bar chart showing sales by product category and a line chart displaying monthly trends. The bar chart reveals Electronics category leads with $5M sales, while the line chart shows consistent growth from January to December.',
+      'Three exploration charts were created analyzing customer segments. The visualizations show demographic distribution, purchase frequency patterns, and revenue by segment. Key insight: Millennials represent 45% of customers but generate 60% of revenue.',
+    ],
+    'data-upload-validate': [
+      'Data validation completed successfully. The file contains 25,000 rows and 15 columns with no critical errors. Minor warnings were found: 3 duplicate rows and 5 missing values in optional columns. The dataset is ready for analysis.',
+      'Validation identified 2 critical issues: 150 rows with invalid date formats and 50 rows with negative values in "quantity" field. After cleaning, 24,800 valid rows remain. The dataset structure is correct with all required columns present.',
+    ],
+  };
+  
+  return examples[atomType] || [
+    `The ${atomType} operation completed successfully. The data has been processed and is ready for further analysis.`,
+  ];
+};
 
 export interface InsightGenerationParams {
   data: any;
   atomType: string;
   sessionId?: string;
+  atomId?: string; // Add atomId to ensure queue manager can track it
 }
 
 export interface InsightResult {
@@ -20,13 +187,42 @@ export interface InsightResult {
 
 /**
  * Generate insight for an atom step
- * This function calls the insight API in parallel (non-blocking)
+ * This function calls the insight API and ensures completion even when new atoms start
+ * Uses a global queue manager to track and complete insights independently
  * Returns a promise that resolves with the insight result
  */
 export const generateAtomInsight = async (
   params: InsightGenerationParams
 ): Promise<InsightResult> => {
+  // Get atomId from params or data
+  const atomId = params.atomId || params.data?.atomId || params.data?.atom_id;
+  
+  // If we have an atomId, use the queue manager to ensure completion
+  // The queue manager will handle the text box update automatically
+  if (atomId) {
+    console.log(`📋 Using queue manager for atomId: ${atomId}`);
+    const insightPromise = generateAtomInsightInternal(params);
+    return insightQueueManager.addInsightTask(atomId, insightPromise);
+  }
+  
+  // Fallback to direct call if no atomId (but this shouldn't happen in normal flow)
+  console.warn('⚠️ generateAtomInsight called without atomId, using direct call');
+  return generateAtomInsightInternal(params);
+};
+
+/**
+ * Internal insight generation function
+ * This is the actual implementation that calls the API
+ */
+const generateAtomInsightInternal = async (
+  params: InsightGenerationParams
+): Promise<InsightResult> => {
   const { data, atomType, sessionId } = params;
+  
+  console.log('🚀🚀🚀 generateAtomInsight CALLED');
+  console.log('🚀🚀🚀 atomType:', atomType);
+  console.log('🚀🚀🚀 sessionId:', sessionId);
+  console.log('🚀🚀🚀 data keys:', Object.keys(data));
   
   try {
     // Extract smart_response, response, and reasoning
@@ -34,8 +230,25 @@ export const generateAtomInsight = async (
     const response = data.response || data.data?.response || '';
     const reasoning = data.reasoning || data.data?.reasoning || '';
     
+    console.log('🚀🚀🚀 Extracted fields:', {
+      hasSmartResponse: !!smartResponse,
+      hasResponse: !!response,
+      hasReasoning: !!reasoning,
+      smartResponseLength: smartResponse.length,
+      responseLength: response.length,
+      reasoningLength: reasoning.length,
+    });
+    
     // Get standardized data summary
     const dataSummary = getDataSummary(atomType, data);
+    console.log('🚀🚀🚀 Data summary:', {
+      atom_type: dataSummary.atom_type,
+      summaryDataKeys: Object.keys(dataSummary.summary_data || {}),
+      metadataKeys: Object.keys(dataSummary.metadata || {}),
+    });
+    
+    // Get example insights for this atom type
+    const examples = getExampleInsights(atomType);
     
     // Prepare request payload
     const requestPayload = {
@@ -45,31 +258,18 @@ export const generateAtomInsight = async (
       data_summary: dataSummary,
       atom_type: atomType,
       session_id: sessionId,
+      examples: examples, // Add examples to guide the LLM
     };
     
-    // 📝 LOG: What we're sending to LLM
-    console.log('\n' + '='.repeat(80));
-    console.log('📤 FRONTEND: Sending to Insight API (what LLM will see)');
-    console.log('='.repeat(80));
-    console.log(`Atom Type: ${atomType}`);
-    console.log(`Session ID: ${sessionId || 'N/A'}`);
-    console.log('\n--- Smart Response (User-friendly): ---');
-    console.log(smartResponse || '(empty)');
-    console.log('\n--- Response (Raw thinking): ---');
-    console.log(response || '(empty)');
-    console.log('\n--- Reasoning: ---');
-    console.log(reasoning || '(empty)');
-    console.log('\n--- Data Summary: ---');
-    console.log(JSON.stringify(dataSummary, null, 2));
-    console.log('='.repeat(80) + '\n');
-    
-    // Call insight API - Open new HTTP connection to LLM
-    console.log('\n' + '='.repeat(80));
-    console.log('🌐 OPENING NEW CONNECTION: Calling Insight API');
-    console.log('='.repeat(80));
-    console.log(`API Endpoint: ${INSIGHT_API}/generate-atom-insight`);
-    console.log(`Method: POST`);
-    console.log('='.repeat(80) + '\n');
+    console.log('🚀🚀🚀 Calling insight API:', INSIGHT_API);
+    console.log('🚀🚀🚀 Request payload:', {
+      atom_type: requestPayload.atom_type,
+      session_id: requestPayload.session_id,
+      hasSmartResponse: !!requestPayload.smart_response,
+      hasResponse: !!requestPayload.response,
+      hasReasoning: !!requestPayload.reasoning,
+      hasDataSummary: !!requestPayload.data_summary,
+    });
     
     const insightResponse = await fetch(`${INSIGHT_API}/generate-atom-insight`, {
       method: 'POST',
@@ -79,12 +279,9 @@ export const generateAtomInsight = async (
       body: JSON.stringify(requestPayload),
     });
     
-    console.log('\n' + '='.repeat(80));
-    console.log('📡 CONNECTION STATUS: Insight API Response');
-    console.log('='.repeat(80));
-    console.log(`Status: ${insightResponse.status} ${insightResponse.statusText}`);
-    console.log(`OK: ${insightResponse.ok}`);
-    console.log('='.repeat(80) + '\n');
+    console.log('🚀🚀🚀 Insight API response status:', insightResponse.status);
+    
+    // Connection status logged on backend
     
     if (!insightResponse.ok) {
       const errorText = await insightResponse.text();
@@ -98,24 +295,14 @@ export const generateAtomInsight = async (
     
     const insightData = await insightResponse.json();
     
-    // 📝 LOG: What we received from LLM
-    console.log('\n' + '='.repeat(80));
-    console.log('📥 FRONTEND: Received from Insight API (LLM response)');
-    console.log('='.repeat(80));
-    console.log(`Success: ${insightData.success}`);
-    console.log(`Processing Time: ${insightData.processing_time?.toFixed(2) || 'N/A'}s`);
-    console.log('\n--- Generated Insight (what user will see in UI): ---');
-    console.log(insightData.insight || '(empty)');
-    console.log('='.repeat(80) + '\n');
+    // Response logged on backend - check terminal for details
     
     if (insightData.success && insightData.insight) {
-      console.log('✅ Atom insight generated successfully - will be displayed in chat box and text box');
       return {
         success: true,
         insight: insightData.insight,
       };
     } else {
-      console.warn('⚠️ Insight generation returned unsuccessful result');
       return {
         success: false,
         insight: insightData.insight || '',

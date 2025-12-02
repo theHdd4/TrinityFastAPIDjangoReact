@@ -10,10 +10,12 @@ import {
   processSmartResponse,
   validateFileInput,
   formatAgentResponseForTextBox,
-  updateCardTextBox
+  updateCardTextBox,
+  addCardTextBox,
+  updateInsightTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
 import { useLaboratoryStore } from '../../LaboratoryMode/store/laboratoryStore';
-import { generateAndFormatInsight } from './insightGenerator';
 
 export const exploreHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
@@ -70,6 +72,26 @@ export const exploreHandler: AtomHandler = {
       );
       setMessages(prev => [...prev, errorMsg]);
       return { success: false, error: 'Invalid file input' };
+    }
+    
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 Updating card text box with agent response...');
+    let textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // STEP 2: Add text box with placeholder for insight (like concat/merge)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
     }
     
     // 🔧 CRITICAL FIX: Use the SAME 3-step backend flow as the working old AtomAIChatBot.tsx
@@ -678,6 +700,44 @@ export const exploreHandler: AtomHandler = {
           setMessages(prev => [...prev, completionMsg]);
         }
         
+        // STEP 2b: Generate insight AFTER charts are processed successfully
+        console.log('🔍 STEP 2b: Generating insight for explore (after charts processed)');
+        
+        // Prepare enhanced data with exploration results for insight generation
+        const enhancedDataForInsight = {
+          ...data, // This includes smart_response, response, reasoning (the 3 keys)
+          exploration_config: data.exploration_config, // Original config from first LLM call
+          exploration_results: {
+            chart_count: finalExplorations.length,
+            charts_processed: finalExplorations.filter(exp => exp.chart_data && exp.chart_data.length > 0).length,
+            chart_configs: chartConfigs,
+            chart_data_summary: Object.keys(exploreData.chartDataSets || {}).map((key: string) => {
+              const chartData = exploreData.chartDataSets[key];
+              return {
+                chart_index: parseInt(key),
+                data_points: Array.isArray(chartData) ? chartData.length : 0,
+                title: chartConfigs[parseInt(key)]?.title || `Chart ${parseInt(key) + 1}`,
+              };
+            }),
+          },
+          file_details: {
+            file_name: targetFile,
+            file_name_only: fileName,
+          },
+        };
+        
+        // Generate insight - uses queue manager to ensure completion even when new atoms start
+        // The queue manager automatically handles text box updates with retry logic
+        generateAtomInsight({
+          data: enhancedDataForInsight,
+          atomType: 'explore',
+          sessionId,
+          atomId, // Pass atomId so queue manager can track and complete this insight
+        }).catch((error) => {
+          console.error('❌ Error generating insight:', error);
+        });
+        // Note: We don't need to manually update the text box here - the queue manager handles it
+        
       } catch (configError: any) {
         console.error('❌ Failed to fetch column config:', configError);
         
@@ -717,6 +777,69 @@ export const exploreHandler: AtomHandler = {
           data: exploreData
         });
         
+        // STEP 2b: Generate insight for fallback case (basic exploreData)
+        if (result.explorations && result.explorations.length > 0) {
+          console.log('🔍 STEP 2b: Generating insight for explore (fallback case)');
+          
+          const enhancedDataForInsight = {
+            ...data,
+            exploration_config: data.exploration_config,
+            exploration_results: {
+              chart_count: result.explorations.length,
+              charts_processed: result.explorations.filter((exp: any) => exp.chart_data && exp.chart_data.length > 0).length,
+              chart_configs: [],
+              chart_data_summary: result.explorations.map((exp: any, idx: number) => ({
+                chart_index: idx,
+                data_points: Array.isArray(exp.chart_data) ? exp.chart_data.length : 0,
+                title: exp.title || `Chart ${idx + 1}`,
+              })),
+            },
+            file_details: {
+              file_name: targetFile,
+              file_name_only: fileName,
+            },
+          };
+          
+          generateAtomInsight({
+            data: enhancedDataForInsight,
+            atomType: 'explore',
+            sessionId,
+          }).then(async (insightResult) => {
+            if (insightResult.success && insightResult.insight) {
+              try {
+                const { getAtom, cards, setCards, updateCard } = useLaboratoryStore.getState();
+                const atom = getAtom(atomId);
+                if (atom) {
+                  const card = cards.find(c => c.atoms?.some((a: any) => a.id === atomId));
+                  if (card && card.textBoxes && card.textBoxes.length > 0) {
+                    const updatedTextBoxes = [...card.textBoxes];
+                    const lastIndex = updatedTextBoxes.length - 1;
+                    if (updatedTextBoxes[lastIndex]?.title === 'AI Insight') {
+                      updatedTextBoxes[lastIndex] = {
+                        ...updatedTextBoxes[lastIndex],
+                        content: insightResult.insight,
+                        html: insightResult.insight.replace(/\n/g, '<br />'),
+                      };
+                      updateCard(card.id, { textBoxes: updatedTextBoxes });
+                      const allCards = cards.map(c => 
+                        c.id === card.id 
+                          ? { ...c, textBoxes: updatedTextBoxes }
+                          : c
+                      );
+                      setCards(allCards);
+                      console.log('✅ Successfully updated insight text box with generated insight');
+                    }
+                  }
+                }
+              } catch (textBoxError) {
+                console.error('❌ Error updating insight text box:', textBoxError);
+              }
+            }
+          }).catch((error) => {
+            console.error('❌ Error generating insight:', error);
+          });
+        }
+        
         // Note: Completion message already added above
       }
           
@@ -755,42 +878,25 @@ export const exploreHandler: AtomHandler = {
       });
     }
 
-    // 🔍 Generate insight for this atom step (explicitly call LLM)
-    console.log('🔍 Generating insight for explore atom...');
-    generateAndFormatInsight({
-      data,
-      atomType: 'explore',
-      sessionId,
-    }).then(async (result) => {
-      console.log('✅ Insight generated by LLM:', result.insight);
-      
-      // Add insight as a message to the chat box
-      if (result.insight) {
-        const insightMessage: Message = {
-          id: `insight-${Date.now()}`,
-          content: `**Insight:**\n${result.insight}`,
-          sender: 'ai',
-          timestamp: new Date(),
-        };
-        setMessages(prev => [...prev, insightMessage]);
-        console.log('✅ Insight added to chat box');
-      }
-      
-      // Update card's text box with formatted insight content (triggers add button functionality)
-      try {
-        await updateCardTextBox(atomId, result.formattedContent);
-        console.log('✅ Card text box updated with insight');
-      } catch (textBoxError) {
-        console.error('❌ Error updating card text box with insight:', textBoxError);
-      }
-    }).catch((error) => {
-      console.error('❌ Error generating insight:', error);
-      // Fallback: Update text box without insight if generation fails
-      const textBoxContent = formatAgentResponseForTextBox(data);
-      updateCardTextBox(atomId, textBoxContent).catch(err => {
-        console.error('❌ Error updating card text box (fallback):', err);
-      });
-    });
+    // 📝 Update card text box with response, reasoning, and smart_response (reassign if needed)
+    console.log('📝 Updating card text box with agent response...');
+    textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // STEP 2: Add text box with placeholder for insight (like concat/merge)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+    }
     
     return { success: true };
   },

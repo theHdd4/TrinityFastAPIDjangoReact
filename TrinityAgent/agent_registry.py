@@ -650,7 +650,9 @@ try:
     logger.info("=" * 80)
     
     # Sync agents to PostgreSQL after initialization (non-blocking)
-    _sync_agents_after_init()
+    # DISABLED: Sync is now handled by main_api.py startup event to avoid duplicate syncs
+    # The Django management command sync_agents_to_postgres can also be used for manual syncs
+    # _sync_agents_after_init()
     
 except Exception as init_error:
     logger.error("=" * 80)

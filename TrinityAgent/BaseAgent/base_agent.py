@@ -152,11 +152,25 @@ class BaseAgent(BaseAgentInterface, ABC):
         self,
         client_name: str = "",
         app_name: str = "",
-        project_name: str = ""
+        project_name: str = "",
+        force_reload: bool = True
     ) -> None:
-        """Ensure files are loaded before processing requests."""
-        if not self._files_loaded:
+        """
+        Ensure files are loaded before processing requests.
+        
+        Args:
+            client_name: Client name for file path resolution
+            app_name: App name for file path resolution
+            project_name: Project name for file path resolution
+            force_reload: If True, always reload files to get latest uploads (default: True)
+        """
+        # Always reload files to ensure we have the latest files after uploads
+        # This ensures newly uploaded files are immediately available
+        if force_reload or not self._files_loaded:
+            logger.info(f"🔄 Reloading files (force_reload={force_reload}, _files_loaded={self._files_loaded})")
             self._load_files(client_name, app_name, project_name)
+        else:
+            logger.debug(f"✅ Files already loaded ({len(self.files_with_columns)} files), skipping reload")
     
     # ========================================================================
     # LLM Integration Methods

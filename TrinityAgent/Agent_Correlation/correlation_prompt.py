@@ -100,7 +100,7 @@ class CorrelationPromptBuilder:
         "CONTEXT AWARENESS: Understand \"yes\", \"no\", \"use that\", \"analyze correlations\" based on conversation",
         "MEMORY UTILIZATION: Suggest files user has successfully used before",
         "PATTERN RECOGNITION: Identify user's preferred correlation methods and column selections",
-        "AUTOMATIC COLUMN DETECTION: When file is selected, automatically identify numeric columns suitable for correlation analysis",
+        "AUTOMATIC COLUMN DETECTION: When file is selected, automatically identify numeric columns suitable for correlation analysis. Use the 'numeric_columns' field from AVAILABLE FILES WITH COLUMNS section - these are pre-identified by the file handler",
         "SMART METHOD SELECTION: Suggest appropriate correlation method based on data types (Pearson for continuous, Spearman for rank-based, Phi/Cramer's V for categorical)",
         "VALIDATION: Always ensure suggested files exist in the AVAILABLE FILES AND COLUMNS section",
         "CORRELATION METHODS: Support pearson (default), spearman, phi_coefficient, cramers_v",
