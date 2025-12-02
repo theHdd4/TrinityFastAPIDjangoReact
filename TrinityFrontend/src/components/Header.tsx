@@ -13,9 +13,11 @@ import { Target, BarChart3, Zap, Plus, FolderOpen } from 'lucide-react';
 
 interface HeaderProps {
   projectCount?: number;
+  sidebarOpen?: boolean;
+  onSidebarToggle?: () => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ projectCount = 0 }) => {
+const Header: React.FC<HeaderProps> = ({ projectCount = 0, sidebarOpen = false, onSidebarToggle }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState<string | null>(null);
