@@ -228,6 +228,16 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
   // Automatically load dataframe if a file is selected but no table data exists
   useEffect(() => {
     if (!settings.selectedFile || settings.tableData || loading) return;
+    
+    // 🔧 FIX: Validate that selectedFile has .arrow extension to prevent repeated errors
+    // If it doesn't have .arrow extension, it's likely an invalid value and we shouldn't try to load it
+    if (!settings.selectedFile.endsWith('.arrow')) {
+      console.warn(`⚠️ [DataFrameOperations] Skipping auto-load for invalid selectedFile: "${settings.selectedFile}" (must end with .arrow)`);
+      // Clear the invalid selectedFile to prevent repeated attempts
+      updateSettings(atomId, { selectedFile: null });
+      return;
+    }
+    
     setLoading(true);
     loadDataframeByKey(settings.selectedFile)
       .then(resp => {
@@ -308,7 +318,15 @@ const DataFrameOperationsAtom: React.FC<Props> = ({ atomId }) => {
           dataLoaded: true,
         });
       })
-      .catch(err => console.error('[DataFrameOperations] auto-load failed', err))
+      .catch(err => {
+        console.error('[DataFrameOperations] auto-load failed', err);
+        // 🔧 FIX: If load fails due to invalid filename (missing .arrow extension), clear selectedFile to prevent retries
+        const errorMessage = err?.message || String(err || '');
+        if (errorMessage.includes('Must end with') || errorMessage.includes('.arrow')) {
+          console.warn(`⚠️ [DataFrameOperations] Clearing invalid selectedFile due to load error: ${settings.selectedFile}`);
+          updateSettings(atomId, { selectedFile: null });
+        }
+      })
       .finally(() => setLoading(false));
   }, [settings.selectedFile, settings.tableData, loading, atomId, updateSettings]);
 

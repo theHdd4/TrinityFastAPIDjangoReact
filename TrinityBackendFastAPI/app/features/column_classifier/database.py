@@ -548,27 +548,53 @@ def get_classifier_config_from_mongo(
     client: str, app: str, project: str, file_name: str | None = None
 ):
     """Retrieve saved classifier configuration."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if not check_mongodb_connection():
+        logger.warning("[get_classifier_config_from_mongo] MongoDB connection check failed")
         return None
 
     try:
         base_id = f"{client}/{app}/{project}"
+        logger.info(f"[get_classifier_config_from_mongo] Looking for config with base_id={base_id}, file_name={file_name}")
+        
         coll = config_db[COLLECTIONS["CLASSIFIER_CONFIGS"]]
         if file_name:
             safe_file = quote(file_name, safe="")
             document_id = f"{base_id}::{safe_file}"
+            logger.info(f"[get_classifier_config_from_mongo] Trying file-specific document_id={document_id}")
             document = coll.find_one({"_id": document_id})
             if document:
+                logger.info(f"[get_classifier_config_from_mongo] Found file-specific document. Keys: {list(document.keys())}")
+                logger.info(f"[get_classifier_config_from_mongo] Identifiers in document: {document.get('identifiers', 'NOT FOUND')}")
                 return document
+            logger.info(f"[get_classifier_config_from_mongo] File-specific document not found, trying legacy base_id={base_id}")
             legacy = coll.find_one({"_id": base_id})
             if legacy:
                 stored_file = legacy.get("file_name")
+                logger.info(f"[get_classifier_config_from_mongo] Found legacy document. stored_file={stored_file}, requested file_name={file_name}")
+                # Return base document even if stored_file doesn't match - use as fallback
+                # Identifiers are often shared across files in the same project
                 if not stored_file or stored_file == file_name:
-                    return legacy
+                    logger.info(f"[get_classifier_config_from_mongo] Legacy document matches file. Keys: {list(legacy.keys())}")
+                else:
+                    logger.info(f"[get_classifier_config_from_mongo] Legacy document file mismatch, but using as fallback. Keys: {list(legacy.keys())}")
+                logger.info(f"[get_classifier_config_from_mongo] Identifiers in legacy: {legacy.get('identifiers', 'NOT FOUND')}")
+                return legacy
+            logger.warning(f"[get_classifier_config_from_mongo] No document found for file_name={file_name} or base_id={base_id}")
             return None
-        return coll.find_one({"_id": base_id})
+        
+        logger.info(f"[get_classifier_config_from_mongo] No file_name provided, fetching base document with _id={base_id}")
+        document = coll.find_one({"_id": base_id})
+        if document:
+            logger.info(f"[get_classifier_config_from_mongo] Found base document. Keys: {list(document.keys())}")
+            logger.info(f"[get_classifier_config_from_mongo] Identifiers in base document: {document.get('identifiers', 'NOT FOUND')}")
+        else:
+            logger.warning(f"[get_classifier_config_from_mongo] No base document found with _id={base_id}")
+        return document
     except Exception as exc:
-        logging.error(f"MongoDB read error for classifier config: {exc}")
+        logger.error(f"[get_classifier_config_from_mongo] MongoDB read error for classifier config: {exc}", exc_info=True)
         return None
 
 

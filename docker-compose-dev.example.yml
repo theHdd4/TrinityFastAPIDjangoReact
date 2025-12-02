@@ -359,6 +359,7 @@ services:
       - ./TrinityBackendDjango/.env
     environment:
       <<: *redis-env
+      HOST_IP: ${HOST_IP:-10.2.4.48}
       OLLAMA_IP: 10.2.4.48
       MONGO_URI: "mongodb://root:rootpass@mongo:27017/trinity_dev?authSource=admin"
       CLASSIFY_MONGO_URI: "mongodb://root:rootpass@mongo:27017/?authSource=admin"

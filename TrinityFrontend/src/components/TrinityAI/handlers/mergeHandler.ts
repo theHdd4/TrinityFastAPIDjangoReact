@@ -9,8 +9,14 @@ import {
   processSmartResponse,
   executePerformOperation,
   validateFileInput,
-  autoSaveStepResult
+  autoSaveStepResult,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox,
+  updateInsightTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 export const mergeHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
@@ -226,6 +232,39 @@ export const mergeHandler: AtomHandler = {
     
     updateAtomSettings(atomId, settingsToUpdate);
     
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content length:', textBoxContent.length);
+    
+    // Update card's text box (this enables the text box icon on the card)
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // Store agent response in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || '',
+        reasoning: data.reasoning || '',
+        smart_response: data.smart_response || '',
+        formattedText: textBoxContent
+      }
+    });
+    
+    // STEP 2: Add text box with placeholder for insight (like concat)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+    }
+    
     // 🔧 FIX: No need for duplicate success message - smart_response already shown at the top
     console.log('📋 Merge configuration:', {
       file1: mappedFile1,
@@ -315,6 +354,41 @@ export const mergeHandler: AtomHandler = {
         const completionMsg = createSuccessMessage('Merge operation', completionDetails);
         completionMsg.content += '\n\n📊 Results are ready! The files have been merged.\n\n💡 You can now view the merged data in the Merge interface.';
         setMessages(prev => [...prev, completionMsg]);
+        
+        // STEP 2b: Generate insight AFTER perform operation completes successfully
+        console.log('🔍 STEP 2b: Generating insight for merge (after perform operation)');
+        
+        // Prepare enhanced data with merge results for insight generation
+        const enhancedDataForInsight = {
+          ...data, // This includes smart_response, response, reasoning (the 3 keys)
+          merge_json: data.merge_json, // Original config from first LLM call
+          merge_results: {
+            merge_id: performResult.merge_id,
+            result_shape: performResult.result_shape,
+            columns: performResult.columns || [],
+            row_count: performResult.result_shape?.[0] || 0,
+            column_count: performResult.columns?.length || 0,
+            result_file: performResult.result_file,
+          },
+          file_details: {
+            file1: file1 || '',
+            file2: file2 || '',
+            joinColumns: joinColumns || [],
+            joinType: joinType || 'inner',
+          },
+        };
+        
+        // Generate insight - uses queue manager to ensure completion even when new atoms start
+        // The queue manager automatically handles text box updates with retry logic
+        generateAtomInsight({
+          data: enhancedDataForInsight,
+          atomType: 'merge',
+          sessionId,
+          atomId, // Pass atomId so queue manager can track and complete this insight
+        }).catch((error) => {
+          console.error('❌ Error generating insight:', error);
+        });
+        // Note: We don't need to manually update the text box here - the queue manager handles it
         
       } else {
         console.error('❌ Auto-execution failed:', res2.status, res2.statusText);
@@ -412,6 +486,16 @@ export const mergeHandler: AtomHandler = {
     };
     setMessages(prev => [...prev, aiMsg]);
     console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
+    
+    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
     
     // 🔧 CRITICAL FIX: Load available files into atom settings for dropdown population
     // This ensures files appear in the merge interface even for failure cases

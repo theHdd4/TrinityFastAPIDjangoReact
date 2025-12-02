@@ -11,7 +11,7 @@ const TrinityAIIcon: React.FC<TrinityAIIconProps> = ({ className, iconClassName,
   return (
     <span
       className={cn(
-        'inline-flex h-4 w-4 items-center justify-center text-purple-500',
+        'inline-flex h-3.5 w-3.5 items-center justify-center text-purple-500',
         className
       )}
       aria-hidden="true"

@@ -155,7 +155,7 @@ const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         <PopoverTrigger asChild>
           <Button
             variant="outline"
-            className={`w-full max-w-[180px] justify-between truncate group ${triggerClassName}`}
+            className={`w-full justify-between truncate group ${triggerClassName}`}
             disabled={disabled}
           >
             <div className="flex items-center gap-2">

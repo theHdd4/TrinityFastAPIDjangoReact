@@ -106,6 +106,36 @@ class Project(models.Model):
         return f"{self.name} ({self.owner.username})"
 
 
+class ProjectModificationHistory(models.Model):
+    """
+    Tracks all users who have modified a project, with timestamps.
+    Allows multiple users to see a project in their "My Projects" tab if they've both modified it.
+    """
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name="modification_history"
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="project_modifications"
+    )
+    modified_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = "registry_project_modification_history"
+        ordering = ["-modified_at"]
+        indexes = [
+            models.Index(fields=['user', '-modified_at']),
+            models.Index(fields=['project', '-modified_at']),
+        ]
+        unique_together = [('project', 'user')]  # One entry per user per project
+    
+    def __str__(self):
+        return f"{self.user.username} modified {self.project.name} at {self.modified_at}"
+
+
 class Template(models.Model):
     """A reusable project template stored in the registry."""
 

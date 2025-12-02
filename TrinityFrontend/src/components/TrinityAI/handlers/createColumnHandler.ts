@@ -2,6 +2,7 @@ import { CREATECOLUMN_API, FEATURE_OVERVIEW_API, VALIDATE_API } from '@/lib/api'
 import { AtomHandler, AtomHandlerContext, AtomHandlerResponse, Message } from './types';
 import { 
   getEnvironmentContext, 
+  getFilename,
   createMessage, 
   createSuccessMessage, 
   createErrorMessage,
@@ -9,9 +10,13 @@ import {
   executePerformOperation,
   validateFileInput,
   constructFullPath,
-  autoSaveStepResult
+  autoSaveStepResult,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox
 } from './utils';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { generateAtomInsight } from './insightGenerator';
 
 export const createColumnHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
@@ -45,8 +50,8 @@ export const createColumnHandler: AtomHandler = {
       console.warn('⚠️ No smart response text found!');
     }
     
-    // Extract json - check multiple possible locations
-    const jsonData = data.json || data.create_json || data.config || null;
+    // Extract json - check multiple possible locations (including create_transform_json)
+    const jsonData = data.json || data.create_json || data.create_transform_json || data.config || null;
     
     if (!jsonData || !Array.isArray(jsonData) || jsonData.length === 0) {
       console.error('❌ No create column configuration found in AI response');
@@ -429,6 +434,70 @@ export const createColumnHandler: AtomHandler = {
     });
     
     updateAtomSettings(atomId, mergedSettings);
+    
+    // STEP 1: Add the 3 keys (smart_response, response, reasoning) to a TEXT BOX
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content length:', textBoxContent.length);
+    
+    // Update card's text box (this enables the text box icon on the card)
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // Store agent response in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || '',
+        reasoning: data.reasoning || '',
+        smart_response: data.smart_response || '',
+        formattedText: textBoxContent
+      }
+    });
+    
+    // STEP 2: Add text box with placeholder and generate insight (right after 3 keys are added)
+    // Add a small delay to ensure first text box is fully saved
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Determine atom type (could be 'create-column' or 'create-transform')
+    const atomTypeForInsight = context.atomType === 'create-transform' ? 'create-transform' : 'create-column';
+    
+    // Prepare data for insight generation (with config data, before perform operation)
+    const configDataForInsight = {
+      ...data, // This includes smart_response, response, reasoning (the 3 keys)
+      json: jsonData, // Original config from first LLM call
+      create_transform_json: data.create_transform_json || jsonData, // Support create_transform_json
+      operations: operations, // Parsed operations
+      file_details: {
+        file_name: getFilename(resolvedDataSource || cfg.object_name || ''),
+        data_source: resolvedDataSource || cfg.object_name || '',
+        object_name: resolvedDataSource || cfg.object_name || '',
+      },
+    };
+    
+    // Add text box with placeholder, then generate insight and update it
+    try {
+      // Add text box with placeholder (addCardTextBox requires non-empty content)
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      
+      // Generate insight - same pattern as correlation (non-blocking)
+      // Generate insight - uses queue manager to ensure completion even when new atoms start
+      // The queue manager automatically handles text box updates with retry logic
+      generateAtomInsight({
+        data: configDataForInsight,
+        atomType: atomTypeForInsight,
+        sessionId,
+        atomId, // Pass atomId so queue manager can track and complete this insight
+      }).catch((error) => {
+        console.error('❌ Error generating insight:', error);
+      });
+      // Note: We don't need to manually update the text box here - the queue manager handles it
+    } catch (textBoxError) {
+      console.error('❌ Error adding text box for insight:', textBoxError);
+    }
     
     // Force a small delay to ensure state propagation, then verify
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -1026,7 +1095,7 @@ export const createColumnHandler: AtomHandler = {
   },
 
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { setMessages } = context;
+    const { setMessages, atomId } = context;
     
     let aiText = '';
     if (data.smart_response) {
@@ -1058,6 +1127,16 @@ export const createColumnHandler: AtomHandler = {
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, aiMsg]);
+    
+    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
     
     return { success: true };
   }

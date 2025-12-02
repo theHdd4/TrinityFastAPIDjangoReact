@@ -11,12 +11,15 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreHorizontal, Trash2, Pencil, Layers } from 'lucide-react';
-import { useLaboratoryStore, CardVariable, LayoutCard } from '../../store/laboratoryStore';
+import { Plus, MoreHorizontal, Trash2, Pencil, Layers, Upload } from 'lucide-react';
+import { useLaboratoryStore, CardVariable, LayoutCard } from '../../../store/laboratoryStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { LABORATORY_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { getActiveProjectContext } from '@/utils/projectEnv';
+import MetricsInputFiles from './MetricsInputFiles';
+import MetricsColOps from './MetricsColOps';
+import VariableTab from './VariableTab';
 
 interface CardSettingsTabsProps {
   card: LayoutCard;
@@ -746,10 +749,9 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   }, [projectContext, toast]);
 
   useEffect(() => {
-    setTab('variables');
     setIsAdding(false);
     setEditingVariableId(null);
-  }, [card.id, setTab]);
+  }, [card.id]);
 
   useEffect(() => {
     if (card && tab === 'variables') {
@@ -760,144 +762,36 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   return (
     <>
       <Tabs value={tab} onValueChange={setTab} className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mx-4 my-4">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="input" className="text-xs font-medium">
+            <Upload className="w-3 h-3 mr-1" />
+            Input
+          </TabsTrigger>
           <TabsTrigger value="variables" className="text-xs">
             Variables
           </TabsTrigger>
-          <TabsTrigger value="settings" className="text-xs">
-            Settings
-          </TabsTrigger>
-          <TabsTrigger value="visual" className="text-xs">
-            Visualisation
+          <TabsTrigger value="column-operations" className="text-xs">
+            Column Ops
           </TabsTrigger>
         </TabsList>
 
-        <div className="px-4">
+        <div>
+          <TabsContent value="input" className="space-y-4">
+            <MetricsInputFiles cardId={card.id} />
+          </TabsContent>
+
           <TabsContent value="variables" className="space-y-4">
-            <Card className="p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-medium text-gray-900">Variable Definition</h4>
-                  <p className="text-xs text-gray-500">
-                    Capture reusable parameters for this card and append them when needed.
-                  </p>
-                </div>
-                {!isAdding && (
-                  <Button size="sm" onClick={() => setIsAdding(true)} disabled={isSaving}>
-                    <Plus className="w-3 h-3 mr-1" /> Add variable
-                  </Button>
-                )}
-              </div>
-
-              {isAdding && (
-                <div className="border border-dashed border-gray-300 rounded-lg p-4 space-y-3 bg-gray-50">
-                  <Input
-                    value={addForm.name}
-                    onChange={e => {
-                      setAddNameError(null);
-                      setAddForm(prev => ({ ...prev, name: e.target.value }));
-                    }}
-                    placeholder="Variable name"
-                  />
-                  {addNameError && <p className="text-xs text-red-500">{addNameError}</p>}
-                  <Input
-                    value={addForm.formula}
-                    onChange={e => setAddForm(prev => ({ ...prev, formula: e.target.value }))}
-                    placeholder="Formula (optional)"
-                  />
-                  <Input
-                    value={addForm.value}
-                    onChange={e => setAddForm(prev => ({ ...prev, value: e.target.value }))}
-                    placeholder="Value (optional)"
-                  />
-                  <Textarea
-                    value={addForm.description}
-                    onChange={e => setAddForm(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="Description (optional)"
-                    rows={2}
-                  />
-                  <Textarea
-                    value={addForm.usageSummary}
-                    onChange={e => setAddForm(prev => ({ ...prev, usageSummary: e.target.value }))}
-                    placeholder="Usage summary (optional)"
-                    rows={2}
-                  />
-                  <div className="flex items-center justify-end gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setIsAdding(false);
-                        setAddForm({ name: '', formula: '', value: '', description: '', usageSummary: '' });
-                      }}
-                      disabled={isSaving}
-                    >
-                      Cancel
-                    </Button>
-                    <Button size="sm" onClick={() => void handleAddVariable()} disabled={isSaving}>
-                      {isSaving ? 'Saving...' : 'Save variable'}
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    This card
-                  </h5>
-                  <span className="text-xs text-gray-400">{currentVariables.length} variables</span>
-                </div>
-                {currentVariables.length === 0 ? (
-                  <Card className="p-4 text-sm text-gray-500 bg-gray-50 border-dashed">
-                    No variables yet. Create one to start configuring the card.
-                  </Card>
-                ) : (
-                  <div className="space-y-3">
-                    {currentVariables.map(variable => renderVariableRow(variable))}
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    Available variables
-                  </h5>
-                  {isLoadingVariables && <span className="text-xs text-gray-400">Loading…</span>}
-                  {!isLoadingVariables && (
-                    <span className="text-xs text-gray-400">{availableVariables.length}</span>
-                  )}
-                </div>
-                {isLoadingVariables ? (
-                  <Card className="p-4 text-sm text-gray-500 bg-gray-50 border-dashed">
-                    Fetching saved variables…
-                  </Card>
-                ) : availableVariables.length === 0 ? (
-                  <Card className="p-4 text-sm text-gray-500 bg-gray-50 border-dashed">
-                    Variables created in this project will appear here for reuse.
-                  </Card>
-                ) : (
-                  <div className="space-y-3">
-                    {availableVariables.map(variable => renderAvailableVariableRow(variable))}
-                  </div>
-                )}
-              </div>
-            </Card>
+            <VariableTab
+              card={card}
+              onAddVariable={onAddVariable}
+              onUpdateVariable={onUpdateVariable}
+              onDeleteVariable={onDeleteVariable}
+              onToggleVariable={onToggleVariable}
+            />
           </TabsContent>
 
-          <TabsContent value="settings" className="space-y-4">
-            <Card className="p-4 text-sm text-gray-600">
-              <h4 className="font-medium text-gray-900 mb-2">Card settings</h4>
-              <p>Text boxes can be toggled on the card header and formatted directly with the toolbar inside the card.</p>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="visual" className="space-y-4">
-            <Card className="p-4 text-sm text-gray-600">
-              <h4 className="font-medium text-gray-900 mb-2">Visualisation</h4>
-              <p>Visual settings for this card will be available soon.</p>
-            </Card>
+          <TabsContent value="column-operations" className="flex flex-col h-full">
+            <MetricsColOps />
           </TabsContent>
         </div>
       </Tabs>

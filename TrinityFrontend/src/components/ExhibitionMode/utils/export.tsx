@@ -1408,6 +1408,7 @@ export interface ExhibitionExportPayload {
   title: string;
   slides: SlideExportPayload[];
   documentStyles?: ExportDocumentStyles | null;
+  fidelity?: 'low' | 'high';
 }
 
 export interface BuildPresentationExportOptions {
@@ -1731,8 +1732,15 @@ export const downloadRenderedSlideScreenshots = async (
 export const requestPresentationExport = async (
   format: 'pptx' | 'pdf',
   payload: ExhibitionExportPayload,
+  fidelity?: 'low' | 'high',
 ): Promise<Blob> => {
   ensureBrowserEnvironment('Presentation export');
+
+  // Add fidelity to payload for PPTX exports
+  const exportPayload: ExhibitionExportPayload = {
+    ...payload,
+    ...(format === 'pptx' && fidelity ? { fidelity } : {}),
+  };
 
   const endpoint = `${EXHIBITION_API}/export/${format}`;
   let response: Response;
@@ -1743,7 +1751,7 @@ export const requestPresentationExport = async (
         'Content-Type': 'application/json',
       },
       credentials: 'include',
-      body: JSON.stringify(payload as JsonCompatible),
+      body: JSON.stringify(exportPayload as JsonCompatible),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Renderer request failed.';

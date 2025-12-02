@@ -114,7 +114,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
   return (
     <Card className="h-full flex flex-col shadow-sm border-2 border-blue-200 bg-white">
     <div className="flex-1 p-4 space-y-3 overflow-y-auto overflow-x-hidden">
-      <div className={useMasterFile && onSelectSavedDataframe ? "flex gap-3" : ""}>
+      <div className={useMasterFile && onSelectSavedDataframe ? "" : ""}>
         {/* Saved Dataframes Selector - Only show when validation steps are enabled */}
         {useMasterFile && onSelectSavedDataframe && (() => {
         const availableDataframes = savedDataframes.filter((frame) => {
@@ -134,7 +134,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
         });
         
         return (
-          <div className="flex-1 border rounded-lg p-4 bg-gray-50">
+          <div className="border rounded-lg p-4 bg-gray-50">
             <label className="text-sm font-medium text-gray-700 block mb-2">
               Select from Saved Dataframes
             </label>
@@ -167,6 +167,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
         );
       })()}
 
+        {/* UPLOAD SECTION COMMENTED OUT - Select from Saved Dataframes takes full space
         <div className={useMasterFile && onSelectSavedDataframe ? "flex-1" : ""}>
           <div
             className={`border-2 border-dashed rounded-lg text-center transition-all duration-300 ${files.length > 0 ? 'p-2' : 'p-8'} ${disabled ? 'opacity-50 cursor-not-allowed' : isDragOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-300'}`}
@@ -193,6 +194,7 @@ const UploadSection: React.FC<UploadSectionProps> = ({
              )}
           </div>
         </div>
+        */}
       </div>
       
       {/* Data Preview & Configuration Section */}

@@ -8,12 +8,18 @@ import {
   createErrorMessage,
   processSmartResponse,
   executePerformOperation,
-  validateFileInput 
+  validateFileInput,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox,
+  updateInsightTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
+import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 
 export const concatHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
-    const { atomId, updateAtomSettings, setMessages } = context;
+    const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
     // 🚨 FORCED TEST MESSAGE - This MUST appear if handler is called
     console.log('🚨🚨🚨 CONCAT HANDLER CALLED - FORCING TEST MESSAGE');
@@ -30,6 +36,62 @@ export const concatHandler: AtomHandler = {
       return updated;
     });
     console.log('🚨 Test message added to state');
+    
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 RAW DATA RECEIVED:', {
+      hasResponse: !!data.response,
+      hasDataResponse: !!data.data?.response,
+      hasReasoning: !!data.reasoning,
+      hasDataReasoning: !!data.data?.reasoning,
+      hasSmartResponse: !!data.smart_response,
+      hasDataSmartResponse: !!data.data?.smart_response,
+      dataKeys: Object.keys(data),
+      dataDataKeys: data.data ? Object.keys(data.data) : [],
+    });
+    
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content length:', textBoxContent.length);
+    console.log('📝 Formatted text box content preview:', textBoxContent.substring(0, 300));
+    
+    if (!textBoxContent || textBoxContent.trim() === '' || textBoxContent === 'No response data available.') {
+      console.warn('⚠️ WARNING: Text box content is empty or invalid!');
+      console.warn('⚠️ Data structure:', JSON.stringify(data, null, 2).substring(0, 1000));
+    }
+    
+    // Store in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || data.data?.response || '',
+        reasoning: data.reasoning || data.data?.reasoning || '',
+        smart_response: data.smart_response || data.data?.smart_response || data.smartResponse || '',
+        formattedText: textBoxContent
+      }
+    });
+    
+    // STEP 1: Add the 3 keys (smart_response, response, reasoning) to a TEXT BOX
+    console.log('📝 About to call updateCardTextBox with atomId:', atomId);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ updateCardTextBox completed successfully');
+    } catch (error) {
+      console.error('❌ ERROR in updateCardTextBox:', error);
+      if (error instanceof Error) {
+        console.error('❌ Error stack:', error.stack);
+      }
+    }
+    
+    // STEP 2: Add text box with placeholder (like create-transform) - right after 3 keys are added
+    // Add a small delay to ensure first text box is fully saved
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      // Add text box with placeholder (addCardTextBox requires non-empty content)
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+      // Continue even if text box addition fails
+    }
     
     // 🔧 CRITICAL FIX: Show smart_response EXACTLY like DataFrame Operations (no isStreamMode check)
     const smartResponseText = processSmartResponse(data);
@@ -55,6 +117,7 @@ export const concatHandler: AtomHandler = {
     }
 
     const cfg = data.concat_json;
+    // Extract file paths from concat_json (handle both array and string formats)
     const file1 = Array.isArray(cfg.file1) ? cfg.file1[0] : cfg.file1;
     const file2 = Array.isArray(cfg.file2) ? cfg.file2[0] : cfg.file2;
     const direction = cfg.concat_direction || 'vertical';
@@ -232,6 +295,43 @@ export const concatHandler: AtomHandler = {
         };
         setMessages(prev => [...prev, completionMsg]);
         
+        // STEP 2b: Generate insight AFTER perform operation completes successfully
+        // Update the existing "Generating insight..." text box with the actual insight
+        // This ensures the insight LLM has access to both the original response AND the concat results
+        
+        console.log('🔍 STEP 2b: Generating insight for concat (after perform operation)');
+        
+        // Prepare enhanced data with concat results for insight generation
+        const enhancedDataForInsight = {
+          ...data, // This includes smart_response, response, reasoning (the 3 keys)
+          concat_json: data.concat_json, // Original config from first LLM call
+          concat_results: {
+            concat_id: result.concat_id,
+            result_shape: result.result_shape,
+            columns: result.columns || [],
+            row_count: result.result_shape?.[0] || 0,
+            column_count: result.columns?.length || 0,
+            result_file: result.result_file,
+          },
+          file_details: {
+            file1: file1 || '',
+            file2: file2 || '',
+            direction: direction || 'vertical',
+          },
+        };
+        
+        // Generate insight - uses queue manager to ensure completion even when new atoms start
+        // The queue manager automatically handles text box updates with retry logic
+        generateAtomInsight({
+          data: enhancedDataForInsight,
+          atomType: 'concat',
+          sessionId,
+          atomId, // Pass atomId so queue manager can track and complete this insight
+        }).catch((error) => {
+          console.error('❌ Error generating insight:', error);
+        });
+        // Note: We don't need to manually update the text box here - the queue manager handles it
+        
       } else {
         console.error('❌ Perform operation failed:', res2.status, res2.statusText);
         const errorMsg: Message = {
@@ -272,6 +372,24 @@ export const concatHandler: AtomHandler = {
 
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { setMessages, updateAtomSettings, atomId } = context;
+    
+    // 📝 Update card text box with response, reasoning, and smart_response even on failure
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content (failure):', textBoxContent.substring(0, 200) + '...');
+    
+    // Store in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || data.data?.response || '',
+        reasoning: data.reasoning || data.data?.reasoning || '',
+        smart_response: data.smart_response || data.data?.smart_response || data.smartResponse || '',
+        formattedText: textBoxContent
+      }
+    });
+    
+    // Update card's text box (this enables the text box icon on the card)
+    await updateCardTextBox(atomId, textBoxContent);
+    console.log('📝 Card text box updated with agent response fields (failure case)');
     
     let aiText = '';
     if (data.smart_response) {

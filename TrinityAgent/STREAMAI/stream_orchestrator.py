@@ -608,6 +608,8 @@ class StreamOrchestrator:
         """
         Step 3: Execute the atom with the prompt.
         
+        Phase 1 Update: Now uses unified agent executor endpoint via registry.
+        
         Args:
             atom: Atom configuration
             prompt: Prompt with injected results
@@ -616,34 +618,65 @@ class StreamOrchestrator:
             Execution result dict
         """
         try:
-            # Use endpoint from atom if provided, otherwise try atom_mapping, then fallback to default
-            endpoint = atom.get("endpoint")
-            if not endpoint:
-                # Try to get from atom_mapping
-                try:
-                    from .atom_mapping import ATOM_MAPPING
-                    atom_id = atom.get("atom_id", "")
-                    if atom_id in ATOM_MAPPING:
-                        endpoint = ATOM_MAPPING[atom_id].get("endpoint")
-                        logger.debug(f"    Using endpoint from atom_mapping: {endpoint}")
-                except ImportError:
-                    pass
+            # Phase 1: Try to use registry directly first (same process, no HTTP overhead)
+            try:
+                from BaseAgent.registry import registry
+                from BaseAgent.interfaces import AgentContext
+                
+                atom_id = atom.get("atom_id", "")
+                # Map atom_id to agent_name
+                from .atom_mapping import ATOM_TO_AGENT_MAPPING
+                agent_name = ATOM_TO_AGENT_MAPPING.get(atom_id, atom_id)
+                
+                agent = registry.get(agent_name)
+                if agent is not None:
+                    logger.info(f"    ✅ Using registry directly for agent: {agent_name}")
+                    
+                    # Get context
+                    ctx = getattr(self, '_current_context', {})
+                    context = AgentContext(
+                        session_id=f"streamai_{int(time.time())}",
+                        user_prompt=prompt,
+                        client_name=ctx.get("client_name", ""),
+                        app_name=ctx.get("app_name", ""),
+                        project_name=ctx.get("project_name", "")
+                    )
+                    
+                    # Execute agent directly
+                    result = agent.execute(context)
+                    
+                    return {
+                        "success": result.success,
+                        "data": result.data,
+                        "message": result.message,
+                        "error": result.error,
+                        "type": "response"
+                    }
+            except Exception as registry_err:
+                logger.debug(f"    Registry not available, using HTTP: {registry_err}")
             
-            # Final fallback: construct endpoint from atom_id
-            if not endpoint:
-                endpoint = f"/trinityai/{atom.get('atom_id', 'unknown')}"
-                logger.debug(f"    Using default endpoint pattern: {endpoint}")
+            # Fallback: Use unified executor endpoint via HTTP
+            endpoint = "/trinityai/agent/execute"
+            atom_id = atom.get("atom_id", "")
+            
+            # Map atom_id to agent_name
+            try:
+                from .atom_mapping import ATOM_TO_AGENT_MAPPING
+                agent_name = ATOM_TO_AGENT_MAPPING.get(atom_id, atom_id)
+            except ImportError:
+                # Fallback: use atom_id as agent_name
+                agent_name = atom_id
             
             url = f"{self.fastapi_base}{endpoint}"
             
-            # Base payload - match DataUploadValidateRequest format
-            # DataUploadValidateRequest expects: prompt, session_id, client_name, app_name, project_name
+            # Base payload for unified executor
             payload = {
+                "agent_name": agent_name,
                 "prompt": prompt,
                 "session_id": f"streamai_{int(time.time())}"
             }
             
-            # Add context if available (from current context stored in instance)
+            # Add context if available
             if hasattr(self, '_current_context'):
                 ctx = getattr(self, '_current_context', {})
                 if ctx.get("client_name"):
@@ -653,14 +686,13 @@ class StreamOrchestrator:
                 if ctx.get("project_name"):
                     payload["project_name"] = ctx["project_name"]
             
-            # Add atom-specific parameters if provided (like file_path)
+            # Add atom-specific parameters if provided
             if "parameters" in atom and atom["parameters"]:
                 params = atom["parameters"]
                 logger.info(f"    📝 Adding parameters: {params}")
-                # Merge parameters into payload (file_path, etc.)
                 payload.update(params)
             
-            logger.debug(f"    POST {url}")
+            logger.debug(f"    POST {url} (agent: {agent_name})")
             logger.debug(f"    Prompt: {prompt[:100]}...")
             
             # Use async aiohttp instead of blocking requests
@@ -673,8 +705,10 @@ class StreamOrchestrator:
                     if response.status == 200:
                         data = await response.json()
                         return {
-                            "success": True,
-                            "data": data,
+                            "success": data.get("success", True),
+                            "data": data.get("data", data),
+                            "message": data.get("message", ""),
+                            "error": data.get("error"),
                             "type": "response"
                         }
                     else:
@@ -686,7 +720,7 @@ class StreamOrchestrator:
                         }
         
         except Exception as e:
-            logger.error(f"    ❌ Exception executing atom: {e}")
+            logger.error(f"    ❌ Exception executing atom: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e)

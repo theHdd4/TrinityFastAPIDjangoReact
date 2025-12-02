@@ -630,6 +630,15 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     // Use current messages state directly to avoid stale data
     const chat = chats.find(c => c.id === currentChatId);
     if (!chat) {
+      // CRITICAL FIX: Only create a new chat if currentChatId is valid and we have messages
+      // Don't create a new chat if we're just updating an existing one (e.g., after insight)
+      // Check if messages already contain user messages - if so, this is likely an update, not a new chat
+      const hasUserMessages = messages.some(m => m.sender === 'user');
+      if (!hasUserMessages) {
+        // No user messages yet, this might be initial state - don't create chat yet
+        return;
+      }
+      
       // Chat doesn't exist, create it with current messages
       const newChat: Chat = {
         id: currentChatId,
@@ -1796,18 +1805,24 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               type: 'text'
             };
             
-            // CRITICAL: Add insight to messages and persist immediately
-            setMessages(prev => {
-              const updated = [...prev, insightMessage];
-              console.log(`💾 Total messages after insight: ${updated.length}`);
-              
-              // Persist immediately with insight included
-              const currentChat = chats.find(c => c.id === currentChatId);
+            // CRITICAL: Update both messages and chats state together
+            // This prevents the useEffect from creating a new chat when it sees the updated messages
+            if (!currentChatId) {
+              console.warn('⚠️ No currentChatId when insight received, skipping insight message');
+              break;
+            }
+            
+            // Update chats state first to ensure chat exists
+            setChats(prevChats => {
+              const currentChat = prevChats.find(c => c.id === currentChatId);
               if (currentChat) {
+                const updatedMessages = [...currentChat.messages, insightMessage];
                 const updatedChat: Chat = {
                   ...currentChat,
-                  messages: updated,
+                  messages: updatedMessages,
                 };
+                
+                // Persist immediately with insight included
                 memoryPersistSkipRef.current = false;
                 persistChatToMemory(updatedChat).then(result => {
                   if (result) {
@@ -1818,8 +1833,19 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 }).catch(err => {
                   console.error('❌ Failed to persist insight:', err);
                 });
+                
+                // Return updated chats array
+                return prevChats.map(chat => 
+                  chat.id === currentChatId ? updatedChat : chat
+                );
               }
-              
+              return prevChats;
+            });
+            
+            // Update messages state
+            setMessages(prev => {
+              const updated = [...prev, insightMessage];
+              console.log(`💾 Total messages after insight: ${updated.length}`);
               return updated;
             });
             

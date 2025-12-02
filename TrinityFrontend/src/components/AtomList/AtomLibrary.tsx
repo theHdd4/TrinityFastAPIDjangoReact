@@ -155,17 +155,17 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
   }, [searchTerm]);
 
   return (
-    <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
+    <div className="w-72 bg-white border-r border-gray-200 flex flex-col h-full">
       {/* Search Header */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="p-2.5 border-b border-gray-200">
         <div className="flex items-center">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+            <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 text-gray-400 w-3.5 h-3.5" />
             <Input
               placeholder="Search atoms..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 text-sm"
+              className="pl-8 text-xs h-8"
               data-atom-search="true"
             />
           </div>
@@ -175,7 +175,7 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
               className="ml-2 p-1 hover:bg-gray-100 rounded"
               title="Collapse"
             >
-              <ChevronLeft className="w-4 h-4 text-gray-500" />
+              <ChevronLeft className="w-3.5 h-3.5 text-gray-500" />
             </button>
           )}
         </div>
@@ -183,22 +183,22 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
       
       {/* Atom Categories */}
       <div className="flex-1 overflow-y-auto">
-        <div className="p-4 space-y-4">
+        <div className="p-3 space-y-3">
           {loading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="text-sm text-gray-500">Loading atoms...</div>
+            <div className="flex items-center justify-center py-6">
+              <div className="text-xs text-gray-500">Loading atoms...</div>
             </div>
           )}
           
           {error && (
-            <div className="flex items-center justify-center py-8">
-              <div className="text-sm text-red-500">{error}</div>
+            <div className="flex items-center justify-center py-6">
+              <div className="text-xs text-red-500">{error}</div>
             </div>
           )}
           
           {!loading && !error && filteredCategories.length === 0 && (
-            <div className="flex items-center justify-center py-8">
-              <div className="text-sm text-gray-500">No atoms found</div>
+            <div className="flex items-center justify-center py-6">
+              <div className="text-xs text-gray-500">No atoms found</div>
             </div>
           )}
           
@@ -208,25 +208,25 @@ const AtomLibrary: React.FC<AtomLibraryProps> = ({ onAtomDragStart, onCollapse }
               open={openCategories.includes(category.name)}
               onOpenChange={() => toggleCategory(category.name)}
             >
-              <CollapsibleTrigger className="flex items-center justify-between w-full p-2 hover:bg-gray-50 rounded-lg transition-colors">
-                <div className="flex items-center space-x-3">
-                  <div className={`w-8 h-8 ${category.color} rounded-lg flex items-center justify-center`}>
-                    <category.icon className="w-4 h-4 text-white" />
+              <CollapsibleTrigger className="flex items-center justify-between w-full p-1.5 hover:bg-gray-50 rounded-lg transition-colors">
+                <div className="flex items-center space-x-2">
+                  <div className={`w-7 h-7 ${category.color} rounded-lg flex items-center justify-center`}>
+                    <category.icon className="w-3.5 h-3.5 text-white" />
                   </div>
                   <div className="text-left">
-                    <h4 className="font-medium text-gray-900 text-sm">{category.name}</h4>
-                    <p className="text-xs text-gray-500">{category.atoms.length} atoms</p>
+                    <h4 className="font-medium text-gray-900 text-xs">{category.name}</h4>
+                    <p className="text-[10px] text-gray-500">{category.atoms.length} atoms</p>
                   </div>
                 </div>
                 {openCategories.includes(category.name) ? (
-                  <ChevronDown className="w-4 h-4 text-gray-500" />
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-500" />
                 ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-500" />
+                  <ChevronRight className="w-3.5 h-3.5 text-gray-500" />
                 )}
               </CollapsibleTrigger>
               
-              <CollapsibleContent className="pt-2">
-                <div className="ml-4 space-y-3">
+              <CollapsibleContent className="pt-1.5">
+                <div className="ml-3 space-y-2">
                   {category.atoms.map((atom) => (
                     <AtomCard
                       key={atom.id}

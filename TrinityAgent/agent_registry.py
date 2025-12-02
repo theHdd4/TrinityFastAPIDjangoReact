@@ -15,6 +15,7 @@ import importlib
 import re
 import asyncio
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, Optional, Any, List
@@ -67,6 +68,7 @@ def _save_agent_to_postgres_with_retry(
     description: Optional[str] = None,
     category: Optional[str] = None,
     tags: Optional[List[str]] = None,
+    host_ip: Optional[str] = None,
     max_retries: int = 3
 ) -> bool:
     """
@@ -93,6 +95,13 @@ def _save_agent_to_postgres_with_retry(
             # Ensure table exists first
             await create_trinity_v1_agents_table()
             
+            # Auto-detect IP if not provided
+            if host_ip is None:
+                from BaseAgent.agent_registry_db import get_host_ip_address
+                detected_ip = get_host_ip_address()
+            else:
+                detected_ip = host_ip
+            
             # Save agent
             success = await save_agent_to_postgres(
                 agent_id=agent_name,
@@ -100,7 +109,8 @@ def _save_agent_to_postgres_with_retry(
                 description=agent_description,
                 router=router,
                 category=agent_category,
-                tags=agent_tags
+                tags=agent_tags,
+                host_ip=detected_ip
             )
             return success
         except Exception as e:
@@ -187,7 +197,8 @@ def _save_agent_to_postgres_async(
     name: Optional[str] = None,
     description: Optional[str] = None,
     category: Optional[str] = None,
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = None,
+    host_ip: Optional[str] = None
 ) -> None:
     """
     Helper function to save agent to PostgreSQL asynchronously (non-blocking).
@@ -205,7 +216,8 @@ def _save_agent_to_postgres_async(
                 name=name,
                 description=description,
                 category=category,
-                tags=tags
+                tags=tags,
+                host_ip=host_ip
             )
         except Exception as e:
             logger.error(f"❌ Background save failed for '{agent_name}': {e}", exc_info=True)
@@ -282,11 +294,6 @@ def register_concat_agent() -> bool:
     Returns:
         True if registered successfully, False otherwise
     """
-    # Use print to ensure we see output even if logger isn't configured
-    print("=" * 80)
-    print("REGISTERING CONCAT AGENT")
-    print("=" * 80)
-    
     try:
         import sys
         from pathlib import Path
@@ -298,32 +305,25 @@ def register_concat_agent() -> bool:
         # Ensure we can import from Agent_Concat
         # Get the directory containing this file (TrinityAgent)
         agent_dir = Path(__file__).resolve().parent
-        print(f"Agent directory: {agent_dir}")
-        print(f"Agent directory exists: {agent_dir.exists()}")
         logger.info(f"Agent directory: {agent_dir}")
         logger.info(f"Agent directory exists: {agent_dir.exists()}")
         
         if not agent_dir.exists():
             error_msg = f"❌ Agent directory does not exist: {agent_dir}"
-            print(error_msg)
             logger.error(error_msg)
             return False
         
         if str(agent_dir) not in sys.path:
             sys.path.insert(0, str(agent_dir))
-            print(f"✅ Added agent directory to sys.path: {agent_dir}")
             logger.info(f"✅ Added agent directory to sys.path: {agent_dir}")
         
         # Check if Agent_Concat directory exists
         agent_concat_dir = agent_dir / "Agent_Concat"
-        print(f"Agent_Concat directory: {agent_concat_dir}")
-        print(f"Agent_Concat directory exists: {agent_concat_dir.exists()}")
         logger.info(f"Agent_Concat directory: {agent_concat_dir}")
         logger.info(f"Agent_Concat directory exists: {agent_concat_dir.exists()}")
         
         if not agent_concat_dir.exists():
             error_msg = f"❌ Agent_Concat directory does not exist: {agent_concat_dir}"
-            print(error_msg)
             logger.error(error_msg)
             return False
         
@@ -333,69 +333,43 @@ def register_concat_agent() -> bool:
         try:
             # Import from __init__.py - it imports main_app first, then router
             # This ensures routes are registered before we get the router
-            print("Attempting to import from Agent_Concat.__init__.py...")
             logger.info("Attempting to import from Agent_Concat.__init__.py...")
             from Agent_Concat import router as concat_router
-            print("✅ Imported concat router from Agent_Concat.__init__.py")
-            print(f"Router type: {type(concat_router)}")
-            print(f"Router is None: {concat_router is None}")
-            if concat_router:
-                print(f"Router has {len(concat_router.routes)} routes")
             logger.info("✅ Imported concat router from Agent_Concat.__init__.py")
             logger.info("✅ Routes should be registered (main_app imported first)")
         except Exception as e1:
             error_msg = f"Failed to import from __init__.py: {e1}"
-            print(f"⚠️ {error_msg}")
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
             logger.warning(error_msg)
             logger.warning(f"Traceback: {traceback.format_exc()}")
             # Fallback 1: Try router.py directly (but import main_app to register routes)
             try:
-                print("Attempting fallback: import main_app then router...")
                 logger.info("Attempting fallback: import main_app then router...")
                 # Import main_app first to register routes
                 import Agent_Concat.main_app
-                print("✅ Imported main_app - routes should be registered")
                 logger.info("✅ Imported main_app - routes should be registered")
                 # Then import router
                 from Agent_Concat.router import router as concat_router
-                print(f"✅ Imported concat router from router.py")
-                print(f"Router type: {type(concat_router)}")
-                if concat_router:
-                    print(f"Router has {len(concat_router.routes)} routes")
                 logger.info("✅ Imported concat router from router.py")
             except Exception as e2:
                 error_msg = f"Failed to import from router.py: {e2}"
-                print(f"⚠️ {error_msg}")
-                import traceback
-                print(f"Traceback: {traceback.format_exc()}")
                 logger.warning(error_msg)
                 logger.warning(f"Traceback: {traceback.format_exc()}")
                 error_msg = f"❌ Failed to import concat router from all sources:\n  __init__.py: {e1}\n  router.py: {e2}"
-                print("=" * 80)
-                print(error_msg)
-                import traceback
-                print(f"Full traceback:\n{traceback.format_exc()}")
-                print("=" * 80)
                 logger.error(error_msg)
                 logger.error(f"Full traceback:\n{traceback.format_exc()}")
                 return False
         
         if concat_router is None:
             error_msg = "❌ Concat router is None after import"
-            print(error_msg)
             logger.error(error_msg)
             return False
         
         # Check router has routes
         route_count = len(concat_router.routes) if concat_router else 0
-        print(f"Router has {route_count} routes")
         logger.info(f"Router has {route_count} routes")
         
         if route_count == 0:
             warning_msg = "⚠️ Router has no routes - routes may not be registered yet"
-            print(warning_msg)
             logger.warning(warning_msg)
         
         # Set metadata for PostgreSQL
@@ -407,29 +381,20 @@ def register_concat_agent() -> bool:
         })
         
         # Register the router
-        print("Registering router in agent registry...")
         success = register_agent("concat", concat_router)
         
         if success:
             success_msg = "✅✅✅ CONCAT AGENT REGISTERED SUCCESSFULLY ✅✅✅"
-            print(success_msg)
             logger.info(success_msg)
         else:
             error_msg = "❌ Failed to register concat agent in registry"
-            print(error_msg)
             logger.error(error_msg)
         
-        print("=" * 80)
         logger.info("=" * 80)
         return success
         
     except Exception as e:
         error_msg = f"❌ Failed to register concat agent: {e}"
-        print("=" * 80)
-        print(error_msg)
-        import traceback
-        print(f"Full traceback:\n{traceback.format_exc()}")
-        print("=" * 80)
         logger.error("=" * 80)
         logger.error(error_msg, exc_info=True)
         logger.error(f"Full traceback:\n{traceback.format_exc()}")
@@ -614,6 +579,7 @@ def _sync_agents_after_init():
     """
     Automatically sync agents to PostgreSQL after initialization.
     Runs in a background thread to avoid blocking module import.
+    Now includes robust retry logic and IP address detection.
     """
     if not POSTGRES_AVAILABLE:
         logger.debug("PostgreSQL not available, skipping startup sync")
@@ -624,7 +590,7 @@ def _sync_agents_after_init():
         return
     
     def _sync_in_background():
-        """Sync agents in background thread"""
+        """Sync agents in background thread with retry logic"""
         try:
             logger.info("=" * 80)
             logger.info("SYNCING AGENTS TO POSTGRESQL (STARTUP)")
@@ -633,17 +599,33 @@ def _sync_agents_after_init():
             # Wait a bit for any pending registrations
             threading.Event().wait(2)
             
-            results = sync_agents_to_postgres_sync()
+            # Get host IP
+            try:
+                from BaseAgent.agent_registry_db import get_host_ip_address
+                host_ip = get_host_ip_address()
+                logger.info(f"Detected host IP: {host_ip}")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not detect host IP: {e}")
+                host_ip = None
+            
+            # Sync with retry logic
+            results = sync_agents_to_postgres_sync(host_ip=host_ip, max_retries=3)
             
             success_count = sum(1 for v in results.values() if v)
             total_count = len(results)
             
             if success_count == total_count and total_count > 0:
-                logger.info(f"✅✅✅ All {success_count} agents synced to PostgreSQL on startup ✅✅✅")
+                sync_msg = f"✅✅✅ All {success_count} agents synced to PostgreSQL on startup (host_ip: {host_ip}) ✅✅✅"
+                print(sync_msg)
+                logger.info(sync_msg)
             elif success_count > 0:
-                logger.debug(f"⚠️ Only {success_count}/{total_count} agents synced to PostgreSQL on startup (Django command will handle full sync)")
+                sync_msg = f"⚠️ Only {success_count}/{total_count} agents synced to PostgreSQL on startup (host_ip: {host_ip})"
+                print(sync_msg)
+                logger.warning(sync_msg)
             else:
-                logger.debug(f"⚠️ Failed to sync any agents to PostgreSQL on startup (non-critical: Django management command will handle sync)")
+                sync_msg = f"⚠️ Failed to sync any agents to PostgreSQL on startup (host_ip: {host_ip}) - will retry on next startup"
+                print(sync_msg)
+                logger.warning(sync_msg)
             
             logger.info("=" * 80)
         except Exception as e:
@@ -668,7 +650,9 @@ try:
     logger.info("=" * 80)
     
     # Sync agents to PostgreSQL after initialization (non-blocking)
-    _sync_agents_after_init()
+    # DISABLED: Sync is now handled by main_api.py startup event to avoid duplicate syncs
+    # The Django management command sync_agents_to_postgres can also be used for manual syncs
+    # _sync_agents_after_init()
     
 except Exception as init_error:
     logger.error("=" * 80)
@@ -688,11 +672,6 @@ def register_merge_agent() -> bool:
     Returns:
         True if registered successfully, False otherwise
     """
-    # Use print to ensure we see output even if logger isn't configured
-    print("=" * 80)
-    print("REGISTERING MERGE AGENT")
-    print("=" * 80)
-    
     try:
         import sys
         from pathlib import Path
@@ -704,57 +683,44 @@ def register_merge_agent() -> bool:
         # Ensure we can import from Agent_Merge
         # Get the directory containing this file (TrinityAgent)
         agent_dir = Path(__file__).resolve().parent
-        print(f"Agent directory: {agent_dir}")
-        print(f"Agent directory exists: {agent_dir.exists()}")
         logger.info(f"Agent directory: {agent_dir}")
         logger.info(f"Agent directory exists: {agent_dir.exists()}")
         
         if not agent_dir.exists():
             error_msg = f"❌ Agent directory does not exist: {agent_dir}"
-            print(error_msg)
             logger.error(error_msg)
             return False
         
         if str(agent_dir) not in sys.path:
             sys.path.insert(0, str(agent_dir))
-            print(f"✅ Added agent directory to sys.path: {agent_dir}")
             logger.info(f"✅ Added agent directory to sys.path: {agent_dir}")
         
         # Check if Agent_Merge directory exists
         agent_merge_path = agent_dir / "Agent_Merge"
-        print(f"Agent_Merge directory: {agent_merge_path}")
-        print(f"Agent_Merge directory exists: {agent_merge_path.exists()}")
         logger.info(f"Agent_Merge directory: {agent_merge_path}")
         logger.info(f"Agent_Merge directory exists: {agent_merge_path.exists()}")
         
         if not agent_merge_path.exists():
             error_msg = f"❌ Agent_Merge directory does not exist: {agent_merge_path}"
-            print(error_msg)
             logger.error(error_msg)
             return False
         
         # Try to import merge router from Agent_Merge.__init__.py
-        print("Attempting to import from Agent_Merge.__init__.py...")
         logger.info("Attempting to import from Agent_Merge.__init__.py...")
         
         try:
             from Agent_Merge import router as merge_router
-            print(f"✅ Imported merge router from Agent_Merge.__init__.py")
             logger.info(f"✅ Imported merge router from Agent_Merge.__init__.py")
-            print(f"Router type: {type(merge_router)}")
-            print(f"Router is None: {merge_router is None}")
             logger.info(f"Router type: {type(merge_router)}")
             logger.info(f"Router is None: {merge_router is None}")
             
             if merge_router is None:
                 error_msg = "❌ Merge router is None after import"
-                print(error_msg)
                 logger.error(error_msg)
                 return False
             
             if hasattr(merge_router, 'routes'):
                 route_count = len(merge_router.routes)
-                print(f"Router has {route_count} routes")
                 logger.info(f"Router has {route_count} routes")
             
             # Set metadata for PostgreSQL
@@ -766,38 +732,26 @@ def register_merge_agent() -> bool:
             })
             
             # Register router in agent registry
-            print("Registering router in agent registry...")
             logger.info("Registering router in agent registry...")
             success = register_agent("merge", merge_router)
             
             if success:
                 success_msg = "✅✅✅ MERGE AGENT REGISTERED SUCCESSFULLY ✅✅✅"
-                print(success_msg)
                 logger.info(success_msg)
             else:
                 error_msg = "❌ Failed to register merge agent in registry"
-                print(error_msg)
                 logger.error(error_msg)
             
-            print("=" * 80)
             logger.info("=" * 80)
             return success
             
         except ImportError as import_error:
             error_msg = f"❌ Failed to import merge router: {import_error}"
-            print(error_msg)
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
             logger.error(error_msg, exc_info=True)
             return False
         
     except Exception as e:
         error_msg = f"❌ Failed to register merge agent: {e}"
-        print("=" * 80)
-        print(error_msg)
-        import traceback
-        print(f"Full traceback:\n{traceback.format_exc()}")
-        print("=" * 80)
         logger.error("=" * 80)
         logger.error(error_msg, exc_info=True)
         logger.error(f"Full traceback:\n{traceback.format_exc()}")
@@ -813,11 +767,6 @@ def register_create_transform_agent() -> bool:
     Returns:
         True if registered successfully, False otherwise
     """
-    # Use print to ensure we see output even if logger isn't configured
-    print("=" * 80)
-    print("REGISTERING CREATETRANSFORM AGENT")
-    print("=" * 80)
-    
     try:
         import sys
         from pathlib import Path
@@ -829,57 +778,44 @@ def register_create_transform_agent() -> bool:
         # Ensure we can import from Agent_CreateTransform
         # Get the directory containing this file (TrinityAgent)
         agent_dir = Path(__file__).resolve().parent
-        print(f"Agent directory: {agent_dir}")
-        print(f"Agent directory exists: {agent_dir.exists()}")
         logger.info(f"Agent directory: {agent_dir}")
         logger.info(f"Agent directory exists: {agent_dir.exists()}")
         
         if not agent_dir.exists():
             error_msg = f"❌ Agent directory does not exist: {agent_dir}"
-            print(error_msg)
             logger.error(error_msg)
             return False
         
         if str(agent_dir) not in sys.path:
             sys.path.insert(0, str(agent_dir))
-            print(f"✅ Added agent directory to sys.path: {agent_dir}")
             logger.info(f"✅ Added agent directory to sys.path: {agent_dir}")
         
         # Check if Agent_CreateTransform directory exists
         agent_create_transform_path = agent_dir / "Agent_CreateTransform"
-        print(f"Agent_CreateTransform directory: {agent_create_transform_path}")
-        print(f"Agent_CreateTransform directory exists: {agent_create_transform_path.exists()}")
         logger.info(f"Agent_CreateTransform directory: {agent_create_transform_path}")
         logger.info(f"Agent_CreateTransform directory exists: {agent_create_transform_path.exists()}")
         
         if not agent_create_transform_path.exists():
             error_msg = f"❌ Agent_CreateTransform directory does not exist: {agent_create_transform_path}"
-            print(error_msg)
             logger.error(error_msg)
             return False
         
         # Try to import create_transform router from Agent_CreateTransform.__init__.py
-        print("Attempting to import from Agent_CreateTransform.__init__.py...")
         logger.info("Attempting to import from Agent_CreateTransform.__init__.py...")
         
         try:
             from Agent_CreateTransform import router as create_transform_router
-            print(f"✅ Imported create_transform router from Agent_CreateTransform.__init__.py")
             logger.info(f"✅ Imported create_transform router from Agent_CreateTransform.__init__.py")
-            print(f"Router type: {type(create_transform_router)}")
-            print(f"Router is None: {create_transform_router is None}")
             logger.info(f"Router type: {type(create_transform_router)}")
             logger.info(f"Router is None: {create_transform_router is None}")
             
             if create_transform_router is None:
                 error_msg = "❌ CreateTransform router is None after import"
-                print(error_msg)
                 logger.error(error_msg)
                 return False
             
             if hasattr(create_transform_router, 'routes'):
                 route_count = len(create_transform_router.routes)
-                print(f"Router has {route_count} routes")
                 logger.info(f"Router has {route_count} routes")
             
             # Set metadata for PostgreSQL
@@ -891,38 +827,26 @@ def register_create_transform_agent() -> bool:
             })
             
             # Register router in agent registry
-            print("Registering router in agent registry...")
             logger.info("Registering router in agent registry...")
             success = register_agent("create_transform", create_transform_router)
             
             if success:
                 success_msg = "✅✅✅ CREATETRANSFORM AGENT REGISTERED SUCCESSFULLY ✅✅✅"
-                print(success_msg)
                 logger.info(success_msg)
             else:
                 error_msg = "❌ Failed to register create_transform agent in registry"
-                print(error_msg)
                 logger.error(error_msg)
             
-            print("=" * 80)
             logger.info("=" * 80)
             return success
             
         except ImportError as import_error:
             error_msg = f"❌ Failed to import create_transform router: {import_error}"
-            print(error_msg)
-            import traceback
-            print(f"Traceback: {traceback.format_exc()}")
             logger.error(error_msg, exc_info=True)
             return False
         
     except Exception as e:
         error_msg = f"❌ Failed to register create_transform agent: {e}"
-        print("=" * 80)
-        print(error_msg)
-        import traceback
-        print(f"Full traceback:\n{traceback.format_exc()}")
-        print("=" * 80)
         logger.error("=" * 80)
         logger.error(error_msg, exc_info=True)
         logger.error(f"Full traceback:\n{traceback.format_exc()}")
@@ -930,10 +854,14 @@ def register_create_transform_agent() -> bool:
         return False
 
 
-async def sync_registry_to_postgres() -> Dict[str, bool]:
+async def sync_registry_to_postgres(host_ip: Optional[str] = None) -> Dict[str, bool]:
     """
     Sync all in-memory agents to PostgreSQL.
     Useful for manual synchronization or after bulk operations.
+    Now includes host_ip to support multiple machines/dev environments.
+    
+    Args:
+        host_ip: Optional host IP address (auto-detected if not provided)
     
     Returns:
         Dictionary of agent_id -> sync success status
@@ -943,15 +871,20 @@ async def sync_registry_to_postgres() -> Dict[str, bool]:
         return {agent_id: False for agent_id in _agent_routers.keys()}
     
     try:
+        # Auto-detect IP if not provided
+        if host_ip is None:
+            from BaseAgent.agent_registry_db import get_host_ip_address
+            host_ip = get_host_ip_address()
+        
         # Ensure table exists
         await create_trinity_v1_agents_table()
         
         # Sync all agents
-        results = await sync_all_agents_to_postgres(_agent_routers, _agent_metadata)
+        results = await sync_all_agents_to_postgres(_agent_routers, _agent_metadata, host_ip=host_ip)
         
         success_count = sum(1 for v in results.values() if v)
         total_count = len(results)
-        logger.info(f"✅ Synced {success_count}/{total_count} agents to PostgreSQL")
+        logger.info(f"✅ Synced {success_count}/{total_count} agents to PostgreSQL (host_ip: {host_ip})")
         
         # Update sync status
         for agent_id, success in results.items():
@@ -963,10 +896,15 @@ async def sync_registry_to_postgres() -> Dict[str, bool]:
         return {agent_id: False for agent_id in _agent_routers.keys()}
 
 
-def sync_agents_to_postgres_sync() -> Dict[str, bool]:
+def sync_agents_to_postgres_sync(host_ip: Optional[str] = None, max_retries: int = 3) -> Dict[str, bool]:
     """
     Synchronous wrapper for sync_registry_to_postgres().
     Can be called from sync context (e.g., Django management commands).
+    Includes retry logic for robust synchronization.
+    
+    Args:
+        host_ip: Optional host IP address (auto-detected if not provided)
+        max_retries: Maximum number of retry attempts (default: 3)
     
     Returns:
         Dictionary of agent_id -> sync success status
@@ -979,44 +917,81 @@ def sync_agents_to_postgres_sync() -> Dict[str, bool]:
         logger.warning("No agents in registry to sync")
         return {}
     
-    try:
-        # Check if executor is shutting down
-        if _postgres_executor._shutdown:
-            logger.debug("⚠️ Executor is shutting down, cannot sync to PostgreSQL")
-            return {agent_id: False for agent_id in _agent_routers.keys()}
-        
-        # Use thread pool executor to run async code
-        # Create a wrapper function to properly handle the async call and shutdown
-        def _run_sync_async():
-            try:
-                return asyncio.run(sync_registry_to_postgres())
-            except RuntimeError as e:
-                # Handle "cannot schedule new futures after interpreter shutdown" gracefully
-                if "cannot schedule" in str(e) or "interpreter shutdown" in str(e):
-                    logger.debug("⚠️ Interpreter shutting down, skipping PostgreSQL sync")
-                    return {agent_id: False for agent_id in _agent_routers.keys()}
-                raise
-        
-        future = _postgres_executor.submit(_run_sync_async)
-        results = future.result(timeout=30)  # 30 second timeout
-        
-        success_count = sum(1 for v in results.values() if v)
-        total_count = len(results)
-        logger.info(f"✅ Synchronously synced {success_count}/{total_count} agents to PostgreSQL")
-        
-        return results
-    except (RuntimeError, TimeoutError) as e:
-        # Handle shutdown and timeout errors gracefully
-        if isinstance(e, RuntimeError) and ("cannot schedule" in str(e) or "interpreter shutdown" in str(e)):
-            logger.debug("⚠️ Interpreter shutting down, skipping PostgreSQL sync")
-        else:
-            # PostgreSQL sync timeouts are non-critical - agents will be synced via Django management command
-            # Log as debug to reduce noise (sync happens in background and failures are expected)
-            logger.debug(f"⚠️ Timeout or runtime error syncing to PostgreSQL (non-critical): {e}")
-        return {agent_id: False for agent_id in _agent_routers.keys()}
-    except Exception as e:
-        logger.error(f"❌ Failed to sync registry to PostgreSQL (sync): {e}", exc_info=True)
-        return {agent_id: False for agent_id in _agent_routers.keys()}
+    # Auto-detect IP if not provided
+    if host_ip is None:
+        try:
+            from BaseAgent.agent_registry_db import get_host_ip_address
+            host_ip = get_host_ip_address()
+        except Exception as e:
+            logger.warning(f"⚠️ Could not detect host IP: {e}, using None")
+    
+    for attempt in range(max_retries):
+        try:
+            # Check if executor is shutting down
+            if _postgres_executor._shutdown:
+                logger.debug("⚠️ Executor is shutting down, cannot sync to PostgreSQL")
+                return {agent_id: False for agent_id in _agent_routers.keys()}
+            
+            # Use thread pool executor to run async code
+            # Create a wrapper function to properly handle the async call and shutdown
+            def _run_sync_async():
+                try:
+                    return asyncio.run(sync_registry_to_postgres(host_ip=host_ip))
+                except RuntimeError as e:
+                    # Handle "cannot schedule new futures after interpreter shutdown" gracefully
+                    if "cannot schedule" in str(e) or "interpreter shutdown" in str(e):
+                        logger.debug("⚠️ Interpreter shutting down, skipping PostgreSQL sync")
+                        return {agent_id: False for agent_id in _agent_routers.keys()}
+                    raise
+            
+            future = _postgres_executor.submit(_run_sync_async)
+            results = future.result(timeout=30)  # 30 second timeout
+            
+            success_count = sum(1 for v in results.values() if v)
+            total_count = len(results)
+            
+            if success_count == total_count and total_count > 0:
+                logger.info(f"✅✅✅ Successfully synced {success_count}/{total_count} agents to PostgreSQL (host_ip: {host_ip}) ✅✅✅")
+                return results
+            elif success_count > 0:
+                logger.warning(f"⚠️ Partially synced {success_count}/{total_count} agents to PostgreSQL (host_ip: {host_ip})")
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying sync (attempt {attempt + 2}/{max_retries})...")
+                    threading.Event().wait(2)  # Wait 2 seconds before retry
+                    continue
+                return results
+            else:
+                if attempt < max_retries - 1:
+                    logger.warning(f"⚠️ Failed to sync agents to PostgreSQL (attempt {attempt + 1}/{max_retries}), retrying...")
+                    threading.Event().wait(2)  # Wait 2 seconds before retry
+                    continue
+                else:
+                    logger.error(f"❌ Failed to sync agents to PostgreSQL after {max_retries} attempts")
+                    return results
+                    
+        except (RuntimeError, TimeoutError) as e:
+            # Handle shutdown and timeout errors gracefully
+            if isinstance(e, RuntimeError) and ("cannot schedule" in str(e) or "interpreter shutdown" in str(e)):
+                logger.debug("⚠️ Interpreter shutting down, skipping PostgreSQL sync")
+                return {agent_id: False for agent_id in _agent_routers.keys()}
+            
+            if attempt < max_retries - 1:
+                logger.warning(f"⚠️ Timeout/RuntimeError syncing to PostgreSQL (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                threading.Event().wait(2)  # Wait 2 seconds before retry
+                continue
+            else:
+                logger.error(f"❌ Timeout/RuntimeError syncing to PostgreSQL after {max_retries} attempts: {e}")
+                return {agent_id: False for agent_id in _agent_routers.keys()}
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"⚠️ Error syncing to PostgreSQL (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                threading.Event().wait(2)  # Wait 2 seconds before retry
+                continue
+            else:
+                logger.error(f"❌ Failed to sync registry to PostgreSQL (sync) after {max_retries} attempts: {e}", exc_info=True)
+                return {agent_id: False for agent_id in _agent_routers.keys()}
+    
+    return {agent_id: False for agent_id in _agent_routers.keys()}
 
 
 async def get_agent_metadata_from_postgres(agent_id: str) -> Optional[Dict[str, Any]]:

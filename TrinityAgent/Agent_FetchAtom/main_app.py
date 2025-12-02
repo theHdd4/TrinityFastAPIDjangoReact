@@ -244,6 +244,20 @@ if BaseAgent is not None and settings is not None:
             bucket=minio_config["bucket"],
             prefix=minio_config["prefix"]
         )
+        
+        # Register agent in BaseAgent registry
+        try:
+            from BaseAgent.registry import registry
+            registry.register(agent)
+            logger.info(f"✅ Registered FetchAtomAgent in BaseAgent registry")
+        except ImportError:
+            try:
+                from TrinityAgent.BaseAgent.registry import registry
+                registry.register(agent)
+                logger.info(f"✅ Registered FetchAtomAgent in BaseAgent registry (absolute import)")
+            except ImportError as e:
+                logger.warning(f"⚠️ Could not register agent in registry: {e}")
+        
         agent_initialized = True
         logger.info("✅ FetchAtomAgent initialized successfully")
     except Exception as e:
@@ -354,6 +368,19 @@ def perform_fetch_atom(request: FetchAtomRequest) -> Dict[str, Any]:
                     bucket=minio_config["bucket"],
                     prefix=minio_config["prefix"]
                 )
+                # Register agent in BaseAgent registry
+                try:
+                    from BaseAgent.registry import registry
+                    registry.register(agent)
+                    logger.info(f"✅ Registered FetchAtomAgent in BaseAgent registry (on-demand)")
+                except ImportError:
+                    try:
+                        from TrinityAgent.BaseAgent.registry import registry
+                        registry.register(agent)
+                        logger.info(f"✅ Registered FetchAtomAgent in BaseAgent registry (on-demand, absolute import)")
+                    except ImportError as e:
+                        logger.warning(f"⚠️ Could not register agent in registry: {e}")
+                
                 agent_initialized = True
                 logger.info("✅ FetchAtomAgent initialized successfully on-demand")
             except Exception as init_error:

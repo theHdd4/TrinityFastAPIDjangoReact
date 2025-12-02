@@ -3305,8 +3305,10 @@ WORKFLOW PLANNING:
             # Log atom result details for debugging
             logger.info(f"📊 Atom {atom_id} execution result keys: {list(execution_result.keys())}")
             logger.info(f"📊 Atom {atom_id} success status: {execution_result.get('success', 'not_found')}")
+            logger.info(f"📊 Atom {atom_id} full result (first 500 chars): {json.dumps(execution_result, indent=2)[:500]}...")
             
             # Check if result has the expected structure for this atom
+            # RESTORED FROM 18_NOV - Simple validation like the working version
             if atom_id == "merge" and "merge_json" not in execution_result:
                 logger.warning(f"⚠️ Merge atom result missing 'merge_json' key. Available keys: {list(execution_result.keys())}")
             elif atom_id == "concat" and "concat_json" not in execution_result:
@@ -3337,6 +3339,7 @@ WORKFLOW PLANNING:
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
             # ================================================================
+            # RESTORED FROM 18_NOV - Simple event sending like the working version
             await self._send_event(
                 websocket,
                 WebSocketEvent(

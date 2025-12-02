@@ -10,8 +10,13 @@ import {
   validateFileInput,
   createProgressTracker,
   autoSaveStepResult,
-  constructFullPath
+  constructFullPath,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox,
+  updateInsightTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
 
 // Import the dataframe operations API functions
 import { loadDataframeByKey } from '../../AtomList/atoms/dataframe-operations/services/dataframeOperationsApi';
@@ -1141,6 +1146,41 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
         
         console.log('📊 Final progress summary:', progressTracker.getStatus());
         
+        // STEP 2b: Generate insight AFTER operations complete successfully
+        console.log('🔍 STEP 2b: Generating insight for dataframe-operations (after operations complete)');
+        
+        // Prepare enhanced data with operation results for insight generation
+        const enhancedDataForInsight = {
+          ...data, // This includes smart_response, response, reasoning (the 3 keys)
+          dataframe_config: data.dataframe_config, // Original config from first LLM call
+          execution_results: results,
+          operation_summary: {
+            total_operations: operationsCount,
+            completed_operations: results.length,
+            final_df_id: currentDfId,
+            final_row_count: results[results.length - 1]?.rows?.length || 0,
+            final_column_count: results[results.length - 1]?.headers?.length || 0,
+          },
+          operations: config.operations?.map((op: any, idx: number) => ({
+            index: idx + 1,
+            operation_name: op.operation_name || op.api_endpoint,
+            description: op.description,
+            success: results[idx] ? true : false,
+          })) || [],
+        };
+        
+        // Generate insight - uses queue manager to ensure completion even when new atoms start
+        // The queue manager automatically handles text box updates with retry logic
+        generateAtomInsight({
+          data: enhancedDataForInsight,
+          atomType: 'dataframe-operations',
+          sessionId,
+          atomId, // Pass atomId so queue manager can track and complete this insight
+        }).catch((error) => {
+          console.error('❌ Error generating insight:', error);
+        });
+        // Note: We don't need to manually update the text box here - the queue manager handles it
+        
       } catch (error) {
         console.error('❌ Auto-execution failed:', error);
         progressTracker.markFailed();
@@ -1160,6 +1200,26 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
       }
     }
 
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // STEP 2: Add text box with placeholder for insight (like concat/merge)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+    }
+    
     return { success: true };
   },
 
@@ -1185,6 +1245,16 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
         fileAnalysis: data.file_analysis || null,
         lastInteractionTime: Date.now()
       });
+    }
+    
+    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
     }
     
     return { success: true };

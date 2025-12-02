@@ -125,10 +125,59 @@ if BaseAgent is not None:
             context: str
         ) -> str:
             """Build data_upload_validate-specific prompt using DataUploadValidatePromptBuilder."""
-            # Get optional attributes with safe defaults if they don't exist
-            file_details = getattr(self, 'current_file_details', None)
-            other_files = getattr(self, 'other_files', None)
-            matched_columns = getattr(self, 'matched_columns', None)
+            # Resolve file context using FileContextResolver to get file details
+            file_details = {}
+            other_files = []
+            matched_columns = {}
+            
+            try:
+                import os
+                
+                # Import FileContextResolver
+                try:
+                    from STREAMAI.file_context_resolver import FileContextResolver
+                except ImportError:
+                    try:
+                        from TrinityAgent.STREAMAI.file_context_resolver import FileContextResolver
+                    except ImportError:
+                        logger.warning("⚠️ FileContextResolver not available - file details will be empty")
+                        FileContextResolver = None
+                
+                if FileContextResolver and available_files:
+                    # Initialize FileContextResolver with available files
+                    # Convert available_files format to the format expected by FileContextResolver
+                    files_index = {}
+                    for file_path, file_info in available_files.items():
+                        if isinstance(file_info, dict) and "columns" in file_info:
+                            columns = file_info["columns"]
+                        elif isinstance(file_info, list):
+                            columns = file_info
+                        else:
+                            columns = []
+                        # Use basename as display name
+                        display_name = os.path.basename(file_path)
+                        files_index[display_name] = columns
+                    
+                    if files_index:
+                        resolver = FileContextResolver()
+                        resolver.update_files(files_index)
+                        
+                        # Resolve file context based on user prompt
+                        selection = resolver.resolve(
+                            prompt=user_prompt,
+                            top_k=3,
+                            include_metadata=True,
+                            fallback_limit=10
+                        )
+                        
+                        if selection:
+                            file_details = selection.file_details or {}
+                            other_files = selection.other_files or []
+                            matched_columns = selection.matched_columns or {}
+                            logger.info(f"✅ Resolved file context: {len(file_details)} file details, {len(other_files)} other files, {len(matched_columns)} matched columns")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to resolve file context: {e}")
+                # Continue with empty file details
             
             prompt = DataUploadValidatePromptBuilder.build_data_upload_validate_prompt(
                 user_prompt=user_prompt,
@@ -316,6 +365,20 @@ if BaseAgent is not None and settings is not None:
             bucket=minio_config["bucket"],
             prefix=minio_config["prefix"]
         )
+        
+        # Register agent in BaseAgent registry
+        try:
+            from BaseAgent.registry import registry
+            registry.register(agent)
+            logger.info(f"✅ Registered DataUploadValidateAgent in BaseAgent registry")
+        except ImportError:
+            try:
+                from TrinityAgent.BaseAgent.registry import registry
+                registry.register(agent)
+                logger.info(f"✅ Registered DataUploadValidateAgent in BaseAgent registry (absolute import)")
+            except ImportError as e:
+                logger.warning(f"⚠️ Could not register agent in registry: {e}")
+        
         agent_initialized = True
         logger.info("✅ DataUploadValidateAgent initialized successfully")
     except Exception as e:
@@ -428,6 +491,19 @@ def perform_data_upload_validate(request: DataUploadValidateRequest) -> Dict[str
                     bucket=minio_config["bucket"],
                     prefix=minio_config["prefix"]
                 )
+                # Register agent in BaseAgent registry
+                try:
+                    from BaseAgent.registry import registry
+                    registry.register(agent)
+                    logger.info(f"✅ Registered DataUploadValidateAgent in BaseAgent registry (on-demand)")
+                except ImportError:
+                    try:
+                        from TrinityAgent.BaseAgent.registry import registry
+                        registry.register(agent)
+                        logger.info(f"✅ Registered DataUploadValidateAgent in BaseAgent registry (on-demand, absolute import)")
+                    except ImportError as e:
+                        logger.warning(f"⚠️ Could not register agent in registry: {e}")
+                
                 agent_initialized = True
                 logger.info("✅ DataUploadValidateAgent initialized successfully on-demand")
             except Exception as init_error:

@@ -201,6 +201,7 @@ const LLM_MAP: Record<string, string> = {
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
+  'correlation': 'Agent Correlation',
   'dataframe-operations': 'Agent DataFrame Operations',
   'pivot-table': 'Agent Pivot Table',
   'data-upload-validate': 'Agent Data Validation',
@@ -307,15 +308,197 @@ interface CardTextBoxCanvasProps {
   settings: TextBoxSettings;
   onTextChange: (data: { text: string; html: string }) => void;
   onSettingsChange: (updates: Partial<TextBoxSettings>) => void;
+  onDelete?: () => void;
 }
 
 const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
 
-const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange }) => {
+const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange, onDelete }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
   const [showToolbar, setShowToolbar] = useState(false);
+
+  const logToolbarAction = (action: string, details: Record<string, unknown> = {}) => {
+    const projectContext = getActiveProjectContext();
+
+    console.log('[Laboratory Text Toolbar]', action, {
+      ...details,
+      project: projectContext?.project_name,
+      app: projectContext?.app_name,
+    });
+
+    fetch(`${LABORATORY_PROJECT_STATE_API}/log-text-toolbar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        action,
+        client: projectContext?.client_name,
+        app: projectContext?.app_name,
+        project: projectContext?.project_name,
+        details: {
+          ...details,
+          textLength: data?.text?.length ?? 0,
+        },
+      }),
+    }).catch(() => {
+      /* non-blocking logging */
+    });
+  };
+
+  const hasEditableSelection = () => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : selectionRef.current;
+
+    if (!range || range.collapsed) return false;
+
+    const container = editorRef.current;
+    return container.contains(range.commonAncestorContainer);
+  };
+
+  const LIST_LINE_SEPARATOR = /\r?\n/;
+  const BULLET_PATTERN = /^\s*[•-]\s+/;
+  const NUMBERED_PATTERN = /^\s*\d+[.)]?\s+/;
+
+  const stripListPrefix = (line: string): string => {
+    if (BULLET_PATTERN.test(line)) return line.replace(BULLET_PATTERN, '');
+    if (NUMBERED_PATTERN.test(line)) return line.replace(NUMBERED_PATTERN, '');
+    return line;
+  };
+
+  const toggleBulletedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+
+    if (isBulleted) {
+      return lines.map(line => line.replace(BULLET_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map(line => {
+        const base = stripListPrefix(line).trimStart();
+        return base.length > 0 ? `• ${base}` : '• ';
+      })
+      .join('\n');
+  };
+
+  const toggleNumberedListContent = (value: string): string => {
+    const lines = value.split(LIST_LINE_SEPARATOR);
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+    if (isNumbered) {
+      return lines.map(line => line.replace(NUMBERED_PATTERN, '')).join('\n');
+    }
+
+    return lines
+      .map((line, index) => {
+        const base = stripListPrefix(line).trimStart();
+        const prefix = `${index + 1}. `;
+        return base.length > 0 ? `${prefix}${base}` : prefix;
+      })
+      .join('\n');
+  };
+
+  const replaceSelectionWithHtml = (html: string) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer)) return false;
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = html;
+
+    const fragment = document.createDocumentFragment();
+    const nodes = Array.from(wrapper.childNodes);
+
+    nodes.forEach(node => fragment.appendChild(node));
+
+    range.deleteContents();
+    range.insertNode(fragment);
+
+    if (nodes.length > 0) {
+      const newRange = document.createRange();
+      newRange.setStartBefore(nodes[0]);
+      newRange.setEndAfter(nodes[nodes.length - 1]);
+      selection.removeAllRanges();
+      selection.addRange(newRange);
+      selectionRef.current = newRange;
+    }
+
+    handleInput();
+    return true;
+  };
+
+  const decodeHtmlEntities = (value: string): string => {
+    if (typeof window === 'undefined') return value;
+
+    const textarea = window.document.createElement('textarea');
+    textarea.innerHTML = value;
+    return textarea.value;
+  };
+
+  const htmlToPlainText = (rawValue: string): string => {
+    if (!rawValue) return '';
+
+    let working = rawValue
+      .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+      .replace(/<\/(div|p|li)>/gi, '\n')
+      .replace(/<li[^>]*>/gi, '')
+      .replace(/<div[^>]*>/gi, '')
+      .replace(/<p[^>]*>/gi, '')
+      .replace(/<span[^>]*>/gi, '')
+      .replace(/<\/span>/gi, '')
+      .replace(/<\/ul>/gi, '\n')
+      .replace(/<\/ol>/gi, '\n')
+      .replace(/<[^>]+>/g, '');
+
+    working = working.replace(/\u00a0/g, ' ');
+    working = decodeHtmlEntities(working);
+
+    while (working.endsWith('\n')) {
+      working = working.slice(0, -1);
+    }
+
+    return working;
+  };
+
+  const escapeHtml = (value: string): string =>
+    value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const plainTextToHtml = (value: string): string => {
+    if (!value) return '';
+
+    return value
+      .split(LIST_LINE_SEPARATOR)
+      .map(line => {
+        if (line.length === 0) {
+          return '<div><br></div>';
+        }
+        return `<div>${escapeHtml(line)}</div>`;
+      })
+      .join('');
+  };
+
+  const deriveListTypeFromPlain = (plain: string): TextBoxSettings['list_type'] => {
+    const lines = plain.split(LIST_LINE_SEPARATOR);
+    const isBulleted = lines.every(line => line.trim().length === 0 || BULLET_PATTERN.test(line));
+    const isNumbered = lines.every(line => line.trim().length === 0 || NUMBERED_PATTERN.test(line));
+
+    if (isBulleted) return 'bullet';
+    if (isNumbered) return 'number';
+    return 'none';
+  };
 
   const applyImmediateStyles = (updates: Partial<TextBoxSettings>) => {
     if (!editorRef.current) return;
@@ -351,19 +534,24 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   };
 
   const saveSelection = () => {
-    const selection = typeof window !== 'undefined' ? window.getSelection() : null;
-    if (selection?.rangeCount) {
-      selectionRef.current = selection.getRangeAt(0);
+    if (typeof window === 'undefined' || !editorRef.current) return;
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+
+    const range = selection.getRangeAt(0);
+    if (editorRef.current.contains(range.commonAncestorContainer)) {
+      selectionRef.current = range;
     }
   };
 
   const restoreSelection = () => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !editorRef.current) return;
 
     const selection = window.getSelection();
     const range = selectionRef.current;
 
-    if (selection && range) {
+    if (selection && range && editorRef.current.contains(range.commonAncestorContainer)) {
       selection.removeAllRanges();
       selection.addRange(range);
     }
@@ -372,6 +560,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   const runCommand = (command: string, value?: string) => {
     if (typeof document === 'undefined') return false;
 
+    editorRef.current?.focus();
     restoreSelection();
 
     try {
@@ -386,6 +575,79 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
       return false;
     }
   };
+
+  const applyStyleToSelection = (styles: Partial<CSSStyleDeclaration>) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    restoreSelection();
+
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!editorRef.current.contains(range.commonAncestorContainer) || range.collapsed) return false;
+
+    const span = document.createElement('span');
+    Object.assign(span.style, styles);
+
+    span.appendChild(range.extractContents());
+    range.insertNode(span);
+
+    selection.removeAllRanges();
+    const newRange = document.createRange();
+    newRange.selectNodeContents(span);
+    selection.addRange(newRange);
+    selectionRef.current = newRange;
+
+    handleInput();
+    return true;
+  };
+
+  const applyFontSizeToSelection = (nextSize: number) => {
+    if (!hasEditableSelection() || typeof document === 'undefined') return false;
+
+    editorRef.current?.focus();
+    restoreSelection();
+
+    try {
+      document.execCommand('fontSize', false, '7');
+    } catch {
+      return false;
+    }
+
+    const container = editorRef.current;
+    if (!container) return false;
+
+    const targets = Array.from(container.querySelectorAll('font[size="7"]'));
+    if (targets.length === 0) return false;
+
+    targets.forEach(node => {
+      const span = document.createElement('span');
+      span.style.fontSize = `${nextSize}px`;
+      span.innerHTML = node.innerHTML;
+      node.replaceWith(span);
+    });
+
+    handleInput();
+    return true;
+  };
+
+  useEffect(() => {
+    if (!showToolbar || typeof document === 'undefined') return undefined;
+
+    const handleSelectionChange = () => {
+      if (!editorRef.current) return;
+      const selection = document.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0);
+      if (editorRef.current.contains(range.commonAncestorContainer)) {
+        selectionRef.current = range;
+      }
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, [showToolbar]);
 
   useEffect(() => {
     if (!editorRef.current) return;
@@ -426,6 +688,8 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   ]);
 
   const handleApplyTextStyle = (preset: TextStylePreset) => {
+    logToolbarAction('apply-text-style', { preset: preset.id });
+
     const updates: Partial<TextBoxSettings> = {
       font_size: clampFontSize(preset.fontSize),
     };
@@ -456,6 +720,123 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
     ? (settings.text_align as TextAlignOption)
     : 'left';
 
+  const updateListTypeFromContent = (plainOverride?: string) => {
+    const plain =
+      plainOverride ?? htmlToPlainText(editorRef.current?.innerHTML ?? settings.html ?? settings.content ?? '');
+    onSettingsChange({ list_type: deriveListTypeFromPlain(plain) });
+  };
+
+  const applyListTransformation = (
+    transformer: (value: string) => string,
+    onApplied?: (plain: string) => void,
+  ) => {
+    if (typeof window === 'undefined' || !editorRef.current) return false;
+
+    const sourceHtml = editorRef.current.innerHTML ?? '';
+    const plain = htmlToPlainText(sourceHtml);
+    const transformed = transformer(plain);
+    const nextHtml = plainTextToHtml(transformed);
+
+    console.log('[Laboratory Text Toolbar] Applying list transform', {
+      plain,
+      transformed,
+      nextHtml,
+    });
+
+    onApplied?.(transformed);
+
+    if (nextHtml === sourceHtml) return false;
+
+    editorRef.current.innerHTML = nextHtml;
+    handleInput();
+    editorRef.current.focus();
+    return true;
+  };
+
+  const handleToggleStyle = (key: 'bold' | 'italics' | 'underline' | 'strikethrough') => {
+    logToolbarAction('toggle-style', { style: key });
+
+    const commandMap: Record<typeof key, string> = {
+      bold: 'bold',
+      italics: 'italic',
+      underline: 'underline',
+      strikethrough: 'strikeThrough',
+    };
+
+    if (hasEditableSelection()) {
+      const executed = runCommand(commandMap[key]);
+      if (executed) return;
+    }
+
+    onSettingsChange({ [key]: !settings[key] } as Partial<TextBoxSettings>);
+  };
+
+  const handleAlign = (align: TextAlignOption) => {
+    logToolbarAction('align-text', { align });
+
+    if (hasEditableSelection()) {
+      const command = align === 'center' ? 'justifyCenter' : align === 'right' ? 'justifyRight' : 'justifyLeft';
+      runCommand(command);
+    }
+
+    onSettingsChange({ text_align: align });
+  };
+
+  const handleFontFamilyChange = (font: string) => {
+    logToolbarAction('change-font-family', { font });
+
+    if (hasEditableSelection()) {
+      const executed = runCommand('fontName', font);
+      if (executed) return;
+    }
+
+    onSettingsChange({ font_family: font });
+  };
+
+  const handleIncreaseFontSize = () => {
+    const next = clampFontSize(settings.font_size + 1);
+    logToolbarAction('increase-font-size', { next });
+
+    if (applyFontSizeToSelection(next)) return;
+    onSettingsChange({ font_size: next });
+  };
+
+  const handleDecreaseFontSize = () => {
+    const next = clampFontSize(settings.font_size - 1);
+    logToolbarAction('decrease-font-size', { next });
+
+    if (applyFontSizeToSelection(next)) return;
+    onSettingsChange({ font_size: next });
+  };
+
+  const handleColorChange = (color: string) => {
+    logToolbarAction('text-color', { color });
+
+    const hasSelection = hasEditableSelection();
+    const executed = hasSelection ? runCommand('foreColor', color) : false;
+    const styled = executed || (hasSelection ? applyStyleToSelection({ color }) : false);
+
+    if (!styled) {
+      applyImmediateStyles({ text_color: color });
+    }
+
+    onSettingsChange({ text_color: color });
+  };
+
+  const handleBackgroundColorChange = (color: string) => {
+    logToolbarAction('background-color', { color });
+
+    const hasSelection = hasEditableSelection();
+    const executed = hasSelection ? runCommand('hiliteColor', color) || runCommand('backColor', color) : false;
+    const styled = executed || (hasSelection ? applyStyleToSelection({ backgroundColor: color }) : false);
+
+    if (!styled) {
+      applyImmediateStyles({ background_color: color });
+    }
+
+    onSettingsChange({ background_color: color });
+  };
+
   return (
     <div
       ref={containerRef}
@@ -467,53 +848,50 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
         <div className="absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full">
           <TextBoxToolbar
             fontFamily={settings.font_family}
-            onFontFamilyChange={(font) => onSettingsChange({ font_family: font })}
+            onFontFamilyChange={handleFontFamilyChange}
             fontSize={settings.font_size}
-            onIncreaseFontSize={() => onSettingsChange({ font_size: clampFontSize(settings.font_size + 1) })}
-            onDecreaseFontSize={() => onSettingsChange({ font_size: clampFontSize(settings.font_size - 1) })}
+            onIncreaseFontSize={handleIncreaseFontSize}
+            onDecreaseFontSize={handleDecreaseFontSize}
             onApplyTextStyle={handleApplyTextStyle}
             bold={settings.bold}
             italic={settings.italics}
             underline={settings.underline}
             strikethrough={Boolean(settings.strikethrough)}
-            onToggleBold={() => onSettingsChange({ bold: !settings.bold })}
-            onToggleItalic={() => onSettingsChange({ italics: !settings.italics })}
-            onToggleUnderline={() => onSettingsChange({ underline: !settings.underline })}
-            onToggleStrikethrough={() => onSettingsChange({ strikethrough: !settings.strikethrough })}
+            onToggleBold={() => handleToggleStyle('bold')}
+            onToggleItalic={() => handleToggleStyle('italics')}
+            onToggleUnderline={() => handleToggleStyle('underline')}
+            onToggleStrikethrough={() => handleToggleStyle('strikethrough')}
             align={toolbarAlign}
-            onAlign={(align) => onSettingsChange({ text_align: align })}
+            onAlign={handleAlign}
             onBulletedList={() => {
-              const nextType = settings.list_type === 'bullet' ? 'none' : 'bullet';
-              const executed = runCommand('insertUnorderedList');
-              if (!executed && !editorRef.current?.classList.contains('list-disc')) {
-                editorRef.current?.classList.toggle('list-disc', nextType === 'bullet');
-              }
-              onSettingsChange({ list_type: nextType });
+              logToolbarAction('toggle-list', { type: 'bullet' });
+
+              console.log('[Laboratory Text Toolbar] Bullet toggle requested', {
+                currentHtml: editorRef.current?.innerHTML,
+              });
+
+              applyListTransformation(toggleBulletedListContent, transformed => {
+                console.log('[Laboratory Text Toolbar] Bullet transform applied to content', transformed);
+                updateListTypeFromContent(transformed);
+              });
             }}
             onNumberedList={() => {
-              const nextType = settings.list_type === 'number' ? 'none' : 'number';
-              const executed = runCommand('insertOrderedList');
-              if (!executed && !editorRef.current?.classList.contains('list-decimal')) {
-                editorRef.current?.classList.toggle('list-decimal', nextType === 'number');
-              }
-              onSettingsChange({ list_type: nextType });
+              logToolbarAction('toggle-list', { type: 'number' });
+
+              console.log('[Laboratory Text Toolbar] Numbered toggle requested', {
+                currentHtml: editorRef.current?.innerHTML,
+              });
+
+              applyListTransformation(toggleNumberedListContent, transformed => {
+                console.log('[Laboratory Text Toolbar] Numbered transform applied to content', transformed);
+                updateListTypeFromContent(transformed);
+              });
             }}
             color={settings.text_color}
-            onColorChange={(color) => {
-              const executed = runCommand('foreColor', color);
-              if (!executed) {
-                applyImmediateStyles({ text_color: color });
-              }
-              onSettingsChange({ text_color: color });
-            }}
+            onColorChange={handleColorChange}
             backgroundColor={settings.background_color ?? 'transparent'}
-            onBackgroundColorChange={(color) => {
-              const executed = runCommand('hiliteColor', color) || runCommand('backColor', color);
-              if (!executed) {
-                applyImmediateStyles({ background_color: color });
-              }
-              onSettingsChange({ background_color: color });
-            }}
+            onBackgroundColorChange={handleBackgroundColorChange}
+            onDelete={onDelete}
           />
         </div>
       ) : null}
@@ -527,9 +905,10 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
           onMouseUp={saveSelection}
           suppressContentEditableWarning
           className={`
-            w-full min-h-[200px] p-6
-            border-2 border-dashed border-border rounded-lg
-            focus:outline-none focus:border-primary
+            w-full min-h-[120px] px-4 py-3
+            border border-[#9bbce8] bg-[#f2f7ff]
+            rounded-xl shadow-[0_1px_3px_rgba(69,142,226,0.15)]
+            focus:outline-none focus:border-[#458EE2] focus:ring-2 focus:ring-[#cfe2ff]
             transition-colors duration-200
             ${getListStyle()}
           `}
@@ -541,13 +920,10 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             textDecoration,
             textAlign: settings.text_align,
             color: settings.text_color,
-            backgroundColor: settings.background_color ?? 'transparent',
+            backgroundColor: settings.background_color ?? '#f2f7ff',
           }}
         />
 
-        <div className="text-sm text-muted-foreground text-left">
-          Click to edit text. Use the toolbar to format content and lists.
-        </div>
       </div>
     </div>
   );
@@ -849,10 +1225,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
 
     const normalizedTextBoxes = normalizeCardTextBoxes(card);
 
-    if (normalizedTextBoxes.length === 0) {
-      return null;
-    }
-
     const syncLegacyFields = (boxes: TextBoxConfig[]) => {
       const primary = boxes[0];
 
@@ -873,7 +1245,8 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
         layoutCards.map(existing => {
           if (existing.id !== card.id) return existing;
 
-          const nextBoxes = updater(normalizedTextBoxes);
+          const current = normalizeCardTextBoxes(existing);
+          const nextBoxes = updater(current);
           return {
             ...existing,
             ...syncLegacyFields(nextBoxes),
@@ -882,8 +1255,29 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
       );
     };
 
+    const MAX_TEXTBOXES = 5;
+
+    const addTextBoxBelow = () => {
+      updateCardTextBoxes(boxes => {
+        if (boxes.length >= MAX_TEXTBOXES) return boxes;
+
+        const nextIndex = boxes.length + 1;
+        const newBox: TextBoxConfig = {
+          id: `text-box-${nextIndex}-${Date.now()}`,
+          title: `Text Box ${nextIndex}`,
+          content: '',
+          html: '',
+          settings: { ...DEFAULT_TEXTBOX_SETTINGS },
+        };
+
+        return [...boxes, newBox];
+      });
+    };
+
+    const canAddMore = normalizedTextBoxes.length < MAX_TEXTBOXES;
+
     return (
-      <div className="mt-10 space-y-8">
+      <div className="mt-10 space-y-6">
         {normalizedTextBoxes.map(box => {
           const rawTextContent = box.content ?? '';
           const textContent = isPlaceholderContent(rawTextContent) ? '' : rawTextContent;
@@ -898,6 +1292,12 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
               key={box.id}
               data={textData}
               settings={box.settings as TextBoxSettings}
+              onDelete={() =>
+                updateCardTextBoxes(boxes => {
+                  const filtered = boxes.filter(existing => existing.id !== box.id);
+                  return filtered;
+                })
+              }
               onTextChange={(data) =>
                 updateCardTextBoxes((boxes) =>
                   boxes.map(existing =>
@@ -926,6 +1326,18 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             />
           );
         })}
+        {canAddMore ? (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={addTextBoxBelow}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-dashed border-primary text-primary transition-colors hover:bg-primary/10"
+              aria-label="Add text box"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -4681,7 +5093,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
         }}
       >
         <div className={canEdit ? '' : 'pointer-events-none'}>
-          <div data-lab-cards-container="true" className="p-6 space-y-6" onClick={(e) => {
+          <div data-lab-cards-container="true" className="p-2 space-y-6" onClick={(e) => {
             // Handle clicks on the empty space in the canvas
             if (e.target === e.currentTarget) {
               if (onOpenSettingsPanel) {
@@ -4773,7 +5185,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
 
                 {/* Molecule Content */}
                 {!isCollapsed && (
-                <div data-lab-cards-container="true" className="p-6 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
+                <div data-lab-cards-container="true" className="p-2 space-y-6 w-full bg-gradient-to-br from-gray-50 to-white">
                     {Array.isArray(layoutCards) &&
                       layoutCards
                         .filter(card => card.moleculeId === molecule.moleculeId)
@@ -4813,18 +5225,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             handleDrop(e, card.id); // Keep existing functionality
                           }}
                         >
-                          <div className="flex items-center justify-between p-4 border-b border-gray-100">
-                            <div className="flex items-center space-x-2">
+                          <div className="flex items-center justify-between py-1.5 px-2">
+                            <div className="flex items-center space-x-1.5">
                               {canEdit && (
                                 <div 
-                                  className="cursor-move p-1 hover:bg-gray-100 rounded"
+                                  className="cursor-move p-0.5 hover:bg-gray-100 rounded"
                                   onMouseDown={(e) => e.stopPropagation()}
                                   title="Drag to reorder"
                                 >
                                   <GripVertical className="w-3 h-3 text-gray-400" />
                                 </div>
                               )}
-                              <span className="text-sm font-medium text-gray-700">
+                              {card.atoms.length > 0 && card.atoms[0].color && (
+                                <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
+                              )}
+                              <span className="text-xs font-medium text-gray-700">
                                 {cardTitle}
                               </span>
                               <AIChatBot
@@ -4835,21 +5250,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               />
                               <button
                                 onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                                className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                                 title="Card Settings"
                                 disabled={!canEdit}
                               >
-                                <Settings className="w-4 h-4 text-gray-400" />
+                                <Settings className="w-3.5 h-3.5 text-gray-400" />
                               </button>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
                                   refreshCardAtoms(card.id);
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded"
+                                className="p-0.5 hover:bg-gray-100 rounded"
                                 title="Refresh Atom"
                               >
-                                <RefreshCcw className="w-4 h-4 text-gray-400" />
+                                <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
                               </button>
                               <button
                                 onClick={e => {
@@ -4864,46 +5279,46 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                               </button>
                             </div>
-                            <div className="flex items-center space-x-2">
+                            <div className="flex items-center space-x-1.5">
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
                                   handleDeleteCardClick(card.id, cardTitle);
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded"
+                                className="p-0.5 hover:bg-gray-100 rounded"
                               >
-                                <Trash2 className="w-4 h-4 text-gray-400" />
+                                <Trash2 className="w-3.5 h-3.5 text-gray-400" />
                               </button>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
                                   toggleCardExpand(card.id);
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded"
+                                className="p-0.5 hover:bg-gray-100 rounded"
                                 title="Expand Card"
                               >
-                                <Maximize2 className="w-4 h-4 text-gray-400" />
+                                <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
                               </button>
                               <button
                                 onClick={e => {
                                   e.stopPropagation();
                                   toggleCardCollapse(card.id);
                                 }}
-                                className="p-1 hover:bg-gray-100 rounded"
+                                className="p-0.5 hover:bg-gray-100 rounded"
                                 title="Toggle Card"
                               >
                                 {collapsedCards[card.id] ? (
-                                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                                  <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                                 ) : (
-                                  <Minus className="w-4 h-4 text-gray-400" />
+                                  <Minus className="w-3.5 h-3.5 text-gray-400" />
                                 )}
                               </button>
                             </div>
                           </div>
 
-                          <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                          <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                             {card.atoms.length === 0 ? (
-                              <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
+                              <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                                 <AtomSuggestion
                                   cardId={card.id}
                                   isVisible={true}
@@ -4925,9 +5340,18 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                     className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                     onClick={(e) => handleAtomClick(e, atom.id)}
                                   >
-                                    <div className="flex items-center justify-between mb-3">
+                                    {/* <div className="flex items-center justify-between mb-3">
                                       <div className="flex items-center space-x-1">
                                         <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        {atom.atomId === 'correlation' && console.log('🎯 CANVAS AREA - Rendering AtomAIChatBot for correlation:', {
+                                          atomId: atom.id,
+                                          atomType: atom.atomId,
+                                          atomTitle: atom.title,
+                                          inLLM_MAP: !!LLM_MAP[atom.atomId],
+                                          LLM_MAP_value: LLM_MAP[atom.atomId],
+                                          disabled: !LLM_MAP[atom.atomId],
+                                          willPassDisabled: !LLM_MAP[atom.atomId]
+                                        })}
                                         <AtomAIChatBot
                                           atomId={atom.id}
                                           atomType={atom.atomId}
@@ -4952,7 +5376,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                       >
                                         <Trash2 className="w-4 h-4 text-gray-400" />
                                       </button>
-                                    </div>
+                                    </div> */}
 
                                     {atom.atomId === 'text-box' ? (
                                       <TextBoxEditor textId={atom.id} />
@@ -5103,9 +5527,12 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                       onDragLeave={handleDragLeave}
                       onDrop={(e) => handleDrop(e, card.id)}
                     >
-                      <div className="flex items-center justify-between p-4 border-b border-gray-100">
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm font-medium text-gray-700">
+                      <div className="flex items-center justify-between py-1.5 px-2">
+                        <div className="flex items-center space-x-1.5">
+                          {card.atoms.length > 0 && card.atoms[0].color && (
+                            <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
+                          )}
+                          <span className="text-xs font-medium text-gray-700">
                             {cardTitle}
                           </span>
                           <AIChatBot
@@ -5116,21 +5543,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           />
                           <button
                             onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                            className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Card Settings"
                             disabled={!canEdit}
                           >
-                            <Settings className="w-4 h-4 text-gray-400" />
+                            <Settings className="w-3.5 h-3.5 text-gray-400" />
                           </button>
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               refreshCardAtoms(card.id);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-0.5 hover:bg-gray-100 rounded"
                             title="Refresh Atom"
                           >
-                            <RefreshCcw className="w-4 h-4 text-gray-400" />
+                            <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
                           </button>
                           <button
                             onClick={e => {
@@ -5145,46 +5572,46 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                           </button>
                         </div>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-1.5">
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               handleDeleteCardClick(card.id, cardTitle);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-0.5 hover:bg-gray-100 rounded"
                           >
-                            <Trash2 className="w-4 h-4 text-gray-400" />
+                            <Trash2 className="w-3.5 h-3.5 text-gray-400" />
                           </button>
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               toggleCardExpand(card.id);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-0.5 hover:bg-gray-100 rounded"
                             title="Expand Card"
                           >
-                            <Maximize2 className="w-4 h-4 text-gray-400" />
+                            <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
                           </button>
                           <button
                             onClick={e => {
                               e.stopPropagation();
                               toggleCardCollapse(card.id);
                             }}
-                            className="p-1 hover:bg-gray-100 rounded"
+                            className="p-0.5 hover:bg-gray-100 rounded"
                             title="Toggle Card"
                           >
                             {collapsedCards[card.id] ? (
-                              <ChevronDown className="w-4 h-4 text-gray-400" />
+                              <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                             ) : (
-                              <Minus className="w-4 h-4 text-gray-400" />
+                              <Minus className="w-3.5 h-3.5 text-gray-400" />
                             )}
                           </button>
                         </div>
                       </div>
 
-                      <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+                      <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
                         {card.atoms.length === 0 ? (
-                          <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
+                          <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                             <AtomSuggestion
                               cardId={card.id}
                               isVisible={true}
@@ -5206,7 +5633,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                 className="p-4 cursor-pointer hover:shadow-lg transition-all duration-200 group border border-gray-200 bg-white overflow-hidden"
                                 onClick={(e) => handleAtomClick(e, atom.id)}
                               >
-                                <div className="flex items-center justify-between mb-3">
+                                {/* <div className="flex items-center justify-between mb-3">
                                   <div className="flex items-center space-x-1">
                                     <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                                     <AtomAIChatBot
@@ -5246,7 +5673,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   >
                                     <Trash2 className="w-4 h-4 text-gray-400" />
                                   </button>
-                                </div>
+                                </div> */}
 
                                 {atom.atomId === 'text-box' ? (
                                   <TextBoxEditor textId={atom.id} />
@@ -5436,7 +5863,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                               <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
                             </div>
-                            <button
+                            {/* <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDeleteAtomClick(card.id, atom.id, atom.title || '');
@@ -5444,7 +5871,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                             >
                               <Trash2 className="w-4 h-4 text-gray-400" />
-                            </button>
+                            </button> */}
                           </div>
 
                           {/* Atom Content */}
@@ -5550,7 +5977,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
       <div className="h-full w-full bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl border border-gray-200 shadow-sm overflow-auto">
         <div className={canEdit ? '' : 'pointer-events-none'}>
         {/* Layout Cards Container */}
-      <div data-lab-cards-container="true" className="p-6 space-y-6 w-full">
+      <div data-lab-cards-container="true" className="p-2 space-y-6 w-full">
         {Array.isArray(layoutCards) && layoutCards.length > 0 && layoutCards.map((card, index) => {
           const cardTitle = card.moleculeTitle
             ? ((Array.isArray(card.atoms) && card.atoms.length > 0) ? `${card.moleculeTitle} - ${card.atoms[0].title}` : card.moleculeTitle)
@@ -5600,9 +6027,12 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
               </div>
             )}
             
-            <div className="flex items-center justify-between p-4 border-b border-gray-100">
-              <div className="flex items-center space-x-2">
-                <span className="text-sm font-medium text-gray-700">
+            <div className="flex items-center justify-between py-1.5 px-2">
+              <div className="flex items-center space-x-1.5">
+                {card.atoms.length > 0 && card.atoms[0].color && (
+                  <div className={`w-3 h-3 ${card.atoms[0].color} rounded-full`}></div>
+                )}
+                <span className="text-xs font-medium text-gray-700">
                   {cardTitle}
                 </span>
                 <AIChatBot
@@ -5613,21 +6043,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 />
                           <button
                             onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
-                            className="p-1 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
                             title="Card Settings"
                             disabled={!canEdit}
                           >
-                  <Settings className="w-4 h-4 text-gray-400" />
+                  <Settings className="w-3.5 h-3.5 text-gray-400" />
                 </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     refreshCardAtoms(card.id);
                   }}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  className="p-0.5 hover:bg-gray-100 rounded"
                   title="Refresh Atom"
                 >
-                  <RefreshCcw className="w-4 h-4 text-gray-400" />
+                  <RefreshCcw className="w-3.5 h-3.5 text-gray-400" />
                 </button>
                 <button
                   onClick={e => {
@@ -5642,48 +6072,48 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                   <Type className={`w-4 h-4 ${card.textBoxEnabled ? 'text-[#458EE2]' : 'text-gray-400'}`} />
                 </button>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-1.5">
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     const cardTitle = card.moleculeTitle || (Array.isArray(card.atoms) && card.atoms.length > 0 ? card.atoms[0]?.title : undefined) || 'Card';
                     handleDeleteCardClick(card.id, cardTitle);
                   }}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  className="p-0.5 hover:bg-gray-100 rounded"
                 >
-                  <Trash2 className="w-4 h-4 text-gray-400" />
+                  <Trash2 className="w-3.5 h-3.5 text-gray-400" />
                 </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     toggleCardExpand(card.id);
                   }}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  className="p-0.5 hover:bg-gray-100 rounded"
                   title="Expand Card"
                 >
-                  <Maximize2 className="w-4 h-4 text-gray-400" />
+                  <Maximize2 className="w-3.5 h-3.5 text-gray-400" />
                 </button>
                 <button
                   onClick={e => {
                     e.stopPropagation();
                     toggleCardCollapse(card.id);
                   }}
-                  className="p-1 hover:bg-gray-100 rounded"
+                  className="p-0.5 hover:bg-gray-100 rounded"
                   title="Toggle Card"
                 >
                   {collapsedCards[card.id] ? (
-                    <ChevronDown className="w-4 h-4 text-gray-400" />
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                   ) : (
-                    <Minus className="w-4 h-4 text-gray-400" />
+                    <Minus className="w-3.5 h-3.5 text-gray-400" />
                   )}
                 </button>
               </div>
             </div>
 
             {/* Card Content */}
-            <div className={`flex-1 flex flex-col p-4 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
+            <div className={`flex-1 flex flex-col p-0 overflow-y-auto ${collapsedCards[card.id] ? 'hidden' : ''}`}>
               {card.atoms.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-2">
+                <div className="flex-1 flex flex-col items-center justify-start text-center border-2 border-dashed border-gray-300 rounded-lg min-h-[300px] mb-4 pt-1">
                   <AtomSuggestion
                     cardId={card.id}
                     isVisible={true}
@@ -5706,7 +6136,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                       onClick={(e) => handleAtomClick(e, atom.id)}
                     >
                       {/* Atom Header */}
-                      <div className="flex items-center justify-between mb-3">
+                      {/* <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center space-x-1">
                           <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                           <AtomAIChatBot
@@ -5718,7 +6148,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           />
                           <button
                             onClick={e => handleAtomSettingsClick(e, atom.id)}
-                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110"
+                            className="p-1 hover:bg-gray-100 rounded transition-transform hover:scale-110 hidden"
                             title="Atom Settings"
                           >
                             <Settings className="w-4 h-4 text-gray-400" />
@@ -5746,7 +6176,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         >
                           <Trash2 className="w-4 h-4 text-gray-400" />
                         </button>
-                      </div>
+                      </div> */}
 
                       {/* Atom Content */}
                       {atom.atomId === 'text-box' ? (
@@ -5927,7 +6357,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
                             <h4 className="font-semibold text-gray-900 text-lg">{atom.title}</h4>
                           </div>
-                          <button
+                          {/* <button
                             onClick={(e) => {
                               e.stopPropagation();
                               handleDeleteAtomClick(card.id, atom.id, atom.title || '');
@@ -5935,7 +6365,7 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                           >
                             <Trash2 className="w-4 h-4 text-gray-400" />
-                          </button>
+                          </button> */}
                         </div>
 
                         {/* Atom Content */}

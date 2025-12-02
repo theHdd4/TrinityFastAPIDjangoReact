@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ChevronRight, Sliders } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 import {
   useLaboratoryStore,
@@ -22,6 +23,8 @@ import {
   DEFAULT_SCENARIO_PLANNER_SETTINGS,
   SelectModelsFeatureSettings,
   DEFAULT_SELECT_MODELS_FEATURE_SETTINGS,
+  CardVariable,
+  LayoutCard,
 } from '../../store/laboratoryStore';
 
 import DataUploadValidateProperties from '@/components/AtomList/atoms/data-upload-validate/components/properties/DataUploadValidateProperties';
@@ -46,7 +49,7 @@ import EvaluateModelsFeatureProperties from '@/components/AtomList/atoms/evaluat
 import PivotTableProperties from '@/components/AtomList/atoms/pivot-table/components/PivotTableProperties';
 import { UnpivotProperties } from '@/components/AtomList/atoms/unpivot';
 import AtomSettingsTabs from './AtomSettingsTabs';
-import CardSettingsTabs from './CardSettingsTabs';
+import CardSettingsTabs from './metricstabs/CardSettingsTabs';
 
 interface SettingsPanelProps {
   isCollapsed: boolean;
@@ -63,10 +66,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   selectedCardId,
   cardExhibited,
 }) => {
-  const [tab, setTab] = useState<'variables' | 'settings' | 'visual' | 'exhibition'>(
-    'variables',
-  );
-
+  const metricsInputs = useLaboratoryStore(state => state.metricsInputs);
+  const updateMetricsInputs = useLaboratoryStore(state => state.updateMetricsInputs);
+  const tab = metricsInputs.currentTab;
+  const setTab = (value: 'input' | 'variables' | 'column-operations' | 'exhibition') => {
+    updateMetricsInputs({ currentTab: value });
+  };
   const atom = useLaboratoryStore((state) =>
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
@@ -79,9 +84,48 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const toggleCardVariableAppend = useLaboratoryStore(state => state.toggleCardVariableAppend);
 
   const selectedCard = useMemo(
-    () => (selectedCardId ? cards.find(card => card.id === selectedCardId) : undefined),
-    [cards, selectedCardId],
+    () => {
+      if (selectedCardId) {
+        return cards.find(card => card.id === selectedCardId);
+      }
+      // If no card is selected but an atom is selected, find the card containing that atom
+      if (selectedAtomId && !selectedCardId) {
+        return cards.find(card => 
+          Array.isArray(card.atoms) && card.atoms.some(atom => atom.id === selectedAtomId)
+        );
+      }
+      return undefined;
+    },
+    [cards, selectedCardId, selectedAtomId],
   );
+
+  // Create a default global card for metrics operations when no card is selected
+  const globalCard = useMemo(
+    () => ({
+      id: 'global-metrics',
+      atoms: [],
+      isExhibited: false,
+      variables: [] as CardVariable[],
+    }),
+    [],
+  );
+
+  // Use selectedCard if available, otherwise use globalCard for Metrics tab
+  const cardForMetrics = selectedCard || globalCard;
+
+  // Initialize mainTab based on initial selection state
+  const [mainTab, setMainTab] = useState<'settings' | 'metrics'>(() => {
+    // If no atom or card is selected, default to metrics
+    if (!selectedAtomId && !selectedCardId) {
+      return 'metrics';
+    }
+    // If card is selected (with or without atom), default to metrics
+    if (selectedCardId) {
+      return 'metrics';
+    }
+    // Only atom selected (no card) - default to settings
+    return 'settings';
+  });
 
   const settings:
     | TextBoxSettings
@@ -114,17 +158,41 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   useEffect(() => {
     if (!cardExhibited && tab === 'exhibition') {
-      setTab('variables');
+      setTab('input');
     }
-  }, [cardExhibited, tab]);
+  }, [cardExhibited, tab, setTab]);
 
+  // Track previous selection to only set defaults on initial selection, not on every change
+  const prevSelection = React.useRef({ selectedAtomId, selectedCardId });
+  const isInitialMount = React.useRef(true);
+  
   useEffect(() => {
-    if (selectedAtomId) {
-      setTab(current => (current === 'visual' || current === 'exhibition' ? current : 'settings'));
-    } else if (selectedCardId) {
-      setTab('variables');
+    const selectionChanged = 
+      prevSelection.current.selectedAtomId !== selectedAtomId ||
+      prevSelection.current.selectedCardId !== selectedCardId;
+    
+    // On initial mount or when selection changes
+    if (isInitialMount.current || selectionChanged) {
+      // Only set defaults when selection actually changes (initial selection)
+      if (selectedCardId) {
+        // When card is selected (with or without atom), default to Metrics tab
+        // Only set to 'input' if current tab is 'exhibition' (invalid state)
+        if (tab === 'exhibition') {
+          setTab('input');
+        }
+        setMainTab('metrics');
+      } else if (selectedAtomId) {
+        // Only atom selected (no card) - default to Settings tab
+        setMainTab('settings');
+      } else {
+        // No card or atom selected - force to Metrics tab
+        setMainTab('metrics');
+      }
+      
+      prevSelection.current = { selectedAtomId, selectedCardId };
+      isInitialMount.current = false;
     }
-  }, [selectedAtomId, selectedCardId]);
+  }, [selectedAtomId, selectedCardId, tab, setTab]);
 
 
 
@@ -135,10 +203,10 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       }`}
     >
       {/* Toggle / Header */}
-      <div className="p-3 border-b border-gray-200 flex items-center justify-between">
+      <div className="p-2 border-b border-gray-200 flex items-center justify-between">
         {!isCollapsed && (
-          <h3 className="font-semibold text-gray-900 flex items-center space-x-2">
-            <Sliders className="w-4 h-4" />
+          <h3 className="text-sm font-medium text-gray-900 flex items-center space-x-2">
+            <Sliders className="w-3.5 h-3.5" />
             <span>Properties</span>
           </h3>
         )}
@@ -148,76 +216,90 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
       </div>
 
       {!isCollapsed && (
-        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300">
-          {!selectedAtomId && !selectedCardId ? (
-            <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
-          ) : selectedCardId && !selectedAtomId && selectedCard ? (
-            <CardSettingsTabs
-              card={selectedCard}
-              tab={tab}
-              setTab={setTab}
-              onUpdateCard={updateCard}
-              onAddVariable={addCardVariable}
-              onUpdateVariable={updateCardVariable}
-              onDeleteVariable={deleteCardVariable}
-              onToggleVariable={toggleCardVariableAppend}
-            />
-          ) : selectedCardId && !selectedAtomId && !selectedCard ? (
-            <div className="p-4 text-gray-600 text-sm">Card not found. Try selecting another card.</div>
-          ) : selectedAtomId && atom?.atomId === 'data-upload-validate' ? (
-            <DataUploadValidateProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'feature-overview' ? (
-            <FeatureOverviewProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
-            <GroupByProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'create-column' ? (
-            <CreateColumnProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'explore' ? (
-            <ExploreProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'chart-maker' ? (
-            <ChartMakerProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'pivot-table' ? (
-            <PivotTableProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'unpivot' ? (
-            <UnpivotProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'build-model-feature-based' ? (
-            <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'select-models-feature' ? (
-            <SelectModelsFeatureProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'auto-regressive-models' ? (
-            <AutoRegressiveModelsProperties atomId={selectedAtomId} />
-                     ) : selectedAtomId && atom?.atomId === 'evaluate-models-feature' ? (
-             <EvaluateModelsFeatureProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'concat' ? (
-            <ConcatProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'scope-selector' ? (
-            <ScopeSelectorProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'merge' ? (
-            <MergeProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'column-classifier' ? (
-            <ColumnClassifierProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'dataframe-operations' ? (
-            <DataFrameOperationsProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'groupby-wtg-avg' ? (
-            <GroupByProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'create-column' ? (
-            <CreateColumnProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'correlation' ? (
-            <CorrelationProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'clustering' ? (
-            <ClusteringProperties atomId={selectedAtomId} />
-          ) : selectedAtomId && atom?.atomId === 'scenario-planner' ? (
-            <ScenarioPlannerProperties atomId={selectedAtomId} />
-          ) : (
-            <AtomSettingsTabs
-              tab={tab}
-              setTab={setTab}
-              selectedAtomId={selectedAtomId!}
-              cardExhibited={cardExhibited}
-              settings={settings as TextBoxSettings}
-              updateSettings={updateSettings}
-            />
-          )}
+        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 flex flex-col text-sm">
+          <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as 'settings' | 'metrics')} className="flex-1 flex flex-col">
+            <TabsList className={`grid w-full ${selectedAtomId || selectedCardId ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              {(selectedAtomId || selectedCardId) && (
+                <TabsTrigger value="settings" className="text-sm font-bold">Settings</TabsTrigger>
+              )}
+              <TabsTrigger value="metrics" className="text-sm font-bold">Metrics</TabsTrigger>
+            </TabsList>
+
+            {/* Settings Tab Content */}
+            <TabsContent value="settings" className="flex-1 mt-0">
+              {selectedAtomId ? (
+                <>
+                  {atom?.atomId === 'data-upload-validate' ? (
+                    <DataUploadValidateProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'feature-overview' ? (
+                    <FeatureOverviewProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'groupby-wtg-avg' ? (
+                    <GroupByProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'create-column' ? (
+                    <CreateColumnProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'explore' ? (
+                    <ExploreProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'chart-maker' ? (
+                    <ChartMakerProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'pivot-table' ? (
+                    <PivotTableProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'unpivot' ? (
+                    <UnpivotProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'build-model-feature-based' ? (
+                    <BuildModelFeatureBasedPropertiesPanel atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'select-models-feature' ? (
+                    <SelectModelsFeatureProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'auto-regressive-models' ? (
+                    <AutoRegressiveModelsProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'evaluate-models-feature' ? (
+                    <EvaluateModelsFeatureProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'concat' ? (
+                    <ConcatProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'scope-selector' ? (
+                    <ScopeSelectorProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'merge' ? (
+                    <MergeProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'column-classifier' ? (
+                    <ColumnClassifierProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'dataframe-operations' ? (
+                    <DataFrameOperationsProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'correlation' ? (
+                    <CorrelationProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'clustering' ? (
+                    <ClusteringProperties atomId={selectedAtomId} />
+                  ) : atom?.atomId === 'scenario-planner' ? (
+                    <ScenarioPlannerProperties atomId={selectedAtomId} />
+                  ) : (
+                    <AtomSettingsTabs
+                      tab={tab}
+                      setTab={setTab}
+                      selectedAtomId={selectedAtomId}
+                      cardExhibited={cardExhibited}
+                      settings={settings as TextBoxSettings}
+                      updateSettings={updateSettings}
+                    />
+                  )}
+                </>
+              ) : selectedCardId ? (
+                <div className="p-4 text-gray-600 text-sm">Select an Atom to view its settings.</div>
+              ) : (
+                <div className="p-4 text-gray-600 text-sm">Please select a Card/Atom</div>
+              )}
+            </TabsContent>
+
+            {/* Metrics Tab Content */}
+            <TabsContent value="metrics" className="flex-1 mt-0">
+              <CardSettingsTabs
+                card={cardForMetrics}
+                tab={tab}
+                setTab={setTab}
+                onAddVariable={addCardVariable}
+                onUpdateVariable={updateCardVariable}
+                onDeleteVariable={deleteCardVariable}
+                onToggleVariable={toggleCardVariableAppend}
+              />
+            </TabsContent>
+          </Tabs>
         </div>
       )}
     </div>
