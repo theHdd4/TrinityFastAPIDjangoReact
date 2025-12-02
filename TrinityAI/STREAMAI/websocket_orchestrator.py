@@ -33,7 +33,7 @@ from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
 from Agent_insight.workflow_insight_agent import get_workflow_insight_agent
-from TrinityAI.atoms.insights import InsightConfig, generate_insights, hash_payload
+from atoms.insights import InsightConfig, generate_insights, hash_payload
 
 try:
     import aiohttp  # type: ignore
