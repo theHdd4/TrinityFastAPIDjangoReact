@@ -809,7 +809,7 @@ const LaboratoryMode = () => {
           right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
         }}
       >
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 px-2.5 py-0.5 flex items-center gap-2 pointer-events-auto">
+        <div className="bg-white rounded-lg shadow-md border border-gray-200 px-2.5 py-0.5 flex items-center gap-2 pointer-events-auto transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
           {/* Active Users */}
           {canEdit && activeUsers.length > 0 && (
             <div className="flex items-center">
@@ -900,14 +900,13 @@ const LaboratoryMode = () => {
           {/* Run Pipeline */}
           <button
             disabled={!canEdit}
-            className={`px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs transition-all flex items-center gap-1.5 ${
+            className={`w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-700 transition-all flex items-center justify-center text-white ${
               !canEdit ? 'opacity-50 cursor-not-allowed' : ''
             }`}
             title="Run Pipeline"
             type="button"
           >
-            <Play className="w-3 h-3" fill="white" />
-            <span>Run Pipeline</span>
+            <Play className="w-3.5 h-3.5" fill="white" />
           </button>
         </div>
       </div>
@@ -932,7 +931,7 @@ const LaboratoryMode = () => {
           {/* Main Canvas Area */}
           <div
             data-lab-canvas="true"
-            className={`flex-1 pt-8 px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
+            className={`flex-1 pt-[2.1rem] px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
             onClick={
               canEdit
                 ? () => {

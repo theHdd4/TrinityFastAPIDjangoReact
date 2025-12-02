@@ -1007,7 +1007,7 @@ const DataUploadValidateProperties: React.FC<Props> = ({ atomId }) => {
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300">
-        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+        <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between hidden">
           <span className="text-sm font-medium text-gray-700">Enable validation steps</span>
           <Switch
             checked={bypassMasterUpload}

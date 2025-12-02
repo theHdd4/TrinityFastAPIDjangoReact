@@ -52,43 +52,46 @@ async def identifier_options(
     client_name: str = Query(..., description="Client name"),
     app_name: str = Query(..., description="App name"),
     project_name: str = Query(..., description="Project name"),
+    file_name: str = Query(None, description="File name for file-specific config lookup"),
 ):
-    """Return identifier column names using Redis ▶ Mongo ▶ fallback logic.
+    """Return identifier column names by fetching directly from MongoDB (bypassing Redis).
 
-    1. Attempt to read JSON config from Redis key
-       `<client>/<app>/<project>/column_classifier_config`.
-    2. If missing, fetch from Mongo (`column_classifier_config` collection).
-       Cache the document back into Redis.
-    3. If still unavailable, return empty list – the frontend will
-       fall back to its existing column_summary extraction flow.
+    Fetches the latest identifiers from MongoDB `column_classifier_config` collection.
+    If file_name is provided, looks for file-specific config first, then falls back to base config.
+    If unavailable, returns empty list – the frontend will fall back to its existing
+    column_summary extraction flow.
+    
+    This matches the same MongoDB lookup pattern used by the groupby atom.
     """
-    import json
     from typing import Any
     
-    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
-    cfg: dict[str, Any] | None = None
-
-    # --- Redis lookup -------------------------------------------------------
-    try:
-        cached = redis_client.get(key)
-        if cached:
-            cfg = json.loads(cached)
-    except Exception as exc:
-        print(f"⚠️ Redis read error for {key}: {exc}")
-
-    # --- Mongo fallback ------------------------------------------------------
-    if cfg is None:
-        cfg = get_classifier_config_from_mongo(client_name, app_name, project_name)
-        if cfg:
-            try:
-                redis_client.setex(key, 3600, json.dumps(cfg, default=str))
-            except Exception as exc:
-                print(f"⚠️ Redis write error for {key}: {exc}")
-
+    # --- Fetch directly from MongoDB (bypass Redis) - same as groupby atom -----
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Construct full file_key path like groupby atom does (client/app/project/file.arrow)
+    file_key: str | None = None
+    if file_name:
+        file_key = f"{client_name}/{app_name}/{project_name}/{file_name}"
+    
+    logger.info(f"[identifier_options] Fetching config for client={client_name}, app={app_name}, project={project_name}, file_name={file_name}, file_key={file_key}")
+    
+    # Pass file_key (full path) to get_classifier_config_from_mongo, same as groupby atom
+    cfg: dict[str, Any] | None = get_classifier_config_from_mongo(client_name, app_name, project_name, file_key)
+    
+    logger.info(f"[identifier_options] MongoDB config result: {cfg}")
+    logger.info(f"[identifier_options] Config keys: {list(cfg.keys()) if cfg else 'None'}")
+    
     identifiers: list[str] = []
     if cfg and isinstance(cfg.get("identifiers"), list):
         identifiers = cfg["identifiers"]
-
+        logger.info(f"[identifier_options] Found {len(identifiers)} identifiers: {identifiers}")
+    else:
+        logger.warning(f"[identifier_options] No identifiers found in config. Config type: {type(cfg)}, has 'identifiers' key: {cfg and 'identifiers' in cfg if cfg else False}")
+    
+    # Return all identifiers without filtering - frontend will handle filtering as needed
+    # This allows compute_metrics_within_group to access all identifiers including date columns
+    logger.info(f"[identifier_options] Returning {len(identifiers)} identifiers: {identifiers}")
     return {"identifiers": identifiers}
 
 
@@ -464,6 +467,33 @@ async def get_cardinality_data(
         raise HTTPException(
             status_code=400,
             detail=submission.detail or "Failed to get cardinality data",
+        )
+
+    return format_task_response(submission)
+
+@router.get("/columns_with_missing_values")
+async def get_columns_with_missing_values(
+    object_name: str = Query(..., description="Object name/path of the dataframe"),
+):
+    """Return list of column names that have missing values."""
+    submission = celery_task_client.submit_callable(
+        name="createcolumn.columns_with_missing_values",
+        dotted_path="app.features.createcolumn.service.columns_with_missing_values_task",
+        kwargs={
+            "bucket_name": MINIO_BUCKET,
+            "object_name": object_name,
+        },
+        metadata={
+            "atom": "createcolumn",
+            "operation": "columns_with_missing_values",
+            "object_name": object_name,
+        },
+    )
+
+    if submission.status == "failure":
+        raise HTTPException(
+            status_code=400,
+            detail=submission.detail or "Failed to get columns with missing values",
         )
 
     return format_task_response(submission)

@@ -1707,6 +1707,7 @@ export interface GroupByAtomSettings {
   sortColumn?: string;
   sortDirection?: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
+  showCardinalityView?: boolean;
   
   // GroupBy results
   groupbyResults?: {
@@ -1738,6 +1739,7 @@ export const DEFAULT_GROUPBY_ATOM_SETTINGS: GroupByAtomSettings = {
   sortColumn: 'unique_count',
   sortDirection: 'desc',
   columnFilters: {},
+  showCardinalityView: false,
   groupbyResults: {
     result_file: '',
     result_shape: [0, 0],
@@ -1881,16 +1883,58 @@ export interface MetricsOperation {
   param?: string | number | Record<string, any>;
 }
 
+export interface VariableOperation {
+  id: string;
+  numericalColumn: string;
+  method: string;
+  secondColumn: string;
+  secondInputType?: 'column' | 'number';
+  secondValue?: string;
+  customName?: string;
+}
+
+export interface ConstantAssignment {
+  id: string;
+  variableName: string;
+  value: string;
+}
+
 export interface MetricsInputSettings {
   dataSource: string;
   operations: MetricsOperation[];
   currentTab: 'input' | 'variables' | 'column-operations' | 'exhibition';
+  // Variable tab specific settings
+  variableComputeMode?: 'whole-dataframe' | 'within-group';
+  variableType?: 'dataframe' | 'constant';
+  computeWithinGroup?: boolean;
+  variableIdentifiers?: string[];
+  selectedVariableIdentifiers?: string[];
+  variableOperations?: VariableOperation[];
+  constantAssignments?: ConstantAssignment[];
+  variableIdentifiersListOpen?: boolean;
+  // Column operations tab specific settings
+  columnOpsAllIdentifiers?: string[]; // Unfiltered identifiers for compute_metrics_within_group
+  columnOpsSelectedIdentifiers?: string[]; // Filtered identifiers (date columns removed) for display
+  columnOpsSelectedIdentifiersForBackend?: string[]; // Selected identifiers for backend operations
+  columnOpsIdentifiersListOpen?: boolean;
 }
 
 export const DEFAULT_METRICS_INPUT_SETTINGS: MetricsInputSettings = {
   dataSource: '',
   operations: [],
   currentTab: 'input',
+  variableComputeMode: 'whole-dataframe',
+  variableType: 'dataframe',
+  computeWithinGroup: false,
+  variableIdentifiers: [],
+  selectedVariableIdentifiers: [],
+  variableOperations: [{ id: '1', numericalColumn: '', method: 'sum', secondColumn: '' }],
+  constantAssignments: [{ id: '1', variableName: '', value: '' }],
+  variableIdentifiersListOpen: false,
+  columnOpsAllIdentifiers: [],
+  columnOpsSelectedIdentifiers: [],
+  columnOpsSelectedIdentifiersForBackend: [],
+  columnOpsIdentifiersListOpen: false,
 };
 
 interface LaboratoryStore {
