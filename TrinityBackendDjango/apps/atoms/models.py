@@ -1,3 +1,4 @@
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 
@@ -61,3 +62,45 @@ class AtomVersion(models.Model):
 
     def __str__(self):
         return f"{self.atom.name} v{self.version}"
+
+
+class RetrievalDocument(models.Model):
+    """
+    Lightweight document storage for retrieval assets.
+    """
+
+    title = models.CharField(max_length=255, blank=True)
+    text = models.TextField()
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.title or f"Document {self.pk}"
+
+
+class EmbeddingCache(models.Model):
+    """
+    Cache of embeddings to avoid recomputation during hybrid retrieval.
+    """
+
+    document = models.ForeignKey(
+        RetrievalDocument,
+        on_delete=models.CASCADE,
+        related_name="embeddings",
+    )
+    model_name = models.CharField(max_length=255)
+    vector = ArrayField(models.FloatField(), default=list, blank=True)
+    vector_dim = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = (("document", "model_name"),)
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Embedding {self.model_name} for {self.document_id}"
