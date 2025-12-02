@@ -170,6 +170,24 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       textRef.current.innerHTML = target;
     }
 
+    // Reset margins and padding on all child div/p elements
+    // Browsers apply default margins to div/p elements, which causes gaps between text and container
+    const resetChildStyles = () => {
+      if (!textRef.current) return;
+      const children = textRef.current.querySelectorAll('div, p');
+      children.forEach(child => {
+        (child as HTMLElement).style.margin = '0';
+        (child as HTMLElement).style.padding = '0';
+        (child as HTMLElement).style.boxSizing = 'border-box';
+        (child as HTMLElement).style.lineHeight = 'normal';
+      });
+    };
+
+    // Reset styles after content is set
+    requestAnimationFrame(() => {
+      resetChildStyles();
+    });
+
     if (isEditing) {
       requestAnimationFrame(() => {
         textRef.current?.focus();
@@ -181,6 +199,16 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
     if (!textRef.current) {
       return;
     }
+    
+    // Reset margins on child elements created during typing (contentEditable creates divs)
+    const children = textRef.current.querySelectorAll('div, p');
+    children.forEach(child => {
+      (child as HTMLElement).style.margin = '0';
+      (child as HTMLElement).style.padding = '0';
+      (child as HTMLElement).style.boxSizing = 'border-box';
+      (child as HTMLElement).style.lineHeight = 'normal';
+    });
+    
     onEditingChange(textRef.current.innerHTML);
   }, [onEditingChange]);
 
@@ -597,7 +625,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
   const content = (
     <div
       className={cn(
-        'h-full w-full overflow-hidden rounded-[22px] border border-transparent bg-transparent px-3 py-2 transition-colors',
+        'h-full w-full overflow-hidden border border-transparent bg-transparent p-0 transition-colors',
         isEditing ? 'border-yellow-400 shadow-lg' : 'focus-within:border-yellow-400 focus-within:shadow-lg',
       )}
       onDoubleClick={handleDoubleClick}
@@ -616,7 +644,7 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
       <div
         ref={textRef}
         className={cn(
-          'relative h-full w-full outline-none empty:before:absolute empty:before:left-3 empty:before:top-2 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
+          'relative h-full w-full outline-none empty:before:absolute empty:before:left-0 empty:before:top-0 empty:before:text-sm empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]',
           canEdit ? 'cursor-text' : 'cursor-default select-none',
           canEdit && (isSelected || isEditing) ? 'overflow-auto' : 'overflow-hidden',
         )}
@@ -641,6 +669,10 @@ export const SlideTextBoxObject: React.FC<SlideTextBoxObjectProps> = ({
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           overflowWrap: 'anywhere',
+          padding: '0',
+          margin: '0',
+          display: 'block',
+          boxSizing: 'border-box',
         }}
       />
       {!canEdit && localFormatting.text.trim().length === 0 && (

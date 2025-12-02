@@ -57,6 +57,7 @@ import {
 import ExhibitedAtomRenderer from '../ExhibitedAtomRenderer';
 import { SlideTextBoxObject } from '../operationsPalette/textBox/TextBox';
 import { DEFAULT_TEXT_BOX_TEXT, extractTextBoxFormatting } from '../operationsPalette/textBox/constants';
+import { resolveFontFamily } from '../operationsPalette/textBox/fontLoading';
 import type { TextBoxFormatting } from '../operationsPalette/textBox/types';
 import { TextBoxPositionPanel } from '../operationsPalette/textBox/TextBoxPositionPanel';
 import { CardFormattingPanel } from '../operationsPalette/CardFormattingPanel';
@@ -2075,9 +2076,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }));
 
         setClipboard(snapshots);
-        if (explicitIds && explicitIds.length > 0) {
-          setSelectedIds(targetIds);
-        }
         focusCanvas();
         toast({
           title: snapshots.length === 1 ? 'Object copied' : 'Objects copied',
@@ -2086,6 +2084,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? 'Copied the selected object.'
               : `Copied ${snapshots.length} objects to the clipboard.`,
         });
+        setSelectedIds([]);
       },
       [focusCanvas, resolveTargetIds, resolveTargetObjects],
     );
@@ -2140,7 +2139,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           onRemoveObject(object.id);
         });
 
-        setSelectedIds(prev => prev.filter(id => !removedIds.has(id)));
+        setSelectedIds([]);
         focusCanvas();
         toast({
           title: snapshots.length === 1 ? 'Object cut' : 'Objects cut',
@@ -2184,6 +2183,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         title: 'Style copied',
         description: 'Copied the selected object styling for reuse.',
       });
+      setSelectedIds([]);
     }, [captureColorStyle, selectedObjects]);
 
     const handleDeleteSelection = useCallback(
@@ -2334,6 +2334,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           default:
             break;
         }
+        setSelectedIds([]);
       },
       [
         objectsMap,
@@ -3640,6 +3641,183 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       [mutateTableState],
     );
 
+    // Helper function to measure text content height
+    // This function creates an unrotated, offscreen clone with identical CSS to measure accurate height
+    const measureTextHeight = useCallback(
+      async (
+        text: string,
+        formatting: {
+          fontSize: number;
+          fontFamily: string;
+          bold: boolean;
+          italic: boolean;
+          underline: boolean;
+          strikethrough: boolean;
+          align: 'left' | 'center' | 'right';
+        },
+        width: number,
+      ): Promise<number> => {
+        if (typeof document === 'undefined') {
+          return MIN_TEXT_OBJECT_HEIGHT;
+        }
+        // Ensure font is loaded before measuring
+        const resolvedFontFamily = resolveFontFamily(formatting.fontFamily);
+        if (typeof document.fonts !== 'undefined' && document.fonts.ready) {
+          // Wait for fonts to be ready (especially important for custom fonts)
+          try {
+            await document.fonts.ready;
+          } catch {
+            // Ignore errors, continue with measurement
+          }
+        }
+
+        const tempDiv = document.createElement('div');
+        
+        // Position offscreen, unrotated, invisible
+        tempDiv.style.position = 'absolute';
+        tempDiv.style.visibility = 'hidden';
+        tempDiv.style.top = '-9999px';
+        tempDiv.style.left = '-9999px';
+        tempDiv.style.transform = 'none'; // Ensure no rotation
+        tempDiv.style.transformOrigin = 'top left';
+        
+        // Match exact width (no padding, no border) - TextBox uses p-0
+        tempDiv.style.width = `${width}px`;
+        tempDiv.style.height = 'auto';
+        tempDiv.style.minHeight = '0';
+        tempDiv.style.maxHeight = 'none';
+        
+        // Match exact font properties
+        tempDiv.style.fontSize = `${formatting.fontSize}px`;
+        tempDiv.style.fontFamily = resolvedFontFamily;
+        tempDiv.style.fontWeight = formatting.bold ? 'bold' : 'normal';
+        tempDiv.style.fontStyle = formatting.italic ? 'italic' : 'normal';
+        
+        // Match text decoration
+        const decorations: string[] = [];
+        if (formatting.underline) decorations.push('underline');
+        if (formatting.strikethrough) decorations.push('line-through');
+        tempDiv.style.textDecoration = decorations.length > 0 ? decorations.join(' ') : 'none';
+        
+        // Match text alignment
+        tempDiv.style.textAlign = formatting.align;
+        
+        // Match text wrapping (must be identical to TextBox component)
+        tempDiv.style.whiteSpace = 'pre-wrap';
+        tempDiv.style.wordBreak = 'break-word';
+        tempDiv.style.overflowWrap = 'anywhere';
+        
+        // Match spacing - TextBox has p-0 (padding: 0) on outer div, inner div has no padding
+        tempDiv.style.padding = '0';
+        tempDiv.style.margin = '0';
+        tempDiv.style.border = 'none';
+        tempDiv.style.borderRadius = '0';
+        tempDiv.style.boxSizing = 'border-box';
+        
+        // Don't set lineHeight explicitly - let browser use default to match TextBox behavior
+        // TextBox doesn't set line-height, so browser default applies
+        tempDiv.style.letterSpacing = 'normal';
+        
+        // Text is always stored as HTML in TextBox component (uses innerHTML)
+        // Always use innerHTML to match the actual rendering
+        if (text && text.trim().length > 0) {
+          tempDiv.innerHTML = text;
+        } else {
+          tempDiv.innerHTML = '';
+        }
+        
+        // Reset margins and padding on all child div/p elements to match TextBox behavior
+        // Browsers apply default margins to div/p elements, which causes gaps
+        const childElements = tempDiv.querySelectorAll('div, p');
+        childElements.forEach(child => {
+          (child as HTMLElement).style.margin = '0';
+          (child as HTMLElement).style.padding = '0';
+          (child as HTMLElement).style.boxSizing = 'border-box';
+          // Ensure line-height matches parent (browser default)
+          (child as HTMLElement).style.lineHeight = 'normal';
+        });
+        
+        document.body.appendChild(tempDiv);
+        
+        // Force multiple reflows to ensure accurate measurement with loaded fonts
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        tempDiv.offsetHeight;
+        // Force another reflow after fonts are potentially loaded
+        void tempDiv.offsetHeight;
+        
+        // Wait a frame to ensure fonts are applied
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        
+        // Force another reflow after animation frame and child style updates
+        // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+        tempDiv.offsetHeight;
+        
+        // Measure the natural height (scrollHeight includes all content)
+        const height = Math.max(tempDiv.scrollHeight, MIN_TEXT_OBJECT_HEIGHT);
+        
+        document.body.removeChild(tempDiv);
+        
+        return height;
+      },
+      [],
+    );
+
+    // Helper function to auto-adjust textbox height based on content
+    // Uses requestAnimationFrame to ensure measurement happens after React layout completes
+    const adjustTextBoxHeight = useCallback(
+      (objectId: string, width?: number) => {
+        const object = objectsMap.get(objectId);
+        if (!object || object.type !== 'text-box') {
+          return;
+        }
+
+        // Use the provided width or fall back to object width
+        const targetWidth = width ?? object.width;
+
+        // Use requestAnimationFrame to ensure measurement happens after layout
+        requestAnimationFrame(async () => {
+          const currentObject = objectsMap.get(objectId);
+          if (!currentObject || currentObject.type !== 'text-box') {
+            return;
+          }
+
+          const props = currentObject.props as Record<string, unknown> | undefined;
+          const formatting = extractTextBoxFormatting(props);
+
+          // Measure with all formatting properties (now async)
+          const measuredHeight = await measureTextHeight(
+            formatting.text,
+            {
+              fontSize: formatting.fontSize,
+              fontFamily: formatting.fontFamily,
+              bold: formatting.bold,
+              italic: formatting.italic,
+              underline: formatting.underline,
+              strikethrough: formatting.strikethrough,
+              align: formatting.align,
+            },
+            targetWidth,
+          );
+          
+          // Double-check object still exists after async operation
+          const finalObject = objectsMap.get(objectId);
+          if (!finalObject || finalObject.type !== 'text-box') {
+            return;
+          }
+          
+          // Only update if height changed significantly (avoid unnecessary updates)
+          if (Math.abs(measuredHeight - finalObject.height) > 1) {
+            onBulkUpdate({
+              [objectId]: {
+                height: measuredHeight,
+              },
+            });
+          }
+        });
+      },
+      [measureTextHeight, objectsMap, onBulkUpdate],
+    );
+
     const commitEditingText = useCallback(() => {
       setEditingTextState(prev => {
         if (!prev) {
@@ -3666,6 +3844,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               props: nextProps,
             },
           });
+          // Auto-adjust height after text update (adjustTextBoxHeight uses requestAnimationFrame internally)
+          adjustTextBoxHeight(object.id);
         }
 
         if (isTitleTextBox) {
@@ -3679,7 +3859,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         return null;
       });
-    }, [objectsMap, onBulkUpdate, onInteract, onTitleCommit, titleObjectId]);
+    }, [adjustTextBoxHeight, objectsMap, onBulkUpdate, onInteract, onTitleCommit, titleObjectId]);
 
     useEffect(() => {
       if (!canEdit && editingTextState) {
@@ -3993,7 +4173,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
 
         onInteract();
         onBringToFront(duplicatedIds);
-        setSelectedIds(duplicatedIds);
         focusCanvas();
         toast({
           title: duplicatedIds.length === 1 ? 'Object duplicated' : 'Objects duplicated',
@@ -4002,6 +4181,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
               ? 'Added a copy of the selected object.'
               : `Added ${duplicatedIds.length} duplicated objects to the slide.`,
         });
+        setSelectedIds([]);
       },
       [
         canEdit,
@@ -4024,7 +4204,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           });
           return;
         }
-
+    
         const canvas = internalRef.current;
         if (!canvas) {
           toast({
@@ -4033,48 +4213,133 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           });
           return;
         }
-
-        const width = canvas.clientWidth;
-        const height = canvas.clientHeight;
+    
+        const canvasW = canvas.clientWidth;
+        const canvasH = canvas.clientHeight;
         const targets = unlockedSelectedObjects.length > 0 ? unlockedSelectedObjects : selectedObjects;
         const updates: Record<string, Partial<SlideObject>> = {};
-
-        targets.forEach(object => {
-          if (alignment === 'left' || alignment === 'center' || alignment === 'right') {
-            let targetX = 0;
-            if (alignment === 'center') {
-              targetX = (width - object.width) / 2;
-            } else if (alignment === 'right') {
-              targetX = width - object.width;
-            }
-            const maxX = Math.max(0, width - object.width);
-            const clampedX = Math.min(Math.max(0, targetX), maxX);
-            const snappedX = snapToGridEnabled
-              ? Math.min(Math.max(0, snapToGrid(targetX, gridSize)), maxX)
-              : clampedX;
-            if (Math.abs(snappedX - object.x) > 0.5) {
-              updates[object.id] = { ...(updates[object.id] ?? {}), x: snappedX };
-            }
+    
+        // Helpers --------------------------------------------------------------
+        const degToRad = (d: number) => (d * Math.PI) / 180;
+    
+        // compute AABB of a rotated rectangle (rotation about center)
+        function getAABB(obj: SlideObject) {
+          const cx = obj.x + obj.width / 2;
+          const cy = obj.y + obj.height / 2;
+          const hw = obj.width / 2;
+          const hh = obj.height / 2;
+          const theta = degToRad(obj.rotation ?? 0);
+    
+          const corners = [
+            { x: -hw, y: -hh },
+            { x: hw, y: -hh },
+            { x: hw, y: hh },
+            { x: -hw, y: hh },
+          ];
+    
+          let minX = Infinity;
+          let minY = Infinity;
+          let maxX = -Infinity;
+          let maxY = -Infinity;
+    
+          const cos = Math.cos(theta);
+          const sin = Math.sin(theta);
+    
+          for (const c of corners) {
+            const rx = c.x * cos - c.y * sin;
+            const ry = c.x * sin + c.y * cos;
+            const worldX = cx + rx;
+            const worldY = cy + ry;
+            if (worldX < minX) minX = worldX;
+            if (worldY < minY) minY = worldY;
+            if (worldX > maxX) maxX = worldX;
+            if (worldY > maxY) maxY = worldY;
           }
-
-          if (alignment === 'top' || alignment === 'middle' || alignment === 'bottom') {
-            let targetY = 0;
-            if (alignment === 'middle') {
-              targetY = (height - object.height) / 2;
-            } else if (alignment === 'bottom') {
-              targetY = height - object.height;
-            }
-            const maxY = Math.max(0, height - object.height);
-            const clampedY = Math.min(Math.max(0, targetY), maxY);
-            const snappedY = snapToGridEnabled
-              ? Math.min(Math.max(0, snapToGrid(targetY, gridSize)), maxY)
-              : clampedY;
-            if (Math.abs(snappedY - object.y) > 0.5) {
-              updates[object.id] = { ...(updates[object.id] ?? {}), y: snappedY };
-            }
-          }
+    
+          return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+        }
+    
+        // Build selection bounding box from AABBs of the targets
+        let selMinX = Infinity;
+        let selMinY = Infinity;
+        let selMaxX = -Infinity;
+        let selMaxY = -Infinity;
+    
+        const targetAABBs = targets.map(obj => {
+          const aabb = getAABB(obj);
+          if (aabb.minX < selMinX) selMinX = aabb.minX;
+          if (aabb.minY < selMinY) selMinY = aabb.minY;
+          if (aabb.maxX > selMaxX) selMaxX = aabb.maxX;
+          if (aabb.maxY > selMaxY) selMaxY = aabb.maxY;
+          return { obj, aabb };
         });
-
+    
+        // If selection bounds didn't change (fail-safe)
+        if (!isFinite(selMinX)) {
+          toast({
+            title: 'Alignment failed',
+            description: 'No valid bounding box for selection.',
+          });
+          return;
+        }
+    
+        const selCenterX = (selMinX + selMaxX) / 2;
+        const selCenterY = (selMinY + selMaxY) / 2;
+    
+        // For each object compute the desired AABB target, then translate the object's x,y
+        for (const { obj, aabb } of targetAABBs) {
+          let desiredAabbLeft = aabb.minX;
+          let desiredAabbTop = aabb.minY;
+    
+          // Horizontal alignment
+          if (alignment === 'left' || alignment === 'center' || alignment === 'right') {
+            if (alignment === 'left') {
+              desiredAabbLeft = selMinX;
+            } else if (alignment === 'center') {
+              // set object's AABB center to selection center
+              desiredAabbLeft = selCenterX - aabb.width / 2;
+            } else if (alignment === 'right') {
+              desiredAabbLeft = selMaxX - aabb.width;
+            }
+          }
+    
+          // Vertical alignment
+          if (alignment === 'top' || alignment === 'middle' || alignment === 'bottom') {
+            if (alignment === 'top') {
+              desiredAabbTop = selMinY;
+            } else if (alignment === 'middle') {
+              desiredAabbTop = selCenterY - aabb.height / 2;
+            } else if (alignment === 'bottom') {
+              desiredAabbTop = selMaxY - aabb.height;
+            }
+          }
+    
+          // Optionally snap the desired AABB position to grid (snap the final object's top-left after translation)
+          // Compute translation delta to move AABB from current to desired
+          const dx = desiredAabbLeft - aabb.minX;
+          const dy = desiredAabbTop - aabb.minY;
+    
+          // Apply translation to the object's top-left coordinates
+          let newX = obj.x + dx;
+          let newY = obj.y + dy;
+    
+          // Snap the final object coordinates if grid is enabled (you can also snap desiredAabbLeft instead,
+          // but snapping object.x/object.y is straightforward and preserves rotation offset semantics)
+          if (snapToGridEnabled) {
+            newX = Math.min(Math.max(0, snapToGrid(newX, gridSize)), Math.max(0, canvasW - obj.width));
+            newY = Math.min(Math.max(0, snapToGrid(newY, gridSize)), Math.max(0, canvasH - obj.height));
+          } else {
+            // Clamp within canvas (to avoid negative or off-canvas top-left)
+            newX = Math.min(Math.max(0, newX), Math.max(0, canvasW - obj.width));
+            newY = Math.min(Math.max(0, newY), Math.max(0, canvasH - obj.height));
+          }
+    
+          // Only push an update if the change is meaningful
+          if (Math.abs(newX - obj.x) > 0.5 || Math.abs(newY - obj.y) > 0.5) {
+            updates[obj.id] = { ...(updates[obj.id] ?? {}), x: newX, y: newY };
+          }
+        }
+    
         if (Object.keys(updates).length === 0) {
           toast({
             title: 'No alignment changes',
@@ -4082,16 +4347,28 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           });
           return;
         }
-
+    
         onInteract();
         onBulkUpdate(updates);
         toast({
           title: 'Objects aligned',
           description: 'Updated the selection alignment on the slide.',
         });
+        setSelectedIds([]);
       },
-      [onBulkUpdate, onInteract, selectedObjects, unlockedSelectedObjects],
+      [
+        onBulkUpdate,
+        onInteract,
+        selectedObjects,
+        unlockedSelectedObjects,
+        internalRef,
+        snapToGridEnabled,
+        snapToGrid,
+        gridSize,
+        toast,
+      ],
     );
+    
 
     const handleBackgroundPointerDown = useCallback(
       (event: React.PointerEvent<HTMLDivElement>) => {
@@ -4100,6 +4377,14 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
 
         if (event.button !== 0) {
+          return;
+        }
+
+        const target = event.target as Element | null;
+        // Don't deselect when clicking inside context menu
+        if (target?.closest('[data-context-menu-root]') || 
+            target?.closest('[data-radix-context-menu-content]') ||
+            target?.closest('[data-radix-context-menu-sub-content]')) {
           return;
         }
 
@@ -4167,6 +4452,21 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           }
 
           if (targetElement.closest('[data-text-toolbar-root]')) {
+            return;
+          }
+
+          // Don't deselect when clicking inside context menu
+          if (targetElement.closest('[data-context-menu-root]')) {
+            return;
+          }
+
+          // Also check for Radix UI context menu portal elements
+          if (targetElement.closest('[data-radix-context-menu-content]')) {
+            return;
+          }
+
+          // Check for context menu sub-content (submenus)
+          if (targetElement.closest('[data-radix-context-menu-sub-content]')) {
             return;
           }
         }
@@ -4295,6 +4595,17 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         }
         onInteract();
         setSelectedIds([objectId]);
+        
+        // Store initial font size for textboxes
+        let initialFontSize: number | undefined;
+        if (target.type === 'text-box') {
+          const props = target.props as Record<string, unknown> | undefined;
+          const fontSize = typeof props?.fontSize === 'number' ? props.fontSize : undefined;
+          if (typeof fontSize === 'number' && Number.isFinite(fontSize) && fontSize > 0) {
+            initialFontSize = fontSize;
+          }
+        }
+        
         setActiveInteraction({
           kind: 'resize',
           objectId,
@@ -4306,6 +4617,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             y: target.y,
             width: target.width,
             height: target.height,
+            fontSize: initialFontSize,
           },
         });
       },
@@ -4534,6 +4846,178 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
           let nextWidth = initial.width;
           let nextHeight = initial.height;
 
+          // Textbox-specific resize logic
+          if (target.type === 'text-box') {
+            const props = target.props as Record<string, unknown> | undefined;
+            const currentFontSize = typeof props?.fontSize === 'number' && Number.isFinite(props.fontSize) && props.fontSize > 0
+              ? props.fontSize
+              : 16;
+            const fontFamily = typeof props?.fontFamily === 'string' && props.fontFamily.trim().length > 0
+              ? props.fontFamily
+              : 'Comic Sans';
+            const initialFontSize = initial.fontSize ?? currentFontSize;
+
+            // Handle side handles (l, r) - width only, no height change during drag
+            if (handle === 'l') {
+              nextX = initial.x + deltaX;
+              nextWidth = initial.width - deltaX;
+              // Height stays the same during drag, will be auto-adjusted on release
+            } else if (handle === 'r') {
+              nextWidth = initial.width + deltaX;
+              // Height stays the same during drag, will be auto-adjusted on release
+            } else {
+              // Corner handles - maintain aspect ratio and uniform scaling with font size
+              // Calculate scale based on the primary drag direction (use average of both)
+              const scaleX = (initial.width + (handle === 'nw' || handle === 'sw' ? -deltaX : deltaX)) / initial.width;
+              const scaleY = (initial.height + (handle === 'nw' || handle === 'ne' ? -deltaY : deltaY)) / initial.height;
+              
+              // Use average scale to maintain aspect ratio
+              const uniformScale = (scaleX + scaleY) / 2;
+              
+              // Apply the same scale to both dimensions to maintain aspect ratio
+              nextWidth = initial.width * uniformScale;
+              nextHeight = initial.height * uniformScale;
+              
+              // Adjust position based on handle
+              if (handle === 'nw' || handle === 'sw') {
+                nextX = initial.x + initial.width - nextWidth;
+              }
+              if (handle === 'nw' || handle === 'ne') {
+                nextY = initial.y + initial.height - nextHeight;
+              }
+
+
+              // Clamp to canvas bounds while maintaining aspect ratio
+              const canvas = internalRef.current;
+              if (canvas) {
+                const maxWidth = canvas.clientWidth;
+                const maxHeight = canvas.clientHeight;
+                const aspectRatio = initial.width / initial.height;
+                
+                // Check if we need to constrain by width or height
+                if (nextWidth > maxWidth) {
+                  nextWidth = maxWidth;
+                  nextHeight = nextWidth / aspectRatio;
+                }
+                if (nextHeight > maxHeight) {
+                  nextHeight = maxHeight;
+                  nextWidth = nextHeight * aspectRatio;
+                }
+              }
+
+              // Ensure minimum size while maintaining aspect ratio
+              if (nextWidth < minWidth) {
+                nextWidth = minWidth;
+                nextHeight = nextWidth / (initial.width / initial.height);
+                if (handle === 'nw' || handle === 'sw') {
+                  nextX = initial.x + initial.width - nextWidth;
+                }
+              }
+              if (nextHeight < minHeight) {
+                nextHeight = minHeight;
+                nextWidth = nextHeight * (initial.width / initial.height);
+                if (handle === 'nw' || handle === 'ne') {
+                  nextY = initial.y + initial.height - nextHeight;
+                }
+              }
+
+              // Recalculate final scale from clamped dimensions to maintain aspect ratio
+              const finalScale = Math.min(nextWidth / initial.width, nextHeight / initial.height);
+              const finalWidth = initial.width * finalScale;
+              const finalHeight = initial.height * finalScale;
+              
+              // Adjust position for final dimensions
+              if (handle === 'nw' || handle === 'sw') {
+                nextX = initial.x + initial.width - finalWidth;
+              }
+              if (handle === 'nw' || handle === 'ne') {
+                nextY = initial.y + initial.height - finalHeight;
+              }
+
+              const { x, y } = clampAndSnapPosition(nextX, nextY, finalWidth, finalHeight);
+              
+              // Snap to grid while maintaining aspect ratio
+              let snappedWidth = snapToGridEnabled
+                ? Math.max(minWidth, snapToGrid(finalWidth, gridSize))
+                : Math.max(minWidth, finalWidth);
+              let snappedHeight = snapToGridEnabled
+                ? Math.max(minHeight, snapToGrid(finalHeight, gridSize))
+                : Math.max(minHeight, finalHeight);
+              
+              // Maintain aspect ratio after snapping by using the average scale
+              if (snapToGridEnabled) {
+                const scaleFromWidth = snappedWidth / initial.width;
+                const scaleFromHeight = snappedHeight / initial.height;
+                const snappedScale = (scaleFromWidth + scaleFromHeight) / 2;
+                snappedWidth = initial.width * snappedScale;
+                snappedHeight = initial.height * snappedScale;
+              }
+              
+              const widthLimit = canvas ? Math.max(minWidth, Math.min(snappedWidth, canvas.clientWidth)) : snappedWidth;
+              const heightLimit = canvas ? Math.max(minHeight, Math.min(snappedHeight, canvas.clientHeight)) : snappedHeight;
+              
+              // Recalculate font size based on final scale (use average to maintain consistency with aspect ratio)
+              const finalWidthScale = widthLimit / initial.width;
+              const finalHeightScale = heightLimit / initial.height;
+              const actualScale = (finalWidthScale + finalHeightScale) / 2;
+              const newFontSize = Math.max(8, Math.min(200, initialFontSize * actualScale));
+              const clampedFontSize = Math.round(newFontSize * 10) / 10;
+
+              // Update with font size scaling
+              const nextProps = { ...(props || {}) } as Record<string, unknown>;
+              nextProps.fontSize = clampedFontSize;
+
+              onBulkUpdate({
+                [objectId]: {
+                  x,
+                  y,
+                  width: widthLimit,
+                  height: heightLimit,
+                  props: nextProps,
+                },
+              });
+              return;
+            }
+
+            // For side handles (l, r), only update width
+            const canvas = internalRef.current;
+            if (canvas) {
+              nextWidth = Math.min(nextWidth, canvas.clientWidth);
+            }
+
+            if (nextWidth < minWidth) {
+              if (handle === 'l') {
+                nextX -= minWidth - nextWidth;
+              }
+              nextWidth = minWidth;
+            }
+
+            const { x, y } = clampAndSnapPosition(nextX, nextY, nextWidth, nextHeight);
+            const snappedWidth = snapToGridEnabled
+              ? Math.max(minWidth, snapToGrid(nextWidth, gridSize))
+              : Math.max(minWidth, nextWidth);
+            const widthLimit = canvas ? Math.max(minWidth, Math.min(snappedWidth, canvas.clientWidth)) : snappedWidth;
+
+            // Store final width in activeInteraction for use in handlePointerUp
+            setActiveInteraction(prev => {
+              if (prev?.kind === 'resize' && prev.objectId === objectId) {
+                return { ...prev, finalWidth: widthLimit };
+              }
+              return prev;
+            });
+
+            onBulkUpdate({
+              [objectId]: {
+                x,
+                y,
+                width: widthLimit,
+                // Height will be auto-adjusted on pointer up
+              },
+            });
+            return;
+          }
+
+          // Non-textbox resize logic (existing behavior)
           if (handle === 'nw' || handle === 'sw') {
             nextX = initial.x + deltaX;
             nextWidth = initial.width - deltaX;
@@ -4591,6 +5075,20 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
       };
 
       const handlePointerUp = () => {
+        // Auto-adjust text height for textbox side handles
+        if (activeInteraction?.kind === 'resize') {
+          const { handle, objectId, finalWidth } = activeInteraction;
+          const target = objectsMap.get(objectId);
+          
+          if (target && target.type === 'text-box' && (handle === 'l' || handle === 'r')) {
+            // Use stored finalWidth to avoid stale state, fallback to current width if not stored
+            const widthToUse = finalWidth ?? target.width;
+            
+            // Use adjustTextBoxHeight which handles async measurement and font loading
+            adjustTextBoxHeight(objectId, widthToUse);
+          }
+        }
+        
         setActiveInteraction(null);
       };
 
@@ -4600,7 +5098,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         window.removeEventListener('pointermove', handlePointerMove);
         window.removeEventListener('pointerup', handlePointerUp);
       };
-    }, [activeInteraction, canEdit, clampAndSnapPosition, onBulkUpdate, objectsMap]);
+    }, [activeInteraction, canEdit, clampAndSnapPosition, onBulkUpdate, objectsMap, measureTextHeight, adjustTextBoxHeight, snapToGridEnabled, gridSize]);
 
     const handleDefinitions: Array<{ handle: ResizeHandle; className: string; cursor: string }> = useMemo(
       () => [
@@ -4608,6 +5106,18 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
         { handle: 'ne', className: 'top-0 right-0 translate-x-1/2 -translate-y-1/2', cursor: 'nesw-resize' },
         { handle: 'sw', className: 'bottom-0 left-0 -translate-x-1/2 translate-y-1/2', cursor: 'nesw-resize' },
         { handle: 'se', className: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2', cursor: 'nwse-resize' },
+      ],
+      [],
+    );
+
+    const textBoxHandleDefinitions: Array<{ handle: ResizeHandle; className: string; cursor: string }> = useMemo(
+      () => [
+        { handle: 'nw', className: 'top-0 left-0 -translate-x-1/2 -translate-y-1/2', cursor: 'nwse-resize' },
+        { handle: 'ne', className: 'top-0 right-0 translate-x-1/2 -translate-y-1/2', cursor: 'nesw-resize' },
+        { handle: 'sw', className: 'bottom-0 left-0 -translate-x-1/2 translate-y-1/2', cursor: 'nesw-resize' },
+        { handle: 'se', className: 'bottom-0 right-0 translate-x-1/2 translate-y-1/2', cursor: 'nwse-resize' },
+        { handle: 'l', className: 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2', cursor: 'ew-resize' },
+        { handle: 'r', className: 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2', cursor: 'ew-resize' },
       ],
       [],
     );
@@ -4858,6 +5368,8 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     transition: shouldAnimateResize 
                       ? 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1), height 0.4s cubic-bezier(0.4, 0, 0.2, 1), left 0.4s cubic-bezier(0.4, 0, 0.2, 1), top 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
                       : undefined,
+                    transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+                    transformOrigin: rotation !== 0 ? 'center center' : undefined,
                   }}
                   data-exhibition-object-id={object.id}
                   data-exhibition-object-type={object.type}
@@ -4895,10 +5407,6 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                     return 'border-border/70 hover:border-primary/40';
                   })(),
                 )}
-                style={{
-                  transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
-                  transformOrigin: rotation !== 0 ? 'center center' : undefined,
-                }}
               >
                 {isAtomObject(object) && shouldShowTitle && (
                   <div className="flex items-center gap-2 border-b border-border/60 bg-muted/10 px-4 py-2">
@@ -4944,6 +5452,9 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                             props: nextProps,
                           },
                         });
+                        // Auto-adjust height after formatting update (text, fontSize, fontFamily, etc.)
+                        // adjustTextBoxHeight uses requestAnimationFrame internally to ensure measurement after layout
+                        adjustTextBoxHeight(object.id);
                       }}
                       onDelete={onRemoveObject ? () => onRemoveObject(object.id) : undefined}
                       onInteract={onInteract}
@@ -5134,7 +5645,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
                 !isEditingTextBox &&
                 !objectLocked &&
                 !(isImageObject && activeImageCropId === object.id) &&
-                handleDefinitions.map(definition => (
+                (isTextBoxObject ? textBoxHandleDefinitions : handleDefinitions).map(definition => (
                   <span
                     key={definition.handle}
                     className={cn(
@@ -5346,7 +5857,7 @@ const CanvasStage = React.forwardRef<HTMLDivElement, CanvasStageProps>(
             }}
           >
             <Copy className="mr-2 h-4 w-4" />
-            Copy
+            Copyy
             <ContextMenuShortcut>Ctrl+C</ContextMenuShortcut>
           </ContextMenuItem>
           <ContextMenuItem
