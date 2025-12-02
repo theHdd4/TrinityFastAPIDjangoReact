@@ -3,6 +3,9 @@ uvicorn
 pydantic
 wikipedia
 numpy
+faiss-cpu
+rank-bm25
+sentence-transformers
 langgraph
 scikit-learn
 requests
