@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
 import { startProjectTransition } from '@/utils/projectTransition';
+import CreateNewProject from '@/components/AppList/apps/CreateNewProject';
 
 interface BackendApp {
   id: number;
@@ -372,6 +373,7 @@ const Apps = () => {
   }>>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
 
   const { isAuthenticated, user } = useAuth();
 
@@ -1272,10 +1274,11 @@ const Apps = () => {
                   <Button 
                     variant="ghost" 
                     size="sm" 
-                    className="text-xs text-muted-foreground hover:text-primary h-8 gap-1"
+                    className="text-xs bg-[#FFBD59] hover:bg-[#FFA726] text-gray-800 font-medium h-8 gap-1.5 shadow-md hover:shadow-lg shadow-[#FFBD59]/30 hover:shadow-[#FFBD59]/40 transition-all duration-300 hover:scale-105"
+                    onClick={() => setCreateProjectOpen(true)}
                   >
-                    View All
-                    <ArrowRight className="w-3.5 h-3.5" />
+                    <Plus className="w-3.5 h-3.5" />
+                    Create New Project
                   </Button>
                 </div>
                 
@@ -1574,6 +1577,14 @@ const Apps = () => {
           </div>
         </div>
       </div>
+      
+      {/* Create New Project Dialog */}
+      <CreateNewProject 
+        open={createProjectOpen} 
+        onOpenChange={setCreateProjectOpen}
+        apps={displayApps}
+        appMap={appMap}
+      />
     </div>
   );
 };
