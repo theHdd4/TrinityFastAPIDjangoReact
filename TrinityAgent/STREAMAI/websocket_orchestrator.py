@@ -32,6 +32,7 @@ from .atom_mapping import ATOM_MAPPING
 from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
+from .laboratory_retriever import LaboratoryRetrievalPipeline
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
     from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
@@ -263,6 +264,13 @@ class StreamWebSocketOrchestrator:
         self.result_storage = result_storage
         self.rag_engine = rag_engine
         self._cancelled_sequences: Set[str] = set()
+
+        try:
+            self.laboratory_retriever = LaboratoryRetrievalPipeline()
+            logger.info("✅ Laboratory retrieval pipeline initialized for Lab Mode insights")
+        except Exception as lab_exc:
+            logger.warning("⚠️ Laboratory retrieval pipeline unavailable: %s", lab_exc)
+            self.laboratory_retriever = None
 
         # GraphRAG integration
         self.graph_workspace_config = GraphRAGWorkspaceConfig()
@@ -3497,6 +3505,38 @@ WORKFLOW PLANNING:
             logger.warning(f"⚠️ Step insight generation failed: {insight_error}")
             return None
 
+    def _compose_business_context(
+        self,
+        step: WorkflowStepPlan,
+        atom_prompt: str,
+        execution_result: Dict[str, Any],
+    ) -> str:
+        """Create a business-focused context block for the insight prompt."""
+
+        if not self.laboratory_retriever:
+            return ""
+
+        execution_result = execution_result or {}
+
+        query_parts = [
+            step.description,
+            atom_prompt,
+            getattr(step, "atom_prompt", ""),
+            getattr(step, "prompt", ""),
+        ]
+        query = " ".join([part for part in query_parts if part]) or step.atom_id
+
+        try:
+            return self.laboratory_retriever.generate_business_insights(
+                atom_id=step.atom_id,
+                query=query,
+                execution_result=execution_result,
+                top_n=3,
+            )
+        except Exception as business_exc:
+            logger.debug("🔇 Business context skipped: %s", business_exc)
+            return ""
+
     def _build_step_insight_prompt(
         self,
         step: WorkflowStepPlan,
@@ -3513,6 +3553,7 @@ WORKFLOW PLANNING:
 
         params_str = self._safe_json_dumps(parameters or {}, fallback="{}")
         result_preview = self._extract_result_preview(execution_result)
+        business_context = self._compose_business_context(step, base_prompt, execution_result)
 
         status_text = "SUCCESS" if execution_success else "FAILED"
         output_alias = step.output_alias or "not_specified"
@@ -3537,6 +3578,7 @@ WORKFLOW PLANNING:
             f"{params_str}\n\n"
             "RESULT SNAPSHOT\n"
             f"{result_preview}\n\n"
+            f"BUSINESS CONTEXT\n{business_context}\n\n" if business_context else ""
             "RESPONSE REQUIREMENTS\n"
             "- Keep total response under 120 words.\n"
             "- Use Markdown with three sections in this order:\n"

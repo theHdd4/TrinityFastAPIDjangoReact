@@ -6,6 +6,9 @@ wikipedia
 numpy
 langgraph
 scikit-learn
+rank-bm25
+sentence-transformers
+faiss-cpu
 requests
 aiohttp>=3.8.0
 pandas
