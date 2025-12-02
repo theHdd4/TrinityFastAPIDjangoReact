@@ -2615,6 +2615,9 @@ WORKFLOW PLANNING:
                 # OBSERVATION: Evaluate the result
                 # ============================================================
                 logger.info(f"👁️ ReAct: OBSERVATION - Evaluating step {current_step_number} result...")
+
+                # Business insights are generated inside the step executor; capture them here for history
+                business_insights = execution_result.get("business_insights")
                 
                 # Send observation event (with error handling)
                 try:
