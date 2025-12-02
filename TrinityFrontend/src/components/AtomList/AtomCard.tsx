@@ -31,26 +31,26 @@ const AtomCard: React.FC<AtomCardProps> = ({
 
   return (
     <Card 
-      className="p-4 hover:shadow-lg transition-all duration-200 cursor-grab active:cursor-grabbing border border-gray-200 bg-white group hover:scale-105"
+      className="p-3 hover:shadow-lg transition-all duration-200 cursor-grab active:cursor-grabbing border border-gray-200 bg-white group hover:scale-105"
       draggable
       onDragStart={handleDragStart}
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center space-x-2">
-          <Grip className="w-4 h-4 text-gray-400 group-hover:text-gray-600" />
-          <Badge variant="secondary" className={`${color} text-white border-0 text-xs`}>
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center space-x-1.5">
+          <Grip className="w-3.5 h-3.5 text-gray-400 group-hover:text-gray-600" />
+          <Badge variant="secondary" className={`${color} text-white border-0 text-[10px]`}>
             {category}
           </Badge>
         </div>
-        <MoreVertical className="w-4 h-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <MoreVertical className="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
       
-      <h4 className="font-semibold text-gray-900 mb-2 text-sm">{title}</h4>
-      <p className="text-xs text-gray-600 mb-3 line-clamp-2">{description}</p>
+      <h4 className="font-semibold text-gray-900 mb-1.5 text-xs">{title}</h4>
+      <p className="text-[10px] text-gray-600 mb-2 line-clamp-2">{description}</p>
       
       <div className="flex flex-wrap gap-1">
         {tags.map((tag, index) => (
-          <Badge key={index} variant="outline" className="text-xs px-2 py-0.5">
+          <Badge key={index} variant="outline" className="text-[10px] px-1.5 py-0.5">
             {tag}
           </Badge>
         ))}

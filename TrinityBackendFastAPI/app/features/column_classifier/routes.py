@@ -735,32 +735,38 @@ async def get_config(
     app_name: str,
     project_name: str,
     file_name: Optional[str] = None,
+    bypass_cache: str = "false",
 ):
     """Retrieve saved column classifier configuration."""
-    key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
-    decoded_file = unquote(file_name) if file_name else None
-    specific_key = None
-    if decoded_file:
-        safe_file = quote(decoded_file, safe="")
-        specific_key = f"{key}:{safe_file}"
-        cached_specific = redis_client.get(specific_key)
-        if cached_specific:
-            return {
-                "status": "success",
-                "source": "redis",
-                "data": json.loads(cached_specific),
-            }
-
-    cached = redis_client.get(key)
-    if cached:
-        data = json.loads(cached)
+    should_bypass_cache = bypass_cache.lower() == "true"
+    
+    if not should_bypass_cache:
+        key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
+        decoded_file = unquote(file_name) if file_name else None
+        specific_key = None
         if decoded_file:
-            stored_file = data.get("file_name")
-            if stored_file and stored_file != decoded_file:
-                data = None
-        if data is not None:
-            return {"status": "success", "source": "redis", "data": data}
+            safe_file = quote(decoded_file, safe="")
+            specific_key = f"{key}:{safe_file}"
+            cached_specific = redis_client.get(specific_key)
+            if cached_specific:
+                return {
+                    "status": "success",
+                    "source": "redis",
+                    "data": json.loads(cached_specific),
+                }
 
+        cached = redis_client.get(key)
+        if cached:
+            data = json.loads(cached)
+            if decoded_file:
+                stored_file = data.get("file_name")
+                if stored_file and stored_file != decoded_file:
+                    data = None
+            if data is not None:
+                return {"status": "success", "source": "redis", "data": data}
+
+    # Bypass cache or cache miss - fetch from MongoDB
+    decoded_file = unquote(file_name) if file_name else None
     mongo_data = get_classifier_config_from_mongo(
         client_name,
         app_name,
@@ -768,8 +774,12 @@ async def get_config(
         decoded_file,
     )
     if mongo_data:
+        # Update cache for future requests
+        key = f"{client_name}/{app_name}/{project_name}/column_classifier_config"
         redis_client.setex(key, 3600, json.dumps(mongo_data, default=str))
-        if specific_key:
+        if decoded_file:
+            safe_file = quote(decoded_file, safe="")
+            specific_key = f"{key}:{safe_file}"
             redis_client.setex(specific_key, 3600, json.dumps(mongo_data, default=str))
         return {"status": "success", "source": "mongo", "data": mongo_data}
 

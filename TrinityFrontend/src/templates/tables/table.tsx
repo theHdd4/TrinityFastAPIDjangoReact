@@ -11,11 +11,12 @@ interface TableProps {
   defaultMinimized?: boolean;
   onMinimizeToggle?: (minimized: boolean) => void;
   customHeader?: {
-    title: string;
+    title: string | React.ReactNode;
     subtitle?: string;
     subtitleClickable?: boolean;
     onSubtitleClick?: () => void;
     controls?: React.ReactNode;
+    compactHeader?: boolean;
   };
   borderColor?: string;
 }
@@ -42,14 +43,14 @@ const Table: React.FC<TableProps> = ({
     <div className={`table-wrapper rounded-2xl border-2 bg-white shadow-sm ${borderColor.replace('border-', 'border-').replace('-500', '-200')}`}>
       {customHeader && (
         <div className="table-custom-header">
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+          <div className={`flex items-center justify-between border-b border-slate-200 px-5 ${customHeader.compactHeader ? 'py-1.5' : 'py-2'}`}>
             <div className="flex items-center">
-              <div className={`w-1 h-8 ${borderColor.replace('border-', 'bg-')} rounded-full mr-4`}></div>
+              <div className={`w-1 ${customHeader.compactHeader ? 'h-5' : 'h-6'} ${borderColor.replace('border-', 'bg-')} rounded-full mr-4`}></div>
               <div>
-                <h2 className="text-base font-semibold text-slate-800">{customHeader.title}</h2>
+                <h2 className={`${customHeader.compactHeader ? 'text-sm' : 'text-sm'} font-semibold text-slate-800`}>{customHeader.title}</h2>
                 {customHeader.subtitle && (
                   <p 
-                    className={`text-sm mt-1 ${customHeader.subtitleClickable ? 'text-blue-500 cursor-pointer hover:text-blue-700 hover:underline' : 'text-slate-500'}`}
+                    className={`${customHeader.compactHeader ? 'text-xs mt-0.5' : 'text-xs mt-0.5'} ${customHeader.subtitleClickable ? 'text-blue-500 cursor-pointer hover:text-blue-700 hover:underline' : 'text-slate-500'}`}
                     onClick={customHeader.subtitleClickable ? customHeader.onSubtitleClick : undefined}
                   >
                     {customHeader.subtitle}

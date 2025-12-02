@@ -895,15 +895,19 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
     );
   }
 
+  // Get showCardinalityView setting from global store
+  const showCardinalityView = settings.showCardinalityView || false;
+
   return (
     <div className="p-6 space-y-6 h-full overflow-auto bg-gradient-to-br from-slate-50 to-slate-100">
       {/* Cardinality View */}
-      {cardinalityLoading ? (
+      {showCardinalityView && (cardinalityLoading ? (
         <div className="p-4 text-blue-600">Loading cardinality data...</div>
       ) : cardinalityError ? (
         <div className="p-4 text-red-600">{cardinalityError}</div>
       ) : cardinalityData && cardinalityData.length > 0 ? (
         <Table
+            key={`cardinality-view-${showCardinalityView}`}
             headers={[
               <ContextMenu key="Column">
                 <ContextMenuTrigger asChild>
@@ -1035,13 +1039,25 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
             ]}
             colClasses={["w-[30%]", "w-[20%]", "w-[15%]", "w-[35%]"]}
             bodyClassName="max-h-[484px] overflow-y-auto"
-            defaultMinimized={true}
+            defaultMinimized={!showCardinalityView}
             borderColor={`border-${groupbyWtgAvg.color.replace('bg-', '')}`}
             customHeader={{
-              title: "Cardinality View",
-              subtitle: "Click Here to View Data",
-              subtitleClickable: !!inputFileName && !!atomId,
-              onSubtitleClick: handleViewDataClick
+              title: (
+                <span className="flex items-center gap-1">
+                  <span>Data Summary</span>
+                  <span className="text-slate-400">|</span>
+                  <span
+                    className="text-blue-500 cursor-pointer hover:text-blue-700 hover:underline"
+                    onClick={handleViewDataClick}
+                  >
+                    Data in detail
+                  </span>
+                </span>
+              ),
+              subtitle: undefined,
+              subtitleClickable: false,
+              onSubtitleClick: handleViewDataClick,
+              compactHeader: true
             }}
           >
             {displayedCardinality.map((col, index) => (
@@ -1092,7 +1108,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
               </tr>
             ))}
           </Table>
-      ) : null}
+      ) : null)}
       
       {/* Group By Section */}
       <Card className="shadow-lg border-0 bg-white/80 backdrop-blur-sm">
