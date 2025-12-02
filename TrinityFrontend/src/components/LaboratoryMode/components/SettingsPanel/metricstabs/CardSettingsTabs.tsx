@@ -12,11 +12,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Plus, MoreHorizontal, Trash2, Pencil, Layers, Upload } from 'lucide-react';
-import {
-  useLaboratoryStore,
-  CardVariable,
-  LayoutCard,
-} from '../../../store/laboratoryStore';
+import { useLaboratoryStore, CardVariable, LayoutCard } from '../../../store/laboratoryStore';
 import ConfirmationDialog from '@/templates/DialogueBox/ConfirmationDialog';
 import { LABORATORY_API } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
@@ -29,6 +25,7 @@ interface CardSettingsTabsProps {
   card: LayoutCard;
   tab: string;
   setTab: (value: string) => void;
+  onUpdateCard: (cardId: string, updates: Partial<LayoutCard>) => void;
   onAddVariable: (cardId: string, variable: CardVariable) => void;
   onUpdateVariable: (
     cardId: string,
@@ -101,6 +98,7 @@ const CardSettingsTabs: React.FC<CardSettingsTabsProps> = ({
   card,
   tab,
   setTab,
+  onUpdateCard,
   onAddVariable,
   onUpdateVariable,
   onDeleteVariable,

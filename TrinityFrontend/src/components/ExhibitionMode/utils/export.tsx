@@ -260,8 +260,17 @@ const ensureImageDataUrl = async (props: Record<string, unknown>): Promise<Recor
     }
     return nextProps;
   } catch (error) {
-    console.error('[Exhibition Export] Unable to inline image for export', candidate, error);
-    throw new Error('We could not include one of the slide images in the export.');
+    console.warn('[Exhibition Export] Unable to inline image for export, will use original URL:', candidate, error);
+    // For PDF/PPTX exports, we can use the original URL - backend can fetch it
+    // Don't throw error, just return props with original src/dataUrl
+    // The backend's _load_image_asset will handle URL fetching
+    if (srcValue) {
+      nextProps.src = srcValue;
+    }
+    if (dataUrlValue) {
+      nextProps.dataUrl = dataUrlValue;
+    }
+    return nextProps;
   }
 };
 
@@ -725,6 +734,130 @@ const renderSlideForCapture = (
   });
 };
 
+/**
+ * Capture visible exhibition slides directly as images.
+ * This is the NEW APPROACH: capture slides from visible exhibition instead of server-side screenshots.
+ */
+const captureVisibleExhibitionSlides = async (
+  cards: LayoutCard[],
+  pixelRatio: number,
+): Promise<SlideCaptureResult[]> => {
+  console.log('[Exhibition Export] Capturing visible exhibition slides directly as images...');
+  
+  const captures: SlideCaptureResult[] = [];
+  const failures: string[] = [];
+
+  for (let index = 0; index < cards.length; index += 1) {
+    const card = cards[index];
+    
+    // Find the visible exhibition slide in the DOM
+    const visibleSlide = document.querySelector<HTMLElement>(
+      `[data-exhibition-slide-id="${card.id}"]`,
+    );
+
+    if (!visibleSlide) {
+      console.warn(`[Exhibition Export] Visible slide not found for card ${card.id}`);
+      failures.push(card.id);
+      continue;
+    }
+
+    try {
+      // Wait a moment for any animations to settle
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // CRITICAL: Use resolveSlideDimensions to account for transforms/scaling
+      // This is especially important for horizontal navigation where slides might be scaled
+      const slideDimensions = resolveSlideDimensions(visibleSlide);
+      const { width, height, scaleX, scaleY } = slideDimensions;
+      
+      // Log transform info for debugging
+      if (scaleX !== 1 || scaleY !== 1) {
+        console.log(
+          `[Exhibition Export] Slide ${card.id} has transform scale: ${scaleX}x${scaleY}, base dimensions: ${width}x${height}`
+        );
+      }
+
+      if (width <= 0 || height <= 0) {
+        console.warn(`[Exhibition Export] Slide ${card.id} has zero or invalid dimensions: ${width}x${height}`);
+        failures.push(card.id);
+        continue;
+      }
+
+      console.log(`[Exhibition Export] Capturing slide ${index + 1}/${cards.length} (${card.id}) - ${width}x${height} (scale: ${scaleX}x${scaleY})`);
+
+      // CRITICAL: Capture with explicit dimensions accounting for transforms
+      // Use the base dimensions (after accounting for scale) for accurate capture
+      // This ensures horizontal navigation slides are captured correctly
+      const dataUrl = await toPng(visibleSlide, {
+        pixelRatio,
+        cacheBust: true,
+        width: Math.round(width),
+        height: Math.round(height),
+        style: {
+          transform: 'none', // Remove transforms for capture
+          transformOrigin: 'top left',
+          margin: '0',
+          padding: '0',
+          width: `${width}px`, // Explicit width
+          height: `${height}px`, // Explicit height
+        },
+        backgroundColor: '#ffffff', // White background for better export quality
+      });
+
+      if (!dataUrl || typeof dataUrl !== 'string') {
+        throw new Error('Failed to capture slide image');
+      }
+
+      // Get actual image dimensions
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = dataUrl;
+      });
+
+      const imageWidth = img.width;
+      const imageHeight = img.height;
+
+      // Validate captured dimensions match expected dimensions
+      const expectedWidth = Math.round(width * pixelRatio);
+      const expectedHeight = Math.round(height * pixelRatio);
+      const widthDiff = Math.abs(imageWidth - expectedWidth);
+      const heightDiff = Math.abs(imageHeight - expectedHeight);
+      
+      if (widthDiff > 2 || heightDiff > 2) {
+        console.warn(
+          `[Exhibition Export] Slide ${card.id} dimension mismatch: expected ${expectedWidth}x${expectedHeight}, got ${imageWidth}x${imageHeight} (diff: ${widthDiff}x${heightDiff})`
+        );
+      }
+
+      captures.push({
+        cardId: card.id,
+        dataUrl,
+        cssWidth: Math.round(width), // Ensure integer dimensions
+        cssHeight: Math.round(height), // Ensure integer dimensions
+        imageWidth,
+        imageHeight,
+        pixelRatio,
+      });
+
+      console.log(
+        `[Exhibition Export] Successfully captured slide ${card.id}: CSS ${Math.round(width)}x${Math.round(height)}, Image ${imageWidth}x${imageHeight}, Scale ${scaleX}x${scaleY}`
+      );
+    } catch (error) {
+      console.error(`[Exhibition Export] Failed to capture visible slide ${card.id}:`, error);
+      failures.push(card.id);
+    }
+  }
+
+  if (failures.length > 0) {
+    console.warn(`[Exhibition Export] Failed to capture ${failures.length} slide(s):`, failures);
+  }
+
+  console.log(`[Exhibition Export] Captured ${captures.length}/${cards.length} visible exhibition slides`);
+  return captures;
+};
+
 const captureChartSnapshotsForSlide = async (
   slideElement: HTMLElement,
   cardId: string,
@@ -845,6 +978,60 @@ export const prepareSlidesForExport = async (
       documentStyles: includeDomSnapshot ? collectDocumentStyles() : null,
       chartCaptures: new Map(),
     };
+  }
+
+  // NEW APPROACH: Capture visible exhibition slides directly as images
+  // This avoids server-side screenshot timing issues
+  if (captureImages) {
+    console.log('[Exhibition Export] Using NEW approach: capturing visible exhibition slides directly');
+    const pixelRatio = getPixelRatio(options?.pixelRatio);
+    
+    try {
+      const visibleCaptures = await captureVisibleExhibitionSlides(cards, pixelRatio);
+      
+      // Only use visible captures if we got ALL slides
+      // Otherwise fall back to hidden container method which renders all slides
+      if (visibleCaptures.length === cards.length) {
+        console.log('[Exhibition Export] Successfully captured all slides from visible exhibition');
+        
+        // Extract chart snapshots from visible slides for overlay
+        const chartCaptures = new Map<string, Map<string, ChartCaptureResult>>();
+        
+        for (const card of cards) {
+          const visibleSlide = document.querySelector<HTMLElement>(
+            `[data-exhibition-slide-id="${card.id}"]`,
+          );
+          
+          if (visibleSlide) {
+            const slideChartSnapshots = await captureChartSnapshotsForSlide(
+              visibleSlide,
+              card.id,
+              slideObjectsByCardId?.[card.id],
+              pixelRatio,
+            );
+            if (slideChartSnapshots.size > 0) {
+              chartCaptures.set(card.id, slideChartSnapshots);
+            }
+          }
+        }
+
+        // Return with visible captures - no need for DOM snapshots or hidden container
+        return {
+          captures: visibleCaptures,
+          domSnapshots: includeDomSnapshot ? new Map() : new Map(), // Not needed for image-only export
+          documentStyles: includeDomSnapshot ? collectDocumentStyles() : null,
+          chartCaptures,
+        };
+      } else {
+        console.warn(
+          `[Exhibition Export] Only captured ${visibleCaptures.length}/${cards.length} visible slides, falling back to hidden container method`
+        );
+        // Fall through to original method
+      }
+    } catch (error) {
+      console.warn('[Exhibition Export] Visible capture failed, falling back to hidden container method:', error);
+      // Fall through to original method
+    }
   }
 
   const container = document.createElement('div');
@@ -1221,6 +1408,7 @@ export interface ExhibitionExportPayload {
   title: string;
   slides: SlideExportPayload[];
   documentStyles?: ExportDocumentStyles | null;
+  fidelity?: 'low' | 'high';
 }
 
 export interface BuildPresentationExportOptions {
@@ -1544,8 +1732,15 @@ export const downloadRenderedSlideScreenshots = async (
 export const requestPresentationExport = async (
   format: 'pptx' | 'pdf',
   payload: ExhibitionExportPayload,
+  fidelity?: 'low' | 'high',
 ): Promise<Blob> => {
   ensureBrowserEnvironment('Presentation export');
+
+  // Add fidelity to payload for PPTX exports
+  const exportPayload: ExhibitionExportPayload = {
+    ...payload,
+    ...(format === 'pptx' && fidelity ? { fidelity } : {}),
+  };
 
   const endpoint = `${EXHIBITION_API}/export/${format}`;
   let response: Response;
@@ -1556,7 +1751,7 @@ export const requestPresentationExport = async (
         'Content-Type': 'application/json',
       },
       credentials: 'include',
-      body: JSON.stringify(payload as JsonCompatible),
+      body: JSON.stringify(exportPayload as JsonCompatible),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Renderer request failed.';

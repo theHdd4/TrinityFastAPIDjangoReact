@@ -76,6 +76,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
     selectedAtomId ? state.getAtom(selectedAtomId) : undefined
   );
   const updateSettings = useLaboratoryStore((state) => state.updateAtomSettings);
+  const updateCard = useLaboratoryStore(state => state.updateCard);
   const cards = useLaboratoryStore(state => state.cards);
   const addCardVariable = useLaboratoryStore(state => state.addCardVariable);
   const updateCardVariable = useLaboratoryStore(state => state.updateCardVariable);

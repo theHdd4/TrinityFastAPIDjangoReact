@@ -28,6 +28,7 @@ urlpatterns = [
     path("api/", include("apps.molecules.urls")),
     path("api/", include("apps.custom_molecules.urls")),
     path("api/", include("apps.trinity_v1_atoms.urls")),
+    path("api/", include("apps.trinity_v1_agents.urls")),
     path("api/share-links/", include("apps.share_links.urls")),
     path("api/signups/", include("apps.signups.urls")),
 ]

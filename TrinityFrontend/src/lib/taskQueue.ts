@@ -11,7 +11,17 @@ export interface TaskEnvelope<T> {
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>): Promise<T> {
+export async function fetchTaskStatus<T = any>(taskId: string): Promise<TaskEnvelope<T>> {
+  const response = await fetch(`${TASK_QUEUE_API}/${taskId}`, {
+    credentials: 'include',
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch task status (${response.status})`);
+  }
+  return (await response.json()) as TaskEnvelope<T>;
+}
+
+export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>, maxAttempts: number = 60, timeoutMs: number = 300000): Promise<T> {
   const initialStatus = (initial.task_status || initial.status || '').toLowerCase();
   if (initialStatus === 'success') {
     if (initial.result && typeof initial.result === 'object') {
@@ -25,30 +35,41 @@ export async function waitForTaskResult<T = any>(initial: TaskEnvelope<T>): Prom
     throw new Error('Task identifier missing from response');
   }
 
+  const startTime = Date.now();
   let attempt = 0;
-  while (true) {
+  while (attempt < maxAttempts) {
+    // Check timeout
+    if (Date.now() - startTime > timeoutMs) {
+      throw new Error(`Task polling timeout after ${timeoutMs}ms (${attempt} attempts)`);
+    }
+
     const sleep = Math.min(1000 * Math.max(attempt, 1), 5000);
     await delay(sleep);
     attempt += 1;
 
-    const response = await fetch(`${TASK_QUEUE_API}/${taskId}`, {
-      credentials: 'include',
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch task status (${response.status})`);
-    }
-    const payload: TaskEnvelope<T> = await response.json();
-    const status = (payload.status || payload.task_status || '').toLowerCase();
-    if (status === 'success') {
-      if (payload.result && typeof payload.result === 'object') {
-        return payload.result as T;
+    try {
+      const payload = await fetchTaskStatus<T>(taskId);
+      const status = (payload.status || payload.task_status || '').toLowerCase();
+      if (status === 'success') {
+        if (payload.result && typeof payload.result === 'object') {
+          return payload.result as T;
+        }
+        return payload as unknown as T;
       }
-      return payload as unknown as T;
-    }
-    if (status === 'failure') {
-      throw new Error(payload.error ? String(payload.error) : 'Task failed');
+      if (status === 'failure') {
+        throw new Error(payload.error ? String(payload.error) : 'Task failed');
+      }
+    } catch (error) {
+      // If it's the last attempt, throw the error
+      if (attempt >= maxAttempts) {
+        throw error;
+      }
+      // Otherwise, continue polling (might be a transient network error)
+      console.warn(`Task polling attempt ${attempt} failed, retrying...`, error);
     }
   }
+
+  throw new Error(`Task did not complete after ${maxAttempts} attempts (${timeoutMs}ms timeout)`);
 }
 
 export function isTaskEnvelope<T = any>(value: unknown): value is TaskEnvelope<T> {
