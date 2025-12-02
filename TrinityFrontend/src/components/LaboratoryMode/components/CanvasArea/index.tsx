@@ -1217,6 +1217,65 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
     );
   };
 
+  const renderAtomInsights = (atom: DroppedAtom) => {
+    const businessInsightsRaw =
+      (atom.settings as any)?.businessInsights ?? (atom.settings as any)?.business_insights;
+    const atomInsight = (atom.settings as any)?.atomInsight ?? (atom.settings as any)?.insight ?? '';
+    const businessInsights = Array.isArray(businessInsightsRaw) ? businessInsightsRaw : [];
+    const hasAtomInsight = typeof atomInsight === 'string' && atomInsight.trim().length > 0;
+    const hasBusinessInsights = businessInsights.length > 0;
+
+    return (
+      <div className="mt-4">
+        <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-3 shadow-inner">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-blue-900">Business insights</span>
+            {!hasAtomInsight && !hasBusinessInsights && (
+              <span className="text-[11px] text-blue-700">Awaiting generation</span>
+            )}
+          </div>
+
+          {hasAtomInsight && (
+            <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{atomInsight.trim()}</p>
+          )}
+
+          {hasBusinessInsights && (
+            <div className="space-y-2">
+              {businessInsights.map((insight: any, idx: number) => (
+                <div
+                  key={insight?.id ?? idx}
+                  className="rounded-lg border border-blue-100 bg-white/80 p-2 shadow-sm"
+                >
+                  <p className="text-sm font-semibold text-gray-900 mb-1">
+                    {insight?.insight || insight?.summary || 'Insight'}
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-gray-700">
+                    <div>
+                      <span className="font-semibold text-gray-800">Impact: </span>
+                      {insight?.impact || 'Not specified'}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-gray-800">Risk: </span>
+                      {insight?.risk || 'Not specified'}
+                    </div>
+                    <div>
+                      <span className="font-semibold text-gray-800">Next action: </span>
+                      {insight?.next_action || 'No action captured'}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!hasAtomInsight && !hasBusinessInsights && (
+            <p className="text-xs text-blue-800">No actionable insight generated yet.</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderCardTextBox = (card: LayoutCard) => {
     if (!card.textBoxEnabled) {
       return null;
@@ -1251,64 +1310,6 @@ const CanvasArea = React.forwardRef<CanvasAreaRef, CanvasAreaProps>(({
             ...syncLegacyFields(nextBoxes),
           };
         }),
-      );
-    };
-
-    const renderAtomInsights = (atom: DroppedAtom) => {
-      const businessInsightsRaw = (atom.settings as any)?.businessInsights ?? (atom.settings as any)?.business_insights;
-      const atomInsight = (atom.settings as any)?.atomInsight ?? (atom.settings as any)?.insight ?? '';
-      const businessInsights = Array.isArray(businessInsightsRaw) ? businessInsightsRaw : [];
-      const hasAtomInsight = typeof atomInsight === 'string' && atomInsight.trim().length > 0;
-      const hasBusinessInsights = businessInsights.length > 0;
-
-      return (
-        <div className="mt-4">
-          <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-3 shadow-inner">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-blue-900">Business insights</span>
-              {!hasAtomInsight && !hasBusinessInsights && (
-                <span className="text-[11px] text-blue-700">Awaiting generation</span>
-              )}
-            </div>
-
-            {hasAtomInsight && (
-              <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">{atomInsight.trim()}</p>
-            )}
-
-            {hasBusinessInsights && (
-              <div className="space-y-2">
-                {businessInsights.map((insight: any, idx: number) => (
-                  <div
-                    key={insight?.id ?? idx}
-                    className="rounded-lg border border-blue-100 bg-white/80 p-2 shadow-sm"
-                  >
-                    <p className="text-sm font-semibold text-gray-900 mb-1">
-                      {insight?.insight || insight?.summary || 'Insight'}
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-gray-700">
-                      <div>
-                        <span className="font-semibold text-gray-800">Impact: </span>
-                        {insight?.impact || 'Not specified'}
-                      </div>
-                      <div>
-                        <span className="font-semibold text-gray-800">Risk: </span>
-                        {insight?.risk || 'Not specified'}
-                      </div>
-                      <div>
-                        <span className="font-semibold text-gray-800">Next action: </span>
-                        {insight?.next_action || 'No action captured'}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {!hasAtomInsight && !hasBusinessInsights && (
-              <p className="text-xs text-blue-800">No actionable insight generated yet.</p>
-            )}
-          </div>
-        </div>
       );
     };
 
