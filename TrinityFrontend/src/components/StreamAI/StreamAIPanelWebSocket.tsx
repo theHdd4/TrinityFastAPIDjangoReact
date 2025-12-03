@@ -2023,6 +2023,20 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                 : msg
             ));
             break;
+
+          case 'workflow_progress': {
+            console.log('⏳ Workflow progress:', data);
+            const stepLabel = data.total_steps
+              ? `${data.current_step}/${data.total_steps}`
+              : `${data.current_step}/?`;
+            const percentLabel =
+              typeof data.progress_percent === 'number'
+                ? ` (${data.progress_percent}%)`
+                : '';
+            const progressUpdate = `\n\n⏳ Workflow progress: step ${stepLabel}${percentLabel}\n${data.message || 'Processing...'}`;
+            updateProgress(progressUpdate);
+            break;
+          }
             
           case 'text_reply':
             // Handle direct text reply (for general questions)
