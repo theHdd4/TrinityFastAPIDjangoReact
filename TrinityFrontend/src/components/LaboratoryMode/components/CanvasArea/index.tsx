@@ -5242,12 +5242,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               <span className="text-xs font-medium text-gray-700">
                                 {cardTitle}
                               </span>
-                              <AIChatBot
-                                cardId={card.id}
-                                cardTitle={cardTitle}
-                                onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                                disabled={card.atoms.length > 0}
-                              />
+                              {card.atoms.length === 0 ? (
+                                <AIChatBot
+                                  cardId={card.id}
+                                  cardTitle={cardTitle}
+                                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                                />
+                              ) : card.atoms.length > 0 && card.atoms[0] ? (
+                                <AtomAIChatBot
+                                  atomId={card.atoms[0].id}
+                                  atomType={card.atoms[0].atomId}
+                                  atomTitle={card.atoms[0].title}
+                                  disabled={!LLM_MAP[card.atoms[0].atomId]}
+                                  className="transition-transform hover:scale-110"
+                                />
+                              ) : null}
                               <button
                                 onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                                 className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -5535,12 +5544,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           <span className="text-xs font-medium text-gray-700">
                             {cardTitle}
                           </span>
-                          <AIChatBot
-                            cardId={card.id}
-                            cardTitle={cardTitle}
-                            onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                            disabled={card.atoms.length > 0}
-                          />
+                          {card.atoms.length === 0 ? (
+                            <AIChatBot
+                              cardId={card.id}
+                              cardTitle={cardTitle}
+                              onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                            />
+                          ) : card.atoms.length > 0 && card.atoms[0] ? (
+                            <AtomAIChatBot
+                              atomId={card.atoms[0].id}
+                              atomType={card.atoms[0].atomId}
+                              atomTitle={card.atoms[0].title}
+                              disabled={!LLM_MAP[card.atoms[0].atomId]}
+                              className="transition-transform hover:scale-110"
+                            />
+                          ) : null}
                           <button
                             onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                             className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -6035,12 +6053,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 <span className="text-xs font-medium text-gray-700">
                   {cardTitle}
                 </span>
-                <AIChatBot
-                  cardId={card.id}
-                  cardTitle={cardTitle}
-                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                  disabled={card.atoms.length > 0}
-                />
+                {card.atoms.length === 0 ? (
+                  <AIChatBot
+                    cardId={card.id}
+                    cardTitle={cardTitle}
+                    onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                  />
+                ) : card.atoms.length > 0 && card.atoms[0] ? (
+                  <AtomAIChatBot
+                    atomId={card.atoms[0].id}
+                    atomType={card.atoms[0].atomId}
+                    atomTitle={card.atoms[0].title}
+                    disabled={!LLM_MAP[card.atoms[0].atomId]}
+                    className="transition-transform hover:scale-110"
+                  />
+                ) : null}
                           <button
                             onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                             className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
