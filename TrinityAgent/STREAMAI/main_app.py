@@ -29,6 +29,7 @@ try:
     from STREAMAI.react_workflow_orchestrator import get_react_orchestrator
     from STREAMAI.stream_orchestrator import get_orchestrator
     from STREAMAI.result_storage import get_result_storage
+    from STREAMAI.intent_service import intent_service
     STREAMAI_AVAILABLE = True
     REACT_AVAILABLE = True
     logger.info("✅ Trinity AI components imported successfully")
@@ -39,6 +40,7 @@ except ImportError as e:
             from .react_workflow_orchestrator import get_react_orchestrator
             from .stream_orchestrator import get_orchestrator
             from .result_storage import get_result_storage
+            from .intent_service import intent_service
             STREAMAI_AVAILABLE = True
             REACT_AVAILABLE = True
             logger.info("✅ Trinity AI components imported successfully (relative)")
@@ -47,6 +49,7 @@ except ImportError as e:
                 from STREAMAI.react_workflow_orchestrator import get_react_orchestrator
                 from STREAMAI.stream_orchestrator import get_orchestrator
                 from STREAMAI.result_storage import get_result_storage
+                from STREAMAI.intent_service import intent_service
                 STREAMAI_AVAILABLE = True
                 REACT_AVAILABLE = True
                 logger.info("✅ Trinity AI components imported successfully (absolute)")
@@ -56,6 +59,7 @@ except ImportError as e:
                     from react_workflow_orchestrator import get_react_orchestrator
                     from stream_orchestrator import get_orchestrator
                     from result_storage import get_result_storage
+                    from intent_service import intent_service
                     STREAMAI_AVAILABLE = True
                     REACT_AVAILABLE = True
                     logger.info("✅ Trinity AI components imported successfully (direct)")
@@ -405,36 +409,77 @@ async def chat(request: ChatRequest) -> ChatResponse:
         raise HTTPException(status_code=503, detail="Trinity AI not available")
     
     logger.info(f"💬 Trinity AI chat request: {request.message[:100]}...")
-    
+
     try:
         # Generate session ID if not provided
         session_id = request.session_id or f"stream_{uuid.uuid4().hex[:16]}"
-        
+
+        # Laboratory-mode intent extraction and routing (persists per session)
+        file_list = None
+        if request.file_context and isinstance(request.file_context, dict):
+            file_list = request.file_context.get("files") or request.file_context.get("available_files")
+        previous_record = intent_service._intent_cache.get(session_id)
+        intent_record = intent_service.infer_intent(
+            request.message,
+            session_id=session_id,
+            available_files=file_list or [],
+            mode="laboratory",
+        )
+        decision = intent_service.route_decision(intent_record, available_files=file_list or [])
+        policy_flip = intent_service.detect_policy_flip(
+            session_id,
+            decision,
+            previous_record=previous_record,
+            available_files=file_list or [],
+        )
+
+        # Ask for clarification before executing high-impact actions
+        if decision.clarifications:
+            clarification_msg = "I need to confirm a couple of details before running this: " + "; ".join(decision.clarifications)
+            logger.info("⚠️ Clarification needed before proceeding: %s", clarification_msg)
+            intent_service.update_scratchpad(session_id, f"Clarification requested: {clarification_msg}")
+            return ChatResponse(response=clarification_msg, session_id=session_id, sequence=None)
+
+        if policy_flip:
+            flip_msg = (
+                "Your latest message changes the execution path. Confirm if you want me to switch tools before proceeding."
+            )
+            intent_service.update_scratchpad(session_id, "Policy flip detected; awaiting confirmation")
+            return ChatResponse(response=flip_msg, session_id=session_id, sequence=None)
+
         # Step 1: Intent Detection (ONCE at the start - like 28_NOV)
         # This is the ONLY place intent detection should happen for this request
         # Use session_id for caching to prevent repeated detection
-        logger.info("🔍 Detecting intent for chat request (ONCE at start)...")
-        intent_result = await _detect_intent_simple(request.message, session_id=session_id, use_cache=True)
-        intent = intent_result.get("intent", "workflow")
-        logger.info(f"✅ Intent detected: {intent} (confidence: {intent_result.get('confidence', 0.5):.2f})")
-        logger.info(f"🔒 Intent detection CACHED for session {session_id} - will NOT be called again for this session")
-        
+        intent = "text_reply" if decision.path == "llm_only" else "workflow"
+        logger.info(
+            "✅ Intent record built for session %s | path=%s | goal=%s | tools=%s",
+            session_id,
+            decision.path,
+            intent_record.goal_type,
+            ",".join(sorted(intent_record.required_tools)) or "none",
+        )
+        logger.info("🔒 Intent record persisted for session %s", session_id)
+
         # Step 2: Route based on intent
         # If text_reply -> return immediately (no workflow execution)
         if intent == "text_reply":
             # Handle as text reply - direct LLM response
             logger.info("📝 Handling as text reply")
             text_response = await _generate_text_reply_direct(request.message)
-            
+
+            intent_service.update_scratchpad(session_id, "Answered via LLM-only path")
             return ChatResponse(
                 response=text_response,
                 session_id=session_id,
                 sequence=None
             )
-        
+
         # Step 3: Handle as workflow (intent already detected above - no need to detect again)
         logger.info("🔄 Handling as workflow - routing to ReAct orchestrator")
         logger.info("ℹ️ Intent detection already done - proceeding with workflow execution")
+
+        if decision:
+            intent_service.update_scratchpad(session_id, f"Executing via {decision.path} with goal {intent_record.goal_type}")
         
         # Use ReAct orchestrator if available, otherwise fallback
         if REACT_AVAILABLE and react_orchestrator:
