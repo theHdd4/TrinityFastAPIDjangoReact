@@ -3821,9 +3821,11 @@ WORKFLOW PLANNING:
         if not step.files_used and step.inputs:
             step.files_used = step.inputs.copy()
 
-    def _register_output_alias(self, sequence_id: str, alias: Optional[str], file_path: Optional[str]) -> None:
+    def _register_output_alias(
+        self, sequence_id: str, alias: Optional[str], file_path: Optional[str]
+    ) -> None:
         """Track which file path was produced for a given output alias."""
-        if not alias or not file_path:
+        if not alias or not file_path or not isinstance(alias, str):
             return
         alias_map = self._output_alias_registry.setdefault(sequence_id, {})
         normalized = self._normalize_alias_token(alias)
@@ -3832,7 +3834,7 @@ WORKFLOW PLANNING:
 
     def _resolve_alias_value(self, sequence_id: str, token: Optional[str]) -> Optional[str]:
         """Resolve an alias token to the stored file path if available."""
-        if not token:
+        if not token or not isinstance(token, str):
             return token
         alias_map = self._output_alias_registry.get(sequence_id)
         if not alias_map:
