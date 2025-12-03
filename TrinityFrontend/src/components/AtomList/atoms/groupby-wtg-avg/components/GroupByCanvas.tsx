@@ -1346,7 +1346,7 @@ const GroupByCanvas: React.FC<GroupByCanvasProps> = ({ atomId }) => {
             {displayedData.map((row, rowIndex) => (
               <tr key={rowIndex} className="table-row">
                 {resultsHeaders.map((header, colIndex) => (
-                  <td key={colIndex} className="table-cell text-center font-medium text-gray-700">
+                  <td key={colIndex} className="table-cell font-medium text-gray-700">
                     {row[header] !== null && row[header] !== undefined && row[header] !== '' ? (
                       typeof row[header] === 'number' ? row[header] : String(row[header])
                     ) : (

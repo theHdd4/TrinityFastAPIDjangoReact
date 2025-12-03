@@ -1507,10 +1507,24 @@ def perform_createcolumn_task(
             if not columns:
                 raise ValueError("No columns provided for compute_metrics_within_group operation")
             
-            # Validate that all specified columns exist in the dataframe
-            missing_cols = [col for col in columns if col not in df.columns]
+            # Create case-insensitive column mapping
+            df_cols_lower = {col.lower(): col for col in df.columns}
+            
+            # Map columns to actual dataframe columns (case-insensitive)
+            resolved_columns = []
+            missing_cols = []
+            for col in columns:
+                col_lower = col.lower()
+                if col_lower in df_cols_lower:
+                    resolved_columns.append(df_cols_lower[col_lower])
+                else:
+                    missing_cols.append(col)
+            
             if missing_cols:
                 raise ValueError(f"Columns not found for compute_metrics_within_group operation: {missing_cols}")
+            
+            # Use resolved columns instead of original columns
+            columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
             import json
@@ -1538,7 +1552,7 @@ def perform_createcolumn_task(
                 raise ValueError("Missing 'metric_cols' parameter for compute_metrics_within_group operation")
             
             # Validate all metric columns and methods
-            valid_methods = ['sum', 'mean', 'median', 'max', 'min', 'count', 'nunique', 'rank_pct']
+            valid_methods = ['sum', 'mean', 'median', 'max', 'min', 'count', 'nunique', 'rank', 'rank_pct']
             for item in metric_cols_list:
                 if not isinstance(item, dict) or 'metric_col' not in item or 'method' not in item:
                     raise ValueError("Invalid metric_cols format. Each item must have 'metric_col' and 'method'")
@@ -1549,12 +1563,18 @@ def perform_createcolumn_task(
                 if method not in valid_methods:
                     raise ValueError(f"Invalid 'method' parameter '{method}' for compute_metrics_within_group operation. Must be one of: {valid_methods}")
                 
-                if metric_col not in df.columns:
+                # Case-insensitive metric column lookup
+                metric_col_lower = metric_col.lower()
+                if metric_col_lower in df_cols_lower:
+                    # Resolve to actual column name
+                    resolved_metric_col = df_cols_lower[metric_col_lower]
+                    item['metric_col'] = resolved_metric_col  # Update the item with resolved name
+                else:
                     raise ValueError(f"Metric column '{metric_col}' not found in dataframe")
                 
                 # Validate metric column is numeric (except for count and nunique which work on any column)
                 if method not in ['count', 'nunique']:
-                    if not pd.api.types.is_numeric_dtype(df[metric_col]):
+                    if not pd.api.types.is_numeric_dtype(df[resolved_metric_col]):
                         raise ValueError(f"Metric column '{metric_col}' must be numeric for compute_metrics_within_group operation with method '{method}'")
             
             # Use identifiers exactly as provided from frontend (no filtering)
@@ -1606,6 +1626,10 @@ def perform_createcolumn_task(
                 elif method == 'nunique':
                     # Nunique: number of unique values - handled separately
                     continue
+                elif method == 'rank':
+                    # Rank: first aggregate with 'first', then apply rank() - handled separately
+                    agg_dict[f"{new_col}_for_rank"] = pd.NamedAgg(column=metric_col, aggfunc="first")
+                    continue
                 elif method == 'rank_pct':
                     # Rank percentile: first aggregate with 'first', then apply rank(pct=True) - handled separately
                     agg_dict[f"{new_col}_for_rank"] = pd.NamedAgg(column=metric_col, aggfunc="first")
@@ -1629,7 +1653,11 @@ def perform_createcolumn_task(
                 # If only count/nunique, create empty grouped dataframe with identifiers
                 grouped = df[operation_identifiers].drop_duplicates().reset_index(drop=True)
             
-            # Handle count, nunique, and rank_pct separately (they need special handling)
+            # Handle count, nunique, rank, and rank_pct separately (they need special handling)
+            # - count: counts rows per group
+            # - nunique: counts unique values per group
+            # - rank: ranks values within group (1, 2, 3, ...)
+            # - rank_pct: ranks as percentile within group (0-1)
             for item in metric_cols_list:
                 metric_col = item['metric_col']
                 method = str(item['method']).lower()
@@ -1643,6 +1671,11 @@ def perform_createcolumn_task(
                     # Nunique: number of unique values in metric_col per group
                     nunique_grouped = df.groupby(operation_identifiers)[metric_col].nunique().reset_index(name=new_col)
                     grouped = grouped.merge(nunique_grouped, on=operation_identifiers, how='left')
+                elif method == 'rank':
+                    # Rank: apply rank() on the aggregated values (returns integer rank)
+                    if f"{new_col}_for_rank" in grouped.columns:
+                        grouped[new_col] = grouped[f"{new_col}_for_rank"].rank(method='dense', ascending=False)
+                        grouped.drop(columns=[f"{new_col}_for_rank"], inplace=True)
                 elif method == 'rank_pct':
                     # Rank percentile: apply rank(pct=True) on the aggregated values
                     if f"{new_col}_for_rank" in grouped.columns:
@@ -1665,10 +1698,24 @@ def perform_createcolumn_task(
             if not columns:
                 raise ValueError("No columns provided for group_share_of_total operation")
             
-            # Validate that all specified columns exist in the dataframe
-            missing_cols = [col for col in columns if col not in df.columns]
+            # Create case-insensitive column mapping
+            df_cols_lower = {col.lower(): col for col in df.columns}
+            
+            # Map columns to actual dataframe columns (case-insensitive)
+            resolved_columns = []
+            missing_cols = []
+            for col in columns:
+                col_lower = col.lower()
+                if col_lower in df_cols_lower:
+                    resolved_columns.append(df_cols_lower[col_lower])
+                else:
+                    missing_cols.append(col)
+            
             if missing_cols:
                 raise ValueError(f"Columns not found for group_share_of_total operation: {missing_cols}")
+            
+            # Use resolved columns instead of original columns
+            columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
             import json
@@ -1694,18 +1741,24 @@ def perform_createcolumn_task(
             if not metric_cols_list:
                 raise ValueError("Missing 'metric_cols' parameter for group_share_of_total operation")
             
-            # Validate all metric columns
+            # Validate all metric columns (case-insensitive)
             for item in metric_cols_list:
                 if not isinstance(item, dict) or 'metric_col' not in item:
                     raise ValueError("Invalid metric_cols format. Each item must have 'metric_col'")
                 
                 metric_col = item['metric_col']
                 
-                if metric_col not in df.columns:
+                # Case-insensitive metric column lookup
+                metric_col_lower = metric_col.lower()
+                if metric_col_lower in df_cols_lower:
+                    # Resolve to actual column name
+                    resolved_metric_col = df_cols_lower[metric_col_lower]
+                    item['metric_col'] = resolved_metric_col  # Update the item with resolved name
+                else:
                     raise ValueError(f"Metric column '{metric_col}' not found in dataframe")
                 
                 # Validate metric column is numeric
-                if not pd.api.types.is_numeric_dtype(df[metric_col]):
+                if not pd.api.types.is_numeric_dtype(df[resolved_metric_col]):
                     raise ValueError(f"Metric column '{metric_col}' must be numeric for group_share_of_total operation")
             
             # Use identifiers exactly as provided from frontend (no filtering)
@@ -1782,10 +1835,24 @@ def perform_createcolumn_task(
             if not columns:
                 raise ValueError("No columns provided for group_contribution operation")
             
-            # Validate that all specified columns exist in the dataframe
-            missing_cols = [col for col in columns if col not in df.columns]
+            # Create case-insensitive column mapping
+            df_cols_lower = {col.lower(): col for col in df.columns}
+            
+            # Map columns to actual dataframe columns (case-insensitive)
+            resolved_columns = []
+            missing_cols = []
+            for col in columns:
+                col_lower = col.lower()
+                if col_lower in df_cols_lower:
+                    resolved_columns.append(df_cols_lower[col_lower])
+                else:
+                    missing_cols.append(col)
+            
             if missing_cols:
                 raise ValueError(f"Columns not found for group_contribution operation: {missing_cols}")
+            
+            # Use resolved columns instead of original columns
+            columns = resolved_columns
             
             # Get parameters from form_payload - support multiple metric columns
             import json
@@ -1811,18 +1878,24 @@ def perform_createcolumn_task(
             if not metric_cols_list:
                 raise ValueError("Missing 'metric_cols' parameter for group_contribution operation")
             
-            # Validate all metric columns
+            # Validate all metric columns (case-insensitive)
             for item in metric_cols_list:
                 if not isinstance(item, dict) or 'metric_col' not in item:
                     raise ValueError("Invalid metric_cols format. Each item must have 'metric_col'")
                 
                 metric_col = item['metric_col']
                 
-                if metric_col not in df.columns:
+                # Case-insensitive metric column lookup
+                metric_col_lower = metric_col.lower()
+                if metric_col_lower in df_cols_lower:
+                    # Resolve to actual column name
+                    resolved_metric_col = df_cols_lower[metric_col_lower]
+                    item['metric_col'] = resolved_metric_col  # Update the item with resolved name
+                else:
                     raise ValueError(f"Metric column '{metric_col}' not found in dataframe")
                 
                 # Validate metric column is numeric
-                if not pd.api.types.is_numeric_dtype(df[metric_col]):
+                if not pd.api.types.is_numeric_dtype(df[resolved_metric_col]):
                     raise ValueError(f"Metric column '{metric_col}' must be numeric for group_contribution operation")
             
             # Use identifiers exactly as provided from frontend (no filtering)

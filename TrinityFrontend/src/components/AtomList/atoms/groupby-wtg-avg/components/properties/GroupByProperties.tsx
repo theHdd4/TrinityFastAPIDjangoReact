@@ -716,48 +716,88 @@ const GroupByProperties: React.FC<GroupByPropertiesProps> = ({ atomId }) => {
             <CardHeader className="py-3">
               <CardTitle className="text-sm">Identifiers Selection</CardTitle>
             </CardHeader>
-            <CardContent className="py-3">
-              <div className="flex items-center space-x-2 pb-2 border-b mb-2">
-                <Checkbox
-                  id="select-all-identifiers"
-                  checked={(() => {
-                    const allSelected = identifierList.length > 0 &&
-                      identifierList.every(id => selectedIdentifiers.includes(id));
-                    console.log('🔍 [Identifiers Select All] Debug:', {
-                      identifierListLength: identifierList.length,
-                      selectedIdentifiersLength: selectedIdentifiers.length,
-                      identifierList: identifierList,
-                      selectedIdentifiers: selectedIdentifiers,
-                      allSelected: allSelected,
-                      checkResult: identifierList.every(id => {
-                        const included = selectedIdentifiers.includes(id);
-                        if (!included) {
-                          console.log(`  ❌ Missing: ${id}`);
-                        }
-                        return included;
-                      })
-                    });
-                    return allSelected;
-                  })()}
-                  onCheckedChange={(checked) => {
-                    userHasInteractedRef.current = true;
-                    console.log('🖱️ [Identifiers Select All] Clicked:', {
-                      checked,
-                      identifierList: identifierList,
-                      willSetTo: checked ? [...identifierList] : []
-                    });
-                    updateSettings(atomId, {
-                      selectedIdentifiers: checked ? [...identifierList] : []
-                    });
-                  }}
-                />
-                <label
-                  htmlFor="select-all-identifiers"
-                  className="text-xs font-medium cursor-pointer flex-1"
-                >
-                  Select All
-                </label>
-              </div>
+             <CardContent className="py-3">
+               <div className="flex items-center justify-between pb-2 border-b mb-2">
+                 <div className="flex items-center space-x-2">
+                   <Checkbox
+                     id="select-all-identifiers"
+                     checked={(() => {
+                       const allSelected = identifierList.length > 0 &&
+                         identifierList.every(id => selectedIdentifiers.includes(id));
+                       console.log('🔍 [Identifiers Select All] Debug:', {
+                         identifierListLength: identifierList.length,
+                         selectedIdentifiersLength: selectedIdentifiers.length,
+                         identifierList: identifierList,
+                         selectedIdentifiers: selectedIdentifiers,
+                         allSelected: allSelected,
+                         checkResult: identifierList.every(id => {
+                           const included = selectedIdentifiers.includes(id);
+                           if (!included) {
+                             console.log(`  ❌ Missing: ${id}`);
+                           }
+                           return included;
+                         })
+                       });
+                       return allSelected;
+                     })()}
+                     onCheckedChange={(checked) => {
+                       userHasInteractedRef.current = true;
+                       console.log('🖱️ [Identifiers Select All] Clicked:', {
+                         checked,
+                         identifierList: identifierList,
+                         willSetTo: checked ? [...identifierList] : []
+                       });
+                       updateSettings(atomId, {
+                         selectedIdentifiers: checked ? [...identifierList] : []
+                       });
+                     }}
+                   />
+                   <label
+                     htmlFor="select-all-identifiers"
+                     className="text-xs font-medium cursor-pointer"
+                   >
+                     Select All
+                   </label>
+                 </div>
+                 <div className="flex items-center space-x-2">
+                   <Checkbox
+                     id="select-informative-identifiers"
+                     checked={(() => {
+                       // Get identifiers with unique_count > 1
+                       const informativeIds = identifierList.filter(id => {
+                         const colInfo = columns.find((col: any) => col.column === id);
+                         return colInfo && colInfo.unique_count > 1;
+                       });
+                       // Check if all informative identifiers are selected
+                       const allInformativeSelected = informativeIds.length > 0 &&
+                         informativeIds.every(id => selectedIdentifiers.includes(id));
+                       return allInformativeSelected;
+                     })()}
+                     onCheckedChange={(checked) => {
+                       userHasInteractedRef.current = true;
+                       // Get identifiers with unique_count > 1
+                       const informativeIds = identifierList.filter(id => {
+                         const colInfo = columns.find((col: any) => col.column === id);
+                         return colInfo && colInfo.unique_count > 1;
+                       });
+                       console.log('🖱️ [Informative Identifiers] Clicked:', {
+                         checked,
+                         informativeIds: informativeIds,
+                         willSetTo: checked ? informativeIds : []
+                       });
+                       updateSettings(atomId, {
+                         selectedIdentifiers: checked ? informativeIds : []
+                       });
+                     }}
+                   />
+                   <label
+                     htmlFor="select-informative-identifiers"
+                     className="text-xs font-medium cursor-pointer"
+                   >
+                     Informative Columns
+                   </label>
+                 </div>
+               </div>
                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
                  {identifierList.map((identifier: string) => {
                   const isSelected = selectedIdentifiers.includes(identifier);

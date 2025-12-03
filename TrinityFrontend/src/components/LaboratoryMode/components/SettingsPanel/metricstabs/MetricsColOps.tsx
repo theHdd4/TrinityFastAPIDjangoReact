@@ -61,7 +61,7 @@ const allOperations: OperationType[] = [
   // { type: 'between_flag', name: 'Between Flag', icon: Filter, description: 'Check if value is between two values' },
   
   // Grouped metrics (placeholders)
-  { type: 'compute_metrics_within_group', name: 'Compute Metrics Within Group', icon: Users, description: 'Compute metrics within groups (sum, mean, median, max, min, count, nunique, rank_pct)' },
+  { type: 'compute_metrics_within_group', name: 'Compute Metrics Within Group', icon: Users, description: 'Compute metrics within groups (sum, mean, median, max, min, count, nunique, rank, rank_pct)' },
   // { type: 'group_sum', name: 'Group Sum', icon: Users, description: 'Sum within groups' },
   // { type: 'group_mean', name: 'Group Mean', icon: Users, description: 'Mean within groups' },
   // { type: 'group_median', name: 'Group Median', icon: Users, description: 'Median within groups' },
@@ -244,7 +244,7 @@ const operationFormulas: Record<string, string> = {
   'rolling_max': 'Rolling maximum over window',
   'cumulative_sum': 'Running cumulative sum',
   'growth_rate': 'Percentage growth rate: ((x(t) - x(t-n)) / x(t-n)) × 100',
-  'compute_metrics_within_group': 'Group aggregation: sum, mean, median, max, min, count, nunique, rank_pct',
+  'compute_metrics_within_group': 'Group aggregation: sum, mean, median, max, min, count, nunique, rank, rank_pct',
   'group_share_of_total': 'Column / Group Sum(Column)',
   'group_contribution': '(Group Sum / Overall Sum) × 100',
   'filter_rows_condition': 'Filter rows based on conditions (>, <, =, !=, >=, <=)',
@@ -2193,6 +2193,7 @@ const MetricsColOps: React.FC = () => {
                                           <SelectItem value="min" className="text-[10px]">Min</SelectItem>
                                           <SelectItem value="count" className="text-[10px]">Count</SelectItem>
                                           <SelectItem value="nunique" className="text-[10px]">Nunique</SelectItem>
+                                          <SelectItem value="rank" className="text-[10px]">Rank</SelectItem>
                                           <SelectItem value="rank_pct" className="text-[10px]">Rank Percentile</SelectItem>
                                         </SelectContent>
                                       </Select>
