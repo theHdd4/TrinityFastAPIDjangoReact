@@ -26,9 +26,9 @@ from apps.tenants.models import Tenant, Domain
 
 
 def main():
-    tenant_name = "Quant Matrix AI"
-    tenant_schema = "Quant_Matrix_AI_Schema"
-    primary_domain = os.getenv("PRIMARY_DOMAIN", "quantmatrix.ai")
+    tenant_name = "Quant Matrix AI test"
+    tenant_schema = "Quant_Matrix_AI_Schema_test"
+    primary_domain = "quantmatrixtest.com"
     seats_allowed = int(os.getenv("TENANT_SEATS", 20))
     project_cap = int(os.getenv("TENANT_PROJECT_CAP", 5))
     projects_allowed = ["Demo Project"]

@@ -3,10 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, ChevronLeft, GitBranch, FlaskConical, Presentation, Info, User, Building2, PanelLeft } from 'lucide-react';
+import { BarChart3, Target, Zap, Plus, ArrowRight, Search, TrendingUp, Brain, Users, ShoppingCart, LineChart, PieChart, Database, Sparkles, Layers, DollarSign, Megaphone, Monitor, LayoutGrid, Clock, Calendar, ChevronRight, ChevronLeft, ChevronDown, GitBranch, FlaskConical, Presentation, Info, User, Building2, PanelLeft } from 'lucide-react';
 import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API, TENANTS_API, ACCOUNTS_API } from '@/lib/api';
@@ -15,7 +14,8 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
 import { startProjectTransition } from '@/utils/projectTransition';
-import CreateNewProject from '@/components/AppList/apps/CreateNewProject';
+import CreateNewProject from './CreateNewProject';
+import Sidebar from './Sidebar';
 
 interface BackendApp {
   id: number;
@@ -50,48 +50,6 @@ const formatRelativeTime = (date: Date) => {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString();
-};
-
-// Mode Status Indicator Component
-const ModeStatusIndicator = ({ modes }: { modes: ModeStatus }) => {
-  const modeItems = [
-    { key: 'workflow', label: 'Workflow', icon: GitBranch, configured: modes.workflow },
-    { key: 'laboratory', label: 'Laboratory', icon: FlaskConical, configured: modes.laboratory },
-    { key: 'exhibition', label: 'Exhibition', icon: Presentation, configured: modes.exhibition },
-  ];
-
-  return (
-    <TooltipProvider delayDuration={200}>
-      <div className="flex items-center gap-1">
-        {modeItems.map((mode) => {
-          const Icon = mode.icon;
-          return (
-            <Tooltip key={mode.key}>
-              <TooltipTrigger asChild>
-                <div
-                  className={cn(
-                    "flex items-center justify-center w-7 h-7 rounded-lg transition-all duration-300",
-                    mode.configured
-                      ? "bg-emerald-100 text-emerald-600"
-                      : "bg-muted/50 text-muted-foreground/40"
-                  )}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent 
-                side="bottom" 
-                sideOffset={8}
-                className="text-xs z-[9999]"
-              >
-                <p>{mode.configured ? `${mode.label} configured` : `${mode.label} not configured`}</p>
-              </TooltipContent>
-            </Tooltip>
-          );
-        })}
-      </div>
-    </TooltipProvider>
-  );
 };
 
 // Horizontal Scroll Container Component
@@ -1083,161 +1041,49 @@ const Apps = () => {
     ...(playIntro ? { opacity: 0 } : {}),
   });
 
+  // Calculate sidebar width based on state
+  const sidebarWidth = sidebarOpen ? 260 : 48; // 48px (icon) + 212px (expanded) = 260px when open
+
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-br from-background via-background to-secondary/20">
+    <div className="relative bg-gradient-to-br from-background via-background to-secondary/20">
       {/* Background Animation */}
       <div
-        className="pointer-events-none absolute inset-0 z-0 animate-fade-in"
+        className="pointer-events-none fixed inset-0 z-0 animate-fade-in"
         style={animationStyle(0)}
       >
         <GreenGlyphRain className="pointer-events-none opacity-90" />
       </div>
 
-      <div className="relative z-10 flex min-h-screen flex-col">
-        {/* Header */}
-        <div className="animate-slide-in-from-top" style={animationStyle(0.2)}>
-          <Header 
-            sidebarOpen={sidebarOpen}
-            onSidebarToggle={() => setSidebarOpen(!sidebarOpen)}
-          />
-        </div>
+      {/* Fixed Header */}
+      <div className="fixed top-0 left-0 right-0 z-50 animate-slide-in-from-top" style={animationStyle(0.2)}>
+        <Header 
+          sidebarOpen={sidebarOpen}
+          onSidebarToggle={() => setSidebarOpen(!sidebarOpen)}
+        />
+      </div>
 
-        {/* Main Content Area with Sidebar */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Sidebar */}
-          <div
-            className={cn(
-              "bg-card border-r border-border transition-all duration-300 ease-in-out flex flex-col shrink-0 overflow-hidden",
-              sidebarOpen ? "w-[260px]" : "w-0"
-            )}
-            style={{
-              height: 'calc(100vh - 80px)',
-            }}
-          >
-            <div className={cn(
-              "p-4 flex flex-col h-full transition-opacity duration-300 relative",
-              sidebarOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-            )}>
-              {/* Sidebar Toggle Button - Inside Sidebar */}
-              {sidebarOpen && (
-                <div className="absolute top-4 right-4 z-20">
-                  <button
-                    type="button"
-                    onClick={() => setSidebarOpen(!sidebarOpen)}
-                    className="p-2 rounded-lg bg-muted hover:bg-muted/80 transition-colors shadow-sm"
-                    title="Toggle Sidebar"
-                    aria-label="Toggle Sidebar"
-                  >
-                    <PanelLeft className="w-4 h-4 text-foreground" />
-                  </button>
-                </div>
-              )}
-              {/* Menu Options */}
-              <div className="flex-1 space-y-1 mt-8">
-                <button
-                  onClick={() => setActiveTab('my-projects')}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                    activeTab === 'my-projects'
-                      ? "bg-yellow-100 text-foreground"
-                      : "text-foreground hover:bg-muted"
-                  )}
-                >
-                  <User className="w-4 h-4 shrink-0" style={{ color: '#FFE28A' }} />
-                  <span className="truncate">Your Workspace</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('workspace')}
-                  className={cn(
-                    "w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                    activeTab === 'workspace'
-                      ? "bg-blue-100 text-foreground"
-                      : "text-foreground hover:bg-muted"
-                  )}
-                >
-                  <Building2 className="w-4 h-4 shrink-0 text-blue-400" />
-                  <span className="truncate">Companies Workspace</span>
-                </button>
-                
-                {/* Divider */}
-                <div className="my-2 border-t border-border"></div>
-                
-                {/* Application Navigation */}
-                <button
-                  onClick={() => {
-                    const element = document.getElementById('custom-applications-section');
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-foreground hover:bg-muted"
-                >
-                  <Plus className="w-4 h-4 shrink-0" />
-                  <span className="truncate">Custom Application</span>
-                </button>
-                <button
-                  onClick={() => {
-                    const element = document.getElementById('all-applications-section');
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-foreground hover:bg-muted"
-                >
-                  <Sparkles className="w-4 h-4 shrink-0" />
-                  <span className="truncate">All Application</span>
-                </button>
-              </div>
+      {/* Fixed Sidebar */}
+      <Sidebar
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        userName={userName}
+        user={user}
+        myProjectsCount={myProjectsState.length}
+        recentProjectsCount={recentProjectsState.length}
+        appsCount={apps.length}
+      />
 
-              {/* User Info - At Bottom */}
-              <div className="mt-auto pt-4 pb-4 border-t border-border">
-                <div className="flex items-center justify-center gap-2">
-                  <div className="w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-semibold">
-                    {(userName || user?.username || 'User').charAt(0).toUpperCase()}
-                  </div>
-                  <span className="text-sm font-semibold">{userName || user?.username || 'User'}</span>
-                </div>
-              </div>
-
-              {/* Project Statistics - At Bottom */}
-              <div className="pt-4 border-t border-border">
-                <h3 className="text-xs font-semibold text-foreground mb-2">Project Statistics</h3>
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-muted-foreground">Your Projects</span>
-                    <span className="font-medium">{myProjectsState.length}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-muted-foreground">Company Projects</span>
-                    <span className="font-medium">{recentProjectsState.length}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-muted-foreground">Total Applications</span>
-                    <span className="font-medium">{apps.length}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Content */}
-          <div className="flex-1 overflow-hidden min-w-0 relative">
-            {/* Sidebar Toggle Button - Only show when sidebar is closed */}
-            {!sidebarOpen && (
-              <div className="absolute top-4 left-4 z-20">
-                <button
-                  type="button"
-                  onClick={() => setSidebarOpen(!sidebarOpen)}
-                  className="p-2 rounded-lg bg-card border border-border hover:bg-muted transition-colors shadow-sm"
-                  title="Toggle Sidebar"
-                  aria-label="Toggle Sidebar"
-                >
-                  <PanelLeft className="w-5 h-5 text-foreground" />
-                </button>
-              </div>
-            )}
-            <ScrollArea className="h-[calc(100vh-80px)]">
-              {/* Search & Filters */}
+      {/* Main Content - Normal document flow with margins */}
+      <div 
+        className="relative z-10"
+        style={{
+          marginTop: '80px',
+          marginLeft: `${sidebarWidth}px`,
+        }}
+      >
+            {/* Search & Filters */}
               <div className="max-w-7xl mx-auto px-6 pt-8 pb-6">
             <div className="animate-fade-in" style={animationStyle(0.4)}>
               <div className="flex items-center gap-4">
@@ -1606,9 +1452,6 @@ const Apps = () => {
               "The Matrix has you" – pick your path
             </div>
           </div>
-            </ScrollArea>
-          </div>
-        </div>
       </div>
       
       {/* Create New Project Dialog */}
