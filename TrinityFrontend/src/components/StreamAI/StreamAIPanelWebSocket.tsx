@@ -2157,7 +2157,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         console.log('🔌 WebSocket closed', { code: event.code, reason: event.reason, wasClean: event.wasClean });
         stopAutoRun();
         setWsConnection(null);
-        
+
+        // Treat missing close code (1005) as a clean shutdown and inform the user
+        if (event.code === 1005 && event.wasClean) {
+          updateProgress('\n\nℹ️ Connection finished without a close code. Ready for the next prompt.');
+        }
+
         // CRITICAL: If connection closed unexpectedly (not clean), ensure message is saved
         if (!event.wasClean && event.code !== 1000) {
           console.warn('⚠️ WebSocket closed unexpectedly, ensuring message is persisted');
@@ -2166,12 +2171,12 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             if (currentChat) {
               const updatedChat: Chat = {
                 ...currentChat,
-                messages: currentChat.messages.some(m => m.id === userMessage.id) 
-                  ? currentChat.messages 
+                messages: currentChat.messages.some(m => m.id === userMessage.id)
+                  ? currentChat.messages
                   : [...currentChat.messages, userMessage],
               };
               memoryPersistSkipRef.current = false;
-              persistChatToMemory(updatedChat).catch(err => 
+              persistChatToMemory(updatedChat).catch(err =>
                 console.error('Failed to persist on close:', err)
               );
             }
@@ -2179,7 +2184,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             console.error('Failed to persist message on WebSocket close:', persistError);
           }
         }
-        
+
         // 🔧 CRITICAL FIX: Set loading to false ONLY when WebSocket connection closes
         // This ensures the loading icon tracks the complete process until the connection is fully closed
         setIsLoading(false);
