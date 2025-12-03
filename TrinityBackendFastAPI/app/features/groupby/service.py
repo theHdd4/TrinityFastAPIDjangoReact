@@ -17,6 +17,7 @@ from minio.error import S3Error
 from app.core.feature_cache import feature_cache
 from app.features.column_classifier.database import get_classifier_config_from_mongo
 from app.features.groupby_weighted_avg.groupby.base import perform_groupby as _perform_groupby
+from app.features.groupby.year_utils import _ensure_year_identifier
 
 logger = logging.getLogger("app.features.groupby.service")
 
@@ -141,7 +142,29 @@ def perform_groupby_task(
         list(identifiers),
     )
     frame = load_dataframe(bucket_name, source_object)
-    grouped = _perform_groupby(frame, list(identifiers), dict(aggregations))
+
+    try:
+        frame, normalized_identifiers, derived_from = _ensure_year_identifier(
+            frame, identifiers
+        )
+        if derived_from:
+            logger.info(
+                "✅ Added synthetic 'year' column from %s to satisfy groupby identifiers",
+                derived_from,
+            )
+    except ValueError as exc:  # Surface guidance instead of crashing
+        message = str(exc)
+        logger.warning("⚠️ %s", message)
+        return {
+            "status": "FAILED",
+            "success": False,
+            "message": message,
+            "result_file": None,
+            "row_count": 0,
+            "columns": list(frame.columns),
+        }
+
+    grouped = _perform_groupby(frame, list(normalized_identifiers), dict(aggregations))
     grouped = grouped.reset_index(drop=True)
 
     csv_bytes = grouped.to_csv(index=False).encode("utf-8")
@@ -156,6 +179,7 @@ def perform_groupby_task(
 
     return {
         "status": "SUCCESS",
+        "success": True,
         "message": "GroupBy complete",
         "result_file": result_filename,
         "row_count": int(grouped.shape[0]),
