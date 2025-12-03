@@ -2038,6 +2038,50 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
           }
 
+          case 'react_generation_status': {
+            console.log('🧠 ReAct generation status:', data);
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const attemptLabel = data.attempt ? ` (attempt ${data.attempt})` : '';
+            const timeoutLabel = data.timed_out ? ' (timeout; replanning...)' : '';
+            const elapsedLabel = typeof data.elapsed_seconds === 'number'
+              ? ` after ${data.elapsed_seconds}s`
+              : '';
+            const progressUpdate = `\n\n🧠 Planning step ${stepNumber}${attemptLabel}${elapsedLabel}: ${data.message || 'Generating next action...'}${timeoutLabel}`;
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: data.timed_out ? 'retrying' : 'thinking',
+                  description: data.message || steps[existingIndex]?.description || 'Planning next action...',
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
           case 'react_validation_blocked': {
             console.warn('⛔ ReAct validation blocked:', data);
             const stepNumber = data.step_number ?? data.step ?? '?';
