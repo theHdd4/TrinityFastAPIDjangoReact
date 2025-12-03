@@ -2037,7 +2037,49 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             updateProgress(progressUpdate);
             break;
           }
-            
+
+          case 'react_action': {
+            console.log('⚡ ReAct action event:', data);
+
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const description = data.description || data.message || data.atom_id || 'Running step...';
+            const progressUpdate = `\n\n⚡ Executing step ${stepNumber}: ${description}`;
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: 'running',
+                  atom_id: data.atom_id || steps[existingIndex]?.atom_id,
+                  description,
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
           case 'text_reply':
             // Handle direct text reply (for general questions)
             console.log('💬 Text reply received:', data.message);
