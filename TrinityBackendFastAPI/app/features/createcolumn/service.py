@@ -259,6 +259,7 @@ def perform_createcolumn_task(
             key.endswith("_customValue") or
             key.endswith("_frequency") or
             key.endswith("_comparison_type") or
+            key.endswith("_fiscal_start_month") or  # For fiscal_mapping
             "_condition_" in key or  # For filter_rows_condition: condition_0_operator, condition_0_value, etc.
             (key.endswith("_operator") and "_condition_" in key) or  # Only skip operator if it's part of condition
             (key.endswith("_value") and "_condition_" in key) or  # Only skip value if it's part of condition
@@ -398,6 +399,276 @@ def perform_createcolumn_task(
                 df[new_col] = date_series.dt.month_name()
             else:
                 raise ValueError(f"Invalid datetime param: {param}")
+            new_cols_total.append(new_col)
+        elif op == "fiscal_mapping":
+            date_col = columns[0]
+            if date_col not in df.columns:
+                raise ValueError(f"Column '{date_col}' not found for fiscal_mapping operation")
+            
+            # Get parameters
+            param = form_payload.get(f"{op}_{op_idx}_param")  # e.g., "fiscal_year", "fiscal_quarter", "fiscal_month"
+            fiscal_start_month = int(form_payload.get(f"{op}_{op_idx}_fiscal_start_month", 1))  # default January
+            
+            if param is None:
+                raise ValueError("Missing `param` for fiscal_mapping operation")
+            
+            # Convert to datetime
+            date_series = pd.to_datetime(df[date_col], errors="coerce")
+            
+            if param == "fiscal_year":
+                # Map to fiscal year (e.g., FY23, FY24)
+                new_col = rename_val or f"{date_col}_fiscal_year"
+                # Check if column name already exists
+                if new_col in df.columns:
+                    raise ValueError(f"Column name '{new_col}' already exists in the uploaded file. Please provide a unique name.")
+                df[new_col] = date_series.apply(
+                    lambda x: f"FY{(x.year + 1) % 100:02d}" if pd.notna(x) and x.month >= fiscal_start_month 
+                    else f"FY{x.year % 100:02d}" if pd.notna(x) else None
+                )
+            elif param == "fiscal_quarter":
+                # Map to fiscal quarter (e.g., FY23-Q1, FY23-Q2)
+                def get_fiscal_quarter(dt):
+                    if pd.isna(dt):
+                        return None
+                    # Calculate fiscal year
+                    fiscal_year = (dt.year + 1) if dt.month >= fiscal_start_month else dt.year
+                    # Calculate quarter based on fiscal start month
+                    fiscal_month = (dt.month - fiscal_start_month) % 12 + 1
+                    fiscal_quarter = (fiscal_month - 1) // 3 + 1
+                    return f"FY{fiscal_year % 100:02d}-Q{fiscal_quarter}"
+                
+                new_col = rename_val or f"{date_col}_fiscal_quarter"
+                # Check if column name already exists
+                if new_col in df.columns:
+                    raise ValueError(f"Column name '{new_col}' already exists in the uploaded file. Please provide a unique name.")
+                df[new_col] = date_series.apply(get_fiscal_quarter)
+            elif param == "fiscal_month":
+                # Map to fiscal month (e.g., FY23-M01, FY23-M02)
+                def get_fiscal_month(dt):
+                    if pd.isna(dt):
+                        return None
+                    # Calculate fiscal year
+                    fiscal_year = (dt.year + 1) if dt.month >= fiscal_start_month else dt.year
+                    # Calculate fiscal month
+                    fiscal_month = (dt.month - fiscal_start_month) % 12 + 1
+                    return f"FY{fiscal_year % 100:02d}-M{fiscal_month:02d}"
+                
+                new_col = rename_val or f"{date_col}_fiscal_month"
+                # Check if column name already exists
+                if new_col in df.columns:
+                    raise ValueError(f"Column name '{new_col}' already exists in the uploaded file. Please provide a unique name.")
+                df[new_col] = date_series.apply(get_fiscal_month)
+            elif param == "fiscal_year_full":
+                # Map to full fiscal year (e.g., FY2023, FY2024)
+                new_col = rename_val or f"{date_col}_fiscal_year_full"
+                # Check if column name already exists
+                if new_col in df.columns:
+                    raise ValueError(f"Column name '{new_col}' already exists in the uploaded file. Please provide a unique name.")
+                df[new_col] = date_series.apply(
+                    lambda x: f"FY{x.year + 1}" if pd.notna(x) and x.month >= fiscal_start_month 
+                    else f"FY{x.year}" if pd.notna(x) else None
+                )
+            else:
+                raise ValueError(f"Invalid fiscal_mapping param: {param}")
+            
+            new_cols_total.append(new_col)
+        elif op == "is_weekend":
+            date_col = columns[0]
+            if date_col not in df.columns:
+                raise ValueError(f"Column '{date_col}' not found for is_weekend operation")
+            
+            # Convert to datetime
+            date_series = pd.to_datetime(df[date_col], errors="coerce")
+            
+            # Check if day of week is Saturday (5) or Sunday (6)
+            new_col = rename_val or f"{date_col}_is_weekend"
+            # Check if column name already exists
+            if new_col in df.columns:
+                raise ValueError(f"Column name '{new_col}' already exists in the uploaded file. Please provide a unique name.")
+            df[new_col] = date_series.dt.dayofweek.isin([5, 6])
+            
+            new_cols_total.append(new_col)
+        elif op == "is_month_end":
+            date_col = columns[0]
+            if date_col not in df.columns:
+                raise ValueError(f"Column '{date_col}' not found for is_month_end operation")
+            
+            # Convert to datetime
+            date_series = pd.to_datetime(df[date_col], errors="coerce")
+            
+            # Check if date is the last day of the month
+            new_col = rename_val or f"{date_col}_is_month_end"
+            # Check if column name already exists
+            if new_col in df.columns:
+                raise ValueError(f"Column name '{new_col}' already exists in the uploaded file. Please provide a unique name.")
+            df[new_col] = date_series.dt.is_month_end
+            
+            new_cols_total.append(new_col)
+        elif op == "is_qtr_end":
+            date_col = columns[0]
+            if date_col not in df.columns:
+                raise ValueError(f"Column '{date_col}' not found for is_qtr_end operation")
+            
+            # Convert to datetime
+            date_series = pd.to_datetime(df[date_col], errors="coerce")
+            
+            # Check if date is the last day of the quarter
+            new_col = rename_val or f"{date_col}_is_qtr_end"
+            # Check if column name already exists
+            if new_col in df.columns:
+                raise ValueError(f"Column name '{new_col}' already exists in the uploaded file. Please provide a unique name.")
+            df[new_col] = date_series.dt.is_quarter_end
+            
+            new_cols_total.append(new_col)
+        elif op == "date_builder":
+            # Build date from components: supports multiple modes
+            # Mode is determined by the 'param' field
+            if len(columns) < 1:
+                raise ValueError("date_builder requires at least one column (year)")
+            
+            # Get the mode parameter (default: from_year_month_day)
+            mode = form_payload.get(f"{op}_{op_idx}_param") or "from_year_month_day"
+            
+            year_col = columns[0] if len(columns) > 0 else None
+            second_col = columns[1] if len(columns) > 1 else None  # month or week
+            third_col = columns[2] if len(columns) > 2 else None   # day, week, or dayofweek
+            
+            # Validate year column exists
+            if year_col and year_col not in df.columns:
+                raise ValueError(f"Year column '{year_col}' not found for date_builder operation")
+            
+            # Build the date column name
+            new_col = rename_val or "built_date"
+            
+            # Check if column name already exists
+            if new_col in df.columns:
+                raise ValueError(f"Column name '{new_col}' already exists in the uploaded file. Please provide a unique name.")
+            
+            # Build date from components
+            try:
+                if mode == "from_year_week":
+                    # Build from year + ISO week (defaults to Monday of that week)
+                    if not year_col:
+                        raise ValueError("Year column is required")
+                    
+                    if second_col and second_col not in df.columns:
+                        raise ValueError(f"Week column '{second_col}' not found")
+                    
+                    if year_col and second_col:
+                        # Year + Week (defaults to Monday - day 1)
+                        date_string = (
+                            df[year_col].astype(str) + '-W' + 
+                            df[second_col].astype(str).str.zfill(2) + '-1'
+                        )
+                        df[new_col] = pd.to_datetime(date_string, format='%Y-W%W-%w', errors='coerce')
+                    else:
+                        raise ValueError("Year and week columns are required")
+                elif mode == "from_year_week_dayofweek":
+                    # Build from year + ISO week + day of week
+                    # second_col = week, third_col = dayofweek (1=Monday, 7=Sunday)
+                    if not year_col:
+                        raise ValueError("Year column is required for week-based date building")
+                    
+                    if second_col and second_col not in df.columns:
+                        raise ValueError(f"Week column '{second_col}' not found")
+                    if third_col and third_col not in df.columns:
+                        raise ValueError(f"Day of week column '{third_col}' not found")
+                    
+                    if year_col and second_col and third_col:
+                        # Year + Week + Day of Week
+                        # Use ISO week date format: combine year, week, dayofweek into string
+                        date_string = (
+                            df[year_col].astype(str) + '-W' + 
+                            df[second_col].astype(str).str.zfill(2) + '-' + 
+                            df[third_col].astype(str)
+                        )
+                        df[new_col] = pd.to_datetime(date_string, format='%Y-W%W-%w', errors='coerce')
+                    elif year_col and second_col:
+                        # Year + Week (defaults to Monday)
+                        date_string = (
+                            df[year_col].astype(str) + '-W' + 
+                            df[second_col].astype(str).str.zfill(2) + '-1'
+                        )
+                        df[new_col] = pd.to_datetime(date_string, format='%Y-W%W-%w', errors='coerce')
+                    else:
+                        raise ValueError("Week-based date building requires at least year and week columns")
+                elif mode == "from_year_month_week":
+                    # Build from year + month + week (week number within the month)
+                    # Creates date for the first day of that week within the month
+                    if not year_col or not second_col or not third_col:
+                        raise ValueError("Year, month, and week columns are all required")
+                    
+                    month_col = second_col
+                    week_col = third_col
+                    
+                    if month_col not in df.columns:
+                        raise ValueError(f"Month column '{month_col}' not found")
+                    if week_col not in df.columns:
+                        raise ValueError(f"Week column '{week_col}' not found")
+                    
+                    # Calculate the date: first day of month + (week-1) * 7 days
+                    # But ensure the date stays within the same month
+                    temp_df = df[[year_col, month_col]].copy()
+                    temp_df['day'] = 1
+                    first_day = pd.to_datetime(
+                        temp_df.rename(columns={year_col: 'year', month_col: 'month'}),
+                        errors='coerce'
+                    )
+                    
+                    # Add (week_number - 1) * 7 days to get to that week
+                    weeks_to_add = (df[week_col].astype(int) - 1) * 7
+                    result_date = first_day + pd.to_timedelta(weeks_to_add, unit='D')
+                    
+                    # Get the last day of the specified month
+                    # (first day of next month - 1 day)
+                    next_month = first_day + pd.offsets.MonthEnd(0)
+                    
+                    # Clamp the result date to stay within the same month
+                    # If result_date is beyond the month, use the last day of the month
+                    df[new_col] = pd.Series([
+                        min(rd, nm) if pd.notna(rd) and pd.notna(nm) else rd
+                        for rd, nm in zip(result_date, next_month)
+                    ])
+                else:
+                    # Default mode: Build from year + month + day
+                    month_col = second_col
+                    day_col = third_col
+                    
+                    if month_col and month_col not in df.columns:
+                        raise ValueError(f"Month column '{month_col}' not found")
+                    if day_col and day_col not in df.columns:
+                        raise ValueError(f"Day column '{day_col}' not found")
+                    
+                    if year_col and month_col and day_col:
+                        # Full date: year + month + day
+                        df[new_col] = pd.to_datetime(
+                            df[[year_col, month_col, day_col]].rename(
+                                columns={year_col: 'year', month_col: 'month', day_col: 'day'}
+                            ),
+                            errors='coerce'
+                        )
+                    elif year_col and month_col:
+                        # Year + month only (day defaults to 1)
+                        temp_df = df[[year_col, month_col]].copy()
+                        temp_df['day'] = 1
+                        df[new_col] = pd.to_datetime(
+                            temp_df.rename(columns={year_col: 'year', month_col: 'month'}),
+                            errors='coerce'
+                        )
+                    elif year_col:
+                        # Year only (month and day default to 1)
+                        temp_df = df[[year_col]].copy()
+                        temp_df['month'] = 1
+                        temp_df['day'] = 1
+                        df[new_col] = pd.to_datetime(
+                            temp_df.rename(columns={year_col: 'year'}),
+                            errors='coerce'
+                        )
+                    else:
+                        raise ValueError("date_builder requires at least a year column")
+            except Exception as e:
+                raise ValueError(f"Failed to build date from components: {str(e)}")
+            
             new_cols_total.append(new_col)
         elif op == "rpi":
             df, rpi_cols = compute_rpi(df, columns)
