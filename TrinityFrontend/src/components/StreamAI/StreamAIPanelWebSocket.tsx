@@ -2038,6 +2038,88 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             break;
           }
 
+          case 'react_validation_blocked': {
+            console.warn('⛔ ReAct validation blocked:', data);
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const blockMessage = data.message || 'Validation blocked this step.';
+            const progressUpdate = `\n\n⛔ Validation blocked for step ${stepNumber}: ${blockMessage}`;
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: 'blocked',
+                  atom_id: data.atom_id || steps[existingIndex]?.atom_id,
+                  description: blockMessage,
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
+          case 'react_thought': {
+            console.log('🧠 ReAct thought event:', data);
+            const stepNumber = data.step_number ?? data.step ?? '?';
+            const thoughtMessage = data.message || 'Thinking...';
+            const progressUpdate = `\n\n🧠 Step ${stepNumber} thinking: ${thoughtMessage}`;
+            updateProgress(progressUpdate);
+
+            setMessages(prev => prev.map(msg => {
+              if (msg.type === 'workflow_monitor' && msg.data?.sequence_id === data.sequence_id) {
+                const steps = msg.data.steps || [];
+                const existingIndex = steps.findIndex((s: any) => s.step_number === stepNumber);
+                const updatedStep = {
+                  ...(existingIndex >= 0 ? steps[existingIndex] : {}),
+                  step_number: stepNumber,
+                  status: data.loading ? 'thinking' : steps[existingIndex]?.status || 'running',
+                  atom_id: data.atom_id || steps[existingIndex]?.atom_id,
+                  description: thoughtMessage,
+                };
+
+                const updatedSteps = [...steps];
+                if (existingIndex >= 0) {
+                  updatedSteps[existingIndex] = updatedStep;
+                } else {
+                  updatedSteps.push(updatedStep);
+                }
+
+                return {
+                  ...msg,
+                  data: {
+                    ...msg.data,
+                    currentStep: stepNumber,
+                    steps: updatedSteps,
+                  },
+                };
+              }
+              return msg;
+            }));
+
+            break;
+          }
+
           case 'react_action': {
             console.log('⚡ ReAct action event:', data);
 
