@@ -8,6 +8,7 @@ Implements the Trinity AI streaming pattern for card and result handling.
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import logging
@@ -302,6 +303,7 @@ class StreamWebSocketOrchestrator:
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
         self._sequence_intent_routing: Dict[str, Dict[str, Any]] = {}
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
+        self._sequence_step_plans: Dict[str, Dict[int, WorkflowStepPlan]] = {}  # Track executed step plans per sequence
         self._paused_sequences: Set[str] = set()
 
         # Safety guards
@@ -3007,6 +3009,9 @@ WORKFLOW PLANNING:
                 
                 # Update step number from generated step
                 next_step.step_number = current_step_number
+
+                # Cache the generated plan for potential replays/recovery
+                self._sequence_step_plans.setdefault(sequence_id, {})[current_step_number] = copy.deepcopy(next_step)
                 
                 # ENHANCED LOOP DETECTION: Check if we're repeating the same atom with same files
                 if execution_history:
@@ -3097,6 +3102,23 @@ WORKFLOW PLANNING:
                         )
                     except (WebSocketDisconnect, Exception) as e:
                         logger.warning(f"⚠️ Failed to send validation_blocked event: {e}")
+
+                    # Attempt to replay the previous step to materialize the needed output when missing
+                    replayed_previous = False
+                    if "No materialized output from prior step" in validation_reason:
+                        replayed_previous = await self._replay_previous_step_for_output(
+                            websocket=websocket,
+                            sequence_id=sequence_id,
+                            execution_history=execution_history,
+                            project_context=project_context,
+                            user_id=user_id,
+                            original_prompt=effective_user_prompt,
+                            available_files=available_files,
+                            frontend_chat_id=frontend_chat_id,
+                            react_state=react_state,
+                        )
+                        if replayed_previous:
+                            logger.info("🔄 ReAct: Previous step re-executed to produce materialized output; retrying current step plan")
 
                     # Re-plan without advancing the step counter
                     current_step_number = max(0, current_step_number - 1)
@@ -3931,6 +3953,125 @@ WORKFLOW PLANNING:
             return False, "Previous atom produced an empty dataset; review before continuing."
 
         return True, ""
+
+    async def _replay_previous_step_for_output(
+        self,
+        websocket,
+        sequence_id: str,
+        execution_history: List[Dict[str, Any]],
+        project_context: Dict[str, Any],
+        user_id: str,
+        original_prompt: str,
+        available_files: List[str],
+        frontend_chat_id: Optional[str],
+        react_state: Optional[ReActState],
+    ) -> bool:
+        """Re-execute the prior step when chaining fails due to missing materialized output."""
+
+        if not execution_history:
+            logger.warning("⚠️ ReAct: Cannot replay previous step because there is no execution history")
+            return False
+
+        last_entry = execution_history[-1]
+        step_number = last_entry.get("step_number")
+        if step_number is None:
+            logger.warning("⚠️ ReAct: Cannot replay previous step because the last entry has no step number")
+            return False
+
+        plan_lookup = self._sequence_step_plans.get(sequence_id, {})
+        step_plan = plan_lookup.get(step_number)
+        if not step_plan:
+            logger.warning(
+                "⚠️ ReAct: Cannot replay previous step %s because no cached plan exists for sequence %s",
+                step_number,
+                sequence_id,
+            )
+            return False
+
+        logger.info("🔁 ReAct: Replaying step %s (%s) to materialize output", step_number, step_plan.atom_id)
+
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "workflow_progress",
+                    {
+                        "sequence_id": sequence_id,
+                        "current_step": step_number,
+                        "total_steps": "?",
+                        "progress_percent": 0,
+                        "status": "retrying",
+                        "loading": True,
+                        "message": f"Replaying step {step_number} to obtain materialized output...",
+                    },
+                ),
+                "workflow_progress replay notice",
+            )
+        except (WebSocketDisconnect, Exception) as e:
+            logger.debug(f"⚠️ Failed to send replay progress event: {e}")
+
+        plan = WorkflowPlan(workflow_steps=[step_plan], total_steps=1)
+        current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+
+        try:
+            execution_result = await self._execute_step_with_events(
+                websocket=websocket,
+                step=step_plan,
+                plan=plan,
+                sequence_id=sequence_id,
+                original_prompt=original_prompt,
+                project_context=project_context,
+                user_id=user_id,
+                available_files=current_available_files,
+                frontend_chat_id=frontend_chat_id,
+            )
+        except Exception as exec_exc:
+            logger.error(f"❌ ReAct: Replay of step {step_number} failed: {exec_exc}")
+            return False
+
+        if not execution_result.get("success", True):
+            logger.warning(
+                "⚠️ ReAct: Replay of step %s did not succeed; cannot materialize output automatically", step_number
+            )
+            return False
+
+        try:
+            await self._auto_save_step(
+                sequence_id=sequence_id,
+                step_number=step_number,
+                workflow_step=step_plan,
+                available_files=current_available_files,
+                frontend_chat_id=frontend_chat_id,
+            )
+
+            saved_path = self._step_output_files.get(sequence_id, {}).get(step_number)
+            if saved_path:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "file_created",
+                        {
+                            "sequence_id": sequence_id,
+                            "step_number": step_number,
+                            "file_path": saved_path,
+                            "output_alias": step_plan.output_alias,
+                            "message": f"Replayed output available: {saved_path}",
+                            "available_for_next_steps": True,
+                        },
+                    ),
+                    "file_created replay event",
+                )
+        except Exception as save_exc:
+            logger.warning(f"⚠️ ReAct: Failed to auto-save replayed output for step {step_number}: {save_exc}")
+
+        last_entry["result"] = execution_result
+        last_entry["output_alias"] = step_plan.output_alias
+        last_entry["files_used"] = step_plan.files_used or []
+
+        if react_state:
+            react_state.execution_history = execution_history
+
+        return True
 
     def _normalize_alias_token(self, alias: str) -> str:
         """Normalize alias references (strip braces, spaces, lowercase)."""
@@ -5000,6 +5141,7 @@ WORKFLOW PLANNING:
         self._output_alias_registry.pop(sequence_id, None)
         self._chat_file_mentions.pop(sequence_id, None)
         self._sequence_react_state.pop(sequence_id, None)  # Cleanup ReAct state
+        self._sequence_step_plans.pop(sequence_id, None)
 
     def _load_persisted_chat_summary(
         self,
