@@ -304,6 +304,7 @@ class StreamWebSocketOrchestrator:
         self._sequence_intent_routing: Dict[str, Dict[str, Any]] = {}
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
         self._sequence_step_plans: Dict[str, Dict[int, WorkflowStepPlan]] = {}  # Track executed step plans per sequence
+        self._sequence_replay_counts: Dict[str, int] = {}
         self._paused_sequences: Set[str] = set()
 
         # Safety guards
@@ -348,6 +349,8 @@ class StreamWebSocketOrchestrator:
             self.atom_retry_attempts,
             self.atom_retry_delay,
         )
+
+        self.max_replay_attempts = 7
 
         self._memory_storage = memory_storage_module
         self._memory_summarizer = summarize_chat_messages
@@ -3105,6 +3108,11 @@ WORKFLOW PLANNING:
 
                     # Attempt to replay the previous step to materialize the needed output when missing
                     replayed_previous = False
+                    dependency_tokens: List[str] = []
+                    if next_step.files_used:
+                        dependency_tokens.extend(next_step.files_used)
+                    if next_step.inputs:
+                        dependency_tokens.extend(next_step.inputs)
                     if "No materialized output from prior step" in validation_reason:
                         replayed_previous = await self._replay_previous_step_for_output(
                             websocket=websocket,
@@ -3116,6 +3124,7 @@ WORKFLOW PLANNING:
                             available_files=available_files,
                             frontend_chat_id=frontend_chat_id,
                             react_state=react_state,
+                            dependency_tokens=dependency_tokens,
                         )
                         if replayed_previous:
                             logger.info("🔄 ReAct: Previous step re-executed to produce materialized output; retrying current step plan")
@@ -3965,8 +3974,41 @@ WORKFLOW PLANNING:
         available_files: List[str],
         frontend_chat_id: Optional[str],
         react_state: Optional[ReActState],
+        dependency_tokens: Optional[List[str]] = None,
     ) -> bool:
         """Re-execute the prior step when chaining fails due to missing materialized output."""
+
+        replay_count = self._sequence_replay_counts.get(sequence_id, 0)
+        if replay_count >= self.max_replay_attempts:
+            logger.warning(
+                "⚠️ ReAct: Replay budget exhausted (%s attempts); prompting user to retry",
+                self.max_replay_attempts,
+            )
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_progress",
+                        {
+                            "sequence_id": sequence_id,
+                            "current_step": None,
+                            "total_steps": "?",
+                            "progress_percent": 100,
+                            "status": "retry_required",
+                            "loading": False,
+                            "message": (
+                                "Unable to recover missing output automatically. "
+                                "Please retry the workflow or adjust the configuration."
+                            ),
+                        },
+                    ),
+                    "workflow_progress replay exhausted",
+                )
+            except (WebSocketDisconnect, Exception):
+                logger.debug("⚠️ Failed to send replay exhaustion notice", exc_info=True)
+            return False
+
+        self._sequence_replay_counts[sequence_id] = replay_count + 1
 
         if not execution_history:
             logger.warning("⚠️ ReAct: Cannot replay previous step because there is no execution history")
@@ -4010,13 +4052,19 @@ WORKFLOW PLANNING:
         except (WebSocketDisconnect, Exception) as e:
             logger.debug(f"⚠️ Failed to send replay progress event: {e}")
 
-        plan = WorkflowPlan(workflow_steps=[step_plan], total_steps=1)
         current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+        bound_plan = self._bind_operands_for_replay(
+            sequence_id=sequence_id,
+            step_plan=step_plan,
+            dependency_tokens=dependency_tokens or [],
+            available_files=current_available_files,
+        )
+        plan = WorkflowPlan(workflow_steps=[bound_plan], total_steps=1)
 
         try:
             execution_result = await self._execute_step_with_events(
                 websocket=websocket,
-                step=step_plan,
+                step=bound_plan,
                 plan=plan,
                 sequence_id=sequence_id,
                 original_prompt=original_prompt,
@@ -4039,7 +4087,7 @@ WORKFLOW PLANNING:
             await self._auto_save_step(
                 sequence_id=sequence_id,
                 step_number=step_number,
-                workflow_step=step_plan,
+                workflow_step=bound_plan,
                 available_files=current_available_files,
                 frontend_chat_id=frontend_chat_id,
             )
@@ -4048,30 +4096,71 @@ WORKFLOW PLANNING:
             if saved_path:
                 await self._send_event(
                     websocket,
-                    WebSocketEvent(
-                        "file_created",
-                        {
-                            "sequence_id": sequence_id,
-                            "step_number": step_number,
-                            "file_path": saved_path,
-                            "output_alias": step_plan.output_alias,
-                            "message": f"Replayed output available: {saved_path}",
-                            "available_for_next_steps": True,
-                        },
-                    ),
-                    "file_created replay event",
+                            WebSocketEvent(
+                                "file_created",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": step_number,
+                                    "file_path": saved_path,
+                                    "output_alias": bound_plan.output_alias,
+                                    "message": f"Replayed output available: {saved_path}",
+                                    "available_for_next_steps": True,
+                                },
+                            ),
+                            "file_created replay event",
                 )
         except Exception as save_exc:
             logger.warning(f"⚠️ ReAct: Failed to auto-save replayed output for step {step_number}: {save_exc}")
 
         last_entry["result"] = execution_result
-        last_entry["output_alias"] = step_plan.output_alias
-        last_entry["files_used"] = step_plan.files_used or []
+        last_entry["output_alias"] = bound_plan.output_alias
+        last_entry["files_used"] = bound_plan.files_used or []
 
         if react_state:
             react_state.execution_history = execution_history
 
         return True
+
+    def _bind_operands_for_replay(
+        self,
+        sequence_id: str,
+        step_plan: WorkflowStepPlan,
+        dependency_tokens: List[str],
+        available_files: List[str],
+    ) -> WorkflowStepPlan:
+        """Rebind a cached step plan to the latest operands before replaying."""
+
+        bound_plan = copy.deepcopy(step_plan)
+        resolved_operands: List[str] = []
+
+        def _append_if_available(token: str) -> None:
+            normalized = self._resolve_alias_value(sequence_id, token)
+            if normalized in available_files and normalized not in resolved_operands:
+                resolved_operands.append(normalized)
+
+        for token in dependency_tokens:
+            _append_if_available(token)
+
+        if not resolved_operands:
+            for token in bound_plan.files_used or []:
+                _append_if_available(token)
+            for token in bound_plan.inputs or []:
+                _append_if_available(token)
+
+        if not resolved_operands and available_files:
+            resolved_operands.append(available_files[-1])
+
+        if resolved_operands:
+            if bound_plan.files_used != resolved_operands:
+                logger.info(
+                    "🔧 ReAct: Rebinding replay operands for step %s -> %s",
+                    bound_plan.step_number,
+                    resolved_operands,
+                )
+            bound_plan.files_used = resolved_operands
+            bound_plan.inputs = resolved_operands
+
+        return bound_plan
 
     def _normalize_alias_token(self, alias: str) -> str:
         """Normalize alias references (strip braces, spaces, lowercase)."""
@@ -5142,6 +5231,7 @@ WORKFLOW PLANNING:
         self._chat_file_mentions.pop(sequence_id, None)
         self._sequence_react_state.pop(sequence_id, None)  # Cleanup ReAct state
         self._sequence_step_plans.pop(sequence_id, None)
+        self._sequence_replay_counts.pop(sequence_id, None)
 
     def _load_persisted_chat_summary(
         self,
