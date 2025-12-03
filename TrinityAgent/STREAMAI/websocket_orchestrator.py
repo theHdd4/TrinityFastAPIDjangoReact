@@ -299,6 +299,10 @@ class StreamWebSocketOrchestrator:
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
 
+        # Safety guards
+        self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
+        self.max_react_operations: int = 12  # Stop runaway execution loops
+
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
         self.merge_save_endpoint = f"{self.fastapi_base_url}/api/merge/save"
@@ -1416,6 +1420,17 @@ WORKFLOW PLANNING:
                 step_name="Workflow Generation",
                 max_attempts=3
             )
+
+            if len(workflow_steps) > self.max_initial_plan_steps:
+                logger.warning(
+                    "⚠️ Workflow generation returned %d steps; aborting to avoid an unmanageable plan",
+                    len(workflow_steps),
+                )
+                raise RetryableJSONGenerationError(
+                    f"Generated plan has {len(workflow_steps)} steps which exceeds the limit of {self.max_initial_plan_steps}",
+                    attempts=1,
+                    last_error=ValueError("plan_too_long"),
+                )
             
             # Post-process: Keep data-upload-validate if user mentions files (it will load them)
             # We no longer skip data-upload-validate - it's needed to load files into the atom
@@ -2575,6 +2590,7 @@ WORKFLOW PLANNING:
             current_step_number = 0
             execution_history: List[Dict[str, Any]] = []
             previous_results: List[Dict[str, Any]] = []
+            abort_due_complexity = False
             
             while not react_state.goal_achieved and current_step_number < max_steps:
                 if sequence_id in self._cancelled_sequences:
@@ -2592,7 +2608,30 @@ WORKFLOW PLANNING:
                         "workflow_stopped (ReAct loop)"
                     )
                     break
-                
+
+                if current_step_number >= self.max_react_operations:
+                    abort_due_complexity = True
+                    logger.warning(
+                        "🛑 ReAct: Aborting workflow after %d operations to prevent runaway plans",
+                        current_step_number,
+                    )
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_abort_complexity",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "message": "Workflow stopped: too many sequential operations; replan with a smaller set of actions.",
+                                },
+                            ),
+                            "react_abort_complexity event",
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send complexity abort event: {e}")
+                    break
+
                 current_step_number += 1
                 logger.info(f"🔄 ReAct Cycle {current_step_number}: Starting...")
                 
@@ -2775,7 +2814,41 @@ WORKFLOW PLANNING:
                 # ACTION: Execute the step
                 # ============================================================
                 logger.info(f"⚡ ReAct: ACTION - Executing step {current_step_number} ({next_step.atom_id})...")
-                
+
+                # Validate that the previous step produced sensible outputs before chaining
+                validation_passed, validation_reason = self._validate_chain_for_next_step(
+                    sequence_id=sequence_id,
+                    execution_history=execution_history,
+                    next_step=next_step,
+                )
+                if not validation_passed:
+                    logger.warning(
+                        "⚠️ ReAct: Blocking step %s due to failed dependency validation: %s",
+                        next_step.atom_id,
+                        validation_reason,
+                    )
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_validation_blocked",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "atom_id": next_step.atom_id,
+                                    "message": validation_reason,
+                                },
+                            ),
+                            "react_validation_blocked event",
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send validation_blocked event: {e}")
+
+                    # Re-plan without advancing the step counter
+                    current_step_number = max(0, current_step_number - 1)
+                    react_state.retry_count = 0
+                    continue
+
                 # Send action event (with error handling)
                 try:
                     await self._send_event(
@@ -2935,6 +3008,7 @@ WORKFLOW PLANNING:
                     "atom_id": next_step.atom_id,
                     "files_used": next_step.files_used or [],  # Track files for loop detection
                     "description": next_step.description,  # Track description for context
+                    "output_alias": next_step.output_alias,
                     "result": execution_result,
                     "evaluation": evaluation.__dict__
                 })
@@ -3056,13 +3130,27 @@ WORKFLOW PLANNING:
                                 # Don't force it, but log the warning
             
             # ================================================================
+            # ============================================================
             # WORKFLOW COMPLETE
-            # ================================================================
-            if react_state.goal_achieved:
+            # ============================================================
+            if abort_due_complexity:
+                logger.warning(
+                    f"⚠️ ReAct: Workflow stopped early after {current_step_number} steps due to complexity guard",
+                )
+                final_status = "aborted"
+                final_message = "Workflow stopped: too many operations; please simplify or ask for a smaller plan."
+            elif react_state.goal_achieved:
                 logger.info(f"✅ ReAct: Workflow completed successfully after {current_step_number} steps")
+                final_status = "completed"
+                final_message = "ReAct workflow completed!"
             elif current_step_number >= max_steps:
                 logger.warning(f"⚠️ ReAct: Reached max steps ({max_steps}), stopping workflow")
-            
+                final_status = "stopped"
+                final_message = "Reached maximum step limit; consider simplifying the request."
+            else:
+                final_status = "stopped"
+                final_message = "Workflow stopped."
+
             # Send final progress update
             try:
                 await self._send_event(
@@ -3074,16 +3162,16 @@ WORKFLOW PLANNING:
                             "current_step": current_step_number,
                             "total_steps": current_step_number,
                             "progress_percent": 100,
-                            "status": "completed",
+                            "status": final_status,
                             "loading": False,  # Turn off loading
-                            "message": "Workflow completed!"
+                            "message": final_message,
                         }
                     ),
-                    "workflow_progress event (final)"
+                    "workflow_progress event (final)",
                 )
             except (WebSocketDisconnect, Exception) as e:
                 logger.warning(f"⚠️ Failed to send final progress event: {e}")
-            
+
             await self._send_event(
                 websocket,
                 WebSocketEvent(
@@ -3092,11 +3180,11 @@ WORKFLOW PLANNING:
                         "sequence_id": sequence_id,
                         "total_steps": current_step_number,
                         "goal_achieved": react_state.goal_achieved,
-                        "message": "ReAct workflow completed!",
+                        "message": final_message,
                         "loading": False  # Turn off loading
                     }
                 ),
-                "workflow_completed event (ReAct)"
+                "workflow_completed event (ReAct)",
             )
             
             # Emit workflow insight if websocket is still connected
@@ -3488,6 +3576,95 @@ WORKFLOW PLANNING:
         stripped = token.strip()
         normalized = self._normalize_alias_token(stripped)
         return alias_map.get(stripped) or alias_map.get(normalized) or token
+
+    def _extract_output_file_from_history(
+        self,
+        sequence_id: str,
+        history_entry: Dict[str, Any],
+    ) -> Optional[str]:
+        """Infer the materialized output file path from a previous execution entry."""
+        step_number = history_entry.get("step_number")
+        saved_outputs = self._step_output_files.get(sequence_id, {})
+        if step_number in saved_outputs:
+            return saved_outputs[step_number]
+
+        atom_id = history_entry.get("atom_id", "")
+        result = history_entry.get("result", {}) or {}
+
+        if atom_id == "merge" and isinstance(result.get("merge_json"), dict):
+            return result.get("merge_json", {}).get("result_file") or result.get("saved_path")
+        if atom_id == "concat" and isinstance(result.get("concat_json"), dict):
+            return result.get("concat_json", {}).get("result_file") or result.get("saved_path")
+        if atom_id in {"create-column", "create-transform", "groupby-wtg-avg", "dataframe-operations"}:
+            return result.get("output_file") or result.get("saved_path")
+
+        return result.get("output_file") or result.get("saved_path")
+
+    def _extract_row_count(self, result: Dict[str, Any]) -> Optional[float]:
+        """Return a simple row-count metric from flat or nested result payloads."""
+        row_keys = ("row_count", "rowcount", "rows", "count", "record_count")
+        for key in row_keys:
+            value = result.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+
+        nested_keys = ("merge_json", "concat_json", "groupby_json", "dataframe_result", "result")
+        for nested_key in nested_keys:
+            nested = result.get(nested_key)
+            if isinstance(nested, dict):
+                for key in row_keys:
+                    value = nested.get(key)
+                    if isinstance(value, (int, float)):
+                        return float(value)
+        return None
+
+    def _validate_chain_for_next_step(
+        self,
+        sequence_id: str,
+        execution_history: List[Dict[str, Any]],
+        next_step: WorkflowStepPlan,
+    ) -> Tuple[bool, str]:
+        """
+        Run sanity checks on the previous step before chaining into the next atom.
+
+        Ensures we don't cascade failures or empty datasets into follow-up operations.
+        """
+        if not execution_history:
+            return True, ""
+
+        last_entry = execution_history[-1]
+        last_result = last_entry.get("result", {}) or {}
+        if not bool(last_result.get("success", True)):
+            return False, "Previous atom failed; re-plan before continuing."
+
+        produced_file = self._extract_output_file_from_history(sequence_id, last_entry)
+        available_files = set(self._sequence_available_files.get(sequence_id, []) or [])
+
+        requires_previous_output = False
+        dependency_tokens: List[str] = []
+        if next_step.files_used:
+            dependency_tokens.extend(next_step.files_used)
+        if next_step.inputs:
+            dependency_tokens.extend(next_step.inputs)
+
+        for value in dependency_tokens:
+            normalized = self._resolve_alias_value(sequence_id, value)
+            if normalized in {produced_file, last_entry.get("output_alias"), "auto_from_previous"}:
+                requires_previous_output = True
+            if normalized in available_files:
+                requires_previous_output = True
+
+        if requires_previous_output and not produced_file:
+            return False, "No materialized output from prior step; cannot chain safely."
+
+        if produced_file and requires_previous_output and produced_file not in available_files:
+            return False, f"Expected previous output {produced_file} to be available but it is not registered."
+
+        row_count = self._extract_row_count(last_result)
+        if requires_previous_output and row_count is not None and row_count <= 0:
+            return False, "Previous atom produced an empty dataset; review before continuing."
+
+        return True, ""
 
     def _normalize_alias_token(self, alias: str) -> str:
         """Normalize alias references (strip braces, spaces, lowercase)."""
