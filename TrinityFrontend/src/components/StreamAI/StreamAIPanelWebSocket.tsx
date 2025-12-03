@@ -1466,6 +1466,84 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             );
             break;
 
+          case 'clarification_required': {
+            console.warn('🛑 Clarification requested before continuing', data);
+            stopAutoRun();
+
+            const clarificationMessage: Message = {
+              id: `clarification-${Date.now()}`,
+              content: data.message || 'The assistant needs clarification before proceeding.',
+              sender: 'ai',
+              timestamp: new Date(),
+              type: 'text'
+            };
+
+            setMessages(prev => {
+              const withoutProgress = prev.filter(msg => msg.id !== progressMessageId);
+              return [...withoutProgress, clarificationMessage];
+            });
+
+            // Persist clarification into the active chat history so the user can respond
+            try {
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const filteredMessages = currentChat.messages.filter(m => m.id !== progressMessageId);
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: [...filteredMessages, clarificationMessage],
+                };
+                memoryPersistSkipRef.current = false;
+                persistChatToMemory(updatedChat).catch(err =>
+                  console.error('Failed to persist clarification message:', err)
+                );
+              }
+            } catch (persistError) {
+              console.error('Failed to persist chat after clarification:', persistError);
+            }
+
+            // If the backend closes the socket after asking for clarification, don't treat it as an error
+            setIsLoading(false);
+            break;
+          }
+
+          case 'policy_shift': {
+            console.warn('⚠️ Policy shift detected, awaiting confirmation', data);
+            stopAutoRun();
+
+            const policyShiftMessage: Message = {
+              id: `policy-shift-${Date.now()}`,
+              content: data.message || 'Execution path changed; please confirm before proceeding.',
+              sender: 'ai',
+              timestamp: new Date(),
+              type: 'text'
+            };
+
+            setMessages(prev => {
+              const withoutProgress = prev.filter(msg => msg.id !== progressMessageId);
+              return [...withoutProgress, policyShiftMessage];
+            });
+
+            try {
+              const currentChat = chats.find(c => c.id === currentChatId);
+              if (currentChat) {
+                const filteredMessages = currentChat.messages.filter(m => m.id !== progressMessageId);
+                const updatedChat: Chat = {
+                  ...currentChat,
+                  messages: [...filteredMessages, policyShiftMessage],
+                };
+                memoryPersistSkipRef.current = false;
+                persistChatToMemory(updatedChat).catch(err =>
+                  console.error('Failed to persist policy shift message:', err)
+                );
+              }
+            } catch (persistError) {
+              console.error('Failed to persist chat after policy shift:', persistError);
+            }
+
+            setIsLoading(false);
+            break;
+          }
+
           case 'plan_generated':
             console.log('📋 Plan generated:', data.plan);
             
