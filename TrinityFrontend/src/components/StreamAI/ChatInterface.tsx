@@ -159,6 +159,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   }, [messages]);
 
+  // Reset hidden state when panel is opened via AI icon
+  useEffect(() => {
+    if (!isCollapsed) {
+      setIsPanelHidden(false);
+    }
+  }, [isCollapsed]);
+
   // Chat history stays closed by default - user must click to open it
   // Removed auto-open behavior so only chat box opens when AI panel is opened
 
@@ -174,32 +181,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     return null;
   }
 
-  // If panel is hidden and no request is active, hide completely
-  if (isPanelHidden && !isLoading) {
+  // If panel is minimized (hidden via eye icon), hide it completely
+  // It will be reopened via AI icon in sidebar which resets isPanelHidden
+  if (isPanelHidden) {
     return null;
-  }
-
-  // If panel is hidden but request is active, show floating icon
-  if (isPanelHidden && isLoading) {
-    return (
-      <AnimatePresence>
-        <motion.div
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0, opacity: 0 }}
-          transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
-          className="fixed bottom-6 right-6 z-50 pointer-events-auto"
-        >
-          <Button
-            onClick={() => setIsPanelHidden(false)}
-            className="h-14 w-14 p-0 rounded-full bg-gradient-to-br from-[#41C185] to-[#50C878] hover:from-[#50C878] hover:to-[#41C185] text-white shadow-lg shadow-[#41C185]/40 hover:shadow-xl hover:shadow-[#41C185]/50 transition-all duration-300 hover:scale-110"
-            title="Show Chat Panel"
-          >
-            <Bot className="w-6 h-6" />
-          </Button>
-        </motion.div>
-      </AnimatePresence>
-    );
   }
 
   // Calculate width and position for auto-size mode

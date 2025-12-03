@@ -10,8 +10,13 @@ import {
   validateFileInput,
   createProgressTracker,
   autoSaveStepResult,
-  constructFullPath
+  constructFullPath,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox,
+  updateInsightTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
 
 // Import the dataframe operations API functions
 import { loadDataframeByKey } from '../../AtomList/atoms/dataframe-operations/services/dataframeOperationsApi';
@@ -157,7 +162,7 @@ export const dataframeOperationsHandler: AtomHandler = {
     updateAtomSettings(atomId, { 
       dataframeConfig: config,
       aiConfig: config,
-      aiMessage: data.smart_response || data.message,
+      aiMessage: data.reasoning ? `**Reasoning:**\n${data.reasoning}` : (data.message || 'AI response received'),
       executionPlan: data.execution_plan,
       reasoning: data.reasoning,
       envContext,
@@ -365,28 +370,23 @@ export const dataframeOperationsHandler: AtomHandler = {
     // 🔧 DEFINE operationsCount for use throughout the handler
     const operationsCount = config.operations ? config.operations.length : 0;
     
-    // Add AI smart response message (prioritize smart_response over generic success message)
-    if (data.smart_response) {
-      // Use the AI's smart response for a more conversational experience
-      const aiMessage = createMessage(data.smart_response);
+    // Add AI reasoning message (only reasoning field now)
+    if (data.reasoning) {
+      const aiMessage = createMessage(`**Reasoning:**\n${data.reasoning}`);
       setMessages(prev => [...prev, aiMessage]);
-      console.log('🤖 AI Smart Response displayed:', data.smart_response);
+      console.log('🤖 AI Reasoning displayed');
     } else {
-      // Fallback to detailed success message if no smart_response
+      // Fallback to detailed success message if no reasoning
       const successDetails = {
         'Operations': operationsCount.toString(),
         'Auto Execute': data.execution_plan?.auto_execute ? 'Yes' : 'No',
         'Session': sessionId
       };
       
-      if (data.reasoning) {
-        successDetails['Reasoning'] = data.reasoning.substring(0, 100) + (data.reasoning.length > 100 ? '...' : '');
-      }
-      
       const successMsg = createSuccessMessage('DataFrame operations configuration completed', successDetails);
       successMsg.content += '\n\n🔄 Ready to execute operations!';
       setMessages(prev => [...prev, successMsg]);
-      console.log('⚠️ No smart_response found, using fallback success message');
+      console.log('⚠️ No reasoning found, using fallback success message');
     }
     
     // 🔧 CRITICAL FIX: Default to auto_execute if operations exist but execution_plan is missing
@@ -1121,10 +1121,10 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
           }
         }
         
-        // 🔧 SMART RESPONSE FIX: Don't add duplicate message if smart_response was already shown
-        // The smart_response is already displayed in the configuration phase above
-        // Only add completion message if no smart_response was provided
-        if (!data.smart_response) {
+        // 🔧 REASONING FIX: Don't add duplicate message if reasoning was already shown
+        // The reasoning is already displayed in the configuration phase above
+        // Only add completion message if no reasoning was provided
+        if (!data.reasoning) {
           // Fallback to detailed success message only if no smart response was shown
           const completionDetails = {
             'Operations': operationsCount.toString(),
@@ -1134,12 +1134,47 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
           const executionSuccessMsg = createSuccessMessage('DataFrame operations auto-execution', completionDetails);
           executionSuccessMsg.content += '\n\n📊 All operations completed! The updated DataFrame should now be visible in the interface.';
           setMessages(prev => [...prev, executionSuccessMsg]);
-          console.log('⚠️ No smart_response available, using fallback completion message');
+          console.log('⚠️ No reasoning available, using fallback completion message');
         } else {
           console.log('✅ Smart response already displayed, skipping duplicate completion message');
         }
         
         console.log('📊 Final progress summary:', progressTracker.getStatus());
+        
+        // STEP 2b: Generate insight AFTER operations complete successfully
+        console.log('🔍 STEP 2b: Generating insight for dataframe-operations (after operations complete)');
+        
+        // Prepare enhanced data with operation results for insight generation
+        const enhancedDataForInsight = {
+          ...data, // This includes reasoning
+          dataframe_config: data.dataframe_config, // Original config from first LLM call
+          execution_results: results,
+          operation_summary: {
+            total_operations: operationsCount,
+            completed_operations: results.length,
+            final_df_id: currentDfId,
+            final_row_count: results[results.length - 1]?.rows?.length || 0,
+            final_column_count: results[results.length - 1]?.headers?.length || 0,
+          },
+          operations: config.operations?.map((op: any, idx: number) => ({
+            index: idx + 1,
+            operation_name: op.operation_name || op.api_endpoint,
+            description: op.description,
+            success: results[idx] ? true : false,
+          })) || [],
+        };
+        
+        // Generate insight - uses queue manager to ensure completion even when new atoms start
+        // The queue manager automatically handles text box updates with retry logic
+        generateAtomInsight({
+          data: enhancedDataForInsight,
+          atomType: 'dataframe-operations',
+          sessionId,
+          atomId, // Pass atomId so queue manager can track and complete this insight
+        }).catch((error) => {
+          console.error('❌ Error generating insight:', error);
+        });
+        // Note: We don't need to manually update the text box here - the queue manager handles it
         
       } catch (error) {
         console.error('❌ Auto-execution failed:', error);
@@ -1160,6 +1195,26 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
       }
     }
 
+    // 📝 Update card text box with reasoning
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // STEP 2: Add text box with placeholder for insight (like concat/merge)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+    }
+    
     return { success: true };
   },
 
@@ -1169,7 +1224,7 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
     console.log('🔍 DEBUG: Handling dataframe operations failure');
     
     // Process smart response with enhanced logic
-    const aiText = processSmartResponse(data);
+    const aiText = data.reasoning ? `**Reasoning:**\n${data.reasoning}` : 'AI response received';
     
     // Create and add AI message
     const aiMsg = createMessage(aiText);
@@ -1185,6 +1240,16 @@ ${frames.length > 3 ? `║   ... and ${frames.length - 3} more` : ''}
         fileAnalysis: data.file_analysis || null,
         lastInteractionTime: Date.now()
       });
+    }
+    
+    // 📝 Update card text box with reasoning (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
     }
     
     return { success: true };

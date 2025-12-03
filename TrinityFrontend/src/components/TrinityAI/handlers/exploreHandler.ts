@@ -8,26 +8,30 @@ import {
   createSuccessMessage, 
   createErrorMessage,
   processSmartResponse,
-  validateFileInput 
+  validateFileInput,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox,
+  updateInsightTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
 import { useLaboratoryStore } from '../../LaboratoryMode/store/laboratoryStore';
 
 export const exploreHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
-    // 🔧 CRITICAL FIX: Show smart_response FIRST (user-friendly message)
-    const smartResponseText = processSmartResponse(data);
-    const showedSmartResponse = !!smartResponseText; // Prevent duplicate chat messages
-    if (smartResponseText) {
-      const smartMsg: Message = {
+    // Show reasoning in chat (only reasoning field now)
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText) {
+      const reasoningMsg: Message = {
         id: (Date.now() + 1).toString(),
-        content: smartResponseText,
+        content: `**Reasoning:**\n${reasoningText}`,
         sender: 'ai',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user:', smartResponseText);
+      setMessages(prev => [...prev, reasoningMsg]);
+      console.log('✅ Displayed reasoning to user');
     }
     
     if (!data.exploration_config) {
@@ -63,10 +67,30 @@ export const exploreHandler: AtomHandler = {
     const fileValidation = validateFileInput(targetFile, 'AI Explore');
     if (!fileValidation.isValid) {
       const errorMsg = createMessage(
-        data.smart_response || `I couldn't find a data file to analyze. Please make sure you have selected or uploaded a data file first, then try your exploration request again. I'll be able to help you create meaningful visualizations once the data is available.`
+        data.reasoning ? `**Reasoning:**\n${data.reasoning}` : `I couldn't find a data file to analyze. Please make sure you have selected or uploaded a data file first, then try your exploration request again. I'll be able to help you create meaningful visualizations once the data is available.`
       );
       setMessages(prev => [...prev, errorMsg]);
       return { success: false, error: 'Invalid file input' };
+    }
+    
+    // 📝 Update card text box with reasoning
+    console.log('📝 Updating card text box with agent response...');
+    let textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // STEP 2: Add text box with placeholder for insight (like concat/merge)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
     }
     
     // 🔧 CRITICAL FIX: Use the SAME 3-step backend flow as the working old AtomAIChatBot.tsx
@@ -661,8 +685,8 @@ export const exploreHandler: AtomHandler = {
           data: mergedData  // ✅ Merged data instead of overwriting
         });
         
-        // Add completion message ONLY if smart_response wasn't already shown
-        if (!showedSmartResponse) {
+        // Add completion message ONLY if reasoning wasn't already shown
+        if (!reasoningText) {
           const completionContent = (finalExplorations.length > 1 
             ? `I've successfully generated ${finalExplorations.length} complementary charts for your analysis. These visualizations will provide different perspectives on your data, allowing you to identify patterns, trends, and relationships. You can use the 2-chart layout to view both visualizations simultaneously for better comparison.`
             : `I've successfully generated your chart analysis. The visualization is now ready and will help you understand the patterns and insights in your data. You can click to view the chart and explore the findings.`);
@@ -674,6 +698,44 @@ export const exploreHandler: AtomHandler = {
           };
           setMessages(prev => [...prev, completionMsg]);
         }
+        
+        // STEP 2b: Generate insight AFTER charts are processed successfully
+        console.log('🔍 STEP 2b: Generating insight for explore (after charts processed)');
+        
+        // Prepare enhanced data with exploration results for insight generation
+        const enhancedDataForInsight = {
+          ...data, // This includes reasoning
+          exploration_config: data.exploration_config, // Original config from first LLM call
+          exploration_results: {
+            chart_count: finalExplorations.length,
+            charts_processed: finalExplorations.filter(exp => exp.chart_data && exp.chart_data.length > 0).length,
+            chart_configs: chartConfigs,
+            chart_data_summary: Object.keys(exploreData.chartDataSets || {}).map((key: string) => {
+              const chartData = exploreData.chartDataSets[key];
+              return {
+                chart_index: parseInt(key),
+                data_points: Array.isArray(chartData) ? chartData.length : 0,
+                title: chartConfigs[parseInt(key)]?.title || `Chart ${parseInt(key) + 1}`,
+              };
+            }),
+          },
+          file_details: {
+            file_name: targetFile,
+            file_name_only: fileName,
+          },
+        };
+        
+        // Generate insight - uses queue manager to ensure completion even when new atoms start
+        // The queue manager automatically handles text box updates with retry logic
+        generateAtomInsight({
+          data: enhancedDataForInsight,
+          atomType: 'explore',
+          sessionId,
+          atomId, // Pass atomId so queue manager can track and complete this insight
+        }).catch((error) => {
+          console.error('❌ Error generating insight:', error);
+        });
+        // Note: We don't need to manually update the text box here - the queue manager handles it
         
       } catch (configError: any) {
         console.error('❌ Failed to fetch column config:', configError);
@@ -714,6 +776,69 @@ export const exploreHandler: AtomHandler = {
           data: exploreData
         });
         
+        // STEP 2b: Generate insight for fallback case (basic exploreData)
+        if (result.explorations && result.explorations.length > 0) {
+          console.log('🔍 STEP 2b: Generating insight for explore (fallback case)');
+          
+          const enhancedDataForInsight = {
+            ...data,
+            exploration_config: data.exploration_config,
+            exploration_results: {
+              chart_count: result.explorations.length,
+              charts_processed: result.explorations.filter((exp: any) => exp.chart_data && exp.chart_data.length > 0).length,
+              chart_configs: [],
+              chart_data_summary: result.explorations.map((exp: any, idx: number) => ({
+                chart_index: idx,
+                data_points: Array.isArray(exp.chart_data) ? exp.chart_data.length : 0,
+                title: exp.title || `Chart ${idx + 1}`,
+              })),
+            },
+            file_details: {
+              file_name: targetFile,
+              file_name_only: fileName,
+            },
+          };
+          
+          generateAtomInsight({
+            data: enhancedDataForInsight,
+            atomType: 'explore',
+            sessionId,
+          }).then(async (insightResult) => {
+            if (insightResult.success && insightResult.insight) {
+              try {
+                const { getAtom, cards, setCards, updateCard } = useLaboratoryStore.getState();
+                const atom = getAtom(atomId);
+                if (atom) {
+                  const card = cards.find(c => c.atoms?.some((a: any) => a.id === atomId));
+                  if (card && card.textBoxes && card.textBoxes.length > 0) {
+                    const updatedTextBoxes = [...card.textBoxes];
+                    const lastIndex = updatedTextBoxes.length - 1;
+                    if (updatedTextBoxes[lastIndex]?.title === 'AI Insight') {
+                      updatedTextBoxes[lastIndex] = {
+                        ...updatedTextBoxes[lastIndex],
+                        content: insightResult.insight,
+                        html: insightResult.insight.replace(/\n/g, '<br />'),
+                      };
+                      updateCard(card.id, { textBoxes: updatedTextBoxes });
+                      const allCards = cards.map(c => 
+                        c.id === card.id 
+                          ? { ...c, textBoxes: updatedTextBoxes }
+                          : c
+                      );
+                      setCards(allCards);
+                      console.log('✅ Successfully updated insight text box with generated insight');
+                    }
+                  }
+                }
+              } catch (textBoxError) {
+                console.error('❌ Error updating insight text box:', textBoxError);
+              }
+            }
+          }).catch((error) => {
+            console.error('❌ Error generating insight:', error);
+          });
+        }
+        
         // Note: Completion message already added above
       }
           
@@ -731,8 +856,8 @@ export const exploreHandler: AtomHandler = {
         errorMessage = `❌ Network error: Could not connect to backend services. Please try again.`;
       }
       
-      // Only add error message if no smart_response was already added
-      if (!data.smart_response) {
+      // Only add error message if no reasoning was already added
+      if (!data.reasoning) {
         const errorMsg: Message = {
           id: (Date.now() + 2).toString(),
           content: `${errorMessage} Please try again or use the manual configuration options to set up your analysis.`,
@@ -752,6 +877,26 @@ export const exploreHandler: AtomHandler = {
       });
     }
 
+    // 📝 Update card text box with reasoning (reassign if needed)
+    console.log('📝 Updating card text box with agent response...');
+    textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // STEP 2: Add text box with placeholder for insight (like concat/merge)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+    }
+    
     return { success: true };
   },
 
@@ -759,7 +904,7 @@ export const exploreHandler: AtomHandler = {
     const { setMessages, updateAtomSettings, atomId } = context;
     
     // Process smart response with enhanced logic
-    const aiText = processSmartResponse(data);
+    const aiText = data.reasoning ? `**Reasoning:**\n${data.reasoning}` : 'AI response received';
     
     // Create and add AI message
     const aiMsg = createMessage(aiText);
@@ -775,6 +920,16 @@ export const exploreHandler: AtomHandler = {
         fileAnalysis: data.file_analysis || null,
         lastInteractionTime: Date.now()
       });
+    }
+    
+    // 📝 Update card text box with reasoning (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
     }
     
     return { success: true };

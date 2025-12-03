@@ -21,3 +21,5 @@ class TrinityV1AgentDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 
+
+

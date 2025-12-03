@@ -306,13 +306,46 @@ class ChartMakerService:
             )
             traces_copy.append(trace_copy)
         
+        # 🔧 CRITICAL FIX: Detect dual Y-axis scenario (2 traces, same x_column, different y_columns, no legend_field)
+        is_dual_y_axis = (
+            len(traces_copy) == 2 and
+            traces_copy[0].x_column == traces_copy[1].x_column and
+            traces_copy[0].y_column != traces_copy[1].y_column and
+            not traces_copy[0].legend_field and
+            not traces_copy[1].legend_field and
+            not has_trace_filters  # No trace-specific filters
+        )
+        
+        # 🔧 CRITICAL FIX: Detect legend field scenario (1 trace with legend_field)
+        has_legend_field = (
+            len(traces_copy) == 1 and
+            traces_copy[0].legend_field and
+            traces_copy[0].legend_field in df.columns
+        )
+        
+        print(f"🔍 Chart mode detection: dual_y_axis={is_dual_y_axis}, legend_field={has_legend_field}, has_trace_filters={has_trace_filters}")
+        
         if has_trace_filters:
             # Advanced mode: Process each trace with its own filters
-            print("🚀 Processing multi-trace data with individual filters...")
+            print("🚀 Processing multi-trace data with individual filters (Advanced Mode)...")
             processed_data = self._process_multi_trace_data(df, traces_copy)
+        elif is_dual_y_axis:
+            # 🔧 DUAL Y-AXIS MODE: Keep original column names for proper dual axis rendering
+            print("🚀 Processing dual Y-axis data (Simple Mode - Dual Axis)...")
+            if request.filters:
+                df = self.apply_filters(df, request.filters)
+            chart_data = self._convert_numpy_types(df.to_dict('records'))
+            # Process dual Y-axis without modifying column names
+            processed_data = self._process_dual_y_axis_data(chart_data, traces_copy)
+        elif has_legend_field:
+            # 🔧 LEGEND FIELD MODE: Process with legend field segregation
+            print("🚀 Processing legend field data (Simple Mode - Legend Field)...")
+            if request.filters:
+                df = self.apply_filters(df, request.filters)
+            processed_data = self._process_chart_data_with_legend(df, traces_copy, traces_copy[0].x_column, traces_copy[0].legend_field)
         else:
             # Legacy mode: Apply chart-level filters
-            print("🚀 Processing single-trace data...")
+            print("🚀 Processing single-trace data (Simple Mode)...")
             if request.filters:
                 df = self.apply_filters(df, request.filters)
                 # print(f"✅ Filters applied: {len(df)} rows remaining")
@@ -413,6 +446,65 @@ class ChartMakerService:
             file_name=file_metadata["filename"],
             data_source=file_metadata["data_source"]
         )
+    
+    def _process_dual_y_axis_data(self, data: List[Dict[str, Any]], traces: List[ChartTrace]) -> List[Dict[str, Any]]:
+        """
+        🔧 CRITICAL FIX: Process dual Y-axis data WITHOUT modifying column names.
+        This ensures the frontend can properly render charts with left and right Y-axes.
+        
+        For dual Y-axis:
+        - 2 traces with same x_column but different y_columns
+        - Keep original column names (don't add _trace_0, _trace_1 suffixes)
+        - Frontend will use these original names for left/right axis mapping
+        """
+        if len(traces) != 2:
+            raise ValueError("_process_dual_y_axis_data requires exactly 2 traces")
+        
+        df = pd.DataFrame(data)
+        x_column = traces[0].x_column
+        y_column_1 = traces[0].y_column
+        y_column_2 = traces[1].y_column
+        
+        if x_column not in df.columns:
+            return data
+        
+        # Get all unique x values
+        all_x_values = df[x_column].dropna().unique()
+        
+        result = []
+        for x_val in sorted(all_x_values):
+            if pd.isna(x_val):
+                continue
+            
+            # Filter data for this x value
+            x_data = df[df[x_column] == x_val]
+            
+            # Aggregate each y column
+            if x_data[y_column_1].duplicated().any() or len(x_data) > 1:
+                # Need aggregation
+                agg_1 = x_data[y_column_1].agg(traces[0].aggregation or 'sum')
+            else:
+                agg_1 = x_data[y_column_1].iloc[0] if len(x_data) > 0 else 0
+            
+            if x_data[y_column_2].duplicated().any() or len(x_data) > 1:
+                # Need aggregation
+                agg_2 = x_data[y_column_2].agg(traces[1].aggregation or 'sum')
+            else:
+                agg_2 = x_data[y_column_2].iloc[0] if len(x_data) > 0 else 0
+            
+            # 🔧 CRITICAL: Use actual column names as keys (don't modify them)
+            row = {
+                x_column: x_val
+            }
+            # Set values using actual column names
+            row[y_column_1] = agg_1
+            row[y_column_2] = agg_2
+            result.append(row)
+        
+        # Convert date columns to ISO format
+        result = self._convert_dates_to_iso(result, x_column)
+        
+        return self._convert_numpy_types(result)
     
     def _process_multi_trace_data(self, df: pd.DataFrame, traces: List[ChartTrace]) -> List[Dict[str, Any]]:
         """Process chart data for multiple traces with individual filters"""

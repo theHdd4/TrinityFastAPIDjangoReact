@@ -45,6 +45,7 @@ const LLM_MAP: Record<string, string> = {
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
+  'correlation': 'Agent Correlation',
   'dataframe-operations': 'Agent DataFrame Operations',
 };
 

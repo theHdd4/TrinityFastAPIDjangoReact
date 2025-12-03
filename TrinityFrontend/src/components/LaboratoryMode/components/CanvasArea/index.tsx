@@ -201,6 +201,7 @@ const LLM_MAP: Record<string, string> = {
   'create-column': 'Agent Create Transform',
   'groupby-wtg-avg': 'Agent GroupBy',
   'explore': 'Agent Explore',
+  'correlation': 'Agent Correlation',
   'dataframe-operations': 'Agent DataFrame Operations',
   'pivot-table': 'Agent Pivot Table',
   'data-upload-validate': 'Agent Data Validation',
@@ -311,6 +312,70 @@ interface CardTextBoxCanvasProps {
 }
 
 const clampFontSize = (size: number) => Math.max(8, Math.min(500, size));
+
+/**
+ * Parse markdown to HTML with support for headers (###) and bold (**)
+ * Makes the content interactive and visually appealing
+ */
+const parseMarkdownToHtml = (text: string): string => {
+  if (!text) return '';
+  
+  // Split into lines to process headers properly
+  const lines = text.split(/\r?\n/);
+  const processedLines: string[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    
+    // Escape HTML to prevent XSS
+    line = line
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    
+    // Parse headers (### Header text) - must be at start of line
+    const headerMatch = line.match(/^(\s*)###\s+(.+)$/);
+    if (headerMatch) {
+      const [, indent, headerText] = headerMatch;
+      processedLines.push(`${indent}<h3 class="markdown-h3">${headerText.trim()}</h3>`);
+      continue;
+    }
+    
+    // Parse bold text (**text** or __text__) - handle multiple per line
+    // Process **text** first (before single * which could be italic)
+    line = line.replace(/\*\*([^*]+?)\*\*/g, '<strong class="markdown-bold">$1</strong>');
+    line = line.replace(/__([^_]+?)__/g, '<strong class="markdown-bold">$1</strong>');
+    
+    // Parse italic text (*text* or _text_) - only match single asterisks/underscores
+    // Use a pattern that avoids matching within bold markers
+    // Match *text* where * is not followed or preceded by another *
+    line = line.replace(/\*([^*\n]+?)\*/g, (match, content) => {
+      // Only replace if it's not part of a bold marker (already processed)
+      if (!match.includes('<strong')) {
+        return `<em class="markdown-italic">${content}</em>`;
+      }
+      return match;
+    });
+    
+    // Match _text_ where _ is not part of __
+    line = line.replace(/_([^_\n]+?)_/g, (match, content) => {
+      // Only replace if it's not part of a bold marker (already processed)
+      if (!match.includes('<strong')) {
+        return `<em class="markdown-italic">${content}</em>`;
+      }
+      return match;
+    });
+    
+    // Wrap line in div (empty lines get <br>)
+    if (line.trim() === '') {
+      processedLines.push('<div><br></div>');
+    } else {
+      processedLines.push(`<div>${line}</div>`);
+    }
+  }
+  
+  return processedLines.join('');
+};
 
 const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, onTextChange, onSettingsChange, onDelete }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -512,10 +577,39 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
   };
 
   useEffect(() => {
-    if (editorRef.current && editorRef.current.innerHTML !== data.html) {
-      editorRef.current.innerHTML = data.html;
+    if (editorRef.current) {
+      // Check if content contains markdown syntax (headers or bold)
+      const hasMarkdown = data.text && (
+        /^(\s*)###\s+/m.test(data.text) || // Headers (###)
+        /\*\*[^*]+\*\*/.test(data.text) || // Bold (**text**)
+        /__[^_]+__/.test(data.text) || // Bold (__text__)
+        (/\*[^*]+\*/.test(data.text) && !/\*\*/.test(data.text)) || // Italic (*text*) but not bold
+        /_[^_]+_/.test(data.text) && !/__/.test(data.text) // Italic (_text_) but not bold
+      );
+      
+      // Check if HTML is already processed (contains markdown classes)
+      const isAlreadyProcessed = data.html && (
+        data.html.includes('markdown-h3') ||
+        data.html.includes('markdown-bold') ||
+        data.html.includes('markdown-italic')
+      );
+      
+      // If markdown is detected and HTML is not already processed, parse it
+      let htmlToSet = data.html;
+      if (hasMarkdown && !isAlreadyProcessed) {
+        htmlToSet = parseMarkdownToHtml(data.text);
+      } else if (!hasMarkdown && !data.html) {
+        // If no markdown and no HTML, create basic HTML from text
+        htmlToSet = data.text ? data.text.replace(/\n/g, '<br>').split('<br>').map(line => 
+          line.trim() === '' ? '<div><br></div>' : `<div>${line}</div>`
+        ).join('') : '';
+      }
+      
+      if (editorRef.current.innerHTML !== htmlToSet) {
+        editorRef.current.innerHTML = htmlToSet;
+      }
     }
-  }, [data.html]);
+  }, [data.html, data.text]);
 
   useEffect(() => {
     applyImmediateStyles({
@@ -910,6 +1004,7 @@ const CardTextBoxCanvas: React.FC<CardTextBoxCanvasProps> = ({ data, settings, o
             focus:outline-none focus:border-[#458EE2] focus:ring-2 focus:ring-[#cfe2ff]
             transition-colors duration-200
             ${getListStyle()}
+            markdown-content
           `}
           style={{
             fontFamily: settings.font_family,
@@ -5241,12 +5336,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               <span className="text-xs font-medium text-gray-700">
                                 {cardTitle}
                               </span>
-                              <AIChatBot
-                                cardId={card.id}
-                                cardTitle={cardTitle}
-                                onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                                disabled={card.atoms.length > 0}
-                              />
+                              {card.atoms.length === 0 ? (
+                                <AIChatBot
+                                  cardId={card.id}
+                                  cardTitle={cardTitle}
+                                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                                />
+                              ) : card.atoms.length > 0 && card.atoms[0] ? (
+                                <AtomAIChatBot
+                                  atomId={card.atoms[0].id}
+                                  atomType={card.atoms[0].atomId}
+                                  atomTitle={card.atoms[0].title}
+                                  disabled={!LLM_MAP[card.atoms[0].atomId]}
+                                  className="transition-transform hover:scale-110"
+                                />
+                              ) : null}
                               <button
                                 onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                                 className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -5342,6 +5446,15 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                     {/* <div className="flex items-center justify-between mb-3">
                                       <div className="flex items-center space-x-1">
                                         <div className={`w-3 h-3 ${atom.color} rounded-full`}></div>
+                                        {atom.atomId === 'correlation' && console.log('🎯 CANVAS AREA - Rendering AtomAIChatBot for correlation:', {
+                                          atomId: atom.id,
+                                          atomType: atom.atomId,
+                                          atomTitle: atom.title,
+                                          inLLM_MAP: !!LLM_MAP[atom.atomId],
+                                          LLM_MAP_value: LLM_MAP[atom.atomId],
+                                          disabled: !LLM_MAP[atom.atomId],
+                                          willPassDisabled: !LLM_MAP[atom.atomId]
+                                        })}
                                         <AtomAIChatBot
                                           atomId={atom.id}
                                           atomType={atom.atomId}
@@ -5525,12 +5638,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           <span className="text-xs font-medium text-gray-700">
                             {cardTitle}
                           </span>
-                          <AIChatBot
-                            cardId={card.id}
-                            cardTitle={cardTitle}
-                            onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                            disabled={card.atoms.length > 0}
-                          />
+                          {card.atoms.length === 0 ? (
+                            <AIChatBot
+                              cardId={card.id}
+                              cardTitle={cardTitle}
+                              onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                            />
+                          ) : card.atoms.length > 0 && card.atoms[0] ? (
+                            <AtomAIChatBot
+                              atomId={card.atoms[0].id}
+                              atomType={card.atoms[0].atomId}
+                              atomTitle={card.atoms[0].title}
+                              disabled={!LLM_MAP[card.atoms[0].atomId]}
+                              className="transition-transform hover:scale-110"
+                            />
+                          ) : null}
                           <button
                             onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                             className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"
@@ -6025,12 +6147,21 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                 <span className="text-xs font-medium text-gray-700">
                   {cardTitle}
                 </span>
-                <AIChatBot
-                  cardId={card.id}
-                  cardTitle={cardTitle}
-                  onAddAtom={(id, atom) => addAtomByName(id, atom)}
-                  disabled={card.atoms.length > 0}
-                />
+                {card.atoms.length === 0 ? (
+                  <AIChatBot
+                    cardId={card.id}
+                    cardTitle={cardTitle}
+                    onAddAtom={(id, atom) => addAtomByName(id, atom)}
+                  />
+                ) : card.atoms.length > 0 && card.atoms[0] ? (
+                  <AtomAIChatBot
+                    atomId={card.atoms[0].id}
+                    atomType={card.atoms[0].atomId}
+                    atomTitle={card.atoms[0].title}
+                    disabled={!LLM_MAP[card.atoms[0].atomId]}
+                    className="transition-transform hover:scale-110"
+                  />
+                ) : null}
                           <button
                             onClick={e => handleCardSettingsClick(e, card.id, card.isExhibited)}
                             className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-40 disabled:cursor-not-allowed"

@@ -107,18 +107,39 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         return;
       }
 
+      // 🔧 CRITICAL: Get latest charts from store (not from component settings which might be stale)
+      const latestAtom = useLaboratoryStore.getState().getAtom(atomId);
+      const latestSettings = (latestAtom?.settings as SettingsType) || {};
+      const latestCharts = Array.isArray(latestSettings.charts) ? latestSettings.charts : [];
+
       // Update data immediately
-      // Only reset charts if NOT preserving them (i.e., this is a new file upload, not a reload)
-      const updatedCharts = preserveCharts ? settings.charts : (Array.isArray(settings.charts) ? settings.charts.map(chart => ({
-        ...chart,
-        xAxis: '',
-        yAxis: '',
-        filters: {},
-        chartRendered: false,
-        chartConfig: undefined,
-        filteredData: undefined,
-        lastUpdateTime: undefined
-      })) : []);
+      // 🔧 CRITICAL: Only reset charts if NOT preserving them (i.e., this is a new file upload, not a reload)
+      // When preserveCharts=true (AI-generated charts), keep ALL chart data including chartConfig and filteredData
+      let updatedCharts;
+      if (preserveCharts) {
+        // 🔧 CRITICAL: When preserving charts (AI-generated), keep them EXACTLY as they are from store
+        // Don't clear chartConfig, filteredData, or any other chart data
+        updatedCharts = latestCharts; // Use charts from store, not from component settings
+        console.log('🔧 PRESERVING charts (AI-generated):', updatedCharts.length, 'charts with full data');
+        if (updatedCharts.length > 0) {
+          console.log('🔧 Chart 1 has chartConfig:', !!updatedCharts[0].chartConfig);
+          console.log('🔧 Chart 1 has filteredData:', !!updatedCharts[0].filteredData);
+          console.log('🔧 Chart 1 chartRendered:', updatedCharts[0].chartRendered);
+        }
+      } else {
+        // Only clear chart data when NOT preserving (new file upload)
+        updatedCharts = latestCharts.map(chart => ({
+          ...chart,
+          xAxis: '',
+          yAxis: '',
+          filters: {},
+          chartRendered: false,
+          chartConfig: undefined,
+          filteredData: undefined,
+          lastUpdateTime: undefined
+        }));
+        console.log('🔧 RESETTING charts (new file upload):', updatedCharts.length);
+      }
       
       // Don't update settings yet - wait until we have all data including unique values
       // This prevents multiple re-renders and potential filter loss
@@ -160,6 +181,16 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
         const finalFileId = uniqueValuesResponse.file_id || resolvedFileId;
 
         // Update uploaded data with comprehensive information
+        // 🔧 CRITICAL: When preserveCharts=true, use charts from store to ensure we don't lose chartConfig/filteredData
+        const finalCharts = preserveCharts 
+          ? latestCharts  // Always use latest charts from store when preserving
+          : updatedCharts;
+        
+        console.log('🔧 Final charts to set (with unique values):', finalCharts.length, 'preserveCharts:', preserveCharts);
+        if (finalCharts.length > 0 && preserveCharts) {
+          console.log('🔧 Preserving chart with chartConfig:', !!finalCharts[0].chartConfig);
+        }
+        
         handleSettingsChange({
           uploadedData: {
             ...data,
@@ -171,10 +202,17 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
           },
           fileId: finalFileId,
           dataSource: dataSource || settings.dataSource,
-          charts: updatedCharts
+          charts: finalCharts
         });
       } else {
         // Update uploaded data with column information
+        // 🔧 CRITICAL: When preserveCharts=true, use charts from store to ensure we don't lose chartConfig/filteredData
+        const finalCharts = preserveCharts 
+          ? latestCharts  // Always use latest charts from store when preserving
+          : updatedCharts;
+        
+        console.log('🔧 Final charts to set (no unique values):', finalCharts.length, 'preserveCharts:', preserveCharts);
+        
         handleSettingsChange({
           uploadedData: {
             ...data,
@@ -186,7 +224,7 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
           },
           fileId: resolvedFileId,
           dataSource: dataSource || settings.dataSource,
-          charts: updatedCharts
+          charts: finalCharts
         });
       }
 
@@ -223,6 +261,26 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
     const ensureFileReady = async () => {
       if (!settings.dataSource) return;
 
+      // 🔧 CRITICAL: Check if this is an AI-initiated dataSource change
+      // If charts already exist and were set by AI, we should preserve them
+      const currentAtom = useLaboratoryStore.getState().getAtom(atomId);
+      const currentSettings = (currentAtom?.settings as SettingsType) || {};
+      const hasAICharts = Array.isArray(currentSettings.charts) && currentSettings.charts.length > 0 && (currentSettings as any).aiConfigured;
+      const hasRenderedCharts = Array.isArray(currentSettings.charts) && currentSettings.charts.some((c: any) => c.chartRendered || c.chartConfig);
+      const shouldPreserveCharts = hasAICharts || (currentSettings as any).autoRenderAfterLoad;
+
+      // 🔧 CRITICAL: If AI is currently setting up charts OR charts are already rendered, skip this reload
+      // The AI handler will load the file itself, or charts are already working
+      if ((currentSettings as any).chartLoading || (currentSettings as any).autoRenderAfterLoad || hasRenderedCharts) {
+        console.log('🔧 Skipping file reload - AI is setting up charts or charts are already rendered', {
+          chartLoading: (currentSettings as any).chartLoading,
+          autoRenderAfterLoad: (currentSettings as any).autoRenderAfterLoad,
+          hasRenderedCharts,
+          chartsCount: Array.isArray(currentSettings.charts) ? currentSettings.charts.length : 0
+        });
+        return;
+      }
+
       // ALWAYS reload the file to get fresh column data and unique values
       // This ensures that even if the same filename is used across different projects,
       // we get the correct column structure and values for the current file
@@ -242,8 +300,21 @@ const ChartMakerProperties: React.FC<Props> = ({ atomId }) => {
           file_id: uploadResponse.file_id,
           row_count: uploadResponse.row_count,
         };
-        // Pass preserveCharts=true to keep existing chart configurations when reloading file
-        await handleDataUpload(chartData, uploadResponse.file_id, settings.dataSource, true);
+        // 🔧 CRITICAL: Pass preserveCharts=true when AI has configured charts to prevent clearing them
+        await handleDataUpload(chartData, uploadResponse.file_id, settings.dataSource, shouldPreserveCharts);
+        
+        // 🔧 AUTO-RENDER: If autoRenderAfterLoad flag is set and charts exist, auto-trigger render
+        const updatedAtom = useLaboratoryStore.getState().getAtom(atomId);
+        const updatedSettings = (updatedAtom?.settings as SettingsType) || {};
+        if ((updatedSettings as any).autoRenderAfterLoad && Array.isArray(updatedSettings.charts) && updatedSettings.charts.length > 0) {
+          console.log('🚀 Auto-triggering render after file load...');
+          // Clear the flag first to prevent re-triggering
+          handleSettingsChange({ autoRenderAfterLoad: false });
+          // Auto-trigger render after a small delay to ensure file is fully loaded
+          setTimeout(() => {
+            handleRenderCharts();
+          }, 500);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to reload dataframe');
         setLoading({ uploading: false });

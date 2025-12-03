@@ -18,16 +18,24 @@ export const DEFAULT_TRACE_COLORS = [
 // Convert legacy single yAxis/filters to traces format
 export const migrateLegacyChart = (chart: ChartMakerConfig): ChartMakerConfig => {
   if (chart.traces && chart.traces.length > 0) {
-    // Already in new format
-    return chart;
+    // Already in new format - but ensure filters is initialized
+    return {
+      ...chart,
+      filters: chart.filters || {},
+    };
   }
 
   // Preserve existing mode preference if set, otherwise default to simple
   const isAdvancedMode = chart.isAdvancedMode ?? false;
 
   if (!chart.yAxis) {
-    // No Y-axis selected yet - return empty traces but preserve mode
-    return { ...chart, traces: [], isAdvancedMode };
+    // No Y-axis selected yet - return empty traces but preserve mode and filters
+    return { 
+      ...chart, 
+      traces: [], 
+      isAdvancedMode,
+      filters: chart.filters || {},
+    };
   }
 
   // Convert legacy format to traces
@@ -54,6 +62,8 @@ export const migrateLegacyChart = (chart: ChartMakerConfig): ChartMakerConfig =>
     ...chart,
     traces: legacyTraces,
     isAdvancedMode,
+    // 🔧 CRITICAL FIX: Preserve filters at chart level (not just in traces)
+    filters: chart.filters || {},
   };
 };
 
