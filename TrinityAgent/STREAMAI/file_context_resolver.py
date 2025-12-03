@@ -384,25 +384,26 @@ class FileContextResolver:
         columns_info = metadata.get("columns") or {}
         if not isinstance(columns_info, dict):
             columns_info = {}
-        
+
         # Get all columns (prioritize highlighted columns, then all columns)
         columns_to_process = highlight_columns[:10] if highlight_columns else list(columns_info.keys())[:10]
-        
+
         categorical_values: Dict[str, List[Any]] = {}
+        value_samples: Dict[str, Dict[str, Any]] = {}
         condensed_stats: Dict[str, Dict[str, Any]] = {}
-        
+
         stats = metadata.get("statistical_summary") or {}
-        
+
         for col_name in columns_to_process:
             col_info = columns_info.get(col_name, {})
             if not isinstance(col_info, dict):
                 continue
-            
+
             data_type = col_info.get("data_type", "").lower()
-            
+
             # Check if numeric (int, float, numeric types)
             is_numeric = any(numeric_type in data_type for numeric_type in ["int", "float", "number", "numeric"])
-            
+
             if is_numeric:
                 # For numeric columns: include statistical summary
                 stat_key = self._match_key_case_insensitive(stats, col_name)
@@ -419,17 +420,28 @@ class FileContextResolver:
                 unique_vals = col_info.get("unique_values", [])
                 if unique_vals:
                     # Limit to reasonable number of unique values (max 50)
-                    categorical_values[col_name] = unique_vals[:50]
+                    sanitized_values = [str(val) for val in unique_vals[:50]]
+                    categorical_values[col_name] = sanitized_values
+                    value_samples[col_name] = {
+                        "examples": sanitized_values[:10],
+                        "total_unique": len(unique_vals) if isinstance(unique_vals, list) else len(sanitized_values),
+                        "note": "Sample values only. Do NOT treat these as column names.",
+                    }
                     # If truncated, indicate it
-                    if len(unique_vals) > 50:
+                    if isinstance(unique_vals, list) and len(unique_vals) > 50:
                         categorical_values[col_name].append(f"... (and {len(unique_vals) - 50} more unique values)")
-        
+
         # Add to summary
         if condensed_stats:
             summary["statistical_summary"] = condensed_stats
-        
+
         if categorical_values:
             summary["unique_values"] = categorical_values
+            summary["value_samples"] = value_samples
+            summary["value_sample_note"] = (
+                "Sample values are provided for context only. Treat only column names listed in 'sample_columns', "
+                "'highlighted_columns', 'numeric_columns', or 'categorical_columns' as valid columns."
+            )
 
         return summary
 

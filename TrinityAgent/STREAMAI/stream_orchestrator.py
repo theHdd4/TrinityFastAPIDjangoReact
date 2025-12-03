@@ -915,6 +915,12 @@ class StreamOrchestrator:
         mapping = selection.to_object_column_mapping(self._raw_files_with_columns)
 
         context_sections: List[str] = []
+        guardrail_note = (
+            "Context guardrails: Treat only entries under 'columns', 'sample_columns', "
+            "'highlighted_columns', 'numeric_columns', or 'categorical_columns' as valid column names. "
+            "Any lists under 'unique_values' or 'value_samples' are sample data values, not columns."
+        )
+        context_sections.append(guardrail_note)
         if mapping:
             context_sections.append("Available files:\n" + json.dumps(mapping, indent=2))
         if selection.file_details:
