@@ -1450,7 +1450,22 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           case 'connected':
             console.log('✅ Trinity AI connected');
             break;
-            
+
+          case 'intent_debug':
+            console.log(
+              '🧭 Intent detected:',
+              data.intent_record?.goal_type,
+              '| tools=',
+              data.intent_record?.required_tools,
+              '| output=',
+              data.intent_record?.output_format,
+              '| path=',
+              data.path,
+              '| rationale=',
+              data.rationale
+            );
+            break;
+
           case 'plan_generated':
             console.log('📋 Plan generated:', data.plan);
             

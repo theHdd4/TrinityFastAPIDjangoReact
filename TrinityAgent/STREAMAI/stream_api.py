@@ -145,6 +145,25 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 session_id, decision, previous_record=previous_record, available_files=available_files
             )
 
+            routing_snapshot = {
+                "path": decision.path,
+                "rationale": decision.rationale,
+                "goal_type": intent_record.goal_type,
+                "required_tools": sorted(intent_record.required_tools),
+                "output_format": intent_record.output_format,
+            }
+            logger.info("🧭 Intent routing snapshot: %s", routing_snapshot)
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "intent_debug",
+                        "path": decision.path,
+                        "intent_record": intent_record.to_dict(),
+                        "rationale": decision.rationale,
+                    }
+                )
+            )
+
             if decision.clarifications:
                 await websocket.send_text(json.dumps({
                     "type": "clarification_required",
