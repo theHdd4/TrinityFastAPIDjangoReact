@@ -25,7 +25,6 @@ from ..config import (
     build_collection,
     db
 )
-from app.core.redis import get_sync_redis
 from ..utils.file_loader import FileLoader
 
 logger = logging.getLogger(__name__)
@@ -307,7 +306,6 @@ class DataService:
 
                     flattened_models.append(flattened)
 
-            # Save to Redis cache
             _redis_set(cls.MODELS_KEY, flattened_models)
             return flattened_models
 
@@ -736,29 +734,29 @@ class DataService:
         cache.delete(f"d0:{d0_key}")
         cache.delete(f"cache_metadata:{d0_key}")
 
-        # Use underlying Redis client for pattern-based key deletion
-        # since FeatureCacheRouter doesn't have a keys() method
-        redis_client = get_sync_redis()
-
         pattern = f"d0:{d0_key}:cluster:*"
-        keys_to_delete = []
-        try:
-            for key in redis_client.scan_iter(match=pattern):
-                keys_to_delete.append(key)
-            if keys_to_delete:
-                redis_client.delete(*keys_to_delete)
-        except Exception as e:
-            logger.warning("Failed to delete cluster keys: %s", e)
+        keys = cache.keys(pattern)
+        if keys:
+            try:
+                cache.delete(*keys)
+            except Exception:
+                try:
+                    keys = [k.decode() if isinstance(k, (bytes, bytearray)) else k for k in keys]
+                    cache.delete(*keys)
+                except Exception as e:
+                    logger.warning("Failed to delete cluster keys: %s", e)
 
         pattern = f"d0:{d0_key}:ident:*"
-        keys_to_delete = []
-        try:
-            for key in redis_client.scan_iter(match=pattern):
-                keys_to_delete.append(key)
-            if keys_to_delete:
-                redis_client.delete(*keys_to_delete)
-        except Exception as e:
-            logger.warning("Failed to delete ident keys: %s", e)
+        keys = cache.keys(pattern)
+        if keys:
+            try:
+                cache.delete(*keys)
+            except Exception:
+                try:
+                    keys = [k.decode() if isinstance(k, (bytes, bytearray)) else k for k in keys]
+                    cache.delete(*keys)
+                except Exception as e:
+                    logger.warning("Failed to delete ident keys: %s", e)
 
         logger.info("Cleared all cache entries for dataset: %s", d0_key)
 

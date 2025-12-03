@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
 import { VALIDATE_API, FEATURE_OVERVIEW_API, SCENARIO_PLANNER_API } from '@/lib/api';
-import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useToast } from '@/hooks/use-toast';
 import { generateModelId } from '../utils/scenarioPlannerUtils';
 import { RefreshCw } from 'lucide-react';
@@ -301,8 +300,7 @@ const ScenarioPlannerInputFiles: React.FC<Props> = ({ atomId, onCacheInitialized
       // Fetch column summary
       const response = await fetch(`${FEATURE_OVERVIEW_API}/column_summary?object_name=${encodeURIComponent(fileName)}`);
       if (response.ok) {
-        const raw = await response.json();
-        const data = await resolveTaskResponse<{ summary?: any[] }>(raw);
+        const data = await response.json();
         const summaryData = Array.isArray(data.summary) ? data.summary.filter(Boolean) : [];
         
         // Auto-identify identifiers and measures based on data types (but don't auto-select)

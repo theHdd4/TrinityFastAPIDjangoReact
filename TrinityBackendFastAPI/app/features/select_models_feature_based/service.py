@@ -1745,18 +1745,18 @@ async def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"Failed to create ensemble model: {str(exc)}") from exc
     else:
         # Handle regular model (existing logic)
-        try:
-            models = _models_for_file(request.file_key, combination_id)
-        except ModelDataUnavailableError as exc:
-            raise ValueError(str(exc)) from exc
-        try:
-            record = next(
-                model
-                for model in models
-                if model.model_name == request.model_name
-            )
-        except StopIteration as exc:  # pragma: no cover - defensive
-            raise ValueError("Model not found for the provided criteria") from exc
+    try:
+        models = _models_for_file(request.file_key, combination_id)
+    except ModelDataUnavailableError as exc:
+        raise ValueError(str(exc)) from exc
+    try:
+        record = next(
+            model
+            for model in models
+            if model.model_name == request.model_name
+        )
+    except StopIteration as exc:  # pragma: no cover - defensive
+        raise ValueError("Model not found for the provided criteria") from exc
 
     model_id = f"saved-{next(_saved_counter):05d}"
     saved_entry = {
@@ -1780,23 +1780,23 @@ async def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     
     # Update selected_models flag (for ensemble, this was already done above)
     if not is_ensemble:
-        try:
-            updated = _update_selected_models_flag(request.file_key, target_combination, request.model_name)
-            if not updated:
-                logger.warning(
-                    "Selected model flag not updated for file=%s combination=%s model=%s",
-                    request.file_key,
-                    target_combination,
-                    request.model_name,
-                )
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.error(
-                "Failed to update selected_models column for file=%s combination=%s model=%s: %s",
+    try:
+        updated = _update_selected_models_flag(request.file_key, target_combination, request.model_name)
+        if not updated:
+            logger.warning(
+                "Selected model flag not updated for file=%s combination=%s model=%s",
                 request.file_key,
                 target_combination,
                 request.model_name,
-                exc,
             )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(
+            "Failed to update selected_models column for file=%s combination=%s model=%s: %s",
+            request.file_key,
+            target_combination,
+            request.model_name,
+            exc,
+        )
 
     # Save to MongoDB select_configs collection (like old implementation)
     try:
@@ -3069,14 +3069,14 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
             beta_col = col_dict["beta"]
             weighted_beta = _weighted_avg_series(filtered_frame[beta_col], weights_series)
             if weighted_beta is not None:
-                weighted_metrics[f"{var_name}_beta"] = weighted_beta
+        weighted_metrics[f"{var_name}_beta"] = weighted_beta
         
         # Average
         if "avg" in col_dict:
             avg_col = col_dict["avg"]
             weighted_avg = _weighted_avg_series(filtered_frame[avg_col], weights_series)
             if weighted_avg is not None:
-                weighted_metrics[f"{var_name}_avg"] = weighted_avg
+        weighted_metrics[f"{var_name}_avg"] = weighted_avg
         elif "av" in col_dict:
             avg_col = col_dict["av"]
             weighted_avg = _weighted_avg_series(filtered_frame[avg_col], weights_series)

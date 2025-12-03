@@ -28,48 +28,50 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
   
   // ✅ NEW: Create scenario-specific data for Settings component
   const scenarioSettingsForSettings = React.useMemo(() => {
-    // ✅ FIXED: Don't create empty arrays - let Settings component handle the sync
-    if (currentScenarioData) {
-      const result = {
-        ...settings,
-        // Use current scenario data as-is - let Settings component sync if needed
-        identifiers: currentScenarioData.identifiers || [],
-        features: currentScenarioData.features || [],
-        outputs: currentScenarioData.outputs || [],
-        combinations: currentScenarioData.combinations || [],
-        resultViews: currentScenarioData.resultViews || [],
-        aggregatedViews: currentScenarioData.aggregatedViews || [],
-        selectedView: currentScenarioData.selectedView || 'view-1',
-        combinationInputs: currentScenarioData.combinationInputs || {},
-        originalReferenceValues: currentScenarioData.originalReferenceValues || {},
-        
-        // Merge with global backend data
-        backendIdentifiers: settings.backendIdentifiers,
-        backendFeatures: settings.backendFeatures,
-        backendCombinations: settings.backendCombinations,
-        selectedCombinations: currentScenarioData?.selectedCombinations || [],
-        referenceMethod: settings.referenceMethod,
-        referencePeriod: settings.referencePeriod
-      };
+    // ✅ FIXED: Always use scenario data if it exists, to ensure updates are reflected
+    const scenarioIdentifiers = currentScenarioData?.identifiers;
+    const scenarioFeatures = currentScenarioData?.features;
+    
+    const result = {
+      ...settings,
+      // ✅ CRITICAL: Always use scenario data if it exists (even if empty), to reflect user selections
+      // Only use empty array if scenario data doesn't exist at all (Settings will sync from backend)
+      identifiers: scenarioIdentifiers !== undefined ? scenarioIdentifiers : [],
+      features: scenarioFeatures !== undefined ? scenarioFeatures : [],
+      outputs: currentScenarioData?.outputs || [],
+      combinations: currentScenarioData?.combinations || [],
+      resultViews: currentScenarioData?.resultViews || [],
+      aggregatedViews: currentScenarioData?.aggregatedViews || [],
+      selectedView: currentScenarioData?.selectedView || 'view-1',
+      combinationInputs: currentScenarioData?.combinationInputs || {},
+      originalReferenceValues: currentScenarioData?.originalReferenceValues || {},
       
-      console.log('🔍 Properties: scenarioSettingsForSettings result:', {
-        identifiersCount: result.identifiers.length,
-        featuresCount: result.features.length,
-        hasBackendData: !!(settings.backendIdentifiers && settings.backendFeatures),
-        selectedCombinations: result.selectedCombinations?.length || 0,
-        backendCombinations: result.backendCombinations?.combinations?.length || 0
-      });
-      
-      return result;
-    } else {
-      // Fallback to global settings if no scenario data exists
-      return {
-        ...settings,
-        // Ensure these fields are always available
-        selectedCombinations: [],
-        backendCombinations: settings.backendCombinations
-      };
-    }
+      // ✅ CRITICAL: Always include backend data - Settings component needs this to sync
+      backendIdentifiers: settings.backendIdentifiers,
+      backendFeatures: settings.backendFeatures,
+      backendCombinations: settings.backendCombinations,
+      selectedCombinations: currentScenarioData?.selectedCombinations || [],
+      referenceMethod: settings.referenceMethod,
+      referencePeriod: settings.referencePeriod
+    };
+    
+    console.log('🔍 Properties: scenarioSettingsForSettings result:', {
+      identifiersCount: result.identifiers.length,
+      featuresCount: result.features.length,
+      scenarioIdentifiersCount: scenarioIdentifiers?.length || 0,
+      scenarioFeaturesCount: scenarioFeatures?.length || 0,
+      hasBackendIdentifiers: !!result.backendIdentifiers,
+      hasBackendFeatures: !!result.backendFeatures,
+      hasBackendCombinations: !!result.backendCombinations,
+      backendIdentifiersKeys: result.backendIdentifiers ? Object.keys(result.backendIdentifiers) : [],
+      backendFeaturesKeys: result.backendFeatures ? Object.keys(result.backendFeatures) : [],
+      identifierColumnsCount: result.backendIdentifiers?.identifier_columns?.length || 0,
+      allUniqueFeaturesCount: result.backendFeatures?.all_unique_features?.length || 0,
+      selectedCombinations: result.selectedCombinations?.length || 0,
+      backendCombinationsCount: result.backendCombinations?.combinations?.length || 0
+    });
+    
+    return result;
   }, [settings, currentScenario, currentScenarioData]);
 
   // Debug: Log when scenario changes
@@ -114,32 +116,69 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
       return;
     }
     
-    // ✅ FIXED: Simplified update logic to prevent infinite loops
+    // ✅ FIXED: Handle scenario-specific updates (identifiers, features, etc.)
+    const scenarioUpdates: Partial<SettingsType> = {};
+    let hasScenarioUpdates = false;
+    
+    // Properties that should be updated in the scenario
+    const scenarioProperties = ['identifiers', 'features', 'outputs', 'combinations', 'resultViews', 'aggregatedViews', 'selectedView', 'combinationInputs', 'originalReferenceValues', 'selectedCombinations'];
+    
     if (currentScenarioData) {
-      // Only update scenario-specific properties that actually changed
       const updatedScenarios = { ...settings.scenarios };
-      if (updatedScenarios[currentScenario]) {
-        const currentData = updatedScenarios[currentScenario];
-        let hasChanges = false;
-        
-        // Check each property for actual changes
-        Object.entries(newData).forEach(([key, value]) => {
-          if (value !== undefined && JSON.stringify(currentData[key]) !== JSON.stringify(value)) {
+      if (!updatedScenarios[currentScenario]) {
+        // Initialize scenario if it doesn't exist
+        updatedScenarios[currentScenario] = { ...currentScenarioData };
+      }
+      
+      // Update scenario-specific properties
+      scenarioProperties.forEach(prop => {
+        if (newData[prop] !== undefined) {
+          const currentValue = updatedScenarios[currentScenario][prop];
+          if (JSON.stringify(currentValue) !== JSON.stringify(newData[prop])) {
             updatedScenarios[currentScenario] = {
               ...updatedScenarios[currentScenario],
-              [key]: value
+              [prop]: newData[prop]
             };
-            hasChanges = true;
+            hasScenarioUpdates = true;
           }
-        });
-        
-        if (hasChanges) {
-          console.log('🔍 Properties: Updating scenario data with changes');
-          updateSettings(atomId, { scenarios: updatedScenarios });
-        } else {
-          console.log('🔍 Properties: No scenario changes detected, skipping update');
         }
+      });
+      
+      // Also handle scenarios object if it's being updated
+      if (newData.scenarios) {
+        scenarioUpdates.scenarios = newData.scenarios;
+        hasScenarioUpdates = true;
+      } else if (hasScenarioUpdates) {
+        scenarioUpdates.scenarios = updatedScenarios;
       }
+    } else if (newData.identifiers || newData.features) {
+      // If no scenario data exists but we have identifiers/features, create it
+      const updatedScenarios = { ...settings.scenarios };
+      if (!updatedScenarios[currentScenario]) {
+        // Initialize with default structure
+        updatedScenarios[currentScenario] = {
+          identifiers: [],
+          features: [],
+          outputs: [],
+          combinations: [],
+          referenceMethod: 'mean',
+          referencePeriod: null,
+          resultViews: [],
+          selectedView: 'view-1'
+        };
+      }
+      if (newData.identifiers) updatedScenarios[currentScenario].identifiers = newData.identifiers;
+      if (newData.features) updatedScenarios[currentScenario].features = newData.features;
+      scenarioUpdates.scenarios = updatedScenarios;
+      hasScenarioUpdates = true;
+    }
+    
+    if (hasScenarioUpdates) {
+      console.log('🔍 Properties: Updating scenario data with changes:', {
+        identifiersCount: scenarioUpdates.scenarios?.[currentScenario]?.identifiers?.length || 0,
+        featuresCount: scenarioUpdates.scenarios?.[currentScenario]?.features?.length || 0
+      });
+      updateSettings(atomId, scenarioUpdates);
     }
     
     // Update global properties separately to avoid circular updates
@@ -147,7 +186,6 @@ export const ScenarioPlannerProperties: React.FC<ScenarioPlannerPropertiesProps>
     if (newData.backendIdentifiers) globalUpdates.backendIdentifiers = newData.backendIdentifiers;
     if (newData.backendFeatures) globalUpdates.backendFeatures = newData.backendFeatures;
     if (newData.backendCombinations) globalUpdates.backendCombinations = newData.backendCombinations;
-    if (newData.selectedCombinations) globalUpdates.selectedCombinations = newData.selectedCombinations;
     if (newData.referenceMethod) globalUpdates.referenceMethod = newData.referenceMethod;
     if (newData.referencePeriod) globalUpdates.referencePeriod = newData.referencePeriod;
     if (newData.referenceValuesNeedRefresh !== undefined) globalUpdates.referenceValuesNeedRefresh = newData.referenceValuesNeedRefresh;
