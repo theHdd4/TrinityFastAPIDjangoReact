@@ -154,7 +154,8 @@ class ReActWorkflowOrchestrator:
         user_prompt: str,
         session_id: Optional[str] = None,
         file_context: Optional[Dict[str, Any]] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        intent_route: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Execute complete ReAct workflow.
@@ -173,6 +174,8 @@ class ReActWorkflowOrchestrator:
         
         logger.info(f"🚀 Starting ReAct workflow for session: {session_id}")
         logger.info(f"📝 User prompt: {user_prompt[:100]}...")
+        if intent_route:
+            logger.info("🧭 Intent routing metadata received: path=%s | expected_artifacts=%s", intent_route.get("path"), intent_route.get("expected_artifacts"))
         
         try:
             # Note: Intent detection is handled ONCE at the entry point (main_app.py chat endpoint)

@@ -300,6 +300,7 @@ class StreamWebSocketOrchestrator:
         self._output_alias_registry: Dict[str, Dict[str, str]] = {}
         self._chat_file_mentions: Dict[str, List[str]] = {}
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
+        self._sequence_intent_routing: Dict[str, Dict[str, Any]] = {}
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
         self._paused_sequences: Set[str] = set()
 
@@ -426,7 +427,8 @@ class StreamWebSocketOrchestrator:
                 user_prompt=user_prompt,
                 session_id=session_id,
                 file_context=file_context,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                intent_route=self._sequence_intent_routing.get(session_id),
             )
             
             # Send final result event
@@ -2617,6 +2619,7 @@ WORKFLOW PLANNING:
         frontend_chat_id: Optional[str] = None,
         history_override: Optional[str] = None,
         chat_file_names: Optional[List[str]] = None,
+        intent_route: Optional[Dict[str, Any]] = None,
     ):
         """
         Execute complete workflow with WebSocket events.
@@ -2642,6 +2645,8 @@ WORKFLOW PLANNING:
         self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
+        if intent_route:
+            self._sequence_intent_routing[sequence_id] = intent_route
         logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
 
         resume_mode = False

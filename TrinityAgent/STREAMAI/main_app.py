@@ -12,6 +12,7 @@ import json
 import uuid
 import re
 import aiohttp
+from dataclasses import asdict
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
@@ -464,6 +465,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
         logger.info("🔒 Intent record persisted for session %s", session_id)
 
+        intent_route = None
+
         # Step 2: Route based on intent
         # If text_reply -> return immediately (no workflow execution)
         if intent == "text_reply":
@@ -483,6 +486,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
         logger.info("ℹ️ Intent detection already done - proceeding with workflow execution")
 
         if decision:
+            intent_route = asdict(decision)
+            intent_route["intent_record"] = intent_record.to_dict()
+            intent_route["session_id"] = session_id
             intent_service.update_scratchpad(session_id, f"Executing via {decision.path} with goal {intent_record.goal_type}")
         
         # Use ReAct orchestrator if available, otherwise fallback
@@ -491,7 +497,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
             result = await react_orchestrator.execute_workflow(
                 user_prompt=request.message,
                 session_id=session_id,
-                file_context=request.file_context
+                file_context=request.file_context,
+                intent_route=intent_route,
             )
             
             if not result.get("success"):

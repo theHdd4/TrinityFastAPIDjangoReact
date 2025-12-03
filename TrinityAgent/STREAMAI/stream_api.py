@@ -9,6 +9,7 @@ Follows the Trinity AI streaming pattern for proper card and result handling.
 import logging
 import json
 import uuid
+from dataclasses import asdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger("trinity.trinityai.api")
@@ -128,6 +129,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
         intent_record = None
         decision = None
         policy_flip = False
+        routing_payload = None
         if intent_service:
             previous_record = intent_service._intent_cache.get(session_id)
             intent_record = intent_service.infer_intent(
@@ -153,6 +155,11 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 "output_format": intent_record.output_format,
             }
             logger.info("🧭 Intent routing snapshot: %s", routing_snapshot)
+
+            routing_payload = asdict(decision)
+            routing_payload["intent_record"] = intent_record.to_dict()
+            routing_payload["session_id"] = session_id
+            routing_payload["routing_snapshot"] = routing_snapshot
             await websocket.send_text(
                 json.dumps(
                     {
@@ -367,6 +374,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
         else:
             mentioned_files = []
         
+        if routing_payload is not None:
+            project_context["intent_routing"] = routing_payload
+
         logger.info(f"🔑 Session ID: {session_id}, Chat ID: {chat_id}")
         
         # Execute workflow with real-time events (intent detection already done above - NOT called again)
@@ -381,6 +391,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 frontend_chat_id=chat_id,
                 history_override=history_summary,
                 chat_file_names=mentioned_files,
+                intent_route=routing_payload,
             )
         except Exception as workflow_error:
             error_msg = str(workflow_error)
