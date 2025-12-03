@@ -224,6 +224,318 @@ def get_group_by_router() -> Optional[APIRouter]:
         return None
 
 
+def get_chart_maker_router() -> Optional[APIRouter]:
+    """
+    Get the chart_maker agent router.
+    This is the main connection point for external systems.
+    
+    Returns:
+        APIRouter for chart_maker agent, or None if not available
+    """
+    try:
+        # Ensure agents are initialized
+        initialize_all_agents()
+        
+        # Get chart_maker router from registry
+        router = get_agent_router("chart_maker")
+        
+        if router:
+            # Ensure main_app is imported to register routes
+            route_count_before = len(router.routes)
+            try:
+                # Try multiple import strategies to ensure routes are registered
+                try:
+                    import Agent_ChartMaker.main_app
+                except ImportError:
+                    try:
+                        from Agent_ChartMaker import main_app
+                    except ImportError:
+                        # Try absolute import
+                        import sys
+                        from pathlib import Path
+                        agent_dir = Path(__file__).resolve().parent
+                        if str(agent_dir) not in sys.path:
+                            sys.path.insert(0, str(agent_dir))
+                        import Agent_ChartMaker.main_app
+                
+                route_count_after = len(router.routes)
+                logger.info(f"✅ ChartMaker router retrieved successfully")
+                logger.info(f"  Routes before main_app import: {route_count_before}")
+                logger.info(f"  Routes after main_app import: {route_count_after}")
+                if route_count_after == 0:
+                    logger.warning("⚠️ Router has no routes after importing main_app!")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import main_app to register routes: {e}")
+                route_count = len(router.routes)
+                logger.info(f"✅ ChartMaker router retrieved (has {route_count} routes)")
+        else:
+            logger.warning("⚠️ ChartMaker router not found in registry - will be auto-discovered")
+            # ChartMaker should be auto-discovered, but if not found, try to ensure it's registered
+            # by importing the module
+            try:
+                import Agent_ChartMaker.main_app
+                router = get_agent_router("chart_maker")
+                if router:
+                    logger.info("✅ ChartMaker router registered and retrieved after import")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import ChartMaker main_app: {e}")
+        
+        return router
+    except Exception as e:
+        logger.error(f"❌ Failed to get chart_maker router: {e}", exc_info=True)
+        return None
+
+
+def get_dataframe_operations_router() -> Optional[APIRouter]:
+    """
+    Get the dataframe_operations agent router.
+    This is the main connection point for external systems.
+    
+    Returns:
+        APIRouter for dataframe_operations agent, or None if not available
+    """
+    try:
+        # Ensure agents are initialized
+        initialize_all_agents()
+        
+        # Get dataframe_operations router from registry (using snake_case for consistency)
+        router = get_agent_router("dataframe_operations")
+        
+        if router:
+            # Ensure main_app is imported to register routes
+            route_count_before = len(router.routes)
+            try:
+                # Try multiple import strategies to ensure routes are registered
+                try:
+                    import Agent_DataFrameOperations.main_app
+                except ImportError:
+                    try:
+                        from Agent_DataFrameOperations import main_app
+                    except ImportError:
+                        # Try absolute import
+                        import sys
+                        from pathlib import Path
+                        agent_dir = Path(__file__).resolve().parent
+                        if str(agent_dir) not in sys.path:
+                            sys.path.insert(0, str(agent_dir))
+                        import Agent_DataFrameOperations.main_app
+                
+                route_count_after = len(router.routes)
+                logger.info(f"✅ DataFrameOperations router retrieved successfully")
+                logger.info(f"  Routes before main_app import: {route_count_before}")
+                logger.info(f"  Routes after main_app import: {route_count_after}")
+                if route_count_after == 0:
+                    logger.warning("⚠️ Router has no routes after importing main_app!")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import main_app to register routes: {e}")
+                route_count = len(router.routes)
+                logger.info(f"✅ DataFrameOperations router retrieved (has {route_count} routes)")
+        else:
+            # DataFrameOperations should be auto-discovered, but if not found yet, try to ensure it's registered
+            # by importing the module. This is expected during initialization, so log at debug level.
+            logger.debug("DataFrameOperations router not found in registry yet - attempting to register via import")
+            try:
+                import Agent_DataFrameOperations.main_app
+                router = get_agent_router("dataframe_operations")
+                if router:
+                    logger.info("✅ DataFrameOperations router registered and retrieved after import")
+                else:
+                    logger.debug("DataFrameOperations router still not found after import - will be auto-discovered")
+            except Exception as e:
+                logger.debug(f"Could not import DataFrameOperations main_app during initialization (will retry): {e}")
+        
+        return router
+    except Exception as e:
+        logger.error(f"❌ Failed to get dataframe_operations router: {e}", exc_info=True)
+        return None
+
+
+def get_data_upload_validate_router() -> Optional[APIRouter]:
+    """
+    Get the data_upload_validate agent router.
+    This is the main connection point for external systems.
+    
+    Returns:
+        APIRouter for data_upload_validate agent, or None if not available
+    """
+    try:
+        # Ensure agents are initialized
+        initialize_all_agents()
+        
+        # Get data_upload_validate router from registry (using snake_case for consistency)
+        router = get_agent_router("data_upload_validate")
+        
+        if router:
+            # Ensure main_app is imported to register routes
+            route_count_before = len(router.routes)
+            try:
+                # Try multiple import strategies to ensure routes are registered
+                try:
+                    import Agent_DataUploadValidate.main_app
+                except ImportError:
+                    try:
+                        from Agent_DataUploadValidate import main_app
+                    except ImportError:
+                        # Try absolute import
+                        import sys
+                        from pathlib import Path
+                        agent_dir = Path(__file__).resolve().parent
+                        if str(agent_dir) not in sys.path:
+                            sys.path.insert(0, str(agent_dir))
+                        import Agent_DataUploadValidate.main_app
+                
+                route_count_after = len(router.routes)
+                logger.info(f"✅ DataUploadValidate router retrieved successfully")
+                logger.info(f"  Routes before main_app import: {route_count_before}")
+                logger.info(f"  Routes after main_app import: {route_count_after}")
+                if route_count_after == 0:
+                    logger.warning("⚠️ Router has no routes after importing main_app!")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import main_app to register routes: {e}")
+                route_count = len(router.routes)
+                logger.info(f"✅ DataUploadValidate router retrieved (has {route_count} routes)")
+        else:
+            logger.warning("⚠️ DataUploadValidate router not found in registry - will be auto-discovered")
+            # DataUploadValidate should be auto-discovered, but if not found, try to ensure it's registered
+            # by importing the module
+            try:
+                import Agent_DataUploadValidate.main_app
+                router = get_agent_router("data_upload_validate")
+                if router:
+                    logger.info("✅ DataUploadValidate router registered and retrieved after import")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import DataUploadValidate main_app: {e}")
+        
+        return router
+    except Exception as e:
+        logger.error(f"❌ Failed to get data_upload_validate router: {e}", exc_info=True)
+        return None
+
+
+def get_fetch_atom_router() -> Optional[APIRouter]:
+    """
+    Get the fetch_atom agent router.
+    This is the main connection point for external systems.
+    
+    Returns:
+        APIRouter for fetch_atom agent, or None if not available
+    """
+    try:
+        # Ensure agents are initialized
+        initialize_all_agents()
+        
+        # Get fetch_atom router from registry (using snake_case for consistency)
+        router = get_agent_router("fetch_atom")
+        
+        if router:
+            # Ensure main_app is imported to register routes
+            route_count_before = len(router.routes)
+            try:
+                # Try multiple import strategies to ensure routes are registered
+                try:
+                    import Agent_FetchAtom.main_app
+                except ImportError:
+                    try:
+                        from Agent_FetchAtom import main_app
+                    except ImportError:
+                        # Try absolute import
+                        import sys
+                        from pathlib import Path
+                        agent_dir = Path(__file__).resolve().parent
+                        if str(agent_dir) not in sys.path:
+                            sys.path.insert(0, str(agent_dir))
+                        import Agent_FetchAtom.main_app
+                
+                route_count_after = len(router.routes)
+                logger.info(f"✅ FetchAtom router retrieved successfully")
+                logger.info(f"  Routes before main_app import: {route_count_before}")
+                logger.info(f"  Routes after main_app import: {route_count_after}")
+                if route_count_after == 0:
+                    logger.warning("⚠️ Router has no routes after importing main_app!")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import main_app to register routes: {e}")
+                route_count = len(router.routes)
+                logger.info(f"✅ FetchAtom router retrieved (has {route_count} routes)")
+        else:
+            logger.warning("⚠️ FetchAtom router not found in registry - will be auto-discovered")
+            # FetchAtom should be auto-discovered, but if not found, try to ensure it's registered
+            # by importing the module
+            try:
+                import Agent_FetchAtom.main_app
+                router = get_agent_router("fetch_atom")
+                if router:
+                    logger.info("✅ FetchAtom router registered and retrieved after import")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import FetchAtom main_app: {e}")
+        
+        return router
+    except Exception as e:
+        logger.error(f"❌ Failed to get fetch_atom router: {e}", exc_info=True)
+        return None
+
+
+def get_explore_router() -> Optional[APIRouter]:
+    """
+    Get the explore agent router.
+    This is the main connection point for external systems.
+    
+    Returns:
+        APIRouter for explore agent, or None if not available
+    """
+    try:
+        # Ensure agents are initialized
+        initialize_all_agents()
+        
+        # Get explore router from registry (using snake_case for consistency)
+        router = get_agent_router("explore")
+        
+        if router:
+            # Ensure main_app is imported to register routes
+            route_count_before = len(router.routes)
+            try:
+                # Try multiple import strategies to ensure routes are registered
+                try:
+                    import Agent_Explore.main_app
+                except ImportError:
+                    try:
+                        from Agent_Explore import main_app
+                    except ImportError:
+                        # Try absolute import
+                        import sys
+                        from pathlib import Path
+                        agent_dir = Path(__file__).resolve().parent
+                        if str(agent_dir) not in sys.path:
+                            sys.path.insert(0, str(agent_dir))
+                        import Agent_Explore.main_app
+                
+                route_count_after = len(router.routes)
+                logger.info(f"✅ Explore router retrieved successfully")
+                logger.info(f"  Routes before main_app import: {route_count_before}")
+                logger.info(f"  Routes after main_app import: {route_count_after}")
+                if route_count_after == 0:
+                    logger.warning("⚠️ Router has no routes after importing main_app!")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import main_app to register routes: {e}")
+                route_count = len(router.routes)
+                logger.info(f"✅ Explore router retrieved (has {route_count} routes)")
+        else:
+            logger.warning("⚠️ Explore router not found in registry - will be auto-discovered")
+            # Explore should be auto-discovered, but if not found, try to ensure it's registered
+            # by importing the module
+            try:
+                import Agent_Explore.main_app
+                router = get_agent_router("explore")
+                if router:
+                    logger.info("✅ Explore router registered and retrieved after import")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not import Explore main_app: {e}")
+        
+        return router
+    except Exception as e:
+        logger.error(f"❌ Failed to get explore router: {e}", exc_info=True)
+        return None
+
+
 def get_all_agent_routers() -> Dict[str, APIRouter]:
     """
     Get all registered agent routers.
@@ -279,6 +591,11 @@ __all__ = [
     "get_merge_router",
     "get_create_transform_router",
     "get_group_by_router",
+    "get_chart_maker_router",
+    "get_dataframe_operations_router",
+    "get_data_upload_validate_router",
+    "get_fetch_atom_router",
+    "get_explore_router",
     "get_all_agent_routers",
     "initialize_trinity_agent",
     "get_agent_router",

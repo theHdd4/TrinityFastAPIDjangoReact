@@ -98,6 +98,20 @@ class LLMClient:
         Raises:
             TrinityException: If the LLM call fails
         """
+        # Print full prompt to terminal
+        print("\n" + "="*80)
+        print("🚀 LLM API CALL - FULL PROMPT")
+        print("="*80)
+        print(f"API URL: {self.api_url}")
+        print(f"Model: {self.model_name}")
+        print(f"Temperature: {temperature}, Num Predict: {num_predict}")
+        print(f"Prompt Length: {len(prompt)} characters")
+        print("-"*80)
+        print("FULL PROMPT:")
+        print("-"*80)
+        print(prompt)
+        print("="*80 + "\n")
+        
         logger.info(f"CALLING LLM:")
         logger.info(f"API URL: {self.api_url}")
         logger.info(f"Model: {self.model_name}")
@@ -134,8 +148,33 @@ class LLMClient:
             )
             response.raise_for_status()
             
+            # Get raw response
+            raw_response_text = response.text
             response_data = response.json()
             content = response_data.get('message', {}).get('content', '')
+            
+            # Print raw API response to terminal
+            print("\n" + "="*80)
+            print("📥 LLM API - RAW RESPONSE")
+            print("="*80)
+            print(f"Status Code: {response.status_code}")
+            print(f"Response Headers: {dict(response.headers)}")
+            print("-"*80)
+            print("RAW JSON RESPONSE:")
+            print("-"*80)
+            print(raw_response_text)
+            print("="*80 + "\n")
+            
+            # Print processed content
+            print("\n" + "="*80)
+            print("✨ LLM API - PROCESSED CONTENT")
+            print("="*80)
+            print(f"Content Length: {len(content)} characters")
+            print("-"*80)
+            print("EXTRACTED CONTENT:")
+            print("-"*80)
+            print(content)
+            print("="*80 + "\n")
             
             logger.info(f"LLM Response Status: {response.status_code}")
             logger.info(f"LLM Content Length: {len(content)}")

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 // import { Play, Save, Share2, Undo2, List, Wifi, WifiOff } from 'lucide-react';
 import { Play, Save, Share2, Undo2, List, Wifi, WifiOff, ChevronUp, ChevronDown } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import Header from '@/components/Header';
 import { atoms as allAtoms } from '@/components/AtomList/data';
@@ -47,6 +48,7 @@ const LaboratoryMode = () => {
   const [cardExhibited, setCardExhibited] = useState<boolean>(false);
   const [showFloatingNavigationList, setShowFloatingNavigationList] = useState(false);
   const [auxActive, setAuxActive] = useState<'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null>('frames');
+  const [isExhibitionOpen, setIsExhibitionOpen] = useState<boolean>(false);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isHeaderMinimized, setIsHeaderMinimized] = useState(false);
   const [isTrinityAIVisible, setIsTrinityAIVisible] = useState(true); // Track if AI panel should be visible at all
@@ -525,9 +527,18 @@ const LaboratoryMode = () => {
 
   const handleCardSelect = (cardId: string, exhibited: boolean) => {
     if (!canEdit) return;
-    setSelectedAtomId(undefined);
     setSelectedCardId(cardId);
     setCardExhibited(exhibited);
+    
+    // Auto-select the atom in the card if it exists
+    const card = cards.find(c => c.id === cardId);
+    if (card && Array.isArray(card.atoms) && card.atoms.length > 0) {
+      // Select the first atom in the card
+      setSelectedAtomId(card.atoms[0].id);
+    } else {
+      // Only clear atom selection if card has no atoms
+      setSelectedAtomId(undefined);
+    }
   };
 
   const toggleSettingsPanel = () => {
@@ -782,6 +793,95 @@ const LaboratoryMode = () => {
     };
   }, [canEdit, handleSave]);
 
+  // Handle Ctrl+Alt+I keyboard shortcut to toggle AI panel
+  // Use refs to always access latest state values
+  const auxActiveRef = useRef(auxActive);
+  const isTrinityAIVisibleRef = useRef(isTrinityAIVisible);
+  const trinityAILayoutRef = useRef(trinityAILayout);
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    auxActiveRef.current = auxActive;
+    isTrinityAIVisibleRef.current = isTrinityAIVisible;
+    trinityAILayoutRef.current = trinityAILayout;
+  }, [auxActive, isTrinityAIVisible, trinityAILayout]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Debug: Log all Ctrl+Alt key combinations to help troubleshoot
+      if ((event.ctrlKey || event.metaKey) && event.altKey) {
+        console.log('🔍 Ctrl+Alt key detected:', {
+          key: event.key,
+          code: event.code,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          target: (event.target as HTMLElement)?.tagName
+        });
+      }
+      
+      // Check for Ctrl+Alt+I (or Cmd+Alt+I on Mac)
+      const isCtrlAltI = (event.ctrlKey || event.metaKey) && event.altKey && 
+                         (event.key.toLowerCase() === 'i' || event.code === 'KeyI');
+      
+      if (isCtrlAltI) {
+        console.log('✅ Ctrl+Alt+I detected!');
+        
+        // Don't trigger if user is typing in an input field
+        const target = event.target as HTMLElement;
+        const isInputField = 
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.contentEditable === 'true' ||
+          target.getAttribute('role') === 'textbox';
+        
+        if (isInputField) {
+          console.log('⚠️ Ignored: user is typing in input field');
+          return;
+        }
+
+        // Prevent default and stop propagation
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        
+        console.log('⌨️ Ctrl+Alt+I pressed - toggling AI panel', {
+          currentActive: auxActiveRef.current,
+          isVisible: isTrinityAIVisibleRef.current,
+          layout: trinityAILayoutRef.current
+        });
+        
+        // Directly toggle the AI panel state (same logic as clicking the icon)
+        const currentActive = auxActiveRef.current;
+        const newActive = currentActive === 'trinity' ? null : 'trinity';
+        
+        // If panel was hidden, show it again
+        if (newActive === 'trinity' && !isTrinityAIVisibleRef.current) {
+          setIsTrinityAIVisible(true);
+        }
+        
+        // In horizontal view, toggle collapse state
+        if (trinityAILayoutRef.current === 'horizontal' && newActive === 'trinity') {
+          setIsHorizontalAICollapsed(false); // Expand when opening
+        } else if (trinityAILayoutRef.current === 'horizontal' && newActive === null && currentActive === 'trinity') {
+          setIsHorizontalAICollapsed(true); // Collapse when closing
+        }
+        
+        // Update the active state
+        setAuxActive(newActive);
+        console.log('✅ AI panel toggled to:', newActive);
+      }
+    };
+
+    // Use capture phase to ensure this handler runs before others
+    window.addEventListener('keydown', handleKeyDown, true);
+    console.log('🎹 Keyboard shortcut handler registered: Ctrl+Alt+I');
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []); // Empty deps - we use refs for state access
+
   return (
     <div
       data-lab-preparing={isPreparingAnimation ? 'true' : undefined}
@@ -790,37 +890,24 @@ const LaboratoryMode = () => {
       <Header />
       
       {/* Laboratory Header */}
-      {isHeaderMinimized ? (
-        /* Minimized State - Small icon button */
-        <div
-          data-lab-header="true"
-          className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-4 py-2 flex-shrink-0 shadow-sm"
-        >
-        </div>
-      ) : (
-        <div
-          data-lab-header="true"
-          className="bg-white/80 backdrop-blur-sm border-b border-gray-200/60 px-6 py-6 flex-shrink-0 shadow-sm"
-        >
-          <div className="flex items-center justify-between">
-            <div data-lab-header-text="true" className="flex items-center gap-3">
-              <div>
-                <h2 className="text-3xl font-light text-gray-900 mb-2">Laboratory Mode</h2>
-                <p className="text-gray-600 font-light">Build sophisticated applications with modular atoms</p>
-              </div>
-            </div>
-
-            <div data-lab-toolbar="true" className="flex items-center space-x-3">
-            {canEdit && activeUsers.length > 0 && (
-              <div
-                className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-gray-200 shadow-sm"
-                title={activeUsers.map(user => user.email).join('\n')}
-              >
-                <div className="flex -space-x-2">
+      <div
+        data-lab-header="true"
+        className="absolute top-[53px] flex items-center justify-center z-50 pointer-events-none"
+        style={{
+          left: (auxiliaryMenuLeftOpen || isExhibitionOpen) ? '336px' : '48px', // w-12 (48px) icons + w-72 (288px) sidebar/panel when open
+          right: (auxActive && auxActive !== 'exhibition') ? '368px' : '48px', // w-12 (48px) icons + w-80 (320px) panel when open (exhibition is on left)
+        }}
+      >
+        <div className="bg-white rounded-lg shadow-md border border-gray-200 px-2.5 py-0.5 flex items-center gap-2 pointer-events-auto transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
+          {/* Active Users */}
+          {canEdit && activeUsers.length > 0 && (
+            <div className="flex items-center">
+              <div className="relative group">
+                <div className="flex -space-x-1.5">
                   {activeUsers.slice(0, 3).map((activeUser, index) => (
                     <div
                       key={activeUser.client_id}
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-semibold border-2 border-white shadow-sm"
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-semibold border-2 border-white shadow-sm"
                       title={`${activeUser.name} (${activeUser.email})`}
                       style={{ 
                         zIndex: 10 - index,
@@ -832,108 +919,108 @@ const LaboratoryMode = () => {
                   ))}
                   {activeUsers.length > 3 && (
                     <div
-                      className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-xs font-semibold border-2 border-white shadow-sm"
+                      className="w-5 h-5 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 text-[9px] font-semibold border-2 border-white shadow-sm"
                       title={`+${activeUsers.length - 3} more`}
                     >
                       +{activeUsers.length - 3}
                     </div>
                   )}
                 </div>
-                <span className="text-xs text-gray-600 font-medium ml-1">
-                  {activeUsers.length} {activeUsers.length === 1 ? 'user' : 'users'} editing
-                </span>
               </div>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
-              onClick={handleUndo}
-              disabled={!canEdit}
-            >
-              <Undo2 className="w-4 h-4 mr-2" />
-              Undo
-            </Button>
-            {canEdit && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-white border border-gray-200">
-                <span className="text-xs text-gray-600 font-medium">Auto Save</span>
-                <Switch
-                  checked={autosaveEnabled}
-                  onCheckedChange={setAutosaveEnabled}
-                  disabled={!canEdit}
-                />
-              </div>
-            )}
-            {!autosaveEnabled && (
-              <Button
-                variant="outline"
-                size="sm"
-                className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
-                onClick={handleSave}
+            </div>
+          )}
+          
+          {/* Undo */}
+          <button
+            onClick={handleUndo}
+            disabled={!canEdit}
+            className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
+              !canEdit ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            title="Undo"
+            type="button"
+          >
+            <Undo2 className="w-3.5 h-3.5" strokeWidth={2} />
+          </button>
+          
+          {/* Auto Save Toggle */}
+          {canEdit && setAutosaveEnabled && (
+            <div className="flex items-center">
+              <Switch
+                checked={autosaveEnabled}
+                onCheckedChange={setAutosaveEnabled}
                 disabled={!canEdit}
-                data-lab-save="true"
-              >
-                <Save className="w-4 h-4 mr-2" />
-                Save
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
-              onClick={() => canEdit && setShowFloatingNavigationList(!showFloatingNavigationList)}
+                className="scale-[0.65]"
+              />
+            </div>
+          )}
+          
+          {/* Save */}
+          {!autosaveEnabled && handleSave && (
+            <button
+              onClick={handleSave}
               disabled={!canEdit}
+              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
+                !canEdit ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              title="Save"
+              type="button"
+              data-lab-save="true"
             >
-              <List className="w-4 h-4 mr-2" />
-              {showFloatingNavigationList ? 'Hide' : 'Show'} Navigation List
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className={`border-gray-200 text-gray-700 font-medium ${canEdit ? 'hover:bg-gray-50' : 'opacity-50 cursor-not-allowed'}`}
+              <Save className="w-3.5 h-3.5" strokeWidth={2} />
+            </button>
+          )}
+          
+          {/* Share */}
+          {handleShareClick && (
+            <button
               onClick={handleShareClick}
               disabled={!canEdit}
+              className={`w-7 h-7 rounded-lg hover:bg-gray-100 transition-all flex items-center justify-center text-gray-600 ${
+                !canEdit ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              title="Share"
+              type="button"
             >
-              <Share2 className="w-4 h-4 mr-2" />
-              Share
-            </Button>
-            {/* {canEdit && (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-gray-50 border border-gray-200">
-                {isSyncConnected ? (
-                  <>
-                    <Wifi className="w-4 h-4 text-green-600" />
-                    <span className="text-xs text-gray-600 font-medium">Live</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="w-4 h-4 text-gray-400" />
-                    <span className="text-xs text-gray-500 font-medium">Offline</span>
-                  </>
-                )}
-              </div>
-            )} */}
-            <Button
-              className={`bg-gradient-to-r from-[#41C185] to-[#3ba876] text-white shadow-lg font-medium ${canEdit ? 'hover:from-[#3ba876] to-[#339966]' : 'opacity-50 cursor-not-allowed'}`}
-              disabled={!canEdit}
-            >
-              <Play className="w-4 h-4 mr-2" />
-              Run Pipeline
-            </Button>
-          </div>
-          </div>
+              <Share2 className="w-3.5 h-3.5" strokeWidth={2} />
+            </button>
+          )}
+          
+          {/* Run Pipeline */}
+          <button
+            disabled={!canEdit}
+            className={`w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-700 transition-all flex items-center justify-center text-white ${
+              !canEdit ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
+            title="Run Pipeline"
+            type="button"
+          >
+            <Play className="w-3.5 h-3.5" fill="white" />
+          </button>
         </div>
-      )}
+      </div>
 
         <div className="flex-1 flex overflow-hidden relative">
           {/* Atoms Sidebar */}
-          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full`}>
-            <AuxiliaryMenuLeft onAtomDragStart={handleAtomDragStart} />
+          <div data-lab-sidebar="true" className={`${canEdit ? '' : 'cursor-not-allowed'} h-full relative z-10`}>
+            <AuxiliaryMenuLeft 
+              onAtomDragStart={handleAtomDragStart}
+              active={auxActive}
+              onActiveChange={(newActive) => {
+                setAuxActive(newActive);
+              }}
+              isExhibitionOpen={isExhibitionOpen}
+              setIsExhibitionOpen={setIsExhibitionOpen}
+              canEdit={canEdit}
+              showFloatingNavigationList={showFloatingNavigationList}
+              setShowFloatingNavigationList={setShowFloatingNavigationList}
+            />
           </div>
 
           {/* Main Canvas Area */}
           <div
             data-lab-canvas="true"
-            className={`flex-1 p-6 ${canEdit ? '' : 'cursor-not-allowed'}`}
+            className={`flex-1 pt-[2.1rem] px-[0.3rem] pb-[0.3rem] relative z-0 ${canEdit ? '' : 'cursor-not-allowed'}`}
             onClick={
               canEdit
                 ? () => {
@@ -984,6 +1071,15 @@ const LaboratoryMode = () => {
                 setIsTrinityAIVisible(false);
                 setAuxActive(null);
               }}
+              canEdit={canEdit}
+              activeUsers={activeUsers}
+              autosaveEnabled={autosaveEnabled}
+              setAutosaveEnabled={setAutosaveEnabled}
+              onUndo={handleUndo}
+              onSave={handleSave}
+              onShare={handleShareClick}
+              showFloatingNavigationList={showFloatingNavigationList}
+              setShowFloatingNavigationList={setShowFloatingNavigationList}
             />
             <FloatingNavigationList
               isVisible={showFloatingNavigationList}

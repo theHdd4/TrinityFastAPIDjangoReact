@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 const PrimaryMenu = () => {
   const location = useLocation();
   return (
-    <nav className="flex items-center space-x-8">
+    <nav className="flex items-center space-x-6">
       <Link
         to="/workflow"
         className={`font-light text-sm transition-colors ${

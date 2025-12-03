@@ -35,7 +35,7 @@ const ProfileMenu: React.FC = () => {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="sm" className="p-2">
-          <User className="w-4 h-4 text-gray-600" />
+          <User className="w-5 h-5 text-gray-600" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">

@@ -11,8 +11,12 @@ import {
   executePerformOperation,
   validateFileInput,
   createProgressTracker,
-  autoSaveStepResult
+  autoSaveStepResult,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox
 } from './utils';
+import { generateAtomInsight } from './insightGenerator';
 
 const normalizeColumnName = (value: string | undefined | null) => {
   if (!value || typeof value !== 'string') return '';
@@ -306,6 +310,42 @@ export const groupbyHandler: AtomHandler = {
       lastUpdateTime: Date.now()
     });
     
+    // 📝 Update card text box with response, reasoning, and smart_response
+    console.log('📝 Updating card text box with agent response...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    console.log('📝 Formatted text box content length:', textBoxContent.length);
+    
+    // Update card's text box (this enables the text box icon on the card)
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
+    }
+    
+    // Store agent response in atom settings for reference
+    updateAtomSettings(atomId, {
+      agentResponse: {
+        response: data.response || '',
+        reasoning: data.reasoning || '',
+        smart_response: data.smart_response || '',
+        formattedText: textBoxContent
+      }
+    });
+    
+    // STEP 2: Add text box with placeholder (like create-transform) - right after 3 keys are added
+    // Add a small delay to ensure first text box is fully saved
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      // Add text box with placeholder (addCardTextBox requires non-empty content)
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight text box:', textBoxError);
+      // Continue even if text box addition fails
+    }
+    
     // Add AI success message with operation completion
     const successDetails = {
       'File': singleFileName || 'N/A',
@@ -432,6 +472,38 @@ export const groupbyHandler: AtomHandler = {
                 completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
                 setMessages(prev => [...prev, completionMsg]);
               }
+              
+              // STEP 2b: Generate insight AFTER perform operation completes successfully
+              // Update the existing "Generating insight..." text box with the actual insight
+              const enhancedDataForInsight = {
+                ...data, // This includes smart_response, response, reasoning (the 3 keys)
+                groupby_json: data.groupby_json, // Original config from first LLM call
+                groupby_results: {
+                  ...result.data,
+                  result_file: result.data.result_file,
+                  row_count: directRows.length,
+                  columns: headers,
+                  unsaved_data: directRows,
+                },
+                file_details: {
+                  file_name: singleFileName || '',
+                  identifiers: aiSelectedIdentifiers,
+                  aggregations: aiSelectedMeasures,
+                },
+              };
+              
+              // Generate insight - same pattern as create-transform (non-blocking)
+              // Generate insight - uses queue manager to ensure completion even when new atoms start
+              // The queue manager automatically handles text box updates with retry logic
+              generateAtomInsight({
+                data: enhancedDataForInsight,
+                atomType: 'groupby-wtg-avg',
+                sessionId,
+                atomId, // Pass atomId so queue manager can track and complete this insight
+              }).catch((error) => {
+                console.error('❌ Error generating insight:', error);
+              });
+              // Note: We don't need to manually update the text box here - the queue manager handles it
             } else {
               // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
               try {
@@ -507,6 +579,77 @@ export const groupbyHandler: AtomHandler = {
                   completionMsg.content += '\n\n📊 Results are ready! The data has been grouped and saved.\n\n💡 You can now view the results in the GroupBy interface - no need to click Perform again!';
                   setMessages(prev => [...prev, completionMsg]);
                 }
+                
+                // STEP 2b: Generate insight AFTER perform operation completes successfully
+                // Update the existing "Generating insight..." text box with the actual insight
+                const enhancedDataForInsight = {
+                  ...data, // This includes smart_response, response, reasoning (the 3 keys)
+                  groupby_json: data.groupby_json, // Original config from first LLM call
+                  groupby_results: {
+                    ...result.data,
+                    result_file: result.data.result_file,
+                    row_count: rows.length,
+                    columns: headers,
+                    unsaved_data: rows,
+                  },
+                  file_details: {
+                    file_name: singleFileName || '',
+                    identifiers: aiSelectedIdentifiers,
+                    aggregations: aiSelectedMeasures,
+                  },
+                };
+                
+                // Generate insight - same pattern as create-transform (non-blocking)
+                generateAtomInsight({
+                  data: enhancedDataForInsight,
+                  atomType: 'groupby-wtg-avg',
+                  sessionId,
+                }).then(async (insightResult) => {
+                  if (insightResult.success && insightResult.insight) {
+                    try {
+                      // Find the card and update the last text box (the one we added earlier) with the insight
+                      const { getAtom, cards, setCards, updateCard } = useLaboratoryStore.getState();
+                      const atom = getAtom(atomId);
+                      if (atom) {
+                        const card = cards.find(c => c.atoms?.some((a: any) => a.id === atomId));
+                        if (card && card.textBoxes && card.textBoxes.length > 0) {
+                          // Update the last text box (the one we just added) with the insight
+                          const updatedTextBoxes = [...card.textBoxes];
+                          const lastIndex = updatedTextBoxes.length - 1;
+                          if (updatedTextBoxes[lastIndex]?.title === 'AI Insight') {
+                            updatedTextBoxes[lastIndex] = {
+                              ...updatedTextBoxes[lastIndex],
+                              content: insightResult.insight,
+                              html: insightResult.insight.replace(/\n/g, '<br />'),
+                            };
+                            
+                            // Update the card
+                            updateCard(card.id, { textBoxes: updatedTextBoxes });
+                            
+                            // Also update using setCards
+                            const allCards = cards.map(c => 
+                              c.id === card.id 
+                                ? { ...c, textBoxes: updatedTextBoxes }
+                                : c
+                            );
+                            setCards(allCards);
+                            
+                            console.log('✅ Successfully updated insight text box with generated insight');
+                          }
+                        }
+                      }
+                    } catch (textBoxError) {
+                      console.error('❌ Error updating insight text box:', textBoxError);
+                    }
+                  } else {
+                    console.warn('⚠️ Insight generation did not produce a valid insight:', {
+                      success: insightResult.success,
+                      error: insightResult.error,
+                    });
+                  }
+                }).catch((error) => {
+                  console.error('❌ Error generating insight:', error);
+                });
               } catch (fetchError) {
                 console.error('❌ Error fetching results from saved file:', fetchError);
                 
@@ -698,6 +841,16 @@ export const groupbyHandler: AtomHandler = {
       });
       
       console.log('✅ Files loaded into groupby interface');
+    }
+    
+    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    console.log('📝 Updating card text box with agent response (failure case)...');
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated successfully (failure case)');
+    } catch (textBoxError) {
+      console.error('❌ Error updating card text box:', textBoxError);
     }
     
     return { success: true };

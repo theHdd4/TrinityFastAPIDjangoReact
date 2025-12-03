@@ -2,6 +2,8 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.utils.text import slugify
+from django.utils import timezone
+from django.db import models as django_models
 from typing import Any, Dict
 import os
 import logging
@@ -15,6 +17,7 @@ from .models import (
     LaboratoryAction,
     ArrowDataset,
     RegistryEnvironment,
+    ProjectModificationHistory,
 )
 from .atom_config import (
     save_atom_list_configuration,
@@ -188,6 +191,17 @@ class ProjectViewSet(viewsets.ModelViewSet):
     """
     CRUD for Projects.
     Admins and owners may create; owners may update/delete their own.
+    
+    Query Parameters:
+    - scope: Filter projects by scope (default: "tenant")
+        - "tenant": Returns all tenant projects (existing behavior)
+        - "user": Returns projects where owner=user OR user appears in ProjectModificationHistory
+    - limit: Limit the number of results without pagination
+    - ordering: Sort order (e.g., "-updated_at", "name", "created_at")
+    - app: Filter by app ID or slug
+    
+    The ProjectModificationHistory table tracks all users who have modified each project,
+    allowing multiple users to see a project in their "My Projects" tab if they've both modified it.
     """
     queryset = Project.objects.select_related("owner", "app").filter(is_deleted=False)
     serializer_class = ProjectSerializer
@@ -231,6 +245,28 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 else:
                     qs = qs.filter(app__slug=app_param)
 
+            # Handle scope parameter for filtering projects
+            # scope=tenant: Returns all tenant projects (default, existing behavior)
+            # scope=user: Returns projects where owner=user OR user appears in ProjectModificationHistory
+            scope = self.request.query_params.get("scope", "tenant")  # default to tenant
+            if scope == "user":
+                # Get project IDs from modification history where user has modified
+                modified_project_ids = list(
+                    ProjectModificationHistory.objects.filter(user=user).values_list('project_id', flat=True)
+                )
+                
+                # Filter to show projects owned OR modified by the current user
+                qs = qs.filter(
+                    django_models.Q(owner=user) | django_models.Q(id__in=modified_project_ids)
+                ).distinct()
+                
+                logger.info(
+                    f"🔍 User scope filter: User {user.username} - "
+                    f"Found {len(modified_project_ids)} projects in modification history, "
+                    f"Total projects after filter: {qs.count()}"
+                )
+            # If scope == "tenant", no additional filtering (existing behavior)
+
             # Handle ordering parameter (for sorting)
             ordering = self.request.query_params.get("ordering")
             if ordering:
@@ -246,9 +282,38 @@ class ProjectViewSet(viewsets.ModelViewSet):
         """
         Override list method to handle limit parameter for recent projects.
         When limit is provided, return limited results without pagination.
+        
+        Query Parameters:
+        - scope: Filter projects by scope
+            - "tenant" (default): Returns all tenant projects
+            - "user": Returns projects where owner=user OR user appears in ProjectModificationHistory
+        - limit: Limit the number of results (no pagination when provided)
+        - ordering: Sort order (e.g., "-updated_at", "name")
+        - app: Filter by app ID or slug
         """
+        from apps.accounts.tenant_utils import get_user_tenant_schema
+        
         # Get the queryset
         queryset = self.filter_queryset(self.get_queryset())
+        
+        # Get user and client info for logging
+        user = request.user
+        schema_name = get_user_tenant_schema(user)
+        scope = request.query_params.get("scope", "tenant")
+        
+        # Console logging for debugging
+        logger.info(
+            f"📋 Projects API Request - "
+            f"User: {user.username} | "
+            f"Client/Tenant: {schema_name} | "
+            f"Scope: {scope} | "
+            f"Total projects: {queryset.count()}"
+        )
+        
+        # Log project details for debugging
+        if queryset.exists():
+            projects_list = list(queryset.values('id', 'name', 'owner__username', 'app__slug', 'updated_at')[:10])
+            logger.info(f"📊 Sample projects (first 10): {projects_list}")
         
         # Handle limit parameter (for limiting results without pagination)
         limit_param = request.query_params.get("limit")
@@ -259,6 +324,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
                     # Apply limit by slicing the queryset (evaluates to list)
                     limited_queryset = list(queryset[:limit])
                     serializer = self.get_serializer(limited_queryset, many=True)
+                    logger.info(f"✅ Returning {len(limited_queryset)} projects (limited to {limit})")
                     return Response(serializer.data)
             except (ValueError, TypeError):
                 # Invalid limit parameter, ignore it and continue with normal pagination
@@ -268,9 +334,11 @@ class ProjectViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
+            logger.info(f"✅ Returning paginated projects (page size: {len(page)})")
             return self.get_paginated_response(serializer.data)
         
         serializer = self.get_serializer(queryset, many=True)
+        logger.info(f"✅ Returning {len(serializer.data)} projects (all)")
         return Response(serializer.data)
 
     def _can_edit(self, user):
@@ -284,6 +352,21 @@ class ProjectViewSet(viewsets.ModelViewSet):
             "permissions.exhibition_edit",
         ]
         return user.is_staff or any(user.has_perm(p) for p in perms)
+
+    def _record_modification(self, project, user):
+        """
+        Record that a user has modified a project.
+        Creates a new entry if it's the user's first time modifying the project,
+        or updates the modified_at timestamp if the entry already exists.
+        """
+        ProjectModificationHistory.objects.update_or_create(
+            project=project,
+            user=user,
+            defaults={'modified_at': timezone.now()}
+        )
+        logger.info(
+            f"📝 Recorded modification: User {user.username} modified project '{project.name}' (ID: {project.id})"
+        )
 
     def update(self, request, *args, **kwargs):
         from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
@@ -404,7 +487,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
             slug_val = f"{slug}-{counter}"
             counter += 1
 
-        serializer.save(owner=user, slug=slug_val)
+        project = serializer.save(owner=user, slug=slug_val)
+        # Record that the user created/modified this project
+        self._record_modification(project, user)
 
     def retrieve(self, request, *args, **kwargs):
         from apps.accounts.tenant_utils import switch_to_user_tenant, get_user_tenant_schema
@@ -456,6 +541,10 @@ class ProjectViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         load_env_vars(self.request.user)
         project = serializer.save()
+        
+        # Record that the user modified this project
+        self._record_modification(project, self.request.user)
+        
         if "name" in serializer.validated_data:
             os.environ["PROJECT_NAME"] = project.name
             os.environ["PROJECT_ID"] = f"{project.name}_{project.id}"
@@ -509,6 +598,9 @@ class ProjectViewSet(viewsets.ModelViewSet):
             state=source.state,
             base_template=source.base_template,
         )
+        
+        # Record that the user created this duplicated project
+        self._record_modification(new_project, request.user)
 
         for mode in ["laboratory", "workflow", "exhibition"]:
             cfg = load_atom_list_configuration(source, mode)

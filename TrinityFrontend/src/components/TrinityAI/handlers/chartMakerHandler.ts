@@ -9,9 +9,13 @@ import {
   processSmartResponse,
   validateFileInput,
   createDebouncer,
-  createProgressTracker 
+  createProgressTracker,
+  formatAgentResponseForTextBox,
+  updateCardTextBox,
+  addCardTextBox
 } from './utils';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { generateAtomInsight } from './insightGenerator';
 
 export const chartMakerHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
@@ -37,6 +41,42 @@ export const chartMakerHandler: AtomHandler = {
       console.log('✅ Displayed smart_response to user:', smartResponseText);
     }
     
+    // Show response and reasoning in chat box (3 keys total: smart_response, response, reasoning)
+    const responseText = data.response || data.data?.response || '';
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    
+    if (responseText) {
+      const responseMsg: Message = {
+        id: (Date.now() + 2).toString(),
+        content: `**Response:**\n${responseText}`,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, responseMsg]);
+      console.log('✅ Displayed response to user');
+    }
+    
+    if (reasoningText) {
+      const reasoningMsg: Message = {
+        id: (Date.now() + 3).toString(),
+        content: `**Reasoning:**\n${reasoningText}`,
+        sender: 'ai',
+        timestamp: new Date(),
+      };
+      setMessages(prev => [...prev, reasoningMsg]);
+      console.log('✅ Displayed reasoning to user');
+    }
+    
+    // STEP 1: Add the 3 keys (smart_response, response, reasoning) to a TEXT BOX
+    const textBoxContent = formatAgentResponseForTextBox(data);
+    
+    try {
+      await updateCardTextBox(atomId, textBoxContent);
+    } catch (textBoxError) {
+      console.error('❌ Error adding 3 keys to text box:', textBoxError);
+      // Continue even if text box update fails
+    }
+    
     // 🔧 CRITICAL FIX: Handle non-chart requests (file listing, suggestions, etc.)
     // Check multiple possible locations for chart_json
     const chartJson = data.chart_json || data.chart_config || null;
@@ -44,6 +84,45 @@ export const chartMakerHandler: AtomHandler = {
     if (!chartJson) {
       console.log('ℹ️ No chart configuration found - this is likely a file listing or suggestion request');
       console.log('📦 Available keys:', Object.keys(data));
+      
+      // STEP 2: Generate insight AFTER 3 keys are shown in text box
+      // This ensures the insight LLM has access to the original response
+      // All detailed logging happens on backend - check terminal for logs
+      
+      // Add a small delay to ensure first text box is fully saved
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Add text box with placeholder, then generate insight and update it
+      let textBoxAdded = false;
+      try {
+        // Add text box with placeholder (addCardTextBox requires non-empty content)
+        await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+        textBoxAdded = true;
+        console.log('✅ Placeholder text box added, now calling generateAtomInsight...');
+      } catch (textBoxError) {
+        console.error('❌ Error adding placeholder text box, but continuing with insight generation:', textBoxError);
+        // Continue even if text box fails
+      }
+      
+      // Generate insight - same pattern as createColumnHandler
+      // Call this even if text box addition failed
+      console.log('🚀🚀🚀 CHART MAKER: About to call generateAtomInsight');
+      console.log('🚀🚀🚀 CHART MAKER: data keys:', Object.keys(data));
+      console.log('🚀🚀🚀 CHART MAKER: sessionId:', sessionId);
+      console.log('🚀🚀🚀 CHART MAKER: atomType: chart-maker');
+      
+      // Generate insight - uses queue manager to ensure completion even when new atoms start
+      // The queue manager automatically handles text box updates with retry logic
+      generateAtomInsight({
+        data,
+        atomType: 'chart-maker',
+        sessionId,
+        atomId, // Pass atomId so queue manager can track and complete this insight
+      }).catch((error) => {
+        console.error('❌ Error generating insight:', error);
+      });
+      // Note: We don't need to manually update the text box here - the queue manager handles it
+      
       return { success: true }; // This is not an error for file listing requests
     }
 
@@ -513,28 +592,143 @@ export const chartMakerHandler: AtomHandler = {
           fileName: targetFile
         });
         
+        console.log('🚨🚨🚨 BEFORE Charts processed log');
         console.log('🎉 Charts processed:', generatedCharts.length);
-        console.log('✅ Final atom settings updated with all required fields for rendering');
+        console.log('🚨🚨🚨 AFTER Charts processed log - LINE 640');
         
-        const successCount = generatedCharts.filter(chart => chart.chartRendered).length;
-        const totalCount = generatedCharts.length;
+        try {
+          console.log('🚨🚨🚨 INSIDE TRY BLOCK AFTER CHARTS PROCESSED');
+          console.log('✅ Final atom settings updated with all required fields for rendering');
+          console.log('🚨🚨🚨 CRITICAL CHECKPOINT 1 - LINE 641');
+          
+          const successCount = generatedCharts.filter(chart => chart.chartRendered).length;
+          const totalCount = generatedCharts.length;
+          console.log('🚨🚨🚨 CRITICAL CHECKPOINT 2 - successCount:', successCount, 'totalCount:', totalCount);
+          
+          if (totalCount > 1) {
+            const successMsg: Message = {
+              id: (Date.now() + 4).toString(),
+              content: `✅ ${successCount}/${totalCount} charts generated successfully!\n\n💡 Use the 2-chart layout option to view them simultaneously.`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, successMsg]);
+          } else {
+            const successMsg: Message = {
+              id: (Date.now() + 4).toString(),
+              content: `✅ Chart generated successfully with real data!`,
+              sender: 'ai',
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, successMsg]);
+          }
+          
+          console.log('🚨🚨🚨 CRITICAL CHECKPOINT 3 - AFTER SUCCESS MESSAGES');
+          console.log('🚨🚨🚨 CRITICAL CHECKPOINT 4 - ABOUT TO START INSIGHT GENERATION');
+        console.log('🚨🚨🚨 fileData check:', typeof fileData !== 'undefined' ? 'EXISTS' : 'UNDEFINED');
+        console.log('🚨🚨🚨 generatedCharts check:', typeof generatedCharts !== 'undefined' ? 'EXISTS' : 'UNDEFINED');
+        console.log('🔍🔍🔍 Current line: After success messages');
+        console.log('🔍🔍🔍 generatedCharts exists:', typeof generatedCharts !== 'undefined');
+        console.log('🔍🔍🔍 generatedCharts length:', generatedCharts?.length || 0);
+        console.log('🔍🔍🔍 fileData exists:', typeof fileData !== 'undefined');
+        console.log('🔍🔍🔍 fileData keys:', fileData ? Object.keys(fileData) : 'N/A');
+        console.log('🔍🔍🔍 successCount:', successCount);
+        console.log('🔍🔍🔍 targetFile:', targetFile);
+        console.log('🔍🔍🔍 resolvedDataSource:', resolvedDataSource);
         
-        if (totalCount > 1) {
-          const successMsg: Message = {
-            id: (Date.now() + 3).toString(),
-            content: `✅ ${successCount}/${totalCount} charts generated successfully!\n\n💡 Use the 2-chart layout option to view them simultaneously.`,
-            sender: 'ai',
-            timestamp: new Date(),
+        // STEP 2: Generate insight AFTER charts are rendered and 3 keys are shown in text box
+        // This ensures the insight LLM has access to both the original response AND the chart results
+        // All detailed logging happens on backend - check terminal for logs
+        
+        console.log('🔍🔍🔍 REACHED INSIGHT GENERATION SECTION - Starting try block');
+        
+        try {
+          // Validate required variables exist
+          if (!fileData) {
+            console.error('❌❌❌ fileData is undefined! Cannot generate insight.');
+            throw new Error('fileData is undefined');
+          }
+          if (!generatedCharts) {
+            console.error('❌❌❌ generatedCharts is undefined! Cannot generate insight.');
+            throw new Error('generatedCharts is undefined');
+          }
+          
+          console.log('✅✅✅ All variables validated, creating enhancedDataForInsight');
+          
+          // Prepare enhanced data with chart results for insight generation
+          // Include the 3 keys from the original AI response (they're in 'data')
+          // Include chart results from backend API call
+          const enhancedDataForInsight = {
+            ...data, // This includes smart_response, response, reasoning (the 3 keys)
+            chart_json: chartJson, // Original chart config from first LLM call
+            chart_results: {
+              charts: generatedCharts,
+              charts_count: generatedCharts.length,
+              success_count: successCount,
+              file_data: {
+                file_id: fileData.file_id,
+                file_name: targetFile,
+                columns: fileData.columns,
+                row_count: fileData.row_count,
+                numeric_columns: fileData.numeric_columns,
+                categorical_columns: fileData.categorical_columns,
+              },
+            },
+            file_details: {
+              file_name: targetFile,
+              data_source: resolvedDataSource,
+            },
           };
-          setMessages(prev => [...prev, successMsg]);
-        } else {
-          const successMsg: Message = {
-            id: (Date.now() + 3).toString(),
-            content: `✅ Chart generated successfully with real data!`,
-            sender: 'ai',
-            timestamp: new Date(),
-          };
-          setMessages(prev => [...prev, successMsg]);
+          
+          console.log('✅✅✅ enhancedDataForInsight created successfully');
+          
+          console.log('✅ Enhanced data prepared for insight generation');
+          
+          // Generate insight - this is the 2nd LLM call
+          // All detailed logging happens on backend - check terminal for logs
+          
+          // Add a small delay to ensure first text box is fully saved
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Add text box with placeholder, then generate insight and update it
+          let textBoxAdded = false;
+          try {
+            // Add text box with placeholder (addCardTextBox requires non-empty content)
+            await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+            textBoxAdded = true;
+            console.log('✅ Placeholder text box added, now calling generateAtomInsight...');
+          } catch (textBoxError) {
+            console.error('❌ Error adding placeholder text box, but continuing with insight generation:', textBoxError);
+            // Continue even if text box fails
+          }
+          
+          // Generate insight - same pattern as createColumnHandler
+          // Call this even if text box addition failed
+          console.log('🚀🚀🚀 CHART MAKER: About to call generateAtomInsight (with enhanced data)');
+          console.log('🚀🚀🚀 CHART MAKER: enhancedDataForInsight keys:', Object.keys(enhancedDataForInsight));
+          console.log('🚀🚀🚀 CHART MAKER: sessionId:', sessionId);
+          console.log('🚀🚀🚀 CHART MAKER: atomType: chart-maker');
+          
+          // Generate insight - uses queue manager to ensure completion even when new atoms start
+          // The queue manager automatically handles text box updates with retry logic
+          generateAtomInsight({
+            data: enhancedDataForInsight,
+            atomType: 'chart-maker',
+            sessionId,
+            atomId, // Pass atomId so queue manager can track and complete this insight
+          }).catch((error) => {
+            console.error('❌ Error generating insight:', error);
+          });
+          // Note: We don't need to manually update the text box here - the queue manager handles it
+        } catch (insightError) {
+          console.error('❌❌❌ ERROR IN INSIGHT GENERATION SECTION:', insightError);
+          console.error('❌❌❌ Error details:', insightError instanceof Error ? insightError.message : insightError);
+          console.error('❌❌❌ Error stack:', insightError instanceof Error ? insightError.stack : 'N/A');
+        }
+        } catch (postChartsError) {
+          console.error('❌❌❌ ERROR AFTER CHARTS PROCESSED:', postChartsError);
+          console.error('❌❌❌ Error details:', postChartsError instanceof Error ? postChartsError.message : postChartsError);
+          console.error('❌❌❌ Error stack:', postChartsError instanceof Error ? postChartsError.stack : 'N/A');
         }
         
       } else {
@@ -547,6 +741,44 @@ export const chartMakerHandler: AtomHandler = {
         } catch (e) {
           // Use status text if can't parse error response
         }
+        
+        // STEP 2: Generate insight AFTER 3 keys are shown in text box (even if file loading fails)
+        // This ensures the insight LLM has access to the original response
+        // All detailed logging happens on backend - check terminal for logs
+        
+        // Add a small delay to ensure first text box is fully saved
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Add text box with placeholder, then generate insight and update it
+        let textBoxAdded = false;
+        try {
+          // Add text box with placeholder (addCardTextBox requires non-empty content)
+          await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+          textBoxAdded = true;
+          console.log('✅ Placeholder text box added (file load failed), now calling generateAtomInsight...');
+        } catch (textBoxError) {
+          console.error('❌ Error adding placeholder text box, but continuing with insight generation:', textBoxError);
+          // Continue even if text box fails
+        }
+        
+        // Generate insight - same pattern as createColumnHandler
+        // Call this even if text box addition failed
+        console.log('🚀🚀🚀 CHART MAKER: About to call generateAtomInsight (file load failed)');
+        console.log('🚀🚀🚀 CHART MAKER: data keys:', Object.keys(data));
+        console.log('🚀🚀🚀 CHART MAKER: sessionId:', sessionId);
+        console.log('🚀🚀🚀 CHART MAKER: atomType: chart-maker');
+        
+        // Generate insight - uses queue manager to ensure completion even when new atoms start
+        // The queue manager automatically handles text box updates with retry logic
+        generateAtomInsight({
+          data,
+          atomType: 'chart-maker',
+          sessionId,
+          atomId, // Pass atomId so queue manager can track and complete this insight
+        }).catch((error) => {
+          console.error('❌ Error generating insight:', error);
+        });
+        // Note: We don't need to manually update the text box here - the queue manager handles it
         
         updateAtomSettings(atomId, {
           chartRendered: false,
@@ -564,6 +796,7 @@ export const chartMakerHandler: AtomHandler = {
       
     } catch (error) {
       console.error('❌ Error in AI chart setup:', error);
+      console.error('❌ Error stack:', error instanceof Error ? error.stack : 'N/A');
       
       updateAtomSettings(atomId, {
         chartRendered: false,
@@ -580,6 +813,8 @@ export const chartMakerHandler: AtomHandler = {
     }
     
     // Smart response is already displayed above using processSmartResponse
+    console.log('🚨🚨🚨 ABOUT TO RETURN FROM HANDLER - Line 951');
+    console.log('🚨🚨🚨 Handler completing, returning success: true');
 
     return { success: true };
   },

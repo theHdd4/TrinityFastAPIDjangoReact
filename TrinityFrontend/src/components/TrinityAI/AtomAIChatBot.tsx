@@ -26,11 +26,20 @@ const ENDPOINTS: Record<string, string> = {
   'create-column': `${TRINITY_AI_API}/create-transform`,
   'groupby-wtg-avg': `${TRINITY_AI_API}/groupby`,
   'explore': `${TRINITY_AI_API}/explore`,
+  'correlation': `${TRINITY_AI_API}/correlation`,
   'dataframe-operations': `${TRINITY_AI_API}/dataframe-operations`,
   'data-upload-validate': `${TRINITY_AI_API}/df-validate`,
 };
 
 const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTitle, className, disabled }) => {
+  // Check if endpoint exists for this atom type
+  const endpoint = ENDPOINTS[atomType];
+  
+  // Don't render if no endpoint is available OR if explicitly disabled
+  if (!endpoint || disabled) {
+    return null;
+  }
+  
   const [isOpen, setIsOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string>(() => {
     // Generate session ID only once when component mounts
@@ -127,10 +136,10 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
     console.log('🚨 atomType:', atomType);
     console.log('🚨 inputValue:', inputValue);
     
-    const endpoint = ENDPOINTS[atomType];
-    console.log('🚨 endpoint:', endpoint);
+    const endpointForRequest = ENDPOINTS[atomType];
+    console.log('🚨 endpoint:', endpointForRequest);
     
-    if (!inputValue.trim() || !endpoint) {
+    if (!inputValue.trim() || !endpointForRequest) {
       console.log('🚨 EARLY RETURN - no input or endpoint');
       return;
     }
@@ -185,7 +194,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
       console.log('='.repeat(80));
       
       console.log('🚨 About to call fetch...');
-      const res = await fetch(endpoint, {
+      const res = await fetch(endpointForRequest, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestPayload),
@@ -197,7 +206,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
         const data = await res.json();
         console.log('🔍 🔍 🔍 FRONTEND - RECEIVED RESPONSE FROM API:');
         console.log('='.repeat(80));
-        console.log('Endpoint:', endpoint);
+        console.log('Endpoint:', endpointForRequest);
         console.log('Atom Type:', atomType);
         console.log('Status:', res.status);
         console.log('Response Keys:', Object.keys(data));
@@ -276,6 +285,7 @@ const AtomAIChatBot: React.FC<AtomAIChatBotProps> = ({ atomId, atomType, atomTit
                                  (atomType === 'groupby-wtg-avg' && data.groupby_json) ||
                                  (atomType === 'chart-maker' && data.chart_json) ||
                                  (atomType === 'explore' && data.exploration_config) ||
+                                 (atomType === 'correlation' && data.correlation_config) ||
                                  (atomType === 'dataframe-operations' && data.dataframe_config) ||
                                  (atomType === 'data-upload-validate' && data.validate_json);
         

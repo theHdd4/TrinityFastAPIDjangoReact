@@ -33,16 +33,21 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for AI worker image
     except ModuleNotFoundError:  # pragma: no cover - Docker image without backend package
         _fallback_redis_factory = None
         try:
-            from TrinityAI.redis_client import (  # type: ignore
+            from TrinityAgent.BaseAgent.redis_client import (  # type: ignore
                 get_redis_client as _fallback_redis_factory,
             )
-        except ModuleNotFoundError:  # pragma: no cover - alternate image layout
+        except ImportError:
             try:
-                from redis_client import (  # type: ignore
+                from BaseAgent.redis_client import (  # type: ignore
                     get_redis_client as _fallback_redis_factory,
                 )
-            except ModuleNotFoundError:  # pragma: no cover - redis optional in tooling
-                _fallback_redis_factory = None
+            except ImportError:
+                try:
+                    from redis_client import (  # type: ignore
+                        get_redis_client as _fallback_redis_factory,
+                    )
+                except ModuleNotFoundError:  # pragma: no cover - redis optional in tooling
+                    _fallback_redis_factory = None
 
         if _fallback_redis_factory is not None:
             def get_sync_redis(*, decode_responses: bool = True):  # type: ignore

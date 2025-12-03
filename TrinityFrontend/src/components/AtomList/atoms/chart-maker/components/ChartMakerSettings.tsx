@@ -46,28 +46,84 @@ const ChartMakerSettings: React.FC<ChartMakerSettingsProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`${VALIDATE_API}/list_saved_dataframes`)
-      .then(r => r.json())
-      .then(d =>
-        setFrames(
-          Array.isArray(d.files)
-            ? d.files
-                .filter((f: any) => !!f.arrow_name)
-                .map((f: any) => ({
-                  object_name: f.object_name,
-                  arrow_name: f.arrow_name,
-                }))
-            : []
-        )
-      )
-      .catch(() => setFrames([]));
-  }, []);
+    const fetchFrames = async () => {
+      try {
+        const response = await fetch(`${VALIDATE_API}/list_saved_dataframes`);
+        const data = await response.json();
+        const fetchedFrames = Array.isArray(data.files)
+          ? data.files
+              .filter((f: any) => !!f.arrow_name)
+              .map((f: any) => ({
+                object_name: f.object_name,
+                arrow_name: f.arrow_name,
+              }))
+          : [];
+        setFrames(fetchedFrames);
+        console.log('🔧 Fetched frames for dropdown:', fetchedFrames.length, 'files');
+        
+        // 🔧 CRITICAL: After fetching frames, re-match dataSource if it exists
+        // This ensures the dropdown shows the correct selection after frames are loaded
+        if (dataSource && fetchedFrames.length > 0) {
+          const matchingFrame = fetchedFrames.find((f: Frame) => {
+            if (f.object_name === dataSource) return true;
+            const dataSourceBasename = dataSource.split('/').pop()?.replace(/\.arrow$/, '');
+            const frameBasename = f.object_name.split('/').pop()?.replace(/\.arrow$/, '');
+            if (dataSourceBasename && frameBasename && dataSourceBasename === frameBasename) return true;
+            const arrowBasename = f.arrow_name.split('/').pop()?.replace(/\.arrow$/, '');
+            if (dataSourceBasename && arrowBasename && dataSourceBasename === arrowBasename) return true;
+            return false;
+          });
+          if (matchingFrame) {
+            setSelectedDataSource(matchingFrame.object_name);
+            console.log('🔧 Re-matched dataSource after frames loaded:', dataSource, '->', matchingFrame.object_name);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch frames:', error);
+        setFrames([]);
+      }
+    };
+    
+    fetchFrames();
+    // 🔧 Refresh frames periodically to catch newly added files
+    const interval = setInterval(fetchFrames, 5000); // Refresh every 5 seconds
+    return () => clearInterval(interval);
+  }, [dataSource]);
 
   useEffect(() => {
     if (dataSource) {
-      setSelectedDataSource(dataSource);
+      // 🔧 CRITICAL: Match dataSource to object_name in frames list
+      // The AI might provide a file path, but dropdown needs exact object_name match
+      const matchingFrame = frames.find(f => {
+        // Try exact match first
+        if (f.object_name === dataSource) {
+          return true;
+        }
+        // Try matching by basename (filename without path)
+        const dataSourceBasename = dataSource.split('/').pop()?.replace(/\.arrow$/, '');
+        const frameBasename = f.object_name.split('/').pop()?.replace(/\.arrow$/, '');
+        if (dataSourceBasename && frameBasename && dataSourceBasename === frameBasename) {
+          return true;
+        }
+        // Try matching arrow_name (full path)
+        const arrowBasename = f.arrow_name.split('/').pop()?.replace(/\.arrow$/, '');
+        if (dataSourceBasename && arrowBasename && dataSourceBasename === arrowBasename) {
+          return true;
+        }
+        return false;
+      });
+      
+      if (matchingFrame) {
+        // Use the exact object_name from frames list for dropdown
+        setSelectedDataSource(matchingFrame.object_name);
+        console.log('🔧 Matched dataSource to object_name:', dataSource, '->', matchingFrame.object_name);
+      } else {
+        // Fallback: use dataSource as-is (might work if format matches)
+        setSelectedDataSource(dataSource);
+        console.log('⚠️ Could not match dataSource to frames list:', dataSource, 'Available frames:', frames.map(f => f.object_name));
+      }
     }
-  }, [dataSource]);
+  }, [dataSource, frames]);
 
   const applyDataframeSelect = async (objectName: string) => {
     try {

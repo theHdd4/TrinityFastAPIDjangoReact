@@ -210,6 +210,23 @@ export const deleteMemoryChat = async (baseUrl: string, chatId: string): Promise
   }
 };
 
+export const deleteAllMemoryChats = async (baseUrl: string): Promise<{ deleted_count: number }> => {
+  const context = getProjectContext();
+  const url = buildUrl(baseUrl, '/memory/chats', {
+    client: context.client || '',
+    app: context.app || '',
+    project: context.project || '',
+  });
+  const response = await safeFetch(url, { method: 'DELETE' });
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(errorText || `Failed to delete all chats: ${response.status} ${response.statusText}`);
+  }
+  return handleResponse<{ deleted_count: number; message: string }>(response).then(data => ({
+    deleted_count: data.deleted_count
+  }));
+};
+
 export const saveMemorySession = async (
   baseUrl: string,
   sessionId: string,

@@ -4,13 +4,21 @@ import SavedDataFramesPanel from './SavedDataFramesPanel';
 import HelpPanel from './HelpPanel/';
 import ExhibitionPanel from './ExhibitionPanel';
 import { TrinityAIIcon, TrinityAIPanel } from '@/components/TrinityAI';
-import { Settings, Database, HelpCircle, GalleryHorizontal } from 'lucide-react';
+import { Settings, Database, HelpCircle, GalleryHorizontal, Undo2, Save, Share2, List, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
 
 interface TrinityBackgroundStatus {
   isProcessing: boolean;
   isCollapsed: boolean;
   hasActiveWorkflow: boolean;
+}
+
+interface ActiveUser {
+  client_id: string;
+  name: string;
+  email: string;
+  color?: string;
 }
 
 interface Props {
@@ -24,6 +32,16 @@ interface Props {
   trinityAILayout?: 'vertical' | 'horizontal';
   isTrinityAIVisible?: boolean;
   onTrinityAIClose?: () => void;
+  // Toolbar props
+  canEdit?: boolean;
+  activeUsers?: ActiveUser[];
+  autosaveEnabled?: boolean;
+  setAutosaveEnabled?: (enabled: boolean) => void;
+  onUndo?: () => void;
+  onSave?: () => void;
+  onShare?: () => void;
+  showFloatingNavigationList?: boolean;
+  setShowFloatingNavigationList?: (show: boolean) => void;
 }
 
 const AuxiliaryMenu: React.FC<Props> = ({
@@ -34,7 +52,16 @@ const AuxiliaryMenu: React.FC<Props> = ({
   onActiveChange,
   trinityAILayout = 'vertical',
   isTrinityAIVisible = true,
-  onTrinityAIClose
+  onTrinityAIClose,
+  canEdit = true,
+  activeUsers = [],
+  autosaveEnabled = true,
+  setAutosaveEnabled,
+  onUndo,
+  onSave,
+  onShare,
+  showFloatingNavigationList = true,
+  setShowFloatingNavigationList
 }) => {
   const [internalActive, setInternalActive] = useState<
     'settings' | 'frames' | 'help' | 'trinity' | 'exhibition' | null
@@ -148,7 +175,6 @@ const AuxiliaryMenu: React.FC<Props> = ({
         </div>
       )}
 
-      {active === 'exhibition' && <ExhibitionPanel onToggle={() => setActive(null)} />}
 
       {/* Icons Column - Always visible and stays on the right */}
       <div className="bg-white border-l border-gray-200 transition-all duration-300 flex flex-col h-full w-12 flex-shrink-0">
@@ -182,7 +208,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
             data-settings="true"
             type="button"
           >
-            <Settings className="w-4 h-4" />
+            <Settings className="w-3.5 h-3.5" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Settings
             </span>
@@ -198,25 +224,9 @@ const AuxiliaryMenu: React.FC<Props> = ({
             data-saved-dataframes="true"
             type="button"
           >
-            <Database className="w-4 h-4" />
+            <Database className="w-3.5 h-3.5" />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Saved DataFrames
-            </span>
-          </button>
-        </div>
-        <div className="p-3 border-b border-gray-200 flex items-center justify-center">
-          <button
-            onClick={openExhibition}
-            className={`w-9 h-9 rounded-lg hover:bg-muted transition-all group relative hover:scale-105 hover:shadow-lg flex items-center justify-center ${
-              active === 'exhibition' ? 'bg-muted text-foreground' : ''
-            }`}
-            title="Exhibition"
-            data-exhibition-panel-toggle="true"
-            type="button"
-          >
-            <GalleryHorizontal className="w-4 h-4 text-gray-600" />
-            <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
-              Exhibition
             </span>
           </button>
         </div>
@@ -229,7 +239,7 @@ const AuxiliaryMenu: React.FC<Props> = ({
             title="Help"
             type="button"
           >
-            <HelpCircle className="w-5 h-5 text-gray-600" strokeWidth={2} />
+            <HelpCircle className="w-4 h-4 text-gray-600" strokeWidth={2} />
             <span className="absolute right-full mr-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-lg border border-border">
               Help
             </span>

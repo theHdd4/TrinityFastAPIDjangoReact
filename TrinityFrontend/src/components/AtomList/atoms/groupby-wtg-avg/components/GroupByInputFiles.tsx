@@ -4,6 +4,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { VALIDATE_API, FEATURE_OVERVIEW_API, GROUPBY_API } from '@/lib/api';
 import { resolveTaskResponse } from '@/lib/taskQueue';
 import { useLaboratoryStore } from '@/components/LaboratoryMode/store/laboratoryStore';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 const normalizeColumnName = (value: string | undefined | null) => {
   if (!value || typeof value !== 'string') return '';
@@ -204,7 +206,7 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
   };
 
   return (
-    <div className="space-y-4 p-2">
+    <div className="space-y-4 px-2 pb-2">
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 6px;
@@ -236,6 +238,23 @@ const GroupByInputFiles: React.FC<Props> = ({ atomId }) => {
             ))}
           </SelectContent>
         </Select>
+      </Card>
+      <Card className="p-4 space-y-3">
+        <div className="flex items-center space-x-2">
+          <Checkbox
+            id="cardinality-toggle"
+            checked={settings.showCardinalityView || false}
+            onCheckedChange={(checked) => {
+              updateSettings(atomId, { showCardinalityView: !!checked });
+            }}
+          />
+          <Label
+            htmlFor="cardinality-toggle"
+            className="text-sm font-medium text-gray-700 cursor-pointer"
+          >
+            Show Cardinality View
+          </Label>
+        </div>
       </Card>
       {false && identifiers.length > 0 && (
         <Card className="p-4 space-y-3 bg-gradient-to-br from-blue-50 to-blue-100">
