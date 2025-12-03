@@ -2872,6 +2872,25 @@ WORKFLOW PLANNING:
                 except Exception as e:
                     logger.error(f"❌ ReAct: Step generation failed: {e}, stopping workflow")
                     react_state.goal_achieved = True
+                    react_state.paused = True
+                    react_state.paused_at_step = current_step_number
+                    react_state.current_step_number = current_step_number
+                    self._paused_sequences.add(sequence_id)
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_generation_failed",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "message": "Planning encountered an error. Please retry to continue from this step.",
+                                },
+                            ),
+                            "react_generation_failed event",
+                        )
+                    except (WebSocketDisconnect, Exception):
+                        logger.debug("⚠️ Unable to send generation failure event", exc_info=True)
                     break
             
                 if next_step is None:
