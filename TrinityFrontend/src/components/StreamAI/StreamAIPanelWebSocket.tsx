@@ -630,10 +630,28 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     // Use current messages state directly to avoid stale data
     const chat = chats.find(c => c.id === currentChatId);
     if (!chat) {
+      // 🔧 CRITICAL FIX: Don't create a new chat if websocket just closed after insights
+      // Check if this is happening right after a websocket close (insights were just added)
+      // If messages contain insights (workflow_insight type or "Workflow Insights" content),
+      // this means we're updating an existing chat, not creating a new one
+      const hasInsightMessage = messages.some(m => 
+        m.content.includes('Workflow Insights') || 
+        m.content.includes('📊 **Workflow Insights**') ||
+        m.id?.includes('insight-')
+      );
+      
       // CRITICAL FIX: Only create a new chat if currentChatId is valid and we have messages
       // Don't create a new chat if we're just updating an existing one (e.g., after insight)
       // Check if messages already contain user messages - if so, this is likely an update, not a new chat
       const hasUserMessages = messages.some(m => m.sender === 'user');
+      
+      // If we have insight messages but no chat exists, this is likely a race condition
+      // where the chat state hasn't updated yet. Skip creating a new chat in this case.
+      if (hasInsightMessage && hasUserMessages) {
+        console.warn('⚠️ Chat not found but messages contain insights - likely race condition, skipping new chat creation');
+        return;
+      }
+      
       if (!hasUserMessages) {
         // No user messages yet, this might be initial state - don't create chat yet
         return;
@@ -1811,6 +1829,10 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               console.warn('⚠️ No currentChatId when insight received, skipping insight message');
               break;
             }
+            
+            // 🔧 CRITICAL FIX: Set skip flag to prevent useEffect from creating new chat
+            // This prevents race condition where useEffect runs before chats state is updated
+            memoryPersistSkipRef.current = true;
             
             // Update chats state first to ensure chat exists
             setChats(prevChats => {

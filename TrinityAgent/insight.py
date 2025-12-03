@@ -17,6 +17,17 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("trinity.ai.insights")
 router = APIRouter(prefix="/insights", tags=["AI Insights"])
 
+# Import enhanced insight analysis module
+try:
+    from TrinityAgent.insight_analysis import (
+        generate_insights as generate_deep_insights,
+        InsightPayload
+    )
+    DEEP_INSIGHTS_AVAILABLE = True
+except ImportError as e:
+    DEEP_INSIGHTS_AVAILABLE = False
+    logger.warning(f"Enhanced insight analysis module not available: {e}")
+
 # 🔧 Use same LLM config pattern as explore agent
 def get_llm_config():
     ollama_ip = os.getenv("OLLAMA_IP", os.getenv("HOST_IP", "127.0.0.1"))
@@ -431,6 +442,56 @@ class AsyncAtomInsightResponse(BaseModel):
     message: str = Field(..., description="Status message")
     task_id: Optional[str] = Field(None, description="Task ID for tracking")
 
+def _safe_serialize_data_summary(data_summary: Dict[str, Any], max_size: int = 5000) -> str:
+    """
+    Safely serialize data_summary, excluding large datasets to prevent hanging.
+    
+    Args:
+        data_summary: The data summary dictionary
+        max_size: Maximum size of serialized output in characters
+    
+    Returns:
+        Serialized string representation, truncated if necessary
+    """
+    # Keys that typically contain large datasets that should be excluded or summarized
+    large_data_keys = {'rows', 'data', 'samples', 'preview', 'chart_data', 'dataset', 'values'}
+    
+    # Create a safe copy without large datasets
+    safe_summary = {}
+    for key, value in data_summary.items():
+        if key.lower() in large_data_keys:
+            # Replace large datasets with summaries
+            if isinstance(value, (list, tuple)):
+                safe_summary[key] = f"<{len(value)} items> (data excluded for performance)"
+            elif isinstance(value, dict):
+                safe_summary[key] = f"<dict with {len(value)} keys> (data excluded for performance)"
+            else:
+                safe_summary[key] = f"<{type(value).__name__}> (data excluded for performance)"
+        else:
+            # For other values, include them but check size
+            try:
+                test_serialized = json.dumps(value, default=str)
+                if len(test_serialized) > 1000:  # If value itself is large, summarize
+                    if isinstance(value, (list, tuple)):
+                        safe_summary[key] = f"<{len(value)} items> (truncated)"
+                    elif isinstance(value, dict):
+                        safe_summary[key] = f"<dict with {len(value)} keys> (truncated)"
+                    else:
+                        safe_summary[key] = str(value)[:500] + "..." if len(str(value)) > 500 else value
+                else:
+                    safe_summary[key] = value
+            except (TypeError, ValueError):
+                safe_summary[key] = str(value)[:500] if len(str(value)) > 500 else str(value)
+    
+    try:
+        serialized = json.dumps(safe_summary, indent=2, default=str)
+        # Truncate if still too large
+        if len(serialized) > max_size:
+            serialized = serialized[:max_size] + "\n... (truncated for performance)"
+        return serialized
+    except (TypeError, ValueError) as e:
+        return f"<Error serializing data summary: {e}>"
+
 def build_atom_insight_prompt(
     smart_response: str,
     response: str,
@@ -684,9 +745,10 @@ GroupBy Operation Details:
                     data_section += f"Columns (first 20): {', '.join(result_columns[:20])}...\n"
     
     else:
-        # Generic atom type
+        # Generic atom type - use safe serialization to avoid hanging on large datasets
         data_section += f"Atom Type: {atom_type}\n"
-        data_section += f"Data Summary: {json.dumps(data_summary, indent=2)}\n"
+        safe_summary = _safe_serialize_data_summary(data_summary)
+        data_section += f"Data Summary: {safe_summary}\n"
     
     # Build the complete prompt
     prompt = f"""You are an intelligent data analysis assistant. Analyze the agent's response and the underlying data processing to provide a comprehensive, rigorous, and well-explained insight.
@@ -787,14 +849,92 @@ async def generate_atom_insight(request: AtomInsightRequest):
             error=str(e)
         )
 
+def find_card_by_atom_id(cards: List[Dict[str, Any]], atom_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Robust card lookup with multiple matching strategies.
+    
+    Args:
+        cards: List of card dictionaries
+        atom_id: Atom ID to search for
+    
+    Returns:
+        Card dictionary if found, None otherwise
+    """
+    if not cards or not atom_id:
+        return None
+    
+    # Strategy 1: Exact match
+    for card in cards:
+        if card.get("atoms"):
+            for atom in card["atoms"]:
+                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                if atom_id_in_card == atom_id:
+                    logger.info(f"✅ Found card with exact atom ID match: {atom_id}")
+                    return card
+    
+    # Strategy 2: Case-insensitive match
+    atom_id_lower = atom_id.lower().strip()
+    for card in cards:
+        if card.get("atoms"):
+            for atom in card["atoms"]:
+                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                if atom_id_in_card and str(atom_id_in_card).lower().strip() == atom_id_lower:
+                    logger.info(f"✅ Found card with case-insensitive atom ID match: {atom_id} == {atom_id_in_card}")
+                    return card
+    
+    # Strategy 3: Partial match (atom_id ends with or contains the search term)
+    for card in cards:
+        if card.get("atoms"):
+            for atom in card["atoms"]:
+                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                if atom_id_in_card:
+                    atom_id_str = str(atom_id_in_card)
+                    # Check if atom_id ends with our search term or vice versa
+                    if atom_id_str.endswith(atom_id) or atom_id.endswith(atom_id_str):
+                        logger.info(f"✅ Found card with partial atom ID match: {atom_id} ~= {atom_id_str}")
+                        return card
+                    # Check if one contains the other
+                    if atom_id in atom_id_str or atom_id_str in atom_id:
+                        logger.info(f"✅ Found card with substring atom ID match: {atom_id} contains {atom_id_str}")
+                        return card
+    
+    # Strategy 4: Match by prefix (e.g., "chart-maker-123" matches "chart-maker")
+    atom_prefix = atom_id.split("-")[0] if "-" in atom_id else atom_id
+    for card in cards:
+        if card.get("atoms"):
+            for atom in card["atoms"]:
+                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                if atom_id_in_card:
+                    atom_id_str = str(atom_id_in_card)
+                    if atom_id_str.startswith(atom_prefix) or atom_prefix in atom_id_str:
+                        logger.info(f"✅ Found card with prefix atom ID match: {atom_id} (prefix: {atom_prefix})")
+                        return card
+    
+    return None
+
+
 def update_card_textbox_background(
     atom_id: str,
     insight: str,
     client_name: Optional[str],
     app_name: Optional[str],
-    project_name: Optional[str]
+    project_name: Optional[str],
+    max_retries: int = 5,
+    retry_delay: float = 2.0
 ):
-    """Background task to update card text box with generated insight."""
+    """
+    Background task to update card text box with generated insight.
+    🔧 ENHANCED: Added retry logic and robust card lookup.
+    
+    Args:
+        atom_id: Atom ID to update
+        insight: Generated insight text
+        client_name: Client name
+        app_name: App name
+        project_name: Project name
+        max_retries: Maximum number of retry attempts
+        retry_delay: Delay between retries in seconds
+    """
     try:
         # Get laboratory API URL from environment
         # Try multiple possible environment variable names
@@ -826,36 +966,82 @@ def update_card_textbox_background(
         logger.info(f"📤 Cards URL: {cards_url}")
         logger.info(f"📤 Client: {client_name}, App: {app_name}, Project: {project_name}")
         
-        try:
-            cards_response = requests.get(cards_url, timeout=10)
-            
-            if not cards_response.ok:
-                error_text = cards_response.text[:500] if cards_response.text else "No error message"
-                logger.error(f"❌ Failed to fetch cards: {cards_response.status_code}")
-                logger.error(f"❌ Error response: {error_text}")
-                logger.error(f"❌ Request URL was: {cards_url}")
-                return
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Request exception when fetching cards: {e}")
-            logger.error(f"❌ Request URL was: {cards_url}")
-            return
-        
-        cards_data = cards_response.json()
-        cards = cards_data.get("cards", [])
-        
-        # Find the card containing this atom
+        # 🔧 ENHANCED: Retry logic with exponential backoff
         target_card = None
-        for card in cards:
-            if card.get("atoms"):
-                for atom in card["atoms"]:
-                    if atom.get("id") == atom_id:
-                        target_card = card
-                        break
-            if target_card:
-                break
+        cards_data = None
+        
+        for attempt in range(max_retries):
+            try:
+                cards_response = requests.get(cards_url, timeout=10)
+                
+                if not cards_response.ok:
+                    error_text = cards_response.text[:500] if cards_response.text else "No error message"
+                    logger.warning(f"⚠️ Failed to fetch cards (attempt {attempt + 1}/{max_retries}): {cards_response.status_code}")
+                    logger.warning(f"⚠️ Error response: {error_text}")
+                    
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"❌ Failed to fetch cards after {max_retries} attempts")
+                        return
+                
+                cards_data = cards_response.json()
+                cards = cards_data.get("cards", [])
+                
+                if not cards:
+                    logger.warning(f"⚠️ No cards found in response (attempt {attempt + 1}/{max_retries})")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay * (attempt + 1))
+                        continue
+                    else:
+                        logger.error(f"❌ No cards found after {max_retries} attempts")
+                        return
+                
+                # 🔧 ENHANCED: Use robust card lookup
+                target_card = find_card_by_atom_id(cards, atom_id)
+                
+                if target_card:
+                    logger.info(f"✅ Found target card on attempt {attempt + 1}")
+                    break
+                else:
+                    # Log all atom IDs for debugging
+                    all_atom_ids = []
+                    for card in cards:
+                        if card.get("atoms"):
+                            for atom in card["atoms"]:
+                                atom_id_in_card = atom.get("id") or atom.get("atomId") or atom.get("atom_id")
+                                if atom_id_in_card:
+                                    all_atom_ids.append(atom_id_in_card)
+                    
+                    logger.warning(
+                        f"⚠️ Card not found for atomId: {atom_id} (attempt {attempt + 1}/{max_retries})\n"
+                        f"   Available atom IDs: {all_atom_ids[:10]}{'...' if len(all_atom_ids) > 10 else ''}"
+                    )
+                    
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (attempt + 1)
+                        logger.info(f"⏳ Retrying in {wait_time}s (card might not be saved yet)...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"❌ Card not found after {max_retries} attempts")
+                        logger.error(f"   Searched for: {atom_id}")
+                        logger.error(f"   Total cards: {len(cards)}")
+                        logger.error(f"   Total atoms: {len(all_atom_ids)}")
+                        return
+                        
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"⚠️ Request exception (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                else:
+                    logger.error(f"❌ Request exception after {max_retries} attempts: {e}")
+                    return
         
         if not target_card:
-            logger.warn(f"⚠️ Card not found for atomId: {atom_id}")
+            logger.error(f"❌ Could not find card for atomId: {atom_id} after all retry attempts")
             return
         
         # Update the insight text box
@@ -997,7 +1183,153 @@ def process_insight_and_update_card(request: AsyncAtomInsightRequest):
         import traceback
         logger.error(traceback.format_exc())
 
+def extract_facts_from_data_summary(data_summary: Dict[str, Any], atom_type: str) -> Dict[str, Any]:
+    """Extract facts (rows/data) from data_summary for deep insight analysis."""
+    facts = {}
+    
+    # Try to extract actual data rows
+    summary_data = data_summary.get('summary_data', {})
+    metadata = data_summary.get('metadata', {})
+    
+    # Look for rows/data in various places
+    if 'rows' in summary_data:
+        facts['rows'] = summary_data['rows']
+    elif 'data' in summary_data:
+        facts['rows'] = summary_data['data']
+    elif 'preview' in summary_data:
+        facts['rows'] = summary_data['preview']
+    
+    # Add metadata
+    facts['metadata'] = metadata
+    facts['summary'] = summary_data
+    
+    return facts
+
+
+def generate_atom_insight_with_deep_analysis(
+    goal: str,
+    data_summary: Dict[str, Any],
+    atom_type: str,
+    atom_id: Optional[str] = None,
+    use_deep_analysis: bool = True
+) -> str:
+    """Generate insight using deep analysis if available and data is present."""
+    if not DEEP_INSIGHTS_AVAILABLE or not use_deep_analysis:
+        return None
+    
+    try:
+        # Extract facts from data summary
+        facts = extract_facts_from_data_summary(data_summary, atom_type)
+        
+        # Check if we have actual data rows
+        rows = facts.get('rows', [])
+        if not rows or len(rows) == 0:
+            logger.debug("No rows found for deep analysis")
+            return None
+        
+        # Generate deep insights
+        insights = generate_deep_insights(
+            goal=goal,
+            facts=facts,
+            data_hash=None,
+            atom_id=atom_id,
+            llm_client=None  # Will use default LLMClient
+        )
+        
+        if insights and len(insights) > 0:
+            # Format insights into a comprehensive text
+            insight_parts = []
+            for i, insight_dict in enumerate(insights, 1):
+                insight_parts.append(f"### Insight {i}")
+                insight_parts.append(f"**Finding:** {insight_dict.get('insight', '')}")
+                insight_parts.append(f"**Impact:** {insight_dict.get('impact', '')}")
+                insight_parts.append(f"**Risk:** {insight_dict.get('risk', '')}")
+                insight_parts.append(f"**Recommended Action:** {insight_dict.get('next_action', '')}")
+                insight_parts.append("")
+            
+            return "\n".join(insight_parts)
+    
+    except Exception as e:
+        logger.warning(f"Deep insight analysis failed, falling back to standard: {e}")
+        return None
+    
+    return None
+
+
+@router.post("/generate-deep-insights", response_model=AtomInsightResponse)
+async def generate_deep_insights_endpoint(request: AtomInsightRequest):
+    """
+    Generate deep insights using enhanced statistical analysis and pattern detection.
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info(f"🤖 Deep insight generation request - Atom type: {request.atom_type}")
+        
+        if not DEEP_INSIGHTS_AVAILABLE:
+            return AtomInsightResponse(
+                success=False,
+                insight="Deep insight analysis module not available",
+                processing_time=time.time() - start_time,
+                error="Module not available"
+            )
+        
+        # Build goal from smart_response and atom_type
+        goal = f"Analyze {request.atom_type} results: {request.smart_response}"
+        
+        # Extract facts from data summary
+        facts = extract_facts_from_data_summary(request.data_summary, request.atom_type)
+        
+        # Generate deep insights
+        insights = generate_deep_insights(
+            goal=goal,
+            facts=facts,
+            data_hash=None,
+            atom_id=None,
+            llm_client=None
+        )
+        
+        if not insights or len(insights) == 0:
+            raise ValueError("No insights generated")
+        
+        # Format insights
+        insight_parts = []
+        for i, insight_dict in enumerate(insights, 1):
+            insight_parts.append(f"### Insight {i}")
+            insight_parts.append(f"**Finding:** {insight_dict.get('insight', '')}")
+            insight_parts.append(f"**Impact:** {insight_dict.get('impact', '')}")
+            insight_parts.append(f"**Risk:** {insight_dict.get('risk', '')}")
+            insight_parts.append(f"**Recommended Action:** {insight_dict.get('next_action', '')}")
+            insight_parts.append("")
+        
+        insight_text = "\n".join(insight_parts)
+        
+        processing_time = time.time() - start_time
+        logger.info(f"✅ Deep insight generated successfully in {processing_time:.2f}s")
+        
+        return AtomInsightResponse(
+            success=True,
+            insight=insight_text,
+            processing_time=processing_time
+        )
+        
+    except Exception as e:
+        logger.error(f"Deep insight generation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return AtomInsightResponse(
+            success=False,
+            insight="",
+            processing_time=time.time() - start_time,
+            error=str(e)
+        )
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint for insight service."""
-    return {"status": "healthy", "service": "AI Insights"}
+    return {
+        "status": "healthy",
+        "service": "AI Insights",
+        "deep_insights_available": DEEP_INSIGHTS_AVAILABLE
+    }
