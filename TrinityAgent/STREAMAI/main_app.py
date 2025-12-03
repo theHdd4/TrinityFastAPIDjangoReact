@@ -425,7 +425,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
             available_files=file_list or [],
             mode="laboratory",
         )
-        decision = intent_service.route_decision(intent_record, available_files=file_list or [])
+        decision = intent_service.build_atom_binding(
+            session_id,
+            intent_record,
+            available_files=file_list or [],
+        )
         policy_flip = intent_service.detect_policy_flip(
             session_id,
             decision,

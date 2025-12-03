@@ -48,3 +48,18 @@ def test_policy_flip_detection(service):
     service.persist_record("session-3", first_record)
     new_decision = service.route_decision(IntentRecord(goal_type="execute", required_tools={"atom"}))
     assert service.detect_policy_flip("session-3", new_decision) is True
+
+
+def test_build_atom_binding_tracks_context(service):
+    record = service.infer_intent("create chart", session_id="session-4", available_files=["data.csv"])
+    decision = service.build_atom_binding("session-4", record, available_files=["data.csv"])
+    assert decision.required_atoms  # should include atoms when tool is atom
+    assert decision.execution_context.get("file_paths") == ["data.csv"]
+    persisted = service.load_record("session-4")
+    assert persisted.last_routing_path == decision.path
+
+
+def test_conversation_constraints_include_latency_and_safety(service):
+    record = service.infer_intent("explain", session_id="session-5", available_files=[])
+    assert "latency" in record.conversation_constraints
+    assert "safety" in record.conversation_constraints

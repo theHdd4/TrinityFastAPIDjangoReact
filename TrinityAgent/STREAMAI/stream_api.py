@@ -136,7 +136,11 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 available_files=available_files,
                 mode="laboratory",
             )
-            decision = intent_service.route_decision(intent_record, available_files=available_files)
+            decision = intent_service.build_atom_binding(
+                session_id,
+                intent_record,
+                available_files=available_files,
+            )
             policy_flip = intent_service.detect_policy_flip(
                 session_id, decision, previous_record=previous_record, available_files=available_files
             )

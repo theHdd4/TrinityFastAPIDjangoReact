@@ -125,6 +125,10 @@ class LaboratoryIntentService:
 
         merged = prior.merge(rule_record).merge(llm_record)
         merged.scratchpad_refs = scratchpad
+        merged.conversation_constraints = {
+            **{"safety": merged.safety_constraints, "latency": merged.urgency_budget},
+            **(merged.conversation_constraints or {}),
+        }
 
         validations = self._validate_record(merged, available_files)
         merged.clarifications.extend([v.message for v in validations])
@@ -316,13 +320,21 @@ class LaboratoryIntentService:
         if clarifications:
             self.metrics.ambiguous += 1
 
-        return RoutingDecision(
+        decision = RoutingDecision(
             path=path,
             rationale=rationale,
             clarifications=clarifications,
             requires_files=requires_files,
             required_tools=record.required_tools,
+            required_atoms=self._enumerate_atoms(record, available_files=available_files),
+            expected_artifacts=self._expected_artifacts(record),
+            execution_context=self._build_execution_context(record, available_files=available_files),
         )
+
+        record.last_routing_path = path
+        record.conversation_constraints.setdefault("latency", record.urgency_budget)
+        record.conversation_constraints.setdefault("safety", record.safety_constraints)
+        return decision
 
     def detect_policy_flip(
         self,
@@ -341,8 +353,88 @@ class LaboratoryIntentService:
         return False
 
     # ------------------------------------------------------------------
+    # Atom planning helpers
+    # ------------------------------------------------------------------
+    def build_atom_binding(
+        self, session_id: str, record: IntentRecord, available_files: Optional[Iterable[str]] = None
+    ) -> RoutingDecision:
+        """Return a routing decision annotated with concrete atom plan and context."""
+
+        decision = self.route_decision(record, available_files=available_files)
+        if available_files:
+            decision.execution_context["file_paths"] = list(available_files)
+        if record.output_format:
+            decision.execution_context.setdefault("output_format", record.output_format)
+        if record.subject_domain:
+            decision.execution_context.setdefault("subject_domain", record.subject_domain)
+        decision.execution_context.setdefault("urgency", record.urgency_budget)
+        decision.execution_context.setdefault("safety", record.safety_constraints)
+
+        if decision.requires_files and not list(available_files or []):
+            decision.clarifications.append("Upload a dataset or point me to an existing file before running atoms.")
+
+        rationale_bits = [decision.rationale]
+        if decision.required_atoms:
+            rationale_bits.append(f"Atoms: {', '.join(decision.required_atoms)}")
+        if decision.expected_artifacts:
+            rationale_bits.append(f"Artifacts: {', '.join(decision.expected_artifacts)}")
+        self.update_scratchpad(
+            session_id,
+            f"Routing decision: {decision.path} | {'; '.join(rationale_bits)} | context={decision.execution_context}",
+        )
+
+        # Persist routing path for future deltas
+        record.last_routing_path = decision.path
+        self.persist_record(session_id, record)
+
+        return decision
+
+    # ------------------------------------------------------------------
     # Utility
     # ------------------------------------------------------------------
+    def _enumerate_atoms(self, record: IntentRecord, available_files: Optional[Iterable[str]] = None) -> List[str]:
+        atoms: List[str] = []
+        if "atom" not in record.required_tools:
+            return atoms
+
+        files = list(available_files or [])
+        if files:
+            atoms.append("file_ops")
+        if record.output_format in {"chart"}:
+            atoms.append("charting")
+        if record.output_format in {"table", "code"} or record.goal_type == "execute":
+            atoms.append("data_transform")
+        if record.subject_domain.lower().startswith("model") or "train" in record.subject_domain.lower():
+            atoms.append("model_fit")
+        return atoms
+
+    def _expected_artifacts(self, record: IntentRecord) -> List[str]:
+        artifacts: List[str] = []
+        if record.output_format in {"chart"}:
+            artifacts.append("chart")
+        if record.output_format in {"table", "text"} and "atom" in record.required_tools:
+            artifacts.append("table")
+        if record.goal_type == "execute" and "atom" in record.required_tools:
+            artifacts.append("metrics")
+        return artifacts
+
+    def _build_execution_context(
+        self, record: IntentRecord, available_files: Optional[Iterable[str]] = None
+    ) -> Dict[str, object]:
+        context: Dict[str, object] = {
+            "output_format": record.output_format,
+            "urgency": record.urgency_budget,
+            "safety": record.safety_constraints,
+        }
+        files = list(available_files or [])
+        if files:
+            context["file_paths"] = files
+        if record.required_data_freshness != "unspecified":
+            context["data_freshness"] = record.required_data_freshness
+        if record.subject_domain:
+            context["subject_domain"] = record.subject_domain
+        return context
+
     def _load_llm_config(self) -> Dict[str, str]:
         try:
             from BaseAgent.config import settings
@@ -374,6 +466,7 @@ class LaboratoryIntentService:
         record.output_format = str(data.get("output_format", record.output_format))
         record.safety_constraints = str(data.get("safety_constraints", record.safety_constraints))
         record.urgency_budget = str(data.get("urgency_budget", record.urgency_budget))
+        record.last_routing_path = str(data.get("last_routing_path", record.last_routing_path))
 
         tools = data.get("required_tools") or []
         if isinstance(tools, list):
@@ -391,6 +484,10 @@ class LaboratoryIntentService:
 
         record.scratchpad_refs = list(data.get("scratchpad_refs") or [])
         record.clarifications = list(data.get("clarifications") or [])
+
+        constraints = data.get("conversation_constraints") or {}
+        if isinstance(constraints, dict):
+            record.conversation_constraints = {str(k): str(v) for k, v in constraints.items()}
         return record
 
 
