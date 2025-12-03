@@ -63,6 +63,7 @@ import dataframeOperations from '@/components/AtomList/atoms/dataframe-operation
 import clustering from '@/components/AtomList/atoms/clustering';
 import pivotTable from '@/components/AtomList/atoms/pivot-table';
 import unpivot from '@/components/AtomList/atoms/unpivot';
+import kpiDashboard from '@/components/AtomList/atoms/kpi-dashboard';
 
 export interface Atom {
   id: string;
@@ -172,7 +173,8 @@ export const atomCategories: AtomCategory[] = [
       basePriceEstimator,
       promoEstimator,
       pivotTable,
-      unpivot
+      unpivot,
+      kpiDashboard
     ]
   }
 ];

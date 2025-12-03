@@ -31,7 +31,8 @@ class Command(BaseCommand):
             'scenario-planner',
             'clustering',  # Added missing clustering atom
             'pivot-table',
-            'unpivot'
+            'unpivot',
+            'kpi-dashboard'  # KPI Dashboard atom
         ]
         
         updated_count = 0

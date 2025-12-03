@@ -45,6 +45,7 @@ import SelectModelsFeatureProperties from '@/components/AtomList/atoms/select-mo
 import EvaluateModelsFeatureProperties from '@/components/AtomList/atoms/evaluate-models-feature/components/properties/EvaluateModelsFeatureProperties';
 import PivotTableProperties from '@/components/AtomList/atoms/pivot-table/components/PivotTableProperties';
 import { UnpivotProperties } from '@/components/AtomList/atoms/unpivot';
+import KPIDashboardProperties from '@/components/AtomList/atoms/kpi-dashboard/components/properties/KPIDashboardProperties';
 import AtomSettingsTabs from './AtomSettingsTabs';
 import CardSettingsTabs from './CardSettingsTabs';
 
@@ -208,6 +209,8 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <ClusteringProperties atomId={selectedAtomId} />
           ) : selectedAtomId && atom?.atomId === 'scenario-planner' ? (
             <ScenarioPlannerProperties atomId={selectedAtomId} />
+          ) : selectedAtomId && atom?.atomId === 'kpi-dashboard' ? (
+            <KPIDashboardProperties atomId={selectedAtomId} />
           ) : (
             <AtomSettingsTabs
               tab={tab}

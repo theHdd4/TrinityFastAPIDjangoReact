@@ -61,6 +61,7 @@ import ClusteringAtom from '@/components/AtomList/atoms/clustering/ClusteringAto
 import ScenarioPlannerAtom from '@/components/AtomList/atoms/scenario-planner/ScenarioPlannerAtom';
 import PivotTableAtom from '@/components/AtomList/atoms/pivot-table/PivotTableAtom';
 import UnpivotAtom from '@/components/AtomList/atoms/unpivot/UnpivotAtom';
+import KPIDashboardAtom from '@/components/AtomList/atoms/kpi-dashboard/KPIDashboardAtom';
 import { fetchDimensionMapping } from '@/lib/dimensions';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -5445,6 +5446,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                       <ClusteringAtom atomId={atom.id} />
                                     ) : atom.atomId === 'scenario-planner' ? (
                                       <ScenarioPlannerAtom atomId={atom.id} />
+                                    ) : atom.atomId === 'kpi-dashboard' ? (
+                                      <KPIDashboardAtom atomId={atom.id} />
                                     ) : (
                                       <div>
                                         <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -5725,6 +5728,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                                   <BuildModelFeatureBasedAtom atomId={atom.id} />
                                 ) : atom.atomId === 'scenario-planner' ? (
                                   <ScenarioPlannerAtom atomId={atom.id} />
+                                ) : atom.atomId === 'kpi-dashboard' ? (
+                                  <KPIDashboardAtom atomId={atom.id} />
                                 ) : atom.atomId === 'select-models-feature' ? (
                                   <SelectModelsFeatureAtom atomId={atom.id} />
                                 ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -5926,6 +5931,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                               <BuildModelFeatureBasedAtom atomId={atom.id} />
                             ) : atom.atomId === 'scenario-planner' ? (
                               <ScenarioPlannerAtom atomId={atom.id} />
+                            ) : atom.atomId === 'kpi-dashboard' ? (
+                              <KPIDashboardAtom atomId={atom.id} />
                             ) : atom.atomId === 'select-models-feature' ? (
                               <SelectModelsFeatureAtom atomId={atom.id} />
                             ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -6226,6 +6233,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                           <BuildModelFeatureBasedAtom atomId={atom.id} />
                        ) : atom.atomId === 'scenario-planner' ? (
                           <ScenarioPlannerAtom atomId={atom.id} />
+                       ) : atom.atomId === 'kpi-dashboard' ? (
+                          <KPIDashboardAtom atomId={atom.id} />
                        ) : atom.atomId === 'select-models-feature' ? (
                         <SelectModelsFeatureAtom atomId={atom.id} />
                        ) : atom.atomId === 'evaluate-models-feature' ? (
@@ -6240,6 +6249,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                         <SelectModelsAutoRegressiveAtom atomId={atom.id} />
                       ) : atom.atomId === 'evaluate-models-auto-regressive' ? (
                         <EvaluateModelsAutoRegressiveAtom atomId={atom.id} />
+                      ) : atom.atomId === 'kpi-dashboard' ? (
+                        <KPIDashboardAtom atomId={atom.id} />
                       ) : (
                         <div>
                           <h4 className="font-semibold text-gray-900 mb-1 text-sm">{atom.title}</h4>
@@ -6425,6 +6436,8 @@ const handleMoleculeDrop = (e: React.DragEvent, targetMoleculeId: string) => {
                             <ScopeSelectorAtom atomId={atom.id} />
                           ) : atom.atomId === 'correlation' ? (
                             <CorrelationAtom atomId={atom.id} />
+                          ) : atom.atomId === 'kpi-dashboard' ? (
+                            <KPIDashboardAtom atomId={atom.id} />
                           ) : (
                             <div>
                               <h4 className="font-semibold text-gray-900 mb-2 text-lg">{atom.title}</h4>
