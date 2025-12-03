@@ -1723,6 +1723,9 @@ async def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
                         "r2_test": weighted_metrics.get("r2_test"),
                         "aic": weighted_metrics.get("aic"),
                         "bic": weighted_metrics.get("bic"),
+                        "intercept": weighted_metrics.get("intercept", 0.0),  # Add intercept for select_configs
+                        "n_parameters": weighted_metrics.get("n_parameters", 0),  # Add n_parameters for select_configs
+                        "price_elasticity": weighted_metrics.get("price_elasticity", 0.0),  # Add price_elasticity for select_configs
                     },
                     variable_impacts=variable_impacts,
                     variable_averages=variable_averages,
@@ -1745,18 +1748,18 @@ async def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"Failed to create ensemble model: {str(exc)}") from exc
     else:
         # Handle regular model (existing logic)
-    try:
-        models = _models_for_file(request.file_key, combination_id)
-    except ModelDataUnavailableError as exc:
-        raise ValueError(str(exc)) from exc
-    try:
-        record = next(
-            model
-            for model in models
-            if model.model_name == request.model_name
-        )
-    except StopIteration as exc:  # pragma: no cover - defensive
-        raise ValueError("Model not found for the provided criteria") from exc
+        try:
+            models = _models_for_file(request.file_key, combination_id)
+        except ModelDataUnavailableError as exc:
+            raise ValueError(str(exc)) from exc
+        try:
+            record = next(
+                model
+                for model in models
+                if model.model_name == request.model_name
+            )
+        except StopIteration as exc:  # pragma: no cover - defensive
+            raise ValueError("Model not found for the provided criteria") from exc
 
     model_id = f"saved-{next(_saved_counter):05d}"
     saved_entry = {
@@ -1780,23 +1783,23 @@ async def save_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     
     # Update selected_models flag (for ensemble, this was already done above)
     if not is_ensemble:
-    try:
-        updated = _update_selected_models_flag(request.file_key, target_combination, request.model_name)
-        if not updated:
-            logger.warning(
-                "Selected model flag not updated for file=%s combination=%s model=%s",
+        try:
+            updated = _update_selected_models_flag(request.file_key, target_combination, request.model_name)
+            if not updated:
+                logger.warning(
+                    "Selected model flag not updated for file=%s combination=%s model=%s",
+                    request.file_key,
+                    target_combination,
+                    request.model_name,
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.error(
+                "Failed to update selected_models column for file=%s combination=%s model=%s: %s",
                 request.file_key,
                 target_combination,
                 request.model_name,
+                exc,
             )
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.error(
-            "Failed to update selected_models column for file=%s combination=%s model=%s: %s",
-            request.file_key,
-            target_combination,
-            request.model_name,
-            exc,
-        )
 
     # Save to MongoDB select_configs collection (like old implementation)
     try:
@@ -1845,6 +1848,9 @@ async def _save_to_select_configs(
             logger.warning(f"Could not load file {request.file_key} for MongoDB save")
             return
 
+        # Check if this is an ensemble model (like old implementation)
+        is_ensemble = record.model_name.lower() in ['ensemble', 'weighted ensemble', 'ensemble model']
+        
         # Find the row matching this model (like old implementation)
         model_row = None
         for idx, row in df.iterrows():
@@ -1854,30 +1860,115 @@ async def _save_to_select_configs(
                 model_row = row
                 break
 
-        if model_row is None:
+        # Handle ensemble models (like old implementation - lines 1525-1610)
+        if is_ensemble:
+            # For ensemble, create model_dict from record and weighted metrics (like old implementation)
+            try:
+                # Get x_variables from dataframe or record
+                x_vars = None
+                if len(df) > 0 and 'x_variables' in df.columns:
+                    x_vars = df['x_variables'].iloc[0]
+                elif hasattr(record, 'variable_impacts') and record.variable_impacts:
+                    x_vars = list(record.variable_impacts.keys())
+                
+                # Handle x_variables properly - convert numpy array to string (like old implementation)
+                if isinstance(x_vars, (list, np.ndarray)):
+                    x_vars_str = str(list(x_vars)) if isinstance(x_vars, np.ndarray) else str(x_vars)
+                elif x_vars is not None:
+                    x_vars_str = str(x_vars)
+                else:
+                    x_vars_str = '[]'
+                
+                # Create ensemble model_dict with actual metrics from record (like old implementation)
+                model_dict = {
+                    'model_name': 'Ensemble',
+                    'combination_id': combination_id,
+                    'Scope': df['Scope'].iloc[0] if len(df) > 0 and 'Scope' in df.columns else 'Scope_1',
+                    'y_variable': df['y_variable'].iloc[0] if len(df) > 0 and 'y_variable' in df.columns else 'Volume',
+                    'x_variables': x_vars_str,
+                    'mape_train': record.metrics.get('mape_train', 0.0) if record.metrics else 0.0,
+                    'mape_test': record.metrics.get('mape_test', 0.0) if record.metrics else 0.0,
+                    'r2_train': record.metrics.get('r2_train', 0.0) if record.metrics else 0.0,
+                    'r2_test': record.metrics.get('r2_test', 0.0) if record.metrics else 0.0,
+                    'aic': record.metrics.get('aic', 0.0) if record.metrics else 0.0,
+                    'bic': record.metrics.get('bic', 0.0) if record.metrics else 0.0,
+                    'intercept': record.metrics.get('intercept', 0.0) if record.metrics else 0.0,
+                    'n_parameters': record.metrics.get('n_parameters', 0) if record.metrics else 0,
+                    'price_elasticity': record.metrics.get('price_elasticity', 0.0) if record.metrics else 0.0,
+                    'run_id': f"ensemble_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                # Add variable impacts and averages as beta/avg columns (like old implementation)
+                if hasattr(record, 'variable_impacts') and record.variable_impacts:
+                    for var_name, impact_value in record.variable_impacts.items():
+                        model_dict[f"{var_name}_beta"] = impact_value
+                        if hasattr(record, 'variable_averages') and record.variable_averages:
+                            avg_value = record.variable_averages.get(var_name, 0.0)
+                            model_dict[f"{var_name}_avg"] = avg_value
+                
+                # Add all other metrics from record.metrics (like old implementation)
+                if record.metrics:
+                    for key, value in record.metrics.items():
+                        if key not in model_dict:
+                            model_dict[key] = value
+                
+                cleaned_dict = model_dict
+                logger.info(f"✅ Created ensemble model_dict for select_configs with {len(model_dict)} fields")
+                    
+            except Exception as e:
+                # Fallback to default values if ensemble creation fails (like old implementation)
+                logger.warning(f"⚠️ Error creating ensemble model_dict, using fallback: {e}")
+                x_vars = df['x_variables'].iloc[0] if len(df) > 0 and 'x_variables' in df.columns else '[]'
+                if isinstance(x_vars, (list, np.ndarray)):
+                    x_vars_str = str(list(x_vars)) if isinstance(x_vars, np.ndarray) else str(x_vars)
+                else:
+                    x_vars_str = str(x_vars)
+                
+                model_dict = {
+                    'model_name': 'Ensemble',
+                    'combination_id': combination_id,
+                    'Scope': df['Scope'].iloc[0] if len(df) > 0 and 'Scope' in df.columns else 'Scope_1',
+                    'y_variable': df['y_variable'].iloc[0] if len(df) > 0 and 'y_variable' in df.columns else 'Volume',
+                    'x_variables': x_vars_str,
+                    'mape_train': 0.0,
+                    'mape_test': 0.0,
+                    'r2_train': 0.0,
+                    'r2_test': 0.0,
+                    'aic': 0.0,
+                    'bic': 0.0,
+                    'intercept': 0.0,
+                    'n_parameters': 0,
+                    'price_elasticity': 0.0,
+                    'run_id': f"ensemble_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    'timestamp': datetime.now().isoformat()
+                }
+                cleaned_dict = model_dict
+        elif model_row is None:
+            # For regular models, if row not found, return early
             logger.warning(f"Could not find matching row for combination {combination_id}, model {record.model_name}")
             return
-
-        # Convert row to dict and clean it (like old implementation)
-        model_dict = model_row.to_dict()
-        cleaned_dict = {}
-        for key, value in model_dict.items():
-            try:
-                # Handle arrays/lists by converting to string
-                if isinstance(value, (list, np.ndarray)):
-                    cleaned_dict[key] = str(value)
-                elif pd.isna(value):
-                    cleaned_dict[key] = None
-                elif isinstance(value, (np.integer, np.floating)):
-                    if np.isinf(value):
-                        cleaned_dict[key] = "inf" if value > 0 else "-inf"
+        else:
+            # For regular models, process the existing data (like old implementation)
+            model_dict = model_row.to_dict()
+            cleaned_dict = {}
+            for key, value in model_dict.items():
+                try:
+                    # Handle arrays/lists by converting to string
+                    if isinstance(value, (list, np.ndarray)):
+                        cleaned_dict[key] = str(value)
+                    elif pd.isna(value):
+                        cleaned_dict[key] = None
+                    elif isinstance(value, (np.integer, np.floating)):
+                        if np.isinf(value):
+                            cleaned_dict[key] = "inf" if value > 0 else "-inf"
+                        else:
+                            cleaned_dict[key] = float(value)
                     else:
-                        cleaned_dict[key] = float(value)
-                else:
-                    cleaned_dict[key] = value
-            except Exception as e:
-                # If any error occurs, convert to string as fallback
-                cleaned_dict[key] = str(value)
+                        cleaned_dict[key] = value
+                except Exception as e:
+                    # If any error occurs, convert to string as fallback
+                    cleaned_dict[key] = str(value)
 
         # Use cleaned_dict as complete_model_data (like old implementation)
         complete_model_data = cleaned_dict.copy()
@@ -1918,10 +2009,15 @@ async def _save_to_select_configs(
             if "combinations" not in merged_document:
                 merged_document["combinations"] = []
 
-            # Check if this combination already exists
+            # Check if this combination and model already exists
+            # Match by both combination_id AND model_name to support multiple models per combination
             existing_combination = None
+            model_name_to_match = cleaned_dict.get("model_name") or record.model_name
             for combo in merged_document["combinations"]:
-                if combo.get("combination_id") == combination_id:
+                combo_id = combo.get("combination_id")
+                combo_model = str(combo.get("model_name", "")).strip().lower()
+                record_model = str(model_name_to_match).strip().lower()
+                if combo_id == combination_id and combo_model == record_model:
                     existing_combination = combo
                     break
 
@@ -3069,14 +3165,14 @@ def calculate_weighted_ensemble(payload: Dict[str, Any]) -> Dict[str, Any]:
             beta_col = col_dict["beta"]
             weighted_beta = _weighted_avg_series(filtered_frame[beta_col], weights_series)
             if weighted_beta is not None:
-        weighted_metrics[f"{var_name}_beta"] = weighted_beta
+                weighted_metrics[f"{var_name}_beta"] = weighted_beta
         
         # Average
         if "avg" in col_dict:
             avg_col = col_dict["avg"]
             weighted_avg = _weighted_avg_series(filtered_frame[avg_col], weights_series)
             if weighted_avg is not None:
-        weighted_metrics[f"{var_name}_avg"] = weighted_avg
+                weighted_metrics[f"{var_name}_avg"] = weighted_avg
         elif "av" in col_dict:
             avg_col = col_dict["av"]
             weighted_avg = _weighted_avg_series(filtered_frame[avg_col], weights_series)

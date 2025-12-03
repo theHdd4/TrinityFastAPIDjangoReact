@@ -336,9 +336,55 @@ def compute_actual_vs_predicted(
 
                 betas, intercept, _ = _extract_betas_from_results_file(results_df, combination_id)
 
+                # Check if this is an ensemble model
+                is_ensemble = model_name.lower() in ['ensemble', 'weighted ensemble', 'ensemble model']
+                
                 transformation_metadata: Dict[str, Any] = {}
-                model_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {}).get(model_name, {})
-                transformation_metadata = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
+                if is_ensemble:
+                    # For ensemble models, calculate weighted transformation metadata
+                    try:
+                        from ..select_models_feature_based.service import calculate_weighted_ensemble
+                        from ..select_models_feature_based.ensemble_metric_calculation import calculate_weighted_transformation_metadata
+                        
+                        # Get ensemble weights by calling calculate_weighted_ensemble
+                        ensemble_request = {
+                            "file_key": results_file_key,
+                            "grouping_keys": ['combination_id'],
+                            "filter_criteria": {"combination_id": combination_id},
+                            "include_numeric": None,
+                            "exclude_numeric": None,
+                            "filtered_models": None
+                        }
+                        
+                        ensemble_result = calculate_weighted_ensemble(ensemble_request)
+                        
+                        if ensemble_result.get("results") and len(ensemble_result["results"]) > 0:
+                            ensemble_data = ensemble_result["results"][0]
+                            weighted_metrics = ensemble_data.get("weighted", {})
+                            model_composition = ensemble_data.get("model_composition", {})
+                            
+                            # Create a mock ensemble_data object for the transformation metadata function
+                            class MockEnsembleData:
+                                def __init__(self, weighted, model_composition):
+                                    self.weighted = weighted
+                                    self.model_composition = model_composition
+                            
+                            mock_ensemble = MockEnsembleData(weighted_metrics, model_composition)
+                            
+                            # Calculate weighted transformation metadata
+                            transformation_metadata = await calculate_weighted_transformation_metadata(
+                                loop_db, client_name, app_name, project_name, combination_id, mock_ensemble
+                            )
+                            logger.info(f"✅ Calculated weighted transformation metadata for ensemble model: {len(transformation_metadata)} variables")
+                        else:
+                            logger.warning(f"⚠️ No ensemble data found for combination {combination_id}, skipping transformations")
+                    except Exception as exc:
+                        logger.warning(f"⚠️ Error calculating weighted transformation metadata for ensemble: {exc}, continuing without transformations")
+                        transformation_metadata = {}
+                else:
+                    # For regular models, get transformation metadata directly from MongoDB
+                    model_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {}).get(model_name, {})
+                    transformation_metadata = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
 
                 x_vars = list(betas.keys())
                 y_var = (build_cfg.get("y_variable") or "Volume").lower()
@@ -361,14 +407,23 @@ def compute_actual_vs_predicted(
                             x_value = row[x_var]
                             if has_transformations:
                                 transformation_steps = None
+                                # Try multiple key variations (case-insensitive matching)
                                 for key in (x_var, x_var.lower(), x_var.upper()):
-                                    if key in transformation_metadata and isinstance(transformation_metadata[key], dict):
-                                        transformation_steps = transformation_metadata[key].get("transformation_steps")
-                                        break
+                                    if key in transformation_metadata:
+                                        var_meta = transformation_metadata[key]
+                                        # Handle both dict structure and direct transformation_steps
+                                        if isinstance(var_meta, dict):
+                                            transformation_steps = var_meta.get("transformation_steps")
+                                        elif isinstance(var_meta, list):
+                                            # If transformation_steps is directly in the metadata
+                                            transformation_steps = var_meta
+                                        if transformation_steps:
+                                            break
                                 if transformation_steps:
                                     try:
                                         x_value = apply_transformation_steps([x_value], transformation_steps)[0]
                                     except Exception as exc:
+                                        logger.debug(f"Transformation failed for {x_var}: {exc}, using original value")
                                         pass
                             predicted_value += betas.get(x_var, 0.0) * x_value
                     predicted_values.append(predicted_value)
@@ -644,19 +699,65 @@ def compute_yoy_growth(
                 x_vars = list(betas.keys())
                 y_var = (build_cfg.get("y_variable") or "Volume").lower()
 
-                try:
-                    combo_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {})
-                    model_coeffs = combo_coeffs.get(model_name, {}) if isinstance(combo_coeffs, dict) else {}
-                    from_mongo = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
-                    if isinstance(from_mongo, str):
-                        try:
-                            from_mongo = json.loads(from_mongo)
-                        except json.JSONDecodeError:
-                            from_mongo = {}
-                    if isinstance(from_mongo, dict):
-                        transformation_metadata = from_mongo
-                except Exception as exc:
-                    pass
+                # Check if this is an ensemble model
+                is_ensemble = model_name.lower() in ['ensemble', 'weighted ensemble', 'ensemble model']
+                
+                if is_ensemble:
+                    # For ensemble models, calculate weighted transformation metadata
+                    try:
+                        from ..select_models_feature_based.service import calculate_weighted_ensemble
+                        from ..select_models_feature_based.ensemble_metric_calculation import calculate_weighted_transformation_metadata
+                        
+                        # Get ensemble weights by calling calculate_weighted_ensemble
+                        ensemble_request = {
+                            "file_key": results_file_key,
+                            "grouping_keys": ['combination_id'],
+                            "filter_criteria": {"combination_id": combination_id},
+                            "include_numeric": None,
+                            "exclude_numeric": None,
+                            "filtered_models": None
+                        }
+                        
+                        ensemble_result = calculate_weighted_ensemble(ensemble_request)
+                        
+                        if ensemble_result.get("results") and len(ensemble_result["results"]) > 0:
+                            ensemble_data = ensemble_result["results"][0]
+                            weighted_metrics = ensemble_data.get("weighted", {})
+                            model_composition = ensemble_data.get("model_composition", {})
+                            
+                            # Create a mock ensemble_data object for the transformation metadata function
+                            class MockEnsembleData:
+                                def __init__(self, weighted, model_composition):
+                                    self.weighted = weighted
+                                    self.model_composition = model_composition
+                            
+                            mock_ensemble = MockEnsembleData(weighted_metrics, model_composition)
+                            
+                            # Calculate weighted transformation metadata
+                            transformation_metadata = await calculate_weighted_transformation_metadata(
+                                loop_db, client_name, app_name, project_name, combination_id, mock_ensemble
+                            )
+                            logger.info(f"✅ Calculated weighted transformation metadata for ensemble YoY: {len(transformation_metadata)} variables")
+                        else:
+                            logger.warning(f"⚠️ No ensemble data found for combination {combination_id}, skipping transformations")
+                    except Exception as exc:
+                        logger.warning(f"⚠️ Error calculating weighted transformation metadata for ensemble YoY: {exc}, continuing without transformations")
+                        transformation_metadata = {}
+                else:
+                    # For regular models, get transformation metadata directly from MongoDB
+                    try:
+                        combo_coeffs = build_cfg.get("model_coefficients", {}).get(combination_id, {})
+                        model_coeffs = combo_coeffs.get(model_name, {}) if isinstance(combo_coeffs, dict) else {}
+                        from_mongo = model_coeffs.get("transformation_metadata", {}) if isinstance(model_coeffs, dict) else {}
+                        if isinstance(from_mongo, str):
+                            try:
+                                from_mongo = json.loads(from_mongo)
+                            except json.JSONDecodeError:
+                                from_mongo = {}
+                        if isinstance(from_mongo, dict):
+                            transformation_metadata = from_mongo
+                    except Exception as exc:
+                        pass
 
                 has_transformations = bool(transformation_metadata)
                 
@@ -696,22 +797,38 @@ def compute_yoy_growth(
                         x_first = df_first_year[x_var].mean()
                         x_last = df_last_year[x_var].mean()
 
-                        if has_transformations and x_var in transformation_metadata:
-                            var_meta = transformation_metadata[x_var]
-                            if isinstance(var_meta, dict) and "transformation_steps" in var_meta:
-                                var_meta = var_meta["transformation_steps"]
-                            if isinstance(var_meta, str):
+                        if has_transformations:
+                            transformation_steps = None
+                            # Try multiple key variations (case-insensitive matching)
+                            for key in (x_var, x_var.lower(), x_var.upper()):
+                                if key in transformation_metadata:
+                                    var_meta = transformation_metadata[key]
+                                    # Handle different metadata structures
+                                    if isinstance(var_meta, dict):
+                                        transformation_steps = var_meta.get("transformation_steps")
+                                    elif isinstance(var_meta, list):
+                                        # If transformation_steps is directly in the metadata
+                                        transformation_steps = var_meta
+                                    elif isinstance(var_meta, str):
+                                        # Try to parse JSON string
+                                        try:
+                                            parsed = json.loads(var_meta)
+                                            if isinstance(parsed, dict) and "transformation_steps" in parsed:
+                                                transformation_steps = parsed["transformation_steps"]
+                                            elif isinstance(parsed, list):
+                                                transformation_steps = parsed
+                                        except json.JSONDecodeError:
+                                            pass
+                                    if transformation_steps:
+                                        break
+                            
+                            if transformation_steps:
                                 try:
-                                    parsed = json.loads(var_meta)
-                                    if isinstance(parsed, dict) and "transformation_steps" in parsed:
-                                        var_meta = parsed["transformation_steps"]
-                                except json.JSONDecodeError:
-                                    var_meta = []
-                            try:
-                                x_first = apply_transformation_steps([x_first], var_meta)[0]
-                                x_last = apply_transformation_steps([x_last], var_meta)[0]
-                            except Exception as exc:
-                                pass
+                                    x_first = apply_transformation_steps([x_first], transformation_steps)[0]
+                                    x_last = apply_transformation_steps([x_last], transformation_steps)[0]
+                                except Exception as exc:
+                                    logger.debug(f"Transformation failed for {x_var} in YoY: {exc}, using original values")
+                                    pass
 
                         delta = float(x_last - x_first)
                         contribution = float(beta_value * delta)
