@@ -147,9 +147,20 @@ export const correlationHandler: AtomHandler = {
     
     try {
       await updateCardTextBox(atomId, textBoxContent);
+      console.log('✅ Card text box updated with initial 3 keys');
     } catch (textBoxError) {
       console.error('❌ Error adding 3 keys to text box:', textBoxError);
       // Continue even if text box update fails
+    }
+    
+    // STEP 2: Add placeholder text box for insight (like other atoms)
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    try {
+      await addCardTextBox(atomId, 'Generating insight...', 'AI Insight');
+      console.log('✅ Insight placeholder text box added successfully');
+    } catch (textBoxError) {
+      console.error('❌ Error adding insight placeholder text box:', textBoxError);
     }
     
     if (!data.correlation_config) {
@@ -383,28 +394,18 @@ export const correlationHandler: AtomHandler = {
         }
       };
       
-      // Generate insight - this is the 2nd LLM call
-      // All detailed logging happens on backend - check terminal for logs
-      
-      // Add a small delay to ensure first text box is fully saved
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
+      // STEP 2b: Generate insight - uses queue manager to ensure completion even when new atoms start
+      // The queue manager automatically handles text box updates with retry logic
+      // The placeholder text box was already added in STEP 2 above
       generateAtomInsight({
         data: enhancedDataForInsight,
         atomType: 'correlation',
         sessionId,
-      }).then(async (result) => {
-        if (result.success && result.insight) {
-          try {
-            // Add insight to a NEW text box (separate from the text box with 3 keys)
-            await addCardTextBox(atomId, result.insight, 'AI Insight');
-          } catch (textBoxError) {
-            console.error('❌ Error adding new text box with insight:', textBoxError);
-          }
-        }
+        atomId, // Pass atomId so queue manager can track and complete this insight
       }).catch((error) => {
         console.error('❌ Error generating insight:', error);
       });
+      // Note: We don't need to manually update the text box here - the queue manager handles it
       
       return {
         success: true,
