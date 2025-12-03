@@ -141,11 +141,44 @@ export const getGroupbyDataSummary = (data: any): StandardizedDataSummary => {
   const groupbyConfig = data.groupby_json || {};
   const groupbyResults = data.groupby_results || {};
   
+  // Get aggregations - prioritize file_details (array format) over config (might be dict)
+  let aggregations = data.file_details?.aggregations || [];
+  if (!Array.isArray(aggregations) || aggregations.length === 0) {
+    // If file_details doesn't have aggregations, try config
+    const configAggs = groupbyConfig.aggregations;
+    if (Array.isArray(configAggs)) {
+      aggregations = configAggs;
+    } else if (configAggs && typeof configAggs === 'object') {
+      // Convert dict format to array format for consistency
+      aggregations = Object.entries(configAggs).map(([field, aggConfig]: [string, any]) => {
+        if (typeof aggConfig === 'object' && aggConfig !== null) {
+          return {
+            field,
+            aggregator: aggConfig.agg || aggConfig.aggregator || 'sum',
+            weight_by: aggConfig.weight_by || '',
+            rename_to: aggConfig.rename_to || field
+          };
+        } else if (typeof aggConfig === 'string') {
+          return {
+            field,
+            aggregator: aggConfig,
+            weight_by: '',
+            rename_to: field
+          };
+        }
+        return { field, aggregator: 'sum', weight_by: '', rename_to: field };
+      });
+    }
+  }
+  
+  // Get identifiers - prioritize file_details over config
+  const identifiers = data.file_details?.identifiers || groupbyConfig.identifiers || [];
+  
   const summary: StandardizedDataSummary = {
     atom_type: 'groupby-wtg-avg',
     summary_data: {
-      identifiers: groupbyConfig.identifiers || data.file_details?.identifiers || [],
-      aggregations: groupbyConfig.aggregations || data.file_details?.aggregations || [],
+      identifiers: Array.isArray(identifiers) ? identifiers : [],
+      aggregations: Array.isArray(aggregations) ? aggregations : [],
       groupby_results: {
         result_file: groupbyResults.result_file || '',
         row_count: groupbyResults.row_count || 0,
@@ -157,8 +190,8 @@ export const getGroupbyDataSummary = (data: any): StandardizedDataSummary => {
       file_name: data.file_details?.file_name || groupbyConfig.file_name || groupbyConfig.object_names || '',
       row_count: groupbyResults.row_count || 0,
       column_count: groupbyResults.columns?.length || 0,
-      identifiers_count: (groupbyConfig.identifiers || data.file_details?.identifiers || []).length,
-      aggregations_count: (groupbyConfig.aggregations || data.file_details?.aggregations || []).length,
+      identifiers_count: Array.isArray(identifiers) ? identifiers.length : 0,
+      aggregations_count: Array.isArray(aggregations) ? aggregations.length : 0,
     }
   };
   

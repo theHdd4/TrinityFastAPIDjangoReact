@@ -7,9 +7,10 @@ import os
 import json
 import logging
 import time
+import requests
 from typing import Dict, Any, List, Optional, Union
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 
 # Set up logging
@@ -412,12 +413,31 @@ class AtomInsightResponse(BaseModel):
     processing_time: float = Field(..., description="Time taken to generate insight")
     error: Optional[str] = Field(None, description="Error message if generation failed")
 
+class AsyncAtomInsightRequest(BaseModel):
+    smart_response: str = Field(..., description="User-friendly response from agent")
+    response: str = Field(..., description="Raw response/thinking from agent")
+    reasoning: str = Field(..., description="Reasoning behind agent's decision")
+    data_summary: Dict[str, Any] = Field(..., description="Standardized data summary from atom handler")
+    atom_type: str = Field(..., description="Type of atom (correlation, chart-maker, etc.)")
+    session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
+    atom_id: str = Field(..., description="Atom ID to update text box for")
+    client_name: Optional[str] = Field(None, description="Client name for card update")
+    app_name: Optional[str] = Field(None, description="App name for card update")
+    project_name: Optional[str] = Field(None, description="Project name for card update")
+    examples: Optional[List[str]] = Field(None, description="Example insights for LLM guidance")
+
+class AsyncAtomInsightResponse(BaseModel):
+    success: bool = Field(..., description="Whether async task was started successfully")
+    message: str = Field(..., description="Status message")
+    task_id: Optional[str] = Field(None, description="Task ID for tracking")
+
 def build_atom_insight_prompt(
     smart_response: str,
     response: str,
     reasoning: str,
     data_summary: Dict[str, Any],
-    atom_type: str
+    atom_type: str,
+    examples: Optional[List[str]] = None
 ) -> str:
     """Build AI prompt for atom insight generation."""
     
@@ -611,20 +631,41 @@ GroupBy Operation Details:
         
         if aggregations:
             data_section += f"\nAggregations Performed:\n"
-            for i, agg in enumerate(aggregations[:10], 1):  # Show up to 10 aggregations
-                if isinstance(agg, dict):
-                    field = agg.get('field', 'unknown')
-                    aggregator = agg.get('aggregator', agg.get('agg', 'unknown'))
-                    weight_by = agg.get('weight_by', '')
-                    rename_to = agg.get('rename_to', field)
-                    data_section += f"{i}. {aggregator.upper()}({field})"
-                    if weight_by:
-                        data_section += f" weighted by {weight_by}"
-                    if rename_to != field:
-                        data_section += f" → {rename_to}"
-                    data_section += "\n"
-                else:
-                    data_section += f"{i}. {agg}\n"
+            # Handle both list and dict formats for aggregations
+            if isinstance(aggregations, list):
+                # aggregations is a list
+                for i, agg in enumerate(aggregations[:10], 1):  # Show up to 10 aggregations
+                    if isinstance(agg, dict):
+                        field = agg.get('field', 'unknown')
+                        aggregator = agg.get('aggregator', agg.get('agg', 'unknown'))
+                        weight_by = agg.get('weight_by', '')
+                        rename_to = agg.get('rename_to', field)
+                        data_section += f"{i}. {aggregator.upper()}({field})"
+                        if weight_by:
+                            data_section += f" weighted by {weight_by}"
+                        if rename_to != field:
+                            data_section += f" → {rename_to}"
+                        data_section += "\n"
+                    else:
+                        data_section += f"{i}. {agg}\n"
+            elif isinstance(aggregations, dict):
+                # aggregations is a dict (e.g., { "field_name": { "agg": "sum", "weight_by": "", "rename_to": "" } })
+                for i, (field, agg_config) in enumerate(list(aggregations.items())[:10], 1):
+                    if isinstance(agg_config, dict):
+                        aggregator = agg_config.get('aggregator', agg_config.get('agg', 'unknown'))
+                        weight_by = agg_config.get('weight_by', '')
+                        rename_to = agg_config.get('rename_to', field)
+                        data_section += f"{i}. {aggregator.upper()}({field})"
+                        if weight_by:
+                            data_section += f" weighted by {weight_by}"
+                        if rename_to != field:
+                            data_section += f" → {rename_to}"
+                        data_section += "\n"
+                    else:
+                        data_section += f"{i}. {field}: {agg_config}\n"
+            else:
+                # Fallback for other types
+                data_section += f"Aggregations: {aggregations}\n"
         
         if groupby_results:
             result_file = groupby_results.get('result_file', '')
@@ -681,7 +722,17 @@ EXAMPLE OUTPUT STYLE FOR CREATE-TRANSFORM:
 
 EXAMPLE OUTPUT STYLE FOR CONCAT:
 "The concat operation successfully combined two datasets: D0_KHC_UK_Beans.arrow and D1_KHC_UK_Beans.arrow. The operation was performed vertically (stacking rows), which means rows from both files were appended together. The result contains [X] total rows and [Y] columns, combining data from both source files. This vertical concatenation is useful for [business use case], allowing you to [specific analysis capabilities]. The concatenated dataset preserves all columns from both files and is ready for further analysis."
+
+EXAMPLE OUTPUT STYLE FOR GROUPBY:
+"The groupby operation successfully processed 12,345 rows from the dataset, grouping by 'region' and 'product_category' with sales volume aggregated using sum. The operation resulted in 45 grouped rows, showing total sales volume per region-category combination. The weighted average calculation provides accurate insights into regional product performance, revealing that [specific findings]. This grouping enables [business use case], allowing for [specific analysis capabilities]."
 """
+    
+    # Add examples if provided
+    if examples and len(examples) > 0:
+        prompt += "\n\nEXAMPLE INSIGHTS FOR REFERENCE:\n"
+        for i, example in enumerate(examples[:3], 1):  # Show up to 3 examples
+            prompt += f"\nExample {i}:\n{example}\n"
+        prompt += "\nUse these examples as a guide for the style and depth of insight you should provide.\n"
     
     return prompt
 
@@ -701,7 +752,8 @@ async def generate_atom_insight(request: AtomInsightRequest):
             request.response,
             request.reasoning,
             request.data_summary,
-            request.atom_type
+            request.atom_type,
+            examples=None  # Examples not in original request model
         )
         
         logger.info(f"🤖 Generated atom insight prompt (length: {len(prompt)})")
@@ -734,6 +786,216 @@ async def generate_atom_insight(request: AtomInsightRequest):
             processing_time=time.time() - start_time,
             error=str(e)
         )
+
+def update_card_textbox_background(
+    atom_id: str,
+    insight: str,
+    client_name: Optional[str],
+    app_name: Optional[str],
+    project_name: Optional[str]
+):
+    """Background task to update card text box with generated insight."""
+    try:
+        # Get laboratory API URL from environment
+        # Try multiple possible environment variable names
+        # Default to FastAPI backend service in Docker (fastapi service on port 8001)
+        lab_api_base = (
+            os.getenv("LABORATORY_API_URL") or 
+            os.getenv("LAB_API_URL") or 
+            os.getenv("LABORATORY_API") or
+            os.getenv("FASTAPI_BACKEND_URL") or
+            "http://fastapi:8001"  # Default to FastAPI service in Docker
+        )
+        
+        # Remove trailing slash and ensure /api/laboratory-project-state prefix
+        lab_api_base = lab_api_base.rstrip("/")
+        if not lab_api_base.endswith("/api/laboratory-project-state"):
+            if lab_api_base.endswith("/api"):
+                lab_api_base = f"{lab_api_base}/laboratory-project-state"
+            else:
+                lab_api_base = f"{lab_api_base}/api/laboratory-project-state"
+        
+        # Get cards from laboratory API using GET endpoint
+        # Endpoint: GET /api/laboratory-project-state/get/{client_name}/{app_name}/{project_name}
+        client_name_encoded = requests.utils.quote(client_name or "", safe="")
+        app_name_encoded = requests.utils.quote(app_name or "", safe="")
+        project_name_encoded = requests.utils.quote(project_name or "", safe="")
+        cards_url = f"{lab_api_base}/get/{client_name_encoded}/{app_name_encoded}/{project_name_encoded}"
+        
+        logger.info(f"📤 Fetching cards to update insight for atomId: {atom_id}")
+        logger.info(f"📤 Cards URL: {cards_url}")
+        logger.info(f"📤 Client: {client_name}, App: {app_name}, Project: {project_name}")
+        
+        try:
+            cards_response = requests.get(cards_url, timeout=10)
+            
+            if not cards_response.ok:
+                error_text = cards_response.text[:500] if cards_response.text else "No error message"
+                logger.error(f"❌ Failed to fetch cards: {cards_response.status_code}")
+                logger.error(f"❌ Error response: {error_text}")
+                logger.error(f"❌ Request URL was: {cards_url}")
+                return
+        except requests.exceptions.RequestException as e:
+            logger.error(f"❌ Request exception when fetching cards: {e}")
+            logger.error(f"❌ Request URL was: {cards_url}")
+            return
+        
+        cards_data = cards_response.json()
+        cards = cards_data.get("cards", [])
+        
+        # Find the card containing this atom
+        target_card = None
+        for card in cards:
+            if card.get("atoms"):
+                for atom in card["atoms"]:
+                    if atom.get("id") == atom_id:
+                        target_card = card
+                        break
+            if target_card:
+                break
+        
+        if not target_card:
+            logger.warn(f"⚠️ Card not found for atomId: {atom_id}")
+            return
+        
+        # Update the insight text box
+        text_boxes = target_card.get("textBoxes", [])
+        
+        # Find the last text box with title 'AI Insight' or 'Generating insight...'
+        insight_box_index = -1
+        for i in range(len(text_boxes) - 1, -1, -1):
+            title = text_boxes[i].get("title", "")
+            if title == "AI Insight" or title == "Generating insight..." or "Insight" in title:
+                insight_box_index = i
+                break
+        
+        if insight_box_index >= 0:
+            # Update existing insight text box
+            text_boxes[insight_box_index] = {
+                **text_boxes[insight_box_index],
+                "title": "AI Insight",
+                "content": insight,
+                "html": insight.replace("\n", "<br />")
+            }
+        else:
+            # Create new insight text box
+            new_text_box = {
+                "id": f"insight-{atom_id}-{int(time.time())}",
+                "title": "AI Insight",
+                "content": insight,
+                "html": insight.replace("\n", "<br />"),
+                "settings": {}
+            }
+            text_boxes.append(new_text_box)
+        
+        # Update card
+        target_card["textBoxes"] = text_boxes
+        target_card["textBoxEnabled"] = True
+        
+        # Save updated cards
+        # Endpoint: POST /api/laboratory-project-state/save
+        save_url = f"{lab_api_base}/save"
+        save_payload = {
+            "client_name": client_name or "",
+            "app_name": app_name or "",
+            "project_name": project_name or "",
+            "cards": cards,
+            "workflow_molecules": cards_data.get("workflow_molecules", []),
+            "auxiliaryMenuLeftOpen": cards_data.get("auxiliaryMenuLeftOpen", True),
+            "autosaveEnabled": cards_data.get("autosaveEnabled", True),
+            "mode": "laboratory"
+        }
+        
+        logger.info(f"📤 Saving updated card with insight for atomId: {atom_id}")
+        logger.info(f"📤 Save URL: {save_url}")
+        save_response = requests.post(save_url, json=save_payload, timeout=10)
+        
+        if save_response.ok:
+            logger.info(f"✅ Successfully updated card text box with insight for atomId: {atom_id}")
+        else:
+            logger.error(f"❌ Failed to save card: {save_response.status_code} - {save_response.text}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error updating card text box in background: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+@router.post("/generate-atom-insight-async", response_model=AsyncAtomInsightResponse)
+async def generate_atom_insight_async(
+    request: AsyncAtomInsightRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Generate AI-powered insights asynchronously in the background.
+    The insight will be automatically updated in the card text box when complete.
+    This ensures insights complete even when new atoms are called.
+    """
+    try:
+        logger.info(f"🚀 Starting async atom insight generation - Atom type: {request.atom_type}, AtomId: {request.atom_id}")
+        
+        # Add background task to generate insight and update card
+        background_tasks.add_task(
+            process_insight_and_update_card,
+            request
+        )
+        
+        return AsyncAtomInsightResponse(
+            success=True,
+            message="Insight generation started in background. Text box will be updated when complete.",
+            task_id=f"insight-{request.atom_id}-{int(time.time())}"
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to start async insight generation: {e}")
+        return AsyncAtomInsightResponse(
+            success=False,
+            message=f"Failed to start insight generation: {str(e)}",
+            task_id=None
+        )
+
+def process_insight_and_update_card(request: AsyncAtomInsightRequest):
+    """Process insight generation and update card in background."""
+    start_time = time.time()
+    
+    try:
+        logger.info(f"🤖 Processing atom insight in background - Atom type: {request.atom_type}")
+        
+        # Build prompt for atom insight
+        prompt = build_atom_insight_prompt(
+            request.smart_response,
+            request.response,
+            request.reasoning,
+            request.data_summary,
+            request.atom_type,
+            examples=request.examples
+        )
+        
+        logger.info(f"🤖 Generated atom insight prompt (length: {len(prompt)})")
+        
+        # Call LLM for insight generation
+        ai_insight = call_llm_for_atom_insights(
+            cfg["api_url"],
+            cfg["model_name"],
+            cfg["bearer_token"],
+            prompt
+        )
+        
+        processing_time = time.time() - start_time
+        logger.info(f"✅ Atom insight generated successfully in {processing_time:.2f}s")
+        
+        # Update card text box with the insight (synchronous function)
+        update_card_textbox_background(
+            request.atom_id,
+            ai_insight,
+            request.client_name,
+            request.app_name,
+            request.project_name
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Background insight generation failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 @router.get("/health")
 async def health_check():

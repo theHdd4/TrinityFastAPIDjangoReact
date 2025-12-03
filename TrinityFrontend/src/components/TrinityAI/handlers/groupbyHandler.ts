@@ -493,17 +493,27 @@ export const groupbyHandler: AtomHandler = {
               };
               
               // Generate insight - same pattern as create-transform (non-blocking)
-              // Generate insight - uses queue manager to ensure completion even when new atoms start
-              // The queue manager automatically handles text box updates with retry logic
+              // STEP 2b: Generate insight AFTER perform operation completes successfully
+              // Uses async backend endpoint that processes in background and updates card automatically
+              console.log('🔍 GROUPBY: Starting insight generation for atomId:', atomId);
+              console.log('🔍 GROUPBY: Enhanced data keys:', Object.keys(enhancedDataForInsight));
+              
               generateAtomInsight({
                 data: enhancedDataForInsight,
                 atomType: 'groupby-wtg-avg',
                 sessionId,
-                atomId, // Pass atomId so queue manager can track and complete this insight
+                atomId, // Pass atomId so async backend endpoint can update card automatically
+              }).then((result) => {
+                console.log('🔍 GROUPBY: Insight generation result:', {
+                  success: result.success,
+                  hasInsight: !!result.insight,
+                  error: result.error,
+                  note: result.insight === '' ? 'Using async endpoint - backend will update card' : 'Sync endpoint used'
+                });
               }).catch((error) => {
-                console.error('❌ Error generating insight:', error);
+                console.error('❌ GROUPBY: Error generating insight:', error);
               });
-              // Note: We don't need to manually update the text box here - the queue manager handles it
+              // Note: When using async endpoint, backend handles text box update automatically
             } else {
               // 🔧 FIX: Retrieve results from the saved file using the cached_dataframe endpoint
               try {
@@ -599,57 +609,27 @@ export const groupbyHandler: AtomHandler = {
                   },
                 };
                 
-                // Generate insight - same pattern as create-transform (non-blocking)
+                // STEP 2b: Generate insight AFTER perform operation completes successfully (cached_dataframe path)
+                // Uses async backend endpoint that processes in background and updates card automatically
+                console.log('🔍 GROUPBY (cached): Starting insight generation for atomId:', atomId);
+                console.log('🔍 GROUPBY (cached): Enhanced data keys:', Object.keys(enhancedDataForInsight));
+                
                 generateAtomInsight({
                   data: enhancedDataForInsight,
                   atomType: 'groupby-wtg-avg',
                   sessionId,
-                }).then(async (insightResult) => {
-                  if (insightResult.success && insightResult.insight) {
-                    try {
-                      // Find the card and update the last text box (the one we added earlier) with the insight
-                      const { getAtom, cards, setCards, updateCard } = useLaboratoryStore.getState();
-                      const atom = getAtom(atomId);
-                      if (atom) {
-                        const card = cards.find(c => c.atoms?.some((a: any) => a.id === atomId));
-                        if (card && card.textBoxes && card.textBoxes.length > 0) {
-                          // Update the last text box (the one we just added) with the insight
-                          const updatedTextBoxes = [...card.textBoxes];
-                          const lastIndex = updatedTextBoxes.length - 1;
-                          if (updatedTextBoxes[lastIndex]?.title === 'AI Insight') {
-                            updatedTextBoxes[lastIndex] = {
-                              ...updatedTextBoxes[lastIndex],
-                              content: insightResult.insight,
-                              html: insightResult.insight.replace(/\n/g, '<br />'),
-                            };
-                            
-                            // Update the card
-                            updateCard(card.id, { textBoxes: updatedTextBoxes });
-                            
-                            // Also update using setCards
-                            const allCards = cards.map(c => 
-                              c.id === card.id 
-                                ? { ...c, textBoxes: updatedTextBoxes }
-                                : c
-                            );
-                            setCards(allCards);
-                            
-                            console.log('✅ Successfully updated insight text box with generated insight');
-                          }
-                        }
-                      }
-                    } catch (textBoxError) {
-                      console.error('❌ Error updating insight text box:', textBoxError);
-                    }
-                  } else {
-                    console.warn('⚠️ Insight generation did not produce a valid insight:', {
-                      success: insightResult.success,
-                      error: insightResult.error,
-                    });
-                  }
+                  atomId, // Pass atomId so async backend endpoint can update card automatically
+                }).then((result) => {
+                  console.log('🔍 GROUPBY (cached): Insight generation result:', {
+                    success: result.success,
+                    hasInsight: !!result.insight,
+                    error: result.error,
+                    note: result.insight === '' ? 'Using async endpoint - backend will update card' : 'Sync endpoint used'
+                  });
                 }).catch((error) => {
-                  console.error('❌ Error generating insight:', error);
+                  console.error('❌ GROUPBY (cached): Error generating insight:', error);
                 });
+                // Note: When using async endpoint, backend handles text box update automatically
               } catch (fetchError) {
                 console.error('❌ Error fetching results from saved file:', fetchError);
                 
