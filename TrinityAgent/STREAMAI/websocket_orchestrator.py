@@ -6505,15 +6505,50 @@ WORKFLOW PLANNING:
             return ""
         return " ".join(text.split())
     
-    def _get_file_metadata(self, file_paths: List[str]) -> Dict[str, Dict[str, Any]]:
+    def _resolve_project_context_for_files(self, file_paths: List[str]) -> Dict[str, Any]:
+        """Resolve the most relevant project context for the given files.
+
+        Prefers the sequence context that lists the files so FileReader can
+        refresh its prefix to the correct tenant/app/project location.
+        """
+        if not file_paths:
+            return {}
+
+        # Try to find a sequence that contains any of the provided files
+        for sequence_id, files in self._sequence_available_files.items():
+            if any(path in files for path in file_paths):
+                context = self._sequence_project_context.get(sequence_id) or {}
+                if context:
+                    return context
+
+        # Fallback to any known project context
+        for context in self._sequence_project_context.values():
+            if context:
+                return context
+
+        return {}
+
+    def _get_file_metadata(
+        self,
+        file_paths: List[str],
+        sequence_id: Optional[str] = None,
+        project_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Retrieve file metadata (including column names) for given file paths.
         Returns a dictionary mapping file paths to their metadata.
         """
         metadata_dict: Dict[str, Dict[str, Any]] = {}
-        
+
         if not file_paths:
             return metadata_dict
+
+        # Resolve project context so FileReader targets the correct folder
+        resolved_context = project_context or {}
+        if not resolved_context and sequence_id:
+            resolved_context = self._sequence_project_context.get(sequence_id, {})
+        if not resolved_context:
+            resolved_context = self._resolve_project_context_for_files(file_paths)
         
         try:
             # Use BaseAgent.FileReader (standardized file handler for all agents)
@@ -6525,7 +6560,11 @@ WORKFLOW PLANNING:
                 except ImportError:
                     logger.error("❌ BaseAgent.FileReader not available - cannot retrieve file metadata")
                     return metadata_dict
-            
+
+            client_name = resolved_context.get("client_name", "") if resolved_context else ""
+            app_name = resolved_context.get("app_name", "") if resolved_context else ""
+            project_name = resolved_context.get("project_name", "") if resolved_context else ""
+
             # Extract filenames from paths
             file_names = []
             path_to_filename = {}
@@ -6541,53 +6580,60 @@ WORKFLOW PLANNING:
                 file_details_dict = {}
                 try:
                     file_reader = FileReader()
-                    for filename in file_names:
+
+                    # Update prefix using the resolved project context to avoid
+                    # falling back to the MinIO root between atoms/steps
+                    if client_name and app_name and project_name:
                         try:
-                            columns = file_reader.get_file_columns(filename)
-                            file_details_dict[filename] = {
-                                "object_name": filename,
-                                "columns": columns,
-                                "column_count": len(columns) if columns else 0
-                            }
-                        except Exception as e:
-                            logger.debug(f"⚠️ Could not get columns for {filename}: {e}")
-                            # Still add entry with empty columns
-                            file_details_dict[filename] = {
+                            file_reader._maybe_update_prefix(client_name, app_name, project_name)
+                            logger.info(
+                                "📁 File metadata lookup using context: %s/%s/%s",
+                                client_name,
+                                app_name,
+                                project_name,
+                            )
+                        except Exception as ctx_exc:
+                            logger.warning("⚠️ Could not set FileReader context: %s", ctx_exc)
+
+                    for file_path in file_paths:
+                        filename = path_to_filename[file_path]
+                        # Try full path first (keeps folder context), then fallback to filename
+                        for candidate in [file_path, filename]:
+                            try:
+                                columns = file_reader.get_file_columns(candidate)
+                                file_details_dict[file_path] = {
+                                    "object_name": candidate,
+                                    "columns": columns,
+                                    "column_count": len(columns) if columns else 0,
+                                }
+                                break
+                            except Exception as e:
+                                logger.debug(
+                                    "⚠️ Could not get columns for %s (candidate=%s): %s",
+                                    file_path,
+                                    candidate,
+                                    e,
+                                )
+                        if file_path not in file_details_dict:
+                            file_details_dict[file_path] = {
                                 "object_name": filename,
                                 "columns": [],
-                                "column_count": 0
+                                "column_count": 0,
                             }
+
                     if file_details_dict:
-                        logger.debug(f"✅ Retrieved file metadata for {len(file_details_dict)} files using BaseAgent.FileReader")
+                        logger.debug(
+                            "✅ Retrieved file metadata for %s files using BaseAgent.FileReader",
+                            len(file_details_dict),
+                        )
                 except Exception as e:
                     logger.debug(f"⚠️ Failed to get file metadata using FileReader: {e}")
                     file_details_dict = {}
-                
+
                 if file_details_dict:
                     # Map back to original file paths
-                    for file_path, filename in path_to_filename.items():
-                        # Try to find matching metadata
-                        for key, metadata in file_details_dict.items():
-                            # Check if key matches filename or file_path
-                            if (key == filename or 
-                                key == file_path or 
-                                filename in key or 
-                                file_path in key or
-                                key in filename or
-                                key in file_path):
-                                metadata_dict[file_path] = metadata
-                                break
-                        
-                        # If not found, try to find by object_name
-                        if file_path not in metadata_dict:
-                            for key, metadata in file_details_dict.items():
-                                obj_name = metadata.get("object_name", "")
-                                if (obj_name == filename or 
-                                    obj_name == file_path or
-                                    filename in obj_name or
-                                    file_path in obj_name):
-                                    metadata_dict[file_path] = metadata
-                                    break
+                    for file_path, metadata in file_details_dict.items():
+                        metadata_dict[file_path] = metadata
                     
                     # Log what metadata was retrieved
                     for file_path, metadata in metadata_dict.items():
