@@ -317,13 +317,10 @@ if BaseAgent is not None:
                                     logger.warning(f"❌ Validation warning: chart {idx} trace {trace_idx} missing x_column or y_column")
                                     # Don't fail - will use defaults or handle in normalization
             
-            # 🔧 LENIENT: smart_response and response are preferred but not strictly required
-            # They will be added in normalization if missing
-            if "smart_response" not in result:
-                logger.debug("⚠️ Validation note: smart_response missing - will be provided in normalization")
-            
-            if "response" not in result:
-                logger.debug("⚠️ Validation note: response missing - will be provided in normalization")
+            # 🔧 LENIENT: reasoning is preferred but not strictly required
+            # It will be added in normalization if missing
+            if "reasoning" not in result:
+                logger.debug("⚠️ Validation note: reasoning missing - will be provided in normalization")
             
             # 🔧 VALIDATION PASSED: Allow incomplete responses, normalization will fix them
             return True
@@ -337,34 +334,21 @@ if BaseAgent is not None:
             Only chart_type and aggregation function names are normalized to lowercase.
             🔧 ENHANCED: Always ensures smart_response and response are present (fixes loop validation issues).
             """
-            # 🔧 ENHANCED: Ensure smart_response and response are always present
-            # Extract or generate fallback values
-            raw_response = result.get("response", "")
-            smart_response = result.get("smart_response", "")
+            # 🔧 ENHANCED: Ensure reasoning is always present
+            # Extract reasoning field - this is the only field we need now
+            reasoning = result.get("reasoning", "")
             
-            # If smart_response is missing, try to generate from response or other fields
-            if not smart_response:
-                if raw_response:
-                    # Use first 100 chars of response as smart_response
-                    smart_response = raw_response[:100] + ("..." if len(raw_response) > 100 else "")
-                elif result.get("success") is True:
-                    smart_response = "Chart configuration has been created successfully."
+            # If reasoning is missing, generate a fallback explanation
+            if not reasoning:
+                if result.get("success") is True:
+                    reasoning = "ChartMaker atom was chosen because the user requested chart creation. The configuration has been created successfully based on the user's requirements."
                 else:
-                    smart_response = "I'm processing your chart request. Please check the configuration details."
-                logger.info(f"🔧 Generated fallback smart_response: {smart_response[:50]}...")
-            
-            # If response is missing, try to generate from other fields
-            if not raw_response:
-                if smart_response:
-                    raw_response = f"Generated chart configuration based on user request. {smart_response}"
-                else:
-                    raw_response = "Chart maker agent executed successfully."
-                logger.info(f"🔧 Generated fallback response: {raw_response[:50]}...")
+                    reasoning = "ChartMaker atom was chosen to process the chart request. Analyzing available files and columns to determine the best chart configuration."
+                logger.info(f"🔧 Generated fallback reasoning: {reasoning[:50]}...")
             
             normalized = {
                 "success": result.get("success", False),
-                "response": raw_response,  # Raw LLM thinking (always present)
-                "smart_response": smart_response,  # User-friendly message (always present)
+                "reasoning": reasoning,  # Detailed reasoning explaining atom choice and decisions
             }
             
             # Add chart_json if present

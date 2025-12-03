@@ -49,9 +49,7 @@ class DataFrameOperationsPromptBuilder:
             "execution_mode": "sequential",
             "error_handling": "stop_on_error"
         },
-        "response": "Raw thinking and reasoning from LLM about the DataFrame operations, including why this file was selected, why these operations were chosen, and any considerations made",
-        "smart_response": "I'll load your data file and perform the requested operations. The operations will be executed sequentially.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the DataFrameOperations atom was chosen, including: analysis of the user's request, why this specific file was selected, why these operations were chosen, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True
     }
     
@@ -66,9 +64,7 @@ class DataFrameOperationsPromptBuilder:
             "To perform operations, specify: file + operation type (load, filter, sort, add column, etc.)",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what the user might want, analysis of the request, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you with DataFrame operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you load files, filter rows, sort data, add/rename/delete columns, apply formulas, and save results. What would you like to do?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the DataFrameOperations atom was chosen, including: analysis of the current situation, what files are available, what the user might want, analysis of the request, why DataFrameOperations is appropriate, what information is needed, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_files": ["file1"],

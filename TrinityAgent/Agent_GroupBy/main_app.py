@@ -286,13 +286,8 @@ if BaseAgent is not None:
                 if not isinstance(aggregation_functions, dict):
                     return False
             
-            # Must have smart_response (BaseAgent requirement)
-            if "smart_response" not in result:
-                return False
-            
-            # Must have response (raw thinking)
-            if "response" not in result:
-                return False
+            # Reasoning is preferred but not strictly required (will be added in normalization if missing)
+            # No longer validating for smart_response or response - only reasoning is used now
             
             return True
         
@@ -302,10 +297,17 @@ if BaseAgent is not None:
             BaseAgent handles general normalization.
             🔧 CRITICAL: All column names are normalized to lowercase for backend compatibility.
             """
+            # Extract reasoning - this is the only field we need now
+            reasoning = result.get("reasoning", "")
+            if not reasoning:
+                if result.get("success") is True:
+                    reasoning = "GroupBy atom was chosen because the user requested grouping operations. The configuration has been created successfully based on the user's requirements."
+                else:
+                    reasoning = "GroupBy atom was chosen to process the grouping request. Analyzing available files and columns to determine the best group by configuration."
+            
             normalized = {
                 "success": result.get("success", False),
-                "response": result.get("response", ""),  # Raw LLM thinking
-                "smart_response": result.get("smart_response", ""),
+                "reasoning": reasoning,  # Detailed reasoning explaining atom choice and decisions
             }
             
             # Add group_by_json if present
@@ -347,9 +349,10 @@ if BaseAgent is not None:
                         logger.error(f"❌ GROUPBY VALIDATION ERRORS: {error_msg}")
                         # Set success to False and add detailed error message
                         normalized["success"] = False
-                        normalized["smart_response"] = (
-                            f"I found some issues with the GroupBy configuration: {error_msg}. "
-                            "Please check that all column names exist in the file."
+                        normalized["reasoning"] = (
+                            f"GroupBy atom was chosen, but validation found issues: {error_msg}. "
+                            "Please check that all column names exist in the file. "
+                            "The atom selection was correct, but the configuration needs adjustment."
                         )
                         normalized["validation_errors"] = validation_errors
                 elif file:

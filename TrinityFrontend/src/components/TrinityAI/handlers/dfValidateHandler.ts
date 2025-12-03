@@ -27,19 +27,12 @@ export const dfValidateHandler: AtomHandler = {
     console.log('🔍 Has validate_json:', !!data.validate_json);
     console.log('🔍 Has validate_config:', !!data.validate_config);
     
-    // Show smart_response EXACTLY like other handlers
-    const smartResponseText = processSmartResponse(data);
-    console.log('💬 DF Validate smart response:', smartResponseText);
-    
-    // Add AI smart response message
-    if (smartResponseText) {
-      const aiMessage = createMessage(smartResponseText);
+    // Show reasoning in chat (only reasoning field now)
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText) {
+      const aiMessage = createMessage(`**Reasoning:**\n${reasoningText}`);
       setMessages(prev => [...prev, aiMessage]);
-      console.log('🤖 AI Smart Response displayed:', smartResponseText);
-    } else {
-      console.warn('⚠️ No smart_response found in df_validate data - creating fallback message');
-      const fallbackMsg = createMessage('✅ I\'ve received your data validation request and will process it now.');
-      setMessages(prev => [...prev, fallbackMsg]);
+      console.log('🤖 AI Reasoning displayed');
     }
     
     // Extract validate_json - check multiple possible locations
@@ -561,7 +554,7 @@ export const dfValidateHandler: AtomHandler = {
       });
     }
 
-    // 📝 Update card text box with response, reasoning, and smart_response
+    // 📝 Update card text box with reasoning
     console.log('📝 Updating card text box with agent response...');
     const textBoxContent = formatAgentResponseForTextBox(data);
     try {
@@ -593,7 +586,7 @@ export const dfValidateHandler: AtomHandler = {
       
       // Prepare enhanced data with validation/transformation results for insight generation
       const enhancedDataForInsight = {
-        ...data, // This includes smart_response, response, reasoning (the 3 keys)
+        ...data, // This includes reasoning
         validate_json: data.validate_json || data.validate_config, // Original config from first LLM call
         validation_results: {
           file_name: mappedFileName,
@@ -630,8 +623,8 @@ export const dfValidateHandler: AtomHandler = {
     const { setMessages, updateAtomSettings, atomId } = context;
     
     let aiText = '';
-    if (data.smart_response) {
-      aiText = data.smart_response;
+    if (data.reasoning) {
+      aiText = `**Reasoning:**\n${data.reasoning}`;
     } else if (data.suggestions && Array.isArray(data.suggestions)) {
       aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
       
@@ -655,8 +648,8 @@ export const dfValidateHandler: AtomHandler = {
         });
       }
     } else {
-      // Fallback to processSmartResponse for backward compatibility
-      aiText = processSmartResponse(data);
+      // Fallback to reasoning
+      aiText = data.reasoning ? `**Reasoning:**\n${data.reasoning}` : 'AI response received';
     }
     
     // Create and add AI message
@@ -673,7 +666,7 @@ export const dfValidateHandler: AtomHandler = {
       });
     }
     
-    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    // 📝 Update card text box with reasoning (even for failures)
     console.log('📝 Updating card text box with agent response (failure case)...');
     const textBoxContent = formatAgentResponseForTextBox(data);
     try {

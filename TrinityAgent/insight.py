@@ -17,6 +17,9 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger("trinity.ai.insights")
 router = APIRouter(prefix="/insights", tags=["AI Insights"])
 
+# 🔧 ENHANCED: Temporary storage for insights when cards aren't available yet (React loops)
+_pending_insights: Dict[str, Dict[str, Any]] = {}  # atom_id -> {insight, client_name, app_name, project_name, timestamp}
+
 # Import enhanced insight analysis module
 try:
     from TrinityAgent.insight_analysis import (
@@ -411,9 +414,7 @@ async def generate_insights(request: InsightRequest):
         )
 
 class AtomInsightRequest(BaseModel):
-    smart_response: str = Field(..., description="User-friendly response from agent")
-    response: str = Field(..., description="Raw response/thinking from agent")
-    reasoning: str = Field(..., description="Reasoning behind agent's decision")
+    reasoning: str = Field(..., description="Detailed reasoning explaining atom choice, raw thinking, and decision rationale")
     data_summary: Dict[str, Any] = Field(..., description="Standardized data summary from atom handler")
     atom_type: str = Field(..., description="Type of atom (correlation, chart-maker, etc.)")
     session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
@@ -425,9 +426,7 @@ class AtomInsightResponse(BaseModel):
     error: Optional[str] = Field(None, description="Error message if generation failed")
 
 class AsyncAtomInsightRequest(BaseModel):
-    smart_response: str = Field(..., description="User-friendly response from agent")
-    response: str = Field(..., description="Raw response/thinking from agent")
-    reasoning: str = Field(..., description="Reasoning behind agent's decision")
+    reasoning: str = Field(..., description="Detailed reasoning explaining atom choice, raw thinking, and decision rationale")
     data_summary: Dict[str, Any] = Field(..., description="Standardized data summary from atom handler")
     atom_type: str = Field(..., description="Type of atom (correlation, chart-maker, etc.)")
     session_id: Optional[str] = Field(None, description="Session ID for conversation tracking")
@@ -493,8 +492,6 @@ def _safe_serialize_data_summary(data_summary: Dict[str, Any], max_size: int = 5
         return f"<Error serializing data summary: {e}>"
 
 def build_atom_insight_prompt(
-    smart_response: str,
-    response: str,
     reasoning: str,
     data_summary: Dict[str, Any],
     atom_type: str,
@@ -504,14 +501,7 @@ def build_atom_insight_prompt(
     
     atom_type_lower = atom_type.lower()
     
-    # Build context section
-    context_section = f"""AGENT RESPONSE CONTEXT:
-Smart Response (User-friendly): {smart_response}
-Response (Raw thinking): {response}
-Reasoning: {reasoning}
-"""
-    
-    # Build data summary section based on atom type
+    # Build data summary section based on atom type (focus only on results, not process)
     data_section = "DATA SUMMARY:\n"
     
     if atom_type_lower == 'correlation':
@@ -522,28 +512,36 @@ Reasoning: {reasoning}
         columns = summary_data.get('columns_analyzed', [])
         stats = summary_data.get('correlation_statistics', {})
         top_correlations = summary_data.get('top_correlations', [])
+        correlation_matrix = summary_data.get('correlation_matrix', {})
         row_count = metadata.get('row_count', 0)
         file_name = metadata.get('file_name', 'Unknown')
         
         data_section += f"""
-Correlation Analysis Details:
+CORRELATION DATA ANALYSIS:
+- Dataset: {file_name} ({row_count:,} rows)
 - Method: {method}
-- File: {file_name}
-- Columns Analyzed: {len(columns)} ({', '.join(columns[:5])}{'...' if len(columns) > 5 else ''})
-- Total Row Count: {row_count:,}
-- Total Correlation Pairs: {stats.get('total_pairs', 0)}
+- Columns Analyzed ({len(columns)}): {', '.join(columns) if columns else 'N/A'}
 - Strong Correlations (|r| > 0.7): {stats.get('strong_count', 0)}
 - Moderate Correlations (0.3 < |r| ≤ 0.7): {stats.get('moderate_count', 0)}
 - Weak Correlations (|r| ≤ 0.3): {stats.get('weak_count', 0)}
 """
         
         if top_correlations:
-            data_section += "\nTop Correlations:\n"
-            for i, corr in enumerate(top_correlations[:5], 1):
+            data_section += "\nTOP CORRELATIONS (exact column names and correlation values):\n"
+            for i, corr in enumerate(top_correlations[:10], 1):  # Show top 10
                 var1 = corr.get('var1', '')
                 var2 = corr.get('var2', '')
-                value = corr.get('value', 0)
-                data_section += f"{i}. {var1} ↔ {var2}: {value:.3f}\n"
+                value = corr.get('value', corr.get('correlation', 0))
+                data_section += f"{i}. Column '{var1}' ↔ Column '{var2}': r = {value:.4f}\n"
+        
+        # Include correlation matrix sample if available
+        if correlation_matrix and isinstance(correlation_matrix, dict):
+            data_section += "\nCORRELATION MATRIX (sample of key relationships):\n"
+            matrix_items = list(correlation_matrix.items())[:5]  # Show first 5 entries
+            for key, value in matrix_items:
+                if isinstance(value, dict):
+                    value_str = ", ".join([f"{k}: {v:.3f}" for k, v in list(value.items())[:3]])
+                    data_section += f"  {key}: {value_str}\n"
     
     elif atom_type_lower == 'chart-maker':
         summary_data = data_summary.get('summary_data', {})
@@ -554,34 +552,71 @@ Correlation Analysis Details:
         chart_results = summary_data.get('chart_results', {})
         file_name = metadata.get('file_name', 'Unknown')
         row_count = metadata.get('row_count', 0)
+        columns = metadata.get('column_count', 0)
         
         data_section += f"""
-Chart Generation Details:
-- File: {file_name}
-- Number of Charts: {chart_count}
-- Total Row Count: {row_count:,}
+CHART MAKER DATA ANALYSIS:
+- Dataset: {file_name} ({row_count:,} rows, {columns} columns)
+- Charts Created: {chart_count}
 """
         
+        # Include actual chart configurations with exact column names and data
+        if chart_configs:
+            for i, chart_config in enumerate(chart_configs[:3], 1):  # Show up to 3 charts
+                chart_title = chart_config.get('title', f'Chart {i}')
+                chart_type = chart_config.get('chart_type', chart_config.get('type', 'unknown'))
+                traces = chart_config.get('traces', [])
+                
+                data_section += f"\nCHART {i}: {chart_title} (Type: {chart_type})\n"
+                
+                for j, trace in enumerate(traces[:2], 1):  # Show up to 2 traces per chart
+                    x_col = trace.get('x_column', 'N/A')
+                    y_col = trace.get('y_column', 'N/A')
+                    trace_name = trace.get('name', f'Trace {j}')
+                    
+                    data_section += f"  Trace {j} ({trace_name}):\n"
+                    data_section += f"    X-Axis Column: {x_col}\n"
+                    data_section += f"    Y-Axis Column: {y_col}\n"
+                    
+                    # Include actual data values if available
+                    x_data = trace.get('x', [])
+                    y_data = trace.get('y', [])
+                    
+                    if x_data and len(x_data) > 0:
+                        data_section += f"    X-Values Sample: {x_data[:10]}{'...' if len(x_data) > 10 else ''}\n"
+                    if y_data and len(y_data) > 0:
+                        # Show actual numeric values
+                        y_sample = y_data[:10] if len(y_data) > 10 else y_data
+                        y_str = ', '.join([f"{val:.2f}" if isinstance(val, (int, float)) else str(val) for val in y_sample])
+                        data_section += f"    Y-Values Sample: [{y_str}]{'...' if len(y_data) > 10 else ''}\n"
+                        # Include summary stats
+                        if isinstance(y_data[0], (int, float)):
+                            y_numeric = [v for v in y_data if isinstance(v, (int, float))]
+                            if y_numeric:
+                                data_section += f"    Y-Values Stats: Min={min(y_numeric):.2f}, Max={max(y_numeric):.2f}, Avg={sum(y_numeric)/len(y_numeric):.2f}\n"
+        
+        # Include chart results with actual data if available
         if chart_results:
-            success_count = chart_results.get('success_count', 0)
             charts = chart_results.get('charts', [])
-            data_section += f"- Successfully Generated: {success_count}/{chart_count}\n"
+            file_data = chart_results.get('file_data', {})
+            
+            if file_data:
+                available_columns = file_data.get('columns', [])
+                if available_columns:
+                    data_section += f"\nAVAILABLE COLUMNS IN DATASET:\n"
+                    data_section += f"{', '.join(available_columns)}\n"
             
             if charts:
-                data_section += "\nChart Details:\n"
-                for i, chart in enumerate(charts[:3], 1):
+                data_section += f"\nCHART RESULTS:\n"
+                for i, chart in enumerate(charts[:2], 1):  # Show up to 2 charts
                     title = chart.get('title', f'Chart {i}')
                     chart_type = chart.get('type', chart.get('chart_type', 'unknown'))
                     data_section += f"{i}. {title} ({chart_type})\n"
-        
-        if chart_configs:
-            first_chart = chart_configs[0] if chart_configs else {}
-            data_section += f"\nFirst Chart Configuration:\n"
-            data_section += f"- Type: {first_chart.get('chart_type', 'unknown')}\n"
-            if first_chart.get('traces'):
-                first_trace = first_chart['traces'][0]
-                data_section += f"- X-Axis: {first_trace.get('x_column', 'N/A')}\n"
-                data_section += f"- Y-Axis: {first_trace.get('y_column', 'N/A')}\n"
+                    
+                    # Include actual data points if available
+                    chart_data = chart.get('data', {})
+                    if chart_data:
+                        data_section += f"   Data points available: {len(chart_data.get('x', []))} points\n"
     
     elif atom_type_lower in ['create-transform', 'create-column']:
         summary_data = data_summary.get('summary_data', {})
@@ -596,35 +631,16 @@ Chart Generation Details:
         new_column_count = metadata.get('new_column_count', 0)
         
         data_section += f"""
-Create Transform Details:
-- File: {file_name}
-- Total Row Count: {row_count:,}
-- Original Column Count: {column_count}
-- New Columns Created: {new_column_count}
-- Operations Executed: {operations_count}
+DATA RESULTS:
+- Dataset: {file_name} ({row_count:,} rows)
+- Original Columns: {column_count}
+- New Columns: {new_column_count}
 """
         
-        if operations:
-            data_section += "\nOperations Performed:\n"
-            for i, op in enumerate(operations[:10], 1):  # Show up to 10 operations
-                op_type = op.get('type', 'unknown')
-                columns = op.get('columns', [])
-                new_column_name = op.get('new_column_name', '')
-                data_section += f"{i}. {op_type.upper()}({', '.join(columns[:3])}{'...' if len(columns) > 3 else ''})"
-                if new_column_name:
-                    data_section += f" → {new_column_name}"
-                data_section += "\n"
-        
         if operation_results:
-            result_file = operation_results.get('result_file', '')
-            op_results = operation_results.get('operations_executed', [])
             new_columns = operation_results.get('new_columns', [])
-            
-            if result_file:
-                data_section += f"\nResult File: {result_file}\n"
-            
             if new_columns:
-                data_section += f"\nNew Columns Created ({len(new_columns)}):\n"
+                data_section += f"\nNEW COLUMNS:\n"
                 for i, col in enumerate(new_columns[:10], 1):  # Show up to 10 new columns
                     data_section += f"{i}. {col}\n"
     
@@ -638,24 +654,17 @@ Create Transform Details:
         concat_results = summary_data.get('concat_results', {})
         
         data_section += f"""
-Concat Operation Details:
-- File 1: {file1}
-- File 2: {file2}
+DATA RESULTS:
+- Files Combined: {file1} + {file2}
 - Direction: {direction}
 """
         
         if concat_results:
-            concat_id = concat_results.get('concat_id', '')
-            result_shape = concat_results.get('result_shape', '')
             columns = concat_results.get('columns', [])
             row_count = concat_results.get('row_count', 0)
             
-            if concat_id:
-                data_section += f"- Result ID: {concat_id}\n"
-            if result_shape:
-                data_section += f"- Result Shape: {result_shape}\n"
             if row_count > 0:
-                data_section += f"- Total Rows: {row_count:,}\n"
+                data_section += f"- Combined Rows: {row_count:,}\n"
             if columns:
                 data_section += f"- Total Columns: {len(columns)}\n"
                 if len(columns) <= 20:
@@ -676,26 +685,26 @@ Concat Operation Details:
         identifiers_count = metadata.get('identifiers_count', 0)
         aggregations_count = metadata.get('aggregations_count', 0)
         
+        result_row_count = groupby_results.get('row_count', 0) if groupby_results else 0
+        
         data_section += f"""
-GroupBy Operation Details:
-- File: {file_name}
-- Total Row Count: {row_count:,}
-- Result Column Count: {column_count}
-- Grouping Identifiers: {identifiers_count}
+GROUPBY DATA ANALYSIS:
+- Dataset: {file_name} ({row_count:,} rows)
+- Grouped Result: {result_row_count:,} groups, {column_count} columns
+- Grouping By: {identifiers_count} identifier(s)
 - Aggregations Applied: {aggregations_count}
 """
         
         if identifiers:
-            data_section += f"\nGrouping Identifiers:\n"
-            for i, identifier in enumerate(identifiers[:10], 1):  # Show up to 10 identifiers
+            data_section += f"\nGROUPING COLUMNS (exact names):\n"
+            for i, identifier in enumerate(identifiers, 1):
                 data_section += f"{i}. {identifier}\n"
         
         if aggregations:
-            data_section += f"\nAggregations Performed:\n"
+            data_section += f"\nAGGREGATIONS (exact column names and operations):\n"
             # Handle both list and dict formats for aggregations
             if isinstance(aggregations, list):
-                # aggregations is a list
-                for i, agg in enumerate(aggregations[:10], 1):  # Show up to 10 aggregations
+                for i, agg in enumerate(aggregations, 1):
                     if isinstance(agg, dict):
                         field = agg.get('field', 'unknown')
                         aggregator = agg.get('aggregator', agg.get('agg', 'unknown'))
@@ -705,13 +714,12 @@ GroupBy Operation Details:
                         if weight_by:
                             data_section += f" weighted by {weight_by}"
                         if rename_to != field:
-                            data_section += f" → {rename_to}"
+                            data_section += f" → renamed to {rename_to}"
                         data_section += "\n"
                     else:
                         data_section += f"{i}. {agg}\n"
             elif isinstance(aggregations, dict):
-                # aggregations is a dict (e.g., { "field_name": { "agg": "sum", "weight_by": "", "rename_to": "" } })
-                for i, (field, agg_config) in enumerate(list(aggregations.items())[:10], 1):
+                for i, (field, agg_config) in enumerate(list(aggregations.items()), 1):
                     if isinstance(agg_config, dict):
                         aggregator = agg_config.get('aggregator', agg_config.get('agg', 'unknown'))
                         weight_by = agg_config.get('weight_by', '')
@@ -720,29 +728,34 @@ GroupBy Operation Details:
                         if weight_by:
                             data_section += f" weighted by {weight_by}"
                         if rename_to != field:
-                            data_section += f" → {rename_to}"
+                            data_section += f" → renamed to {rename_to}"
                         data_section += "\n"
                     else:
                         data_section += f"{i}. {field}: {agg_config}\n"
-            else:
-                # Fallback for other types
-                data_section += f"Aggregations: {aggregations}\n"
         
         if groupby_results:
             result_file = groupby_results.get('result_file', '')
             result_row_count = groupby_results.get('row_count', 0)
             result_columns = groupby_results.get('columns', [])
+            unsaved_data = groupby_results.get('unsaved_data')
             
-            if result_file:
-                data_section += f"\nResult File: {result_file}\n"
-            if result_row_count > 0:
-                data_section += f"Result Rows: {result_row_count:,}\n"
             if result_columns:
-                data_section += f"Result Columns: {len(result_columns)}\n"
-                if len(result_columns) <= 20:
-                    data_section += f"Columns: {', '.join(result_columns)}\n"
-                else:
-                    data_section += f"Columns (first 20): {', '.join(result_columns[:20])}...\n"
+                data_section += f"\nRESULT COLUMNS (exact names):\n"
+                data_section += f"{', '.join(result_columns)}\n"
+            
+            # Include actual grouped data values if available
+            if unsaved_data and isinstance(unsaved_data, list) and len(unsaved_data) > 0:
+                data_section += f"\nGROUPED DATA RESULTS (top 10 groups with actual values):\n"
+                for i, row in enumerate(unsaved_data[:10], 1):
+                    if isinstance(row, dict):
+                        # Show identifier values and aggregated values
+                        row_str = ", ".join([f"{k}: {v}" for k, v in list(row.items())[:5]])
+                        data_section += f"{i}. {row_str}\n"
+                    else:
+                        data_section += f"{i}. {str(row)[:200]}\n"
+            
+            if result_row_count > 0:
+                data_section += f"\nTotal Groups: {result_row_count:,}\n"
     
     else:
         # Generic atom type - use safe serialization to avoid hanging on large datasets
@@ -750,43 +763,49 @@ GroupBy Operation Details:
         safe_summary = _safe_serialize_data_summary(data_summary)
         data_section += f"Data Summary: {safe_summary}\n"
     
-    # Build the complete prompt
-    prompt = f"""You are an intelligent data analysis assistant. Analyze the agent's response and the underlying data processing to provide a comprehensive, rigorous, and well-explained insight.
-
-{context_section}
+    # Build the complete prompt - DATA-DRIVEN INSIGHTS WITH ACTUAL VALUES
+    prompt = f"""You are a data insights analyst. Provide detailed, data-driven insights based on the ACTUAL data analysis results below.
 
 {data_section}
 
-TASK: Generate a detailed, rigorous insight that explains:
-1. What the agent did and why (based on reasoning and response)
-2. What the data analysis reveals (based on data summary)
-3. Key findings, patterns, or relationships discovered
-4. Business implications or actionable insights
-5. Any important considerations or limitations
+CRITICAL REQUIREMENTS:
+1. Use EXACT column names as shown in the data above - do not generalize or hide names
+2. Include ACTUAL values, numbers, and metrics from the data - be specific
+3. Reference specific data points, groups, or results mentioned above
+4. Use the exact terminology from the dataset (column names, categories, etc.)
 
-The insight should be:
-- Comprehensive and well-explained (can be lengthy - as detailed as needed)
-- Focused on helping users understand the analysis
-- Based on both the agent's reasoning AND the actual data results
-- Written in clear, professional language
-- Include specific numbers, metrics, or findings where relevant
+TASK: Generate detailed, data-driven insights (3-5 paragraphs) that:
+1. Reference specific column names and their actual values from the data
+2. Identify key patterns, trends, or relationships using actual numbers/metrics
+3. Highlight top performers, outliers, or significant findings with specific values
+4. Provide business implications based on the actual data results
+5. Include actionable recommendations based on specific findings
 
-Provide only the insight text - no JSON, no formatting markers, just the comprehensive insight explanation.
+DO NOT:
+- Use generic placeholders like "[Brand/Product]" or "[metric]" - use actual names and values
+- Hide or generalize column names - use them exactly as shown
+- Make up values - only use what's provided in the data above
+- Explain what was done - focus on what the data reveals
+
+The insight MUST:
+- Reference exact column names from the dataset
+- Include specific numeric values, percentages, or metrics where available
+- Mention specific categories, groups, or data points by name
+- Be based on the actual data provided above
+- Be detailed enough to understand the specific findings
+
+Start directly with specific findings using actual column names and values from the data.
+
+Provide only the insight text - no JSON, no formatting markers, just detailed data-driven insights.
 
 EXAMPLE OUTPUT STYLE FOR CORRELATION:
-"The correlation analysis examined 15 numeric columns across 12,345 data rows using the Pearson method. The analysis revealed 105 total correlation pairs, with 8 showing strong correlations (|r| > 0.7), 32 showing moderate correlations (0.3 < |r| ≤ 0.7), and 65 showing weak correlations. The strongest relationship was found between SalesValue and Volume (r = 0.847), indicating that sales revenue is highly correlated with sales volume. This strong positive correlation suggests that as volume increases, sales value increases proportionally, which is expected in retail scenarios. Other notable correlations include [additional findings]. These findings suggest that [business implications]."
+"SalesValue and Volume columns show a strong positive correlation (r = 0.847), indicating that sales revenue increases proportionally with sales volume. The correlation matrix reveals that SalesValue has the highest correlation (0.92) with Volume among all numeric columns. This suggests pricing strategies that encourage volume growth could directly impact revenue. Consider analyzing the relationship between Volume and SalesValue by region to identify growth opportunities."
 
 EXAMPLE OUTPUT STYLE FOR CHART-MAKER:
-"The chart generation process successfully created 2 visualizations from the dataset. The first chart is a bar chart comparing [x-axis] across [y-axis], showing [key findings]. The chart reveals [patterns/trends], with [specific metrics]. The second chart displays [details]. Overall, the visualizations provide clear insights into [business context], showing that [key takeaways]."
-
-EXAMPLE OUTPUT STYLE FOR CREATE-TRANSFORM:
-"The create-transform operation successfully processed 12,345 rows from the dataset and executed 3 transformation operations. The first operation added two columns (SalesValue and Volume) to create a new column called RevenuePerUnit, which calculates the revenue efficiency metric. The second operation applied a logarithmic transformation to the SalesValue column to normalize the distribution, creating LogSalesValue. The third operation created a dummy variable from the Category column, generating Category_HEINZ. These transformations resulted in 3 new columns being added to the dataset, bringing the total column count from 15 to 18. The new columns enable [business use case], allowing for [specific analysis capabilities]. The transformed dataset has been saved and is ready for further analysis."
-
-EXAMPLE OUTPUT STYLE FOR CONCAT:
-"The concat operation successfully combined two datasets: D0_KHC_UK_Beans.arrow and D1_KHC_UK_Beans.arrow. The operation was performed vertically (stacking rows), which means rows from both files were appended together. The result contains [X] total rows and [Y] columns, combining data from both source files. This vertical concatenation is useful for [business use case], allowing you to [specific analysis capabilities]. The concatenated dataset preserves all columns from both files and is ready for further analysis."
+"The bar chart using column 'Year' on X-axis and 'SalesValue' on Y-axis reveals that 2023 has the highest SalesValue at $2.45M, representing a 15% increase from 2022's $2.13M. The data shows consistent growth from 2018 ($1.8M) to 2023, with the largest year-over-year increase occurring between 2021 and 2022 (12%). This upward trend suggests successful market strategies. Recommendations: Continue current growth strategies and investigate factors driving the 2021-2022 surge."
 
 EXAMPLE OUTPUT STYLE FOR GROUPBY:
-"The groupby operation successfully processed 12,345 rows from the dataset, grouping by 'region' and 'product_category' with sales volume aggregated using sum. The operation resulted in 45 grouped rows, showing total sales volume per region-category combination. The weighted average calculation provides accurate insights into regional product performance, revealing that [specific findings]. This grouping enables [business use case], allowing for [specific analysis capabilities]."
+"Grouping by 'Brand' and 'Region' columns with SUM(SalesValue) aggregation shows that Brand 'HEINZ' leads with $5.2M total sales across all regions, followed by 'Knorr' at $3.8M. The 'UK' region dominates with $12.5M total sales, with HEINZ contributing $2.1M (17%) in that region. The weighted average calculation reveals that HEINZ has the highest average sales per unit at $45.30. These insights support focusing marketing efforts on HEINZ in the UK region. Recommendations: Increase inventory for HEINZ in UK and analyze HEINZ's success factors for replication in other regions."
 """
     
     # Add examples if provided
@@ -794,7 +813,7 @@ EXAMPLE OUTPUT STYLE FOR GROUPBY:
         prompt += "\n\nEXAMPLE INSIGHTS FOR REFERENCE:\n"
         for i, example in enumerate(examples[:3], 1):  # Show up to 3 examples
             prompt += f"\nExample {i}:\n{example}\n"
-        prompt += "\nUse these examples as a guide for the style and depth of insight you should provide.\n"
+        prompt += "\nUse these examples as a guide - keep insights concise and direct, focusing on findings and implications.\n"
     
     return prompt
 
@@ -810,8 +829,6 @@ async def generate_atom_insight(request: AtomInsightRequest):
         
         # Build prompt for atom insight
         prompt = build_atom_insight_prompt(
-            request.smart_response,
-            request.response,
             request.reasoning,
             request.data_summary,
             request.atom_type,
@@ -919,8 +936,8 @@ def update_card_textbox_background(
     client_name: Optional[str],
     app_name: Optional[str],
     project_name: Optional[str],
-    max_retries: int = 5,
-    retry_delay: float = 2.0
+    max_retries: int = 10,  # 🔧 INCREASED: More retries for React loops
+    retry_delay: float = 3.0  # 🔧 INCREASED: Longer delays for React loops
 ):
     """
     Background task to update card text box with generated insight.
@@ -989,13 +1006,55 @@ def update_card_textbox_background(
                 cards_data = cards_response.json()
                 cards = cards_data.get("cards", [])
                 
+                # 🔧 ENHANCED: Better logging for debugging
+                logger.info(f"📥 Cards API response structure: keys={list(cards_data.keys())}")
+                logger.info(f"📥 Cards array length: {len(cards) if cards else 0}")
+                
                 if not cards:
-                    logger.warning(f"⚠️ No cards found in response (attempt {attempt + 1}/{max_retries})")
+                    logger.warning(
+                        f"⚠️ No cards found in response (attempt {attempt + 1}/{max_retries})\n"
+                        f"   Response keys: {list(cards_data.keys())}\n"
+                        f"   Response preview: {json.dumps({k: str(v)[:100] if isinstance(v, (list, dict)) else v for k, v in list(cards_data.items())[:5]}, default=str)}"
+                    )
+                    # 🔧 ENHANCED: For React loops, cards might not be saved yet - use longer delays
                     if attempt < max_retries - 1:
-                        time.sleep(retry_delay * (attempt + 1))
+                        # Progressive delay: 3s, 6s, 9s, 12s, 15s, 18s, 21s, 24s, 27s, 30s
+                        wait_time = retry_delay * (attempt + 1)
+                        logger.info(f"⏳ Retrying in {wait_time}s (cards might not be saved yet in React loop)...")
+                        time.sleep(wait_time)
                         continue
                     else:
                         logger.error(f"❌ No cards found after {max_retries} attempts")
+                        logger.error(f"   Final response keys: {list(cards_data.keys())}")
+                        logger.error(f"   Client: {client_name}, App: {app_name}, Project: {project_name}")
+                        # 🔧 FINAL FALLBACK: Store insight for later retrieval when cards become available
+                        logger.warning(f"⚠️ Insight generated but cards array is empty - storing for later - atomId: {atom_id}")
+                        _pending_insights[atom_id] = {
+                            "insight": insight,
+                            "client_name": client_name,
+                            "app_name": app_name,
+                            "project_name": project_name,
+                            "timestamp": time.time()
+                        }
+                        logger.info(f"💾 Stored pending insight for atomId: {atom_id} (will retry when cards are available)")
+                        # Schedule a delayed retry to check if cards become available
+                        import threading
+                        def delayed_retry():
+                            time.sleep(30)  # Wait 30 seconds
+                            logger.info(f"🔄 Delayed retry: Attempting to update card for atomId: {atom_id}")
+                            if atom_id in _pending_insights:
+                                pending = _pending_insights[atom_id]
+                                update_card_textbox_background(
+                                    atom_id=atom_id,
+                                    insight=pending["insight"],
+                                    client_name=pending["client_name"],
+                                    app_name=pending["app_name"],
+                                    project_name=pending["project_name"],
+                                    max_retries=5,  # Fewer retries for delayed attempt
+                                    retry_delay=2.0
+                                )
+                                # Remove from pending if successful (check will be done in the function)
+                        threading.Thread(target=delayed_retry, daemon=True).start()
                         return
                 
                 # 🔧 ENHANCED: Use robust card lookup
@@ -1042,6 +1101,32 @@ def update_card_textbox_background(
         
         if not target_card:
             logger.error(f"❌ Could not find card for atomId: {atom_id} after all retry attempts")
+            # 🔧 ENHANCED: Store insight for delayed retry if card not found
+            logger.warning(f"💾 Storing insight for delayed retry - atomId: {atom_id}")
+            _pending_insights[atom_id] = {
+                "insight": insight,
+                "client_name": client_name,
+                "app_name": app_name,
+                "project_name": project_name,
+                "timestamp": time.time()
+            }
+            # Schedule delayed retry
+            import threading
+            def delayed_retry():
+                time.sleep(30)  # Wait 30 seconds for cards to be created
+                logger.info(f"🔄 Delayed retry: Attempting to update card for atomId: {atom_id}")
+                if atom_id in _pending_insights:
+                    pending = _pending_insights[atom_id]
+                    update_card_textbox_background(
+                        atom_id=atom_id,
+                        insight=pending["insight"],
+                        client_name=pending["client_name"],
+                        app_name=pending["app_name"],
+                        project_name=pending["project_name"],
+                        max_retries=5,
+                        retry_delay=2.0
+                    )
+            threading.Thread(target=delayed_retry, daemon=True).start()
             return
         
         # Update the insight text box
@@ -1098,6 +1183,10 @@ def update_card_textbox_background(
         
         if save_response.ok:
             logger.info(f"✅ Successfully updated card text box with insight for atomId: {atom_id}")
+            # 🔧 ENHANCED: Clean up pending insight if successfully saved
+            if atom_id in _pending_insights:
+                del _pending_insights[atom_id]
+                logger.info(f"🗑️ Removed pending insight for atomId: {atom_id} (successfully saved)")
         else:
             logger.error(f"❌ Failed to save card: {save_response.status_code} - {save_response.text}")
             
@@ -1148,8 +1237,6 @@ def process_insight_and_update_card(request: AsyncAtomInsightRequest):
         
         # Build prompt for atom insight
         prompt = build_atom_insight_prompt(
-            request.smart_response,
-            request.response,
             request.reasoning,
             request.data_summary,
             request.atom_type,
@@ -1274,8 +1361,8 @@ async def generate_deep_insights_endpoint(request: AtomInsightRequest):
                 error="Module not available"
             )
         
-        # Build goal from smart_response and atom_type
-        goal = f"Analyze {request.atom_type} results: {request.smart_response}"
+        # Build goal from reasoning and atom_type
+        goal = f"Analyze {request.atom_type} results: {request.reasoning[:200]}"
         
         # Extract facts from data summary
         facts = extract_facts_from_data_summary(request.data_summary, request.atom_type)
@@ -1325,11 +1412,66 @@ async def generate_deep_insights_endpoint(request: AtomInsightRequest):
         )
 
 
+@router.get("/pending-insights/{atom_id}")
+async def get_pending_insight(atom_id: str):
+    """
+    Get pending insight for an atom if cards weren't available when insight was generated.
+    Useful for React loops where cards might be created after insight generation.
+    """
+    if atom_id in _pending_insights:
+        pending = _pending_insights[atom_id]
+        return {
+            "status": "pending",
+            "atom_id": atom_id,
+            "insight": pending["insight"],
+            "timestamp": pending["timestamp"],
+            "has_insight": True
+        }
+    return {
+        "status": "not_found",
+        "atom_id": atom_id,
+        "has_insight": False
+    }
+
+
+@router.post("/retry-pending/{atom_id}")
+async def retry_pending_insight(atom_id: str):
+    """
+    Retry updating card with pending insight.
+    Useful when cards become available after insight was generated.
+    """
+    if atom_id not in _pending_insights:
+        return {
+            "status": "not_found",
+            "message": f"No pending insight found for atom_id: {atom_id}"
+        }
+    
+    pending = _pending_insights[atom_id]
+    
+    # Try to update card again
+    update_card_textbox_background(
+        atom_id=atom_id,
+        insight=pending["insight"],
+        client_name=pending["client_name"],
+        app_name=pending["app_name"],
+        project_name=pending["project_name"],
+        max_retries=5,
+        retry_delay=2.0
+    )
+    
+    return {
+        "status": "retry_initiated",
+        "atom_id": atom_id,
+        "message": "Retry initiated - card will be updated if available"
+    }
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint for insight service."""
     return {
         "status": "healthy",
         "service": "AI Insights",
-        "deep_insights_available": DEEP_INSIGHTS_AVAILABLE
+        "deep_insights_available": DEEP_INSIGHTS_AVAILABLE,
+        "pending_insights_count": len(_pending_insights)
     }

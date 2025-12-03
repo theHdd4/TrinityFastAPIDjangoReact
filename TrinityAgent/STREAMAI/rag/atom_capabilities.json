@@ -34,7 +34,7 @@
         "Example: 'Merge D0_KHC_UK_Beans.arrow and D0_KHC_UK_Mayo.arrow on columns Year and Region using inner join'"
       ],
       "output": "Merged dataset saved as new Arrow file",
-      "typical_next_atoms": ["groupby-wtg-avg", "dataframe-operations", "chart-maker", "feature-overview"]
+      "typical_next_atoms": ["correlation", "feature-overview", "groupby-wtg-avg", "dataframe-operations", "chart-maker"]
     },
     {
       "atom_id": "concat",
@@ -66,7 +66,7 @@
         "Example: 'Concatenate D0_KHC_UK_Beans.arrow and D0_KHC_UK_Mayo.arrow vertically'"
       ],
       "output": "Concatenated dataset saved as new Arrow file",
-      "typical_next_atoms": ["groupby-wtg-avg", "dataframe-operations", "chart-maker"]
+      "typical_next_atoms": ["correlation", "feature-overview", "groupby-wtg-avg", "dataframe-operations", "chart-maker"]
     },
     {
       "atom_id": "groupby-wtg-avg",
@@ -102,7 +102,7 @@
         "Example: 'Group D0_KHC_UK_Beans.arrow by Region column and calculate sum of Revenue column'"
       ],
       "output": "Grouped and aggregated dataset",
-      "typical_next_atoms": ["chart-maker", "dataframe-operations", "feature-overview"]
+      "typical_next_atoms": ["correlation", "chart-maker", "dataframe-operations", "feature-overview"]
     },
     {
       "atom_id": "dataframe-operations",
@@ -149,7 +149,7 @@
         "GOOD Example: 'Filter D0_KHC_UK_Beans.arrow where Year = 2023 AND Country = \"UK\", then sort by Revenue descending'"
       ],
       "output": "Transformed DataFrame with operations applied",
-      "typical_next_atoms": ["chart-maker", "groupby-wtg-avg", "feature-overview", "dataframe-operations"]
+      "typical_next_atoms": ["correlation", "chart-maker", "groupby-wtg-avg", "feature-overview", "dataframe-operations"]
     },
     {
       "atom_id": "create-column",
@@ -248,37 +248,69 @@
         "Example: 'Generate overview of merged_data from previous step'"
       ],
       "output": "Data overview and statistics",
-      "typical_next_atoms": ["dataframe-operations", "chart-maker", "groupby-wtg-avg"]
+      "typical_next_atoms": ["correlation", "dataframe-operations", "chart-maker", "groupby-wtg-avg"]
     },
     {
       "atom_id": "correlation",
       "name": "Correlation Analysis",
-      "description": "Calculates correlation matrix between numeric columns",
+      "description": "Comprehensive correlation analysis for EDA: calculates correlation matrices, identifies relationships between numeric variables, filters data before correlation, finds highest correlation pairs, and analyzes time series correlations",
       "endpoint": "/trinityai/correlation",
       "backend_endpoint": "/api/correlation/calculate",
       "capabilities": [
-        "Calculate correlation matrix",
-        "Analyze relationships between numeric columns",
-        "Pearson and Spearman correlation"
+        "Calculate correlation matrix between numeric columns",
+        "Analyze relationships and dependencies between variables",
+        "Pearson and Spearman correlation methods",
+        "Filter data before correlation analysis",
+        "Find highest correlation pairs",
+        "Time series correlation analysis",
+        "Identify identifiers (categorical) vs measures (numeric) columns",
+        "Data exploration and EDA (Exploratory Data Analysis)",
+        "Discover patterns and relationships in data",
+        "Analyze how variables relate to each other"
       ],
       "use_cases": [
-        "User says: correlation, relationship, dependency, associate",
+        "User says: correlation, correlate, relationship, dependency, associate, related, connection, link, relationship analysis, EDA, exploratory data analysis, find relationships, which variables are related, how are columns related",
         "Analyze correlation between price and sales",
-        "Find relationships between variables"
+        "Find relationships between variables in a dataset",
+        "Discover which columns are most correlated",
+        "Perform EDA to understand data relationships",
+        "Identify highly correlated variables",
+        "Analyze time series correlations",
+        "Understand dependencies between measures",
+        "Explore data to find patterns and relationships",
+        "Get insights about variable relationships for better analysis"
       ],
       "required_parameters": {
-        "data_source": "File path or result from previous step"
+        "data_source": "File path or result from previous step (must have numeric columns)"
       },
       "optional_parameters": {
-        "columns": "Specific columns to analyze",
-        "method": "Correlation method: 'pearson' or 'spearman'"
+        "columns": "Specific numeric columns to analyze (if not specified, analyzes all numeric columns)",
+        "method": "Correlation method: 'pearson' (linear relationships) or 'spearman' (monotonic relationships)",
+        "identifier_filters": "Filter by categorical columns before correlation",
+        "measure_filters": "Filter by numeric columns before correlation"
       },
       "prompt_requirements": [
         "MUST specify exact file path or reference previous step",
-        "Example: 'Calculate correlation matrix for D0_KHC_UK_Beans.arrow'"
+        "MUST mention correlation, relationship, or EDA analysis",
+        "CAN specify specific columns to analyze (optional - will analyze all numeric columns if not specified)",
+        "CAN request filtering before correlation (e.g., 'correlate sales and price for North region')",
+        "CAN request highest correlation pairs (e.g., 'find the most correlated columns')",
+        "Example: 'Calculate correlation matrix for D0_KHC_UK_Beans.arrow'",
+        "Example: 'Analyze correlations between all numeric columns in merged_data.arrow'",
+        "Example: 'Find which columns are most correlated in sales.arrow'",
+        "Example: 'Perform EDA to find relationships between Revenue, Price, and Quantity columns'",
+        "Example: 'Analyze correlation between Price and Sales for North region only'"
       ],
-      "output": "Correlation matrix",
-      "typical_next_atoms": ["chart-maker", "feature-overview"]
+      "output": "Correlation matrix with correlation coefficients between numeric columns, can include filtered results and highest correlation pairs",
+      "typical_next_atoms": ["chart-maker", "feature-overview", "dataframe-operations", "explore", "groupby-wtg-avg"],
+      "eda_workflow_position": "Early to mid workflow - use after data loading/merging but before detailed analysis",
+      "best_practices": [
+        "Use correlation early in EDA to understand variable relationships",
+        "Filter data before correlation if user wants specific subset analysis",
+        "Use correlation results to guide further analysis (e.g., highly correlated variables)",
+        "Combine with chart-maker to visualize correlation matrices",
+        "Use feature-overview before correlation to understand data structure"
+      ]
     },
     {
       "atom_id": "explore",
@@ -305,7 +337,7 @@
         "Example: 'Explore D0_KHC_UK_Beans.arrow'"
       ],
       "output": "Exploration results",
-      "typical_next_atoms": ["dataframe-operations", "chart-maker"]
+      "typical_next_atoms": ["correlation", "dataframe-operations", "chart-maker", "feature-overview"]
     },
     {
       "atom_id": "data-upload-validate",
@@ -336,13 +368,15 @@
         "Example: 'Upload sales.csv file'"
       ],
       "output": "Validated file ready for use",
-      "typical_next_atoms": ["merge", "concat", "dataframe-operations", "groupby-wtg-avg", "chart-maker"]
+      "typical_next_atoms": ["correlation", "feature-overview", "merge", "concat", "dataframe-operations", "groupby-wtg-avg", "chart-maker"]
     }
   ],
   "workflow_rules": [
     "Put data loading (data-upload-validate) FIRST only if files don't exist",
     "Put data transformations (merge, concat, filter, groupby, dataframe-operations) BEFORE visualization",
     "Put chart-maker or visualization atoms LAST",
+    "For EDA workflows: Use correlation, feature-overview, or explore early (after data loading/merging) to understand data relationships",
+    "Correlation analysis is excellent for EDA - use it when user wants to understand relationships, perform exploratory analysis, or find how variables relate",
     "Each step should build on previous steps",
     "For dataframe-operations: Use ONE atom per task for clarity",
     "Workflows can be long (5-10+ steps) - break complex tasks into individual steps",

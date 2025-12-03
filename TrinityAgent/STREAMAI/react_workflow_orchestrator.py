@@ -107,6 +107,20 @@ class ReActWorkflowOrchestrator:
         self.model_name = self.config["model_name"]
         self.bearer_token = self.config["bearer_token"]
         
+        # Initialize FileReader for loading files with proper context
+        try:
+            from BaseAgent.file_reader import FileReader
+            self.file_reader = FileReader()
+            logger.info("✅ FileReader initialized for context-aware file loading")
+        except ImportError:
+            try:
+                from TrinityAgent.BaseAgent.file_reader import FileReader
+                self.file_reader = FileReader()
+                logger.info("✅ FileReader initialized for context-aware file loading")
+            except ImportError:
+                logger.warning("⚠️ FileReader not available - file loading may not be context-aware")
+                self.file_reader = None
+        
         # Initialize components
         # Note: Intent detection is handled by BaseAgent before routing to this orchestrator
         self.result_extractor = get_result_extractor()
@@ -167,6 +181,56 @@ class ReActWorkflowOrchestrator:
             intent = "workflow"
             
             logger.info("ℹ️ Intent already detected at entry point - proceeding with workflow execution")
+            
+            # 🔧 CRITICAL FIX: Load files using FileReader with proper context if file_context has context info
+            # This ensures we only read files from the specific client/project location when context is available
+            # If context is missing, proceed with provided file_context (don't block workflow execution)
+            if file_context:
+                client_name = file_context.get("client_name", "")
+                app_name = file_context.get("app_name", "")
+                project_name = file_context.get("project_name", "")
+                
+                if client_name and app_name and project_name and self.file_reader:
+                    logger.info(f"📁 Loading files from MinIO using FileReader with context: {client_name}/{app_name}/{project_name}")
+                    try:
+                        # Load files with proper context
+                        files_with_columns = self.file_reader.load_files(
+                            client_name=client_name,
+                            app_name=app_name,
+                            project_name=project_name
+                        )
+                        
+                        # Update file_context with properly loaded files
+                        if files_with_columns:
+                            # Convert to list of file paths
+                            context_file_paths = list(files_with_columns.keys())
+                            
+                            # Merge with existing files in file_context if any
+                            existing_files = file_context.get("files", [])
+                            if isinstance(existing_files, dict):
+                                existing_file_paths = list(existing_files.keys())
+                            elif isinstance(existing_files, list):
+                                existing_file_paths = existing_files
+                            else:
+                                existing_file_paths = []
+                            
+                            # Combine: use context-loaded files as primary
+                            combined_files = list(context_file_paths)
+                            for f in existing_file_paths:
+                                if f not in combined_files:
+                                    combined_files.append(f)
+                            
+                            # Update file_context
+                            file_context["files"] = files_with_columns  # Keep full metadata
+                            file_context["file_paths"] = combined_files  # Add list of paths
+                            
+                            logger.info(f"✅ Loaded {len(context_file_paths)} files with proper context (total: {len(combined_files)} files)")
+                        else:
+                            logger.debug(f"ℹ️ No files found with context, using provided file_context")
+                    except Exception as e:
+                        logger.debug(f"ℹ️ Could not load files with context (non-blocking): {e}, using provided file_context")
+                else:
+                    logger.debug(f"ℹ️ No project context or FileReader available, using provided file_context")
             
             # Start workflow monitoring
             self.workflow_monitor.start_workflow(

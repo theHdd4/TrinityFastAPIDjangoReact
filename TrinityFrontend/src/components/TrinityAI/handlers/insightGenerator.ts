@@ -331,17 +331,11 @@ const generateAtomInsightInternal = async (
   console.log('🚀🚀🚀 data keys:', Object.keys(data));
   
   try {
-    // Extract smart_response, response, and reasoning
-    const smartResponse = data.smart_response || data.data?.smart_response || data.smartResponse || '';
-    const response = data.response || data.data?.response || '';
+    // Extract only reasoning field (smart_response and response are no longer used)
     const reasoning = data.reasoning || data.data?.reasoning || '';
     
     console.log('🚀🚀🚀 Extracted fields:', {
-      hasSmartResponse: !!smartResponse,
-      hasResponse: !!response,
       hasReasoning: !!reasoning,
-      smartResponseLength: smartResponse.length,
-      responseLength: response.length,
       reasoningLength: reasoning.length,
     });
     
@@ -375,8 +369,6 @@ const generateAtomInsightInternal = async (
       console.log('🚀🚀🚀 Using async endpoint - backend will update card automatically');
       
       const asyncRequestPayload = {
-        smart_response: smartResponse,
-        response: response,
         reasoning: reasoning,
         data_summary: dataSummary,
         atom_type: atomType,
@@ -432,8 +424,6 @@ const generateAtomInsightInternal = async (
     console.log('⚠️ No atomId provided, using synchronous endpoint');
     
     const requestPayload = {
-      smart_response: smartResponse,
-      response: response,
       reasoning: reasoning,
       data_summary: dataSummary,
       atom_type: atomType,
@@ -490,28 +480,20 @@ const generateAtomInsightInternal = async (
 
 /**
  * Format insight content for text box display
- * Combines smart_response, response, reasoning, and generated insight
+ * Now only uses reasoning field (smart_response and response are no longer used)
  */
 export const formatInsightForTextBox = (
-  smartResponse: string,
-  response: string,
   reasoning: string,
   insight: string
 ): string => {
   let formattedText = '';
   
-  if (smartResponse) {
-    formattedText += `**Smart Response:**\n${smartResponse}\n\n`;
-  }
-  
+  // Show reasoning first (this is the detailed explanation from the atom)
   if (reasoning) {
     formattedText += `**Reasoning:**\n${reasoning}\n\n`;
   }
   
-  if (response) {
-    formattedText += `**Response:**\n${response}\n\n`;
-  }
-  
+  // Show generated insight if available
   if (insight) {
     formattedText += `**Insight:**\n${insight}\n\n`;
   }
@@ -528,18 +510,14 @@ export const generateAndFormatInsight = async (
 ): Promise<{ formattedContent: string; insight: string }> => {
   const { data } = params;
   
-  // Extract fields
-  const smartResponse = data.smart_response || data.data?.smart_response || data.smartResponse || '';
-  const response = data.response || data.data?.response || '';
+  // Extract only reasoning field
   const reasoning = data.reasoning || data.data?.reasoning || '';
   
   // Generate insight
   const insightResult = await generateAtomInsight(params);
   
-  // Format for text box
+  // Format for text box (only reasoning and insight now)
   const formattedContent = formatInsightForTextBox(
-    smartResponse,
-    response,
     reasoning,
     insightResult.insight
   );

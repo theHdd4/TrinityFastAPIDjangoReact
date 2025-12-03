@@ -37,14 +37,10 @@ export const concatHandler: AtomHandler = {
     });
     console.log('🚨 Test message added to state');
     
-    // 📝 Update card text box with response, reasoning, and smart_response
+    // 📝 Update card text box with reasoning
     console.log('📝 RAW DATA RECEIVED:', {
-      hasResponse: !!data.response,
-      hasDataResponse: !!data.data?.response,
       hasReasoning: !!data.reasoning,
       hasDataReasoning: !!data.data?.reasoning,
-      hasSmartResponse: !!data.smart_response,
-      hasDataSmartResponse: !!data.data?.smart_response,
       dataKeys: Object.keys(data),
       dataDataKeys: data.data ? Object.keys(data.data) : [],
     });
@@ -61,14 +57,12 @@ export const concatHandler: AtomHandler = {
     // Store in atom settings for reference
     updateAtomSettings(atomId, {
       agentResponse: {
-        response: data.response || data.data?.response || '',
         reasoning: data.reasoning || data.data?.reasoning || '',
-        smart_response: data.smart_response || data.data?.smart_response || data.smartResponse || '',
         formattedText: textBoxContent
       }
     });
     
-    // STEP 1: Add the 3 keys (smart_response, response, reasoning) to a TEXT BOX
+    // STEP 1: Add reasoning to a TEXT BOX
     console.log('📝 About to call updateCardTextBox with atomId:', atomId);
     try {
       await updateCardTextBox(atomId, textBoxContent);
@@ -93,23 +87,12 @@ export const concatHandler: AtomHandler = {
       // Continue even if text box addition fails
     }
     
-    // 🔧 CRITICAL FIX: Show smart_response EXACTLY like DataFrame Operations (no isStreamMode check)
-    const smartResponseText = processSmartResponse(data);
-    console.log('💬 Concat smart response:', smartResponseText);
-    console.log('💬 Smart response length:', smartResponseText?.length);
-    
-    // Add AI smart response message (prioritize smart_response - SAME AS DATAFRAME OPERATIONS)
-    if (smartResponseText) {
-      // Use the AI's smart response for a more conversational experience
-      const aiMessage = createMessage(smartResponseText);
+    // Show reasoning in chat (only reasoning field now)
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText) {
+      const aiMessage = createMessage(`**Reasoning:**\n${reasoningText}`);
       setMessages(prev => [...prev, aiMessage]);
-      console.log('🤖 AI Smart Response displayed:', smartResponseText);
-    } else {
-      // 🔧 FALLBACK: If backend doesn't send smart_response, create a generic success message
-      console.warn('⚠️ No smart_response found in concat data - creating fallback message');
-      const fallbackMsg = createMessage('✅ I\'ve received your concat request and will process it now.');
-      setMessages(prev => [...prev, fallbackMsg]);
-      console.log('🤖 Fallback message displayed');
+      console.log('🤖 AI Reasoning displayed');
     }
     
     if (!data.concat_json) {
@@ -230,7 +213,7 @@ export const concatHandler: AtomHandler = {
       note: 'Mapped to object_name values for UI dropdown compatibility'
     });
     
-    // 🔧 FIX: No need for duplicate message - smart_response already shown at the top
+    // 🔧 FIX: No need for duplicate message - reasoning already shown at the top
     
     // Automatically call perform endpoint
     try {
@@ -303,7 +286,7 @@ export const concatHandler: AtomHandler = {
         
         // Prepare enhanced data with concat results for insight generation
         const enhancedDataForInsight = {
-          ...data, // This includes smart_response, response, reasoning (the 3 keys)
+          ...data, // This includes reasoning
           concat_json: data.concat_json, // Original config from first LLM call
           concat_results: {
             concat_id: result.concat_id,
@@ -373,16 +356,14 @@ export const concatHandler: AtomHandler = {
   handleFailure: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { setMessages, updateAtomSettings, atomId } = context;
     
-    // 📝 Update card text box with response, reasoning, and smart_response even on failure
+    // 📝 Update card text box with reasoning even on failure
     const textBoxContent = formatAgentResponseForTextBox(data);
     console.log('📝 Formatted text box content (failure):', textBoxContent.substring(0, 200) + '...');
     
     // Store in atom settings for reference
     updateAtomSettings(atomId, {
       agentResponse: {
-        response: data.response || data.data?.response || '',
         reasoning: data.reasoning || data.data?.reasoning || '',
-        smart_response: data.smart_response || data.data?.smart_response || data.smartResponse || '',
         formattedText: textBoxContent
       }
     });
@@ -392,8 +373,8 @@ export const concatHandler: AtomHandler = {
     console.log('📝 Card text box updated with agent response fields (failure case)');
     
     let aiText = '';
-    if (data.smart_response) {
-      aiText = data.smart_response;
+    if (data.reasoning) {
+      aiText = `**Reasoning:**\n${data.reasoning}`;
     } else if (data.suggestions && Array.isArray(data.suggestions)) {
       aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
       

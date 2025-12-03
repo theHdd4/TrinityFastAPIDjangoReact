@@ -21,18 +21,17 @@ export const exploreHandler: AtomHandler = {
   handleSuccess: async (data: any, context: AtomHandlerContext): Promise<AtomHandlerResponse> => {
     const { atomId, updateAtomSettings, setMessages, sessionId } = context;
     
-    // 🔧 CRITICAL FIX: Show smart_response FIRST (user-friendly message)
-    const smartResponseText = processSmartResponse(data);
-    const showedSmartResponse = !!smartResponseText; // Prevent duplicate chat messages
-    if (smartResponseText) {
-      const smartMsg: Message = {
+    // Show reasoning in chat (only reasoning field now)
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText) {
+      const reasoningMsg: Message = {
         id: (Date.now() + 1).toString(),
-        content: smartResponseText,
+        content: `**Reasoning:**\n${reasoningText}`,
         sender: 'ai',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, smartMsg]);
-      console.log('✅ Displayed smart_response to user:', smartResponseText);
+      setMessages(prev => [...prev, reasoningMsg]);
+      console.log('✅ Displayed reasoning to user');
     }
     
     if (!data.exploration_config) {
@@ -68,13 +67,13 @@ export const exploreHandler: AtomHandler = {
     const fileValidation = validateFileInput(targetFile, 'AI Explore');
     if (!fileValidation.isValid) {
       const errorMsg = createMessage(
-        data.smart_response || `I couldn't find a data file to analyze. Please make sure you have selected or uploaded a data file first, then try your exploration request again. I'll be able to help you create meaningful visualizations once the data is available.`
+        data.reasoning ? `**Reasoning:**\n${data.reasoning}` : `I couldn't find a data file to analyze. Please make sure you have selected or uploaded a data file first, then try your exploration request again. I'll be able to help you create meaningful visualizations once the data is available.`
       );
       setMessages(prev => [...prev, errorMsg]);
       return { success: false, error: 'Invalid file input' };
     }
     
-    // 📝 Update card text box with response, reasoning, and smart_response
+    // 📝 Update card text box with reasoning
     console.log('📝 Updating card text box with agent response...');
     let textBoxContent = formatAgentResponseForTextBox(data);
     try {
@@ -686,8 +685,8 @@ export const exploreHandler: AtomHandler = {
           data: mergedData  // ✅ Merged data instead of overwriting
         });
         
-        // Add completion message ONLY if smart_response wasn't already shown
-        if (!showedSmartResponse) {
+        // Add completion message ONLY if reasoning wasn't already shown
+        if (!reasoningText) {
           const completionContent = (finalExplorations.length > 1 
             ? `I've successfully generated ${finalExplorations.length} complementary charts for your analysis. These visualizations will provide different perspectives on your data, allowing you to identify patterns, trends, and relationships. You can use the 2-chart layout to view both visualizations simultaneously for better comparison.`
             : `I've successfully generated your chart analysis. The visualization is now ready and will help you understand the patterns and insights in your data. You can click to view the chart and explore the findings.`);
@@ -705,7 +704,7 @@ export const exploreHandler: AtomHandler = {
         
         // Prepare enhanced data with exploration results for insight generation
         const enhancedDataForInsight = {
-          ...data, // This includes smart_response, response, reasoning (the 3 keys)
+          ...data, // This includes reasoning
           exploration_config: data.exploration_config, // Original config from first LLM call
           exploration_results: {
             chart_count: finalExplorations.length,
@@ -857,8 +856,8 @@ export const exploreHandler: AtomHandler = {
         errorMessage = `❌ Network error: Could not connect to backend services. Please try again.`;
       }
       
-      // Only add error message if no smart_response was already added
-      if (!data.smart_response) {
+      // Only add error message if no reasoning was already added
+      if (!data.reasoning) {
         const errorMsg: Message = {
           id: (Date.now() + 2).toString(),
           content: `${errorMessage} Please try again or use the manual configuration options to set up your analysis.`,
@@ -878,7 +877,7 @@ export const exploreHandler: AtomHandler = {
       });
     }
 
-    // 📝 Update card text box with response, reasoning, and smart_response (reassign if needed)
+    // 📝 Update card text box with reasoning (reassign if needed)
     console.log('📝 Updating card text box with agent response...');
     textBoxContent = formatAgentResponseForTextBox(data);
     try {
@@ -905,7 +904,7 @@ export const exploreHandler: AtomHandler = {
     const { setMessages, updateAtomSettings, atomId } = context;
     
     // Process smart response with enhanced logic
-    const aiText = processSmartResponse(data);
+    const aiText = data.reasoning ? `**Reasoning:**\n${data.reasoning}` : 'AI response received';
     
     // Create and add AI message
     const aiMsg = createMessage(aiText);
@@ -923,7 +922,7 @@ export const exploreHandler: AtomHandler = {
       });
     }
     
-    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    // 📝 Update card text box with reasoning (even for failures)
     console.log('📝 Updating card text box with agent response (failure case)...');
     const textBoxContent = formatAgentResponseForTextBox(data);
     try {

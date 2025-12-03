@@ -374,7 +374,7 @@ class StreamWebSocketOrchestrator:
                 except Exception as e:
                     logger.debug(f"Could not send ReAct progress event: {e}")
             
-            # Prepare file context
+            # Prepare file context with proper context information
             if not file_context and project_context:
                 file_context = {
                     "files": project_context.get("available_files", []),
@@ -382,6 +382,14 @@ class StreamWebSocketOrchestrator:
                     "app_name": project_context.get("app_name", ""),
                     "project_name": project_context.get("project_name", "")
                 }
+            elif file_context:
+                # Ensure file_context has context information even if it was provided
+                if not file_context.get("client_name") and project_context:
+                    file_context["client_name"] = project_context.get("client_name", "")
+                if not file_context.get("app_name") and project_context:
+                    file_context["app_name"] = project_context.get("app_name", "")
+                if not file_context.get("project_name") and project_context:
+                    file_context["project_name"] = project_context.get("project_name", "")
             
             # Execute ReAct workflow
             result = await self.react_orchestrator.execute_workflow(
@@ -645,14 +653,30 @@ AVAILABLE ATOMS AND THEIR CAPABILITIES:
      * Example: If Step 1 merged files → Step 2 grouped data → Use the grouped output file for chart, NOT the original files
      * Check EXECUTION HISTORY for output files created by previous steps
 
-8. **correlation** - Correlation Analysis
-   - **CAN DO**: Calculates correlation matrix between numeric columns
-   - **USE WHEN**: User wants to analyze relationships, correlations, or dependencies
+8. **correlation** - Correlation Analysis (EDA Tool)
+   - **CAN DO**: 
+     * Calculates correlation matrix between numeric columns
+     * Analyzes relationships and dependencies between variables
+     * Filters data before correlation (by identifiers/measures)
+     * Finds highest correlation pairs
+     * Time series correlation analysis
+     * Comprehensive EDA (Exploratory Data Analysis)
+   - **USE WHEN**: 
+     * User wants to analyze relationships, correlations, or dependencies
+     * User mentions EDA, exploratory data analysis, or finding relationships
+     * User wants to understand how variables relate to each other
+     * User wants to discover patterns in data
+     * User asks "which columns are related" or "how are variables connected"
    - **REQUIRES**: One input file with numeric columns
-   - **OUTPUT**: Correlation analysis results
-   - **KEYWORDS**: correlation, relationship, dependency, associate
-   - **EXAMPLE**: "Analyze correlation between Price and Sales columns in sales.arrow"
-   - **REQUIRED IN PROMPT**: Specify the file and column names to analyze
+   - **OUTPUT**: Correlation matrix, correlation coefficients, highest correlation pairs
+   - **KEYWORDS**: correlation, correlate, relationship, dependency, associate, related, connection, link, EDA, exploratory data analysis, find relationships, which variables are related
+   - **EXAMPLE**: 
+     * "Analyze correlation between Price and Sales columns in sales.arrow"
+     * "Perform EDA to find relationships in merged_data.arrow"
+     * "Find which columns are most correlated in dataset.arrow"
+     * "Calculate correlation matrix for all numeric columns"
+   - **REQUIRED IN PROMPT**: Specify the file (column names optional - will analyze all numeric columns)
+   - **WORKFLOW POSITION**: Early to mid workflow - use after data loading/merging for EDA insights
 
 9. **data-upload-validate** - Load Data
    - **CAN DO**: Loads and validates data files (CSV, Excel, Arrow) from MinIO
@@ -685,6 +709,59 @@ WORKFLOW PLANNING:
 - **Example workflow**: Load → Filter → Apply Formula → Merge → Group → Chart (chart uses the grouped output file, NOT original files)
 - **Completion Rule**: Only set goal_achieved: true AFTER chart-maker has been executed
 """
+    
+    def _load_files_with_context(
+        self,
+        client_name: str = "",
+        app_name: str = "",
+        project_name: str = ""
+    ) -> List[str]:
+        """
+        Load files from MinIO using FileReader with proper client/project context.
+        This ensures we only read files from the specific location, not all files.
+        
+        Args:
+            client_name: Client name for context
+            app_name: App name for context
+            project_name: Project name for context
+        
+        Returns:
+            List of file paths (object names) from MinIO
+        """
+        try:
+            # Import FileReader (same as BaseAgent uses)
+            try:
+                from BaseAgent.file_reader import FileReader
+            except ImportError:
+                try:
+                    from TrinityAgent.BaseAgent.file_reader import FileReader
+                except ImportError:
+                    logger.error("❌ BaseAgent.FileReader not available - cannot load files with context")
+                    return []
+            
+            # Create FileReader instance
+            file_reader = FileReader()
+            
+            # Load files with proper context (this will set the correct prefix)
+            files_with_columns = file_reader.load_files(
+                client_name=client_name,
+                app_name=app_name,
+                project_name=project_name
+            )
+            
+            # Extract file paths (object names) from the dictionary
+            file_paths = list(files_with_columns.keys())
+            
+            logger.info(f"✅ Loaded {len(file_paths)} files from MinIO using FileReader with context: {client_name}/{app_name}/{project_name}")
+            logger.debug(f"📁 Files loaded: {file_paths[:5]}..." if len(file_paths) > 5 else f"📁 Files loaded: {file_paths}")
+            
+            return file_paths
+            
+        except Exception as e:
+            logger.error(f"❌ Error loading files with context: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return []
     
     def _extract_file_names_from_prompt(self, user_prompt: str, available_files: Optional[List[str]] = None) -> List[str]:
         """
@@ -2454,11 +2531,53 @@ WORKFLOW PLANNING:
         """
         sequence_id = frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
         logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
-        available_files = list(available_files or [])
-        self._sequence_available_files[sequence_id] = available_files
+        
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
-        logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
+        client_name = project_context.get('client_name', '') if project_context else ''
+        app_name = project_context.get('app_name', '') if project_context else ''
+        project_name = project_context.get('project_name', '') if project_context else ''
+        logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={client_name}, app={app_name}, project={project_name}")
+        
+        # 🔧 CRITICAL FIX: Load files using FileReader with proper context if available
+        # This ensures we only read files from the specific client/project location when context is provided
+        # If context is missing, proceed with provided files (don't block workflow execution)
+        if client_name and app_name and project_name:
+            logger.info(f"📁 Loading files from MinIO using FileReader with context: {client_name}/{app_name}/{project_name}")
+            try:
+                context_files = self._load_files_with_context(
+                    client_name=client_name,
+                    app_name=app_name,
+                    project_name=project_name
+                )
+                
+                # Merge with provided available_files (in case frontend has specific files)
+                # But prioritize files loaded with context
+                if context_files:
+                    # Filter available_files to only include files from the correct context
+                    context_prefix = f"{client_name}/{app_name}/{project_name}/"
+                    filtered_provided_files = [
+                        f for f in (available_files or [])
+                        if f.startswith(context_prefix) or not '/' in f
+                    ]
+                    
+                    # Combine: use context-loaded files as primary, add any valid provided files
+                    combined_files = list(context_files)
+                    for f in filtered_provided_files:
+                        if f not in combined_files:
+                            combined_files.append(f)
+                    
+                    available_files = combined_files
+                    logger.info(f"✅ Using {len(available_files)} files loaded with proper context")
+                else:
+                    logger.debug(f"ℹ️ No files found with context, using provided files: {len(available_files or [])}")
+            except Exception as e:
+                logger.debug(f"ℹ️ Could not load files with context (non-blocking): {e}, using provided files")
+        else:
+            logger.debug(f"ℹ️ No project context provided, using provided files: {len(available_files or [])}")
+        
+        available_files = list(available_files or [])
+        self._sequence_available_files[sequence_id] = available_files
 
         persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
         if persisted_history:
@@ -6305,7 +6424,8 @@ WORKFLOW PLANNING:
             "groupby-wtg-avg",
             "groupby",
             "create-column",
-            "chart-maker"
+            "chart-maker",
+            "correlation"  # Added correlation for EDA workflows - needs file access
         }
         
         if atom_id in atoms_needing_context:

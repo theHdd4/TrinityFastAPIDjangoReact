@@ -43,24 +43,12 @@ export const mergeHandler: AtomHandler = {
     });
     console.log('🚨 Test message added to state');
     
-    // 🔧 CRITICAL FIX: Show smart_response EXACTLY like DataFrame Operations (no isStreamMode check)
-    const smartResponseText = processSmartResponse(data);
-    console.log('💬 Smart response text:', smartResponseText);
-    console.log('💬 Smart response length:', smartResponseText?.length);
-    console.log('🔍 Has merge_json:', !!data.merge_json);
-    
-    // Add AI smart response message (prioritize smart_response - SAME AS DATAFRAME OPERATIONS)
-    if (smartResponseText) {
-      // Use the AI's smart response for a more conversational experience
-      const aiMessage = createMessage(smartResponseText);
+    // Show reasoning in chat (only reasoning field now)
+    const reasoningText = data.reasoning || data.data?.reasoning || '';
+    if (reasoningText) {
+      const aiMessage = createMessage(`**Reasoning:**\n${reasoningText}`);
       setMessages(prev => [...prev, aiMessage]);
-      console.log('🤖 AI Smart Response displayed:', smartResponseText);
-    } else {
-      // 🔧 FALLBACK: If backend doesn't send smart_response, create a generic success message
-      console.warn('⚠️ No smart_response found in merge data - creating fallback message');
-      const fallbackMsg = createMessage('✅ I\'ve received your merge request and will process it now.');
-      setMessages(prev => [...prev, fallbackMsg]);
-      console.log('🤖 Fallback message displayed');
+      console.log('🤖 AI Reasoning displayed');
     }
     
     if (!data.merge_json) {
@@ -232,7 +220,7 @@ export const mergeHandler: AtomHandler = {
     
     updateAtomSettings(atomId, settingsToUpdate);
     
-    // 📝 Update card text box with response, reasoning, and smart_response
+    // 📝 Update card text box with reasoning
     console.log('📝 Updating card text box with agent response...');
     const textBoxContent = formatAgentResponseForTextBox(data);
     console.log('📝 Formatted text box content length:', textBoxContent.length);
@@ -248,9 +236,7 @@ export const mergeHandler: AtomHandler = {
     // Store agent response in atom settings for reference
     updateAtomSettings(atomId, {
       agentResponse: {
-        response: data.response || '',
         reasoning: data.reasoning || '',
-        smart_response: data.smart_response || '',
         formattedText: textBoxContent
       }
     });
@@ -265,7 +251,7 @@ export const mergeHandler: AtomHandler = {
       console.error('❌ Error adding insight text box:', textBoxError);
     }
     
-    // 🔧 FIX: No need for duplicate success message - smart_response already shown at the top
+    // 🔧 FIX: No need for duplicate success message - reasoning already shown at the top
     console.log('📋 Merge configuration:', {
       file1: mappedFile1,
       file2: mappedFile2,
@@ -360,7 +346,7 @@ export const mergeHandler: AtomHandler = {
         
         // Prepare enhanced data with merge results for insight generation
         const enhancedDataForInsight = {
-          ...data, // This includes smart_response, response, reasoning (the 3 keys)
+          ...data, // This includes reasoning
           merge_json: data.merge_json, // Original config from first LLM call
           merge_results: {
             merge_id: performResult.merge_id,
@@ -455,8 +441,8 @@ export const mergeHandler: AtomHandler = {
     
     // 🔧 FIX: EXACTLY like DataFrame Operations - no isStreamMode check
     let aiText = '';
-    if (data.smart_response) {
-      aiText = data.smart_response;
+    if (data.reasoning) {
+      aiText = `**Reasoning:**\n${data.reasoning}`;
     } else if (data.suggestions && Array.isArray(data.suggestions)) {
       aiText = `${data.message || 'Here\'s what I can help you with:'}\n\n${data.suggestions.join('\n\n')}`;
       
@@ -474,7 +460,7 @@ export const mergeHandler: AtomHandler = {
         aiText += `\n\n🎯 Next Steps:\n${data.next_steps.map((step: string, idx: number) => `${idx + 1}. ${step}`).join('\n')}`;
       }
     } else {
-      aiText = data.smart_response || data.message || 'AI response received';
+      aiText = data.reasoning ? `**Reasoning:**\n${data.reasoning}` : (data.message || 'AI response received');
     }
     
     // Create and add AI message (EXACTLY like DataFrame Operations - no conditional)
@@ -487,7 +473,7 @@ export const mergeHandler: AtomHandler = {
     setMessages(prev => [...prev, aiMsg]);
     console.log('📤 Added AI message to chat:', aiText.substring(0, 100) + '...');
     
-    // 📝 Update card text box with response, reasoning, and smart_response (even for failures)
+    // 📝 Update card text box with reasoning (even for failures)
     console.log('📝 Updating card text box with agent response (failure case)...');
     const textBoxContent = formatAgentResponseForTextBox(data);
     try {

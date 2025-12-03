@@ -37,9 +37,7 @@ class DataUploadValidatePromptBuilder:
                 "column_name_4": "object"
             }
         },
-        "response": "Raw thinking and reasoning from LLM about the data validation and dtype conversion, including why this file was selected, why these dtype changes were chosen, and any considerations made",
-        "smart_response": "I'll help you validate and convert data types in a two-step process:\n\n📂 **Step 1: Load File**\nI'll load \"exact_filename.csv\" into the data upload atom so you can see it in the UI.\n\n🔄 **Step 2: Apply Dtype Conversions**\nI'll convert the following columns:\n• column_name_1 → int64\n• column_name_2 → float64\n• column_name_3 → datetime64 with format YYYY-MM-DD\n• column_name_4 → object\n\n💡 **Insights:**\nThese conversions will ensure your data types are correct for downstream operations.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the DataUploadValidate atom was chosen, including: analysis of the user's request, why this specific file was selected, why these dtype changes were chosen, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True
     }
     
@@ -54,9 +52,7 @@ class DataUploadValidatePromptBuilder:
             "To validate data, specify: file name + optional dtype changes",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what the user might want, analysis of the request, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you validate and convert data types! Here are your available files and their columns: [FORMAT: **filename.csv** (X columns) - column1, column2, column3, etc.]. I can help you load files and convert data types (int64, float64, datetime64, object, bool). What would you like to validate?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the DataUploadValidate atom was chosen, including: analysis of the current situation, what files are available, what the user might want, analysis of the request, why DataUploadValidate is appropriate, what information is needed, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_files": ["file1"],
@@ -90,7 +86,7 @@ class DataUploadValidatePromptBuilder:
         "OPTIONAL DTYPE CHANGES: If user only wants to load file without dtype changes, set dtype_changes to empty object {}",
         "DATETIME FORMATS: For datetime64, can include format specification: {\"dtype\": \"datetime64\", \"format\": \"YYYY-MM-DD\"}",
         "FILE LOADING: Primary goal is to load the file into the data upload atom - dtype changes are optional",
-        "REQUIRED JSON KEYS: success, validate_json (when success true), and smart_response must ALL be present so the UI always has a friendly response"
+        "REQUIRED JSON KEYS: success, validate_json (when success true), and reasoning must ALL be present so the UI always has a friendly response"
     ]
 
     @staticmethod

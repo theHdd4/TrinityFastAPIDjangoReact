@@ -48,9 +48,7 @@ class ChartMakerPromptBuilder:
             }
         ],
         "file_name": "exact_filename.arrow",
-        "response": "Raw thinking and reasoning from LLM about the chart creation, including why this file was selected, why these columns were chosen, why this chart type was selected, and any considerations made",
-        "smart_response": "I've created a chart configuration for you. The chart will visualize your data with the specified columns and chart type. You can now view the chart or make adjustments as needed.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the ChartMaker atom was chosen, including: analysis of the user's request, why this specific file was selected, why these columns were chosen, why this chart type was selected, alternatives considered, how the visualization will help answer the user's question, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True
     }
     
@@ -81,9 +79,7 @@ class ChartMakerPromptBuilder:
             "To create a chart, specify: file + x-axis column + y-axis column + chart type",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what the user might want, analysis of the request, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you create charts! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you create bar charts, line charts, area charts, pie charts, or scatter plots. What would you like to visualize?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the ChartMaker atom was chosen, including: analysis of the current situation, what files are available, what the user might want, analysis of the request, why ChartMaker is appropriate, what information is needed to create charts, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_files": ["file1"],

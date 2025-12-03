@@ -847,28 +847,30 @@ Now classify the intent:"""
                     logger.error(traceback.format_exc())
                     # Continue with original failed result
             
-            # Build result
+            # Build result - now only using reasoning field
+            reasoning = agent_result.get("reasoning", "Agent execution completed")
             result = {
-                "response": agent_result.get("smart_response", agent_result.get("response", "")),
+                "response": reasoning,  # Use reasoning as the response/message
                 "intent": "workflow",
                 "agent_data": agent_result,
-                "reasoning": agent_result.get("reasoning", "Agent execution completed")
+                "reasoning": reasoning
             }
             
             # Normalize result format (always workflow path now)
             if "error" in result:
                 normalized_result = {
-                    "message": result.get("response", "Agent execution failed"),
+                    "message": reasoning if reasoning else "Agent execution failed",
                     "error": result.get("error", "Unknown error"),
                     "intent": "workflow",
-                    "agent_data": result.get("agent_data", {})
+                    "agent_data": result.get("agent_data", {}),
+                    "reasoning": reasoning
                 }
             else:
                 normalized_result = {
-                    "message": result.get("response", ""),
+                    "message": reasoning,  # Use reasoning as the message
                     "intent": "workflow",
                     "agent_data": result.get("agent_data", {}),
-                    "reasoning": result.get("reasoning", "")
+                    "reasoning": reasoning
                 }
             
             # Store interaction

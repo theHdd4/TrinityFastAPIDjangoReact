@@ -76,9 +76,9 @@ export const createErrorMessage = (operation: string, error: any, context?: stri
 
 // Smart response processing based on Atom_ai_chat.tsx logic
 export const processSmartResponse = (data: any): string => {
-  // Priority 1: Use smart_response if available (clean, user-friendly message)
-  if (data.smart_response) {
-    return data.smart_response;
+  // Priority 1: Use reasoning if available (detailed explanation from atom)
+  if (data.reasoning || data.data?.reasoning) {
+    return data.reasoning || data.data?.reasoning || '';
   }
   
   // Priority 2: Build from suggestions and next steps
@@ -114,7 +114,7 @@ export const processSmartResponse = (data: any): string => {
   }
   
   // Priority 3: Fallback to basic message
-  return data.message || data.response || data.final_response || 'AI response received';
+  return data.message || data.final_response || 'AI response received';
 };
 
 // Enhanced error handling with specific context
@@ -682,27 +682,19 @@ const convertTableDataToCsv = (headers: string[], rows: Record<string, any>[]): 
 };
 
 /**
- * Format agent response fields (response, reasoning, smart_response) for text box display
+ * Format agent response field (reasoning only) for text box display
  * Can be used by all agent handlers
+ * Now only uses reasoning field (smart_response and response are no longer used)
  */
 export const formatAgentResponseForTextBox = (data: any): string => {
   // Handle both top-level and nested data structures
-  const response = data?.response || data?.data?.response || '';
   const reasoning = data?.reasoning || data?.data?.reasoning || '';
-  const smartResponse = data?.smart_response || data?.data?.smart_response || data?.smartResponse || '';
   
   let formattedText = '';
   
-  if (smartResponse) {
-    formattedText += `**Smart Response:**\n${smartResponse}\n\n`;
-  }
-  
+  // Only show reasoning (detailed explanation from atom)
   if (reasoning) {
-    formattedText += `**Reasoning:**\n${reasoning}\n\n`;
-  }
-  
-  if (response) {
-    formattedText += `**Response:**\n${response}`;
+    formattedText += `**Reasoning:**\n${reasoning}`;
   }
   
   return formattedText.trim() || 'No response data available.';

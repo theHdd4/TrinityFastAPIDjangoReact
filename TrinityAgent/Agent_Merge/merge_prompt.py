@@ -35,9 +35,7 @@ class MergePromptBuilder:
             "join_columns": ["common_column_name"],
             "join_type": "outer"  # DEFAULT: Always use "outer" unless user explicitly specifies otherwise
         },
-        "response": "Raw thinking and reasoning from LLM about the merge operation, including why these files were selected, why these join columns were chosen, why this join type was selected, and any considerations made",
-        "smart_response": "I've configured the merge operation for you. The files will be joined using the specified columns and join type. You can now proceed with the merge or make adjustments as needed.",
-        "reasoning": "Found all required components with context from history",
+        "reasoning": "Detailed explanation of why the Merge atom was chosen, including: analysis of the user's request, why these specific files were selected, why these join columns were chosen, why this join type was selected, alternatives considered, and complete raw thinking process. Be thorough and detailed - explain every decision and consideration.",
         "used_memory": True
     }
     
@@ -52,9 +50,7 @@ class MergePromptBuilder:
             "To complete merge, specify: files + join columns + join type",
             "Or say 'yes' to use my suggestions"
         ],
-        "response": "Raw thinking and reasoning from LLM about the current situation, what files are available, what the user might want, analysis of the request, and recommendations based on available data",
-        "smart_response": "I'd be happy to help you with Merge operations! Here are your available files and their columns: [FORMAT: **filename.arrow** (X columns) - column1, column2, column3, etc.]. I can help you merge your data files using various join strategies. What files would you like to merge?",
-        "reasoning": "Providing helpful information and guidance",
+        "reasoning": "Detailed explanation of why the Merge atom was chosen, including: analysis of the current situation, what files are available, what the user might want, analysis of the request, why Merge is appropriate, what information is needed, recommendations based on available data, and complete raw thinking process. Be thorough and detailed - explain every consideration.",
         "file_analysis": {
             "total_files": "number",
             "recommended_pairs": ["file1 + file2"],
