@@ -18,7 +18,19 @@ from typing import Dict, Any, List, Optional, Tuple, Callable, Set
 from dataclasses import dataclass
 import uuid
 
-from TrinityAgent.atoms.insights import generate_insights
+logger = logging.getLogger("trinity.trinityai.websocket")
+
+# Import atom insights with fallbacks for environments where the package path differs
+try:
+    from TrinityAgent.atoms.insights import generate_insights
+except ImportError:
+    try:
+        from atoms.insights import generate_insights  # type: ignore
+    except ImportError:  # pragma: no cover - insights unavailable
+        logger.warning("Atom insights unavailable; TrinityAgent package not on PYTHONPATH")
+
+        def generate_insights(*args, **kwargs):
+            return []
 
 try:
     from starlette.websockets import WebSocketDisconnect  # type: ignore
@@ -46,9 +58,6 @@ except ImportError:
         # Fallback: define a no-op function
         def get_workflow_insight_agent():
             return None
-
-logger = logging.getLogger("trinity.trinityai.websocket")
-
 # Import centralized settings
 try:
     from BaseAgent.config import settings
