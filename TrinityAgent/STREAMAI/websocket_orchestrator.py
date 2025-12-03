@@ -7,6 +7,7 @@ Implements the Trinity AI streaming pattern for card and result handling.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -214,6 +215,8 @@ class ReActState:
     user_prompt: str
     goal_achieved: bool = False
     current_step_number: int = 0
+    paused: bool = False  # Indicates whether the loop was paused mid-generation
+    paused_at_step: int = 0  # The step where generation paused
     execution_history: List[Dict[str, Any]] = None  # Previous steps and results
     thoughts: List[str] = None  # Reasoning history
     observations: List[str] = None  # Observation history
@@ -298,10 +301,13 @@ class StreamWebSocketOrchestrator:
         self._chat_file_mentions: Dict[str, List[str]] = {}
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
+        self._paused_sequences: Set[str] = set()
 
         # Safety guards
         self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
         self.max_react_operations: int = 12  # Stop runaway execution loops
+        self.llm_attempt_timeout_seconds: float = 60.0  # Guardrail for individual LLM attempts
+        self.llm_status_interval_seconds: float = 10.0  # Periodic heartbeat interval
 
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
@@ -456,7 +462,10 @@ class StreamWebSocketOrchestrator:
         self,
         llm_call_func: Callable,
         step_name: str,
-        max_attempts: int = 3
+        max_attempts: int = 3,
+        status_callback: Optional[Callable[[int, float, bool], Any]] = None,
+        attempt_timeout: Optional[float] = None,
+        pause_after_timeout: bool = False
     ) -> Any:
         """
         Retry mechanism for LLM JSON generation.
@@ -476,11 +485,39 @@ class StreamWebSocketOrchestrator:
         last_content = None
         
         for attempt in range(1, max_attempts + 1):
+            start_time = datetime.utcnow()
+            status_task = None
             try:
                 logger.info(f"🔄 [{step_name}] Attempt {attempt}/{max_attempts}: Calling LLM for JSON generation...")
-                result = await llm_call_func()
+                if status_callback:
+                    status_task = asyncio.create_task(
+                        self._periodic_generation_status(
+                            status_callback=status_callback,
+                            step_name=step_name,
+                            attempt=attempt,
+                            start_time=start_time,
+                            max_elapsed=attempt_timeout or self.llm_attempt_timeout_seconds,
+                        )
+                    )
+
+                if attempt_timeout:
+                    result = await asyncio.wait_for(llm_call_func(), timeout=attempt_timeout)
+                else:
+                    result = await llm_call_func()
                 logger.info(f"✅ [{step_name}] Attempt {attempt} succeeded: Valid JSON generated")
                 return result
+            except asyncio.TimeoutError as e:
+                last_error = e
+                logger.warning(
+                    f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} timed out after {attempt_timeout or self.llm_attempt_timeout_seconds}s"
+                )
+                if status_callback:
+                    try:
+                        await status_callback(attempt, (datetime.utcnow() - start_time).total_seconds(), True)
+                    except Exception:
+                        logger.debug("⚠️ Status callback failed after timeout", exc_info=True)
+                if pause_after_timeout:
+                    raise
             except json.JSONDecodeError as e:
                 last_error = e
                 logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Invalid JSON - {e}")
@@ -502,6 +539,11 @@ class StreamWebSocketOrchestrator:
                     logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
                 else:
                     logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
+            finally:
+                if status_task:
+                    status_task.cancel()
+                    with contextlib.suppress(Exception):
+                        await status_task
         
         # All attempts failed
         error_msg = (
@@ -509,6 +551,28 @@ class StreamWebSocketOrchestrator:
             f"Please rephrase your query in a clearer way."
         )
         raise RetryableJSONGenerationError(error_msg, max_attempts, last_error)
+
+    async def _periodic_generation_status(
+        self,
+        status_callback: Callable[[int, float, bool], Any],
+        step_name: str,
+        attempt: int,
+        start_time: datetime,
+        max_elapsed: float,
+    ) -> None:
+        """Emit periodic status updates while waiting on a long LLM call."""
+        try:
+            while True:
+                await asyncio.sleep(self.llm_status_interval_seconds)
+                elapsed = (datetime.utcnow() - start_time).total_seconds()
+                try:
+                    await status_callback(attempt, elapsed, False)
+                except Exception:
+                    logger.debug("⚠️ Failed to emit generation heartbeat", exc_info=True)
+                if elapsed >= max_elapsed:
+                    return
+        except asyncio.CancelledError:
+            return
     
     def _load_atom_mapping(self):
         """Load atom mapping"""
@@ -1462,7 +1526,9 @@ WORKFLOW PLANNING:
         available_files: List[str],
         previous_results: List[Dict[str, Any]],
         sequence_id: str,
-        priority_files: Optional[List[str]] = None
+        priority_files: Optional[List[str]] = None,
+        status_callback: Optional[Callable[[int, float, bool], Any]] = None,
+        llm_timeout: Optional[float] = None,
     ) -> Optional[WorkflowStepPlan]:
         """
         Generate the next workflow step using ReAct-style planning.
@@ -1559,7 +1625,10 @@ WORKFLOW PLANNING:
             step_data = await self._retry_llm_json_generation(
                 llm_call_func=_call_llm_for_react_step,
                 step_name="ReAct Step Planning",
-                max_attempts=3
+                max_attempts=3,
+                status_callback=status_callback,
+                attempt_timeout=llm_timeout or self.llm_attempt_timeout_seconds,
+                pause_after_timeout=True,
             )
             
             if step_data.get("goal_achieved", False):
@@ -2490,10 +2559,24 @@ WORKFLOW PLANNING:
         sequence_id = frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
         logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
         available_files = list(available_files or [])
+        existing_files = self._sequence_available_files.get(sequence_id)
+        if existing_files:
+            available_files = existing_files
         self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
         logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
+
+        resume_mode = False
+        react_state: Optional[ReActState] = self._sequence_react_state.get(sequence_id)
+        if react_state and react_state.paused:
+            resume_mode = True
+            react_state.paused = False
+            logger.info(
+                "⏯️ Resuming paused ReAct workflow %s from step %s",
+                sequence_id,
+                react_state.paused_at_step or react_state.current_step_number,
+            )
 
         persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
         if persisted_history:
@@ -2535,17 +2618,19 @@ WORKFLOW PLANNING:
             )
             
             logger.info(f"🚀 Starting ReAct workflow for sequence: {sequence_id}")
-            
+
             # ================================================================
             # INITIALIZE REACT STATE
             # ================================================================
-            react_state = ReActState(
-                sequence_id=sequence_id,
-                user_prompt=effective_user_prompt
-            )
-            self._sequence_react_state[sequence_id] = react_state
-            
-            logger.info("🧠 ReAct: Initialized agent state")
+            if resume_mode and react_state:
+                logger.info("🧠 ReAct: Using existing paused agent state")
+            else:
+                react_state = ReActState(
+                    sequence_id=sequence_id,
+                    user_prompt=effective_user_prompt
+                )
+                self._sequence_react_state[sequence_id] = react_state
+                logger.info("🧠 ReAct: Initialized agent state")
             
             # ================================================================
             # REACT LOOP: Thought → Action → Observation → Thought...
@@ -2585,11 +2670,31 @@ WORKFLOW PLANNING:
                 )
             except (WebSocketDisconnect, Exception) as e:
                 logger.warning(f"⚠️ Failed to send initial progress event: {e}")
-            
+
             max_steps = 20  # Prevent infinite loops
-            current_step_number = 0
-            execution_history: List[Dict[str, Any]] = []
-            previous_results: List[Dict[str, Any]] = []
+            if resume_mode and react_state:
+                current_step_number = max((react_state.paused_at_step or react_state.current_step_number) - 1, 0)
+                execution_history = list(react_state.execution_history)
+                previous_results = [entry.get("result", {}) for entry in react_state.execution_history]
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "workflow_resumed",
+                            {
+                                "sequence_id": sequence_id,
+                                "resuming_from_step": react_state.paused_at_step or react_state.current_step_number,
+                                "message": "Resuming from last paused step",
+                            },
+                        ),
+                        "workflow_resumed event",
+                    )
+                except (WebSocketDisconnect, Exception):
+                    logger.debug("⚠️ Failed to send workflow_resumed event", exc_info=True)
+            else:
+                current_step_number = 0
+                execution_history = []
+                previous_results = []
             abort_due_complexity = False
             
             while not react_state.goal_achieved and current_step_number < max_steps:
@@ -2699,7 +2804,34 @@ WORKFLOW PLANNING:
                         effective_user_prompt_with_warning = effective_user_prompt
                 else:
                     effective_user_prompt_with_warning = effective_user_prompt
-                
+
+                async def _react_generation_status(attempt: int, elapsed: float, timed_out: bool) -> None:
+                    message = (
+                        f"Still planning step {current_step_number} (attempt {attempt}) after {int(elapsed)}s."
+                    )
+                    if timed_out:
+                        message = (
+                            f"Step {current_step_number} planning timed out after {int(elapsed)}s."
+                        )
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_generation_status",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "attempt": attempt,
+                                    "elapsed_seconds": int(elapsed),
+                                    "timed_out": timed_out,
+                                    "message": message,
+                                },
+                            ),
+                            "react_generation_status event",
+                        )
+                    except (WebSocketDisconnect, Exception):
+                        logger.debug("⚠️ Unable to send generation status update", exc_info=True)
+
                 try:
                     next_step = await asyncio.wait_for(
                         self._generate_next_step_with_react(
@@ -2708,13 +2840,34 @@ WORKFLOW PLANNING:
                             available_files=current_available_files,  # Use updated file list with newly created files
                             previous_results=previous_results,
                             sequence_id=sequence_id,
-                            priority_files=file_focus
+                            priority_files=file_focus,
+                            status_callback=_react_generation_status,
+                            llm_timeout=self.llm_attempt_timeout_seconds,
                         ),
                         timeout=90.0  # 90 second timeout for step generation
                     )
                 except asyncio.TimeoutError:
                     logger.error(f"❌ ReAct: Step generation timed out after 90s, stopping workflow")
                     react_state.goal_achieved = True
+                    react_state.paused = True
+                    react_state.paused_at_step = current_step_number
+                    react_state.current_step_number = current_step_number
+                    self._paused_sequences.add(sequence_id)
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_generation_timeout",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "message": "Planning timed out. Please retry to resume from this step.",
+                                },
+                            ),
+                            "react_generation_timeout event",
+                        )
+                    except (WebSocketDisconnect, Exception):
+                        logger.debug("⚠️ Unable to send generation timeout event", exc_info=True)
                     break
                 except Exception as e:
                     logger.error(f"❌ ReAct: Step generation failed: {e}, stopping workflow")
@@ -3023,6 +3176,7 @@ WORKFLOW PLANNING:
                     description=next_step.description,
                     files_used=next_step.files_used or []
                 )
+                react_state.current_step_number = current_step_number
                 
                 # ============================================================
                 # DECISION: Handle evaluation decision
@@ -3255,7 +3409,16 @@ WORKFLOW PLANNING:
             except WebSocketDisconnect:
                 logger.info("🔌 WebSocket disconnected before error event could be delivered")
         finally:
-            self._cleanup_sequence_state(sequence_id)
+            react_state_final = self._sequence_react_state.get(sequence_id)
+            if react_state_final and react_state_final.paused:
+                logger.info(
+                    "⏸️ Preserving state for sequence %s to allow resume at step %s",
+                    sequence_id,
+                    react_state_final.paused_at_step or react_state_final.current_step_number,
+                )
+            else:
+                self._cleanup_sequence_state(sequence_id)
+                self._paused_sequences.discard(sequence_id)
             self._cancelled_sequences.discard(sequence_id)
     async def _execute_step_with_events(
         self,
