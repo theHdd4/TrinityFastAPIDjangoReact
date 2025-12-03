@@ -181,7 +181,7 @@ OPERATION EXAMPLES:
         """Load API endpoints information from JSON file."""
         try:
             # Try to load from the old location first
-            rag_dir = Path(__file__).parent.parent.parent / "TrinityAI" / "Agent_dataframe_operations" / "rag"
+            rag_dir = Path(__file__).parent.parent.parent / "TrinityAgent" / "Agent_dataframe_operations" / "rag"
             api_endpoints_file = rag_dir / "api_endpoints.json"
             
             if api_endpoints_file.exists():

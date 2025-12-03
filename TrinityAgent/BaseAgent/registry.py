@@ -67,7 +67,7 @@ class AgentRegistry:
         Automatically discover and register agents from Agent_* directories.
         
         Args:
-            package_path: Path to the TrinityAI package (defaults to current directory)
+            package_path: Path to the TrinityAgent package (defaults to current directory)
         """
         if package_path is None:
             # Default to the directory containing this file
@@ -101,15 +101,9 @@ class AgentRegistry:
                         agent_module_name = f"TrinityAgent.{agent_dir.name}.main_app"
                         module = importlib.import_module(agent_module_name)
                         logger.debug(f"Imported {agent_module_name} (TrinityAgent prefix)")
-                    except ImportError:
-                        # Strategy 3: Try with TrinityAI prefix (legacy)
-                        try:
-                            agent_module_name = f"TrinityAI.{agent_dir.name}.main_app"
-                            module = importlib.import_module(agent_module_name)
-                            logger.debug(f"Imported {agent_module_name} (TrinityAI prefix)")
-                        except ImportError as e3:
-                            logger.warning(f"Failed to import {agent_dir.name}.main_app: {e3}")
-                            continue
+                    except ImportError as e2:
+                        logger.warning(f"Failed to import {agent_dir.name}.main_app: {e2}")
+                        continue
                 
                 if module is None:
                     continue

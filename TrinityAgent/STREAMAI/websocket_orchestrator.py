@@ -7,6 +7,8 @@ Implements the Trinity AI streaming pattern for card and result handling.
 """
 
 import asyncio
+import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +18,20 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Callable, Set
 from dataclasses import dataclass
 import uuid
+
+logger = logging.getLogger("trinity.trinityai.websocket")
+
+# Import atom insights with fallbacks for environments where the package path differs
+try:
+    from TrinityAgent.atoms.insights import generate_insights
+except ImportError:
+    try:
+        from atoms.insights import generate_insights  # type: ignore
+    except ImportError:  # pragma: no cover - insights unavailable
+        logger.warning("Atom insights unavailable; TrinityAgent package not on PYTHONPATH")
+
+        def generate_insights(*args, **kwargs):
+            return []
 
 try:
     from starlette.websockets import WebSocketDisconnect  # type: ignore
@@ -32,6 +48,7 @@ from .atom_mapping import ATOM_MAPPING
 from .graphrag import GraphRAGWorkspaceConfig
 from .graphrag.client import GraphRAGQueryClient
 from .graphrag.prompt_builder import GraphRAGPromptBuilder, PhaseOnePrompt as GraphRAGPhaseOnePrompt
+from .laboratory_retriever import LaboratoryRetrievalPipeline
 # Import workflow_insight_agent - try both paths for Docker and local development
 try:
     from Agent_Insight.workflow_insight_agent import get_workflow_insight_agent
@@ -42,9 +59,6 @@ except ImportError:
         # Fallback: define a no-op function
         def get_workflow_insight_agent():
             return None
-
-logger = logging.getLogger("trinity.trinityai.websocket")
-
 # Import centralized settings
 try:
     from BaseAgent.config import settings
@@ -201,6 +215,8 @@ class ReActState:
     user_prompt: str
     goal_achieved: bool = False
     current_step_number: int = 0
+    paused: bool = False  # Indicates whether the loop was paused mid-generation
+    paused_at_step: int = 0  # The step where generation paused
     execution_history: List[Dict[str, Any]] = None  # Previous steps and results
     thoughts: List[str] = None  # Reasoning history
     observations: List[str] = None  # Observation history
@@ -264,6 +280,13 @@ class StreamWebSocketOrchestrator:
         self.rag_engine = rag_engine
         self._cancelled_sequences: Set[str] = set()
 
+        try:
+            self.laboratory_retriever = LaboratoryRetrievalPipeline()
+            logger.info("✅ Laboratory retrieval pipeline initialized for Lab Mode insights")
+        except Exception as lab_exc:
+            logger.warning("⚠️ Laboratory retrieval pipeline unavailable: %s", lab_exc)
+            self.laboratory_retriever = None
+
         # GraphRAG integration
         self.graph_workspace_config = GraphRAGWorkspaceConfig()
         self.graph_rag_client = GraphRAGQueryClient(self.graph_workspace_config)
@@ -278,6 +301,13 @@ class StreamWebSocketOrchestrator:
         self._chat_file_mentions: Dict[str, List[str]] = {}
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
+        self._paused_sequences: Set[str] = set()
+
+        # Safety guards
+        self.max_initial_plan_steps: int = 8  # Abort overly long upfront plans
+        self.max_react_operations: int = 12  # Stop runaway execution loops
+        self.llm_attempt_timeout_seconds: float = 60.0  # Guardrail for individual LLM attempts
+        self.llm_status_interval_seconds: float = 10.0  # Periodic heartbeat interval
 
         # Determine FastAPI base for downstream atom services (merge, concat, etc.)
         self.fastapi_base_url = self._determine_fastapi_base_url()
@@ -440,7 +470,10 @@ class StreamWebSocketOrchestrator:
         self,
         llm_call_func: Callable,
         step_name: str,
-        max_attempts: int = 3
+        max_attempts: int = 3,
+        status_callback: Optional[Callable[[int, float, bool], Any]] = None,
+        attempt_timeout: Optional[float] = None,
+        pause_after_timeout: bool = False
     ) -> Any:
         """
         Retry mechanism for LLM JSON generation.
@@ -460,11 +493,39 @@ class StreamWebSocketOrchestrator:
         last_content = None
         
         for attempt in range(1, max_attempts + 1):
+            start_time = datetime.utcnow()
+            status_task = None
             try:
                 logger.info(f"🔄 [{step_name}] Attempt {attempt}/{max_attempts}: Calling LLM for JSON generation...")
-                result = await llm_call_func()
+                if status_callback:
+                    status_task = asyncio.create_task(
+                        self._periodic_generation_status(
+                            status_callback=status_callback,
+                            step_name=step_name,
+                            attempt=attempt,
+                            start_time=start_time,
+                            max_elapsed=attempt_timeout or self.llm_attempt_timeout_seconds,
+                        )
+                    )
+
+                if attempt_timeout:
+                    result = await asyncio.wait_for(llm_call_func(), timeout=attempt_timeout)
+                else:
+                    result = await llm_call_func()
                 logger.info(f"✅ [{step_name}] Attempt {attempt} succeeded: Valid JSON generated")
                 return result
+            except asyncio.TimeoutError as e:
+                last_error = e
+                logger.warning(
+                    f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} timed out after {attempt_timeout or self.llm_attempt_timeout_seconds}s"
+                )
+                if status_callback:
+                    try:
+                        await status_callback(attempt, (datetime.utcnow() - start_time).total_seconds(), True)
+                    except Exception:
+                        logger.debug("⚠️ Status callback failed after timeout", exc_info=True)
+                if pause_after_timeout:
+                    raise
             except json.JSONDecodeError as e:
                 last_error = e
                 logger.warning(f"⚠️ [{step_name}] Attempt {attempt}/{max_attempts} failed: Invalid JSON - {e}")
@@ -486,6 +547,11 @@ class StreamWebSocketOrchestrator:
                     logger.info(f"🔄 [{step_name}] Retrying with same prompt...")
                 else:
                     logger.error(f"❌ [{step_name}] All {max_attempts} attempts failed: {e}")
+            finally:
+                if status_task:
+                    status_task.cancel()
+                    with contextlib.suppress(Exception):
+                        await status_task
         
         # All attempts failed
         error_msg = (
@@ -493,6 +559,28 @@ class StreamWebSocketOrchestrator:
             f"Please rephrase your query in a clearer way."
         )
         raise RetryableJSONGenerationError(error_msg, max_attempts, last_error)
+
+    async def _periodic_generation_status(
+        self,
+        status_callback: Callable[[int, float, bool], Any],
+        step_name: str,
+        attempt: int,
+        start_time: datetime,
+        max_elapsed: float,
+    ) -> None:
+        """Emit periodic status updates while waiting on a long LLM call."""
+        try:
+            while True:
+                await asyncio.sleep(self.llm_status_interval_seconds)
+                elapsed = (datetime.utcnow() - start_time).total_seconds()
+                try:
+                    await status_callback(attempt, elapsed, False)
+                except Exception:
+                    logger.debug("⚠️ Failed to emit generation heartbeat", exc_info=True)
+                if elapsed >= max_elapsed:
+                    return
+        except asyncio.CancelledError:
+            return
     
     def _load_atom_mapping(self):
         """Load atom mapping"""
@@ -1473,6 +1561,17 @@ WORKFLOW PLANNING:
                 step_name="Workflow Generation",
                 max_attempts=3
             )
+
+            if len(workflow_steps) > self.max_initial_plan_steps:
+                logger.warning(
+                    "⚠️ Workflow generation returned %d steps; aborting to avoid an unmanageable plan",
+                    len(workflow_steps),
+                )
+                raise RetryableJSONGenerationError(
+                    f"Generated plan has {len(workflow_steps)} steps which exceeds the limit of {self.max_initial_plan_steps}",
+                    attempts=1,
+                    last_error=ValueError("plan_too_long"),
+                )
             
             # Post-process: Keep data-upload-validate if user mentions files (it will load them)
             # We no longer skip data-upload-validate - it's needed to load files into the atom
@@ -1504,7 +1603,9 @@ WORKFLOW PLANNING:
         available_files: List[str],
         previous_results: List[Dict[str, Any]],
         sequence_id: str,
-        priority_files: Optional[List[str]] = None
+        priority_files: Optional[List[str]] = None,
+        status_callback: Optional[Callable[[int, float, bool], Any]] = None,
+        llm_timeout: Optional[float] = None,
     ) -> Optional[WorkflowStepPlan]:
         """
         Generate the next workflow step using ReAct-style planning.
@@ -1601,7 +1702,10 @@ WORKFLOW PLANNING:
             step_data = await self._retry_llm_json_generation(
                 llm_call_func=_call_llm_for_react_step,
                 step_name="ReAct Step Planning",
-                max_attempts=3
+                max_attempts=3,
+                status_callback=status_callback,
+                attempt_timeout=llm_timeout or self.llm_attempt_timeout_seconds,
+                pause_after_timeout=True,
             )
             
             if step_data.get("goal_achieved", False):
@@ -2531,53 +2635,25 @@ WORKFLOW PLANNING:
         """
         sequence_id = frontend_session_id or f"seq_{uuid.uuid4().hex[:12]}"
         logger.info(f"🔑 Using session ID: {sequence_id} (Chat ID: {frontend_chat_id})")
-        
+        available_files = list(available_files or [])
+        existing_files = self._sequence_available_files.get(sequence_id)
+        if existing_files:
+            available_files = existing_files
+        self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
-        client_name = project_context.get('client_name', '') if project_context else ''
-        app_name = project_context.get('app_name', '') if project_context else ''
-        project_name = project_context.get('project_name', '') if project_context else ''
-        logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={client_name}, app={app_name}, project={project_name}")
-        
-        # 🔧 CRITICAL FIX: Load files using FileReader with proper context if available
-        # This ensures we only read files from the specific client/project location when context is provided
-        # If context is missing, proceed with provided files (don't block workflow execution)
-        if client_name and app_name and project_name:
-            logger.info(f"📁 Loading files from MinIO using FileReader with context: {client_name}/{app_name}/{project_name}")
-            try:
-                context_files = self._load_files_with_context(
-                    client_name=client_name,
-                    app_name=app_name,
-                    project_name=project_name
-                )
-                
-                # Merge with provided available_files (in case frontend has specific files)
-                # But prioritize files loaded with context
-                if context_files:
-                    # Filter available_files to only include files from the correct context
-                    context_prefix = f"{client_name}/{app_name}/{project_name}/"
-                    filtered_provided_files = [
-                        f for f in (available_files or [])
-                        if f.startswith(context_prefix) or not '/' in f
-                    ]
-                    
-                    # Combine: use context-loaded files as primary, add any valid provided files
-                    combined_files = list(context_files)
-                    for f in filtered_provided_files:
-                        if f not in combined_files:
-                            combined_files.append(f)
-                    
-                    available_files = combined_files
-                    logger.info(f"✅ Using {len(available_files)} files loaded with proper context")
-                else:
-                    logger.debug(f"ℹ️ No files found with context, using provided files: {len(available_files or [])}")
-            except Exception as e:
-                logger.debug(f"ℹ️ Could not load files with context (non-blocking): {e}, using provided files")
-        else:
-            logger.debug(f"ℹ️ No project context provided, using provided files: {len(available_files or [])}")
-        
-        available_files = list(available_files or [])
-        self._sequence_available_files[sequence_id] = available_files
+        logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
+
+        resume_mode = False
+        react_state: Optional[ReActState] = self._sequence_react_state.get(sequence_id)
+        if react_state and react_state.paused:
+            resume_mode = True
+            react_state.paused = False
+            logger.info(
+                "⏯️ Resuming paused ReAct workflow %s from step %s",
+                sequence_id,
+                react_state.paused_at_step or react_state.current_step_number,
+            )
 
         persisted_history = self._load_persisted_chat_summary(frontend_chat_id, project_context)
         if persisted_history:
@@ -2619,17 +2695,19 @@ WORKFLOW PLANNING:
             )
             
             logger.info(f"🚀 Starting ReAct workflow for sequence: {sequence_id}")
-            
+
             # ================================================================
             # INITIALIZE REACT STATE
             # ================================================================
-            react_state = ReActState(
-                sequence_id=sequence_id,
-                user_prompt=effective_user_prompt
-            )
-            self._sequence_react_state[sequence_id] = react_state
-            
-            logger.info("🧠 ReAct: Initialized agent state")
+            if resume_mode and react_state:
+                logger.info("🧠 ReAct: Using existing paused agent state")
+            else:
+                react_state = ReActState(
+                    sequence_id=sequence_id,
+                    user_prompt=effective_user_prompt
+                )
+                self._sequence_react_state[sequence_id] = react_state
+                logger.info("🧠 ReAct: Initialized agent state")
             
             # ================================================================
             # REACT LOOP: Thought → Action → Observation → Thought...
@@ -2669,11 +2747,32 @@ WORKFLOW PLANNING:
                 )
             except (WebSocketDisconnect, Exception) as e:
                 logger.warning(f"⚠️ Failed to send initial progress event: {e}")
-            
+
             max_steps = 20  # Prevent infinite loops
-            current_step_number = 0
-            execution_history: List[Dict[str, Any]] = []
-            previous_results: List[Dict[str, Any]] = []
+            if resume_mode and react_state:
+                current_step_number = max((react_state.paused_at_step or react_state.current_step_number) - 1, 0)
+                execution_history = list(react_state.execution_history)
+                previous_results = [entry.get("result", {}) for entry in react_state.execution_history]
+                try:
+                    await self._send_event(
+                        websocket,
+                        WebSocketEvent(
+                            "workflow_resumed",
+                            {
+                                "sequence_id": sequence_id,
+                                "resuming_from_step": react_state.paused_at_step or react_state.current_step_number,
+                                "message": "Resuming from last paused step",
+                            },
+                        ),
+                        "workflow_resumed event",
+                    )
+                except (WebSocketDisconnect, Exception):
+                    logger.debug("⚠️ Failed to send workflow_resumed event", exc_info=True)
+            else:
+                current_step_number = 0
+                execution_history = []
+                previous_results = []
+            abort_due_complexity = False
             
             while not react_state.goal_achieved and current_step_number < max_steps:
                 if sequence_id in self._cancelled_sequences:
@@ -2691,7 +2790,30 @@ WORKFLOW PLANNING:
                         "workflow_stopped (ReAct loop)"
                     )
                     break
-                
+
+                if current_step_number >= self.max_react_operations:
+                    abort_due_complexity = True
+                    logger.warning(
+                        "🛑 ReAct: Aborting workflow after %d operations to prevent runaway plans",
+                        current_step_number,
+                    )
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_abort_complexity",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "message": "Workflow stopped: too many sequential operations; replan with a smaller set of actions.",
+                                },
+                            ),
+                            "react_abort_complexity event",
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send complexity abort event: {e}")
+                    break
+
                 current_step_number += 1
                 logger.info(f"🔄 ReAct Cycle {current_step_number}: Starting...")
                 
@@ -2759,7 +2881,34 @@ WORKFLOW PLANNING:
                         effective_user_prompt_with_warning = effective_user_prompt
                 else:
                     effective_user_prompt_with_warning = effective_user_prompt
-                
+
+                async def _react_generation_status(attempt: int, elapsed: float, timed_out: bool) -> None:
+                    message = (
+                        f"Still planning step {current_step_number} (attempt {attempt}) after {int(elapsed)}s."
+                    )
+                    if timed_out:
+                        message = (
+                            f"Step {current_step_number} planning timed out after {int(elapsed)}s."
+                        )
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_generation_status",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "attempt": attempt,
+                                    "elapsed_seconds": int(elapsed),
+                                    "timed_out": timed_out,
+                                    "message": message,
+                                },
+                            ),
+                            "react_generation_status event",
+                        )
+                    except (WebSocketDisconnect, Exception):
+                        logger.debug("⚠️ Unable to send generation status update", exc_info=True)
+
                 try:
                     next_step = await asyncio.wait_for(
                         self._generate_next_step_with_react(
@@ -2768,17 +2917,57 @@ WORKFLOW PLANNING:
                             available_files=current_available_files,  # Use updated file list with newly created files
                             previous_results=previous_results,
                             sequence_id=sequence_id,
-                            priority_files=file_focus
+                            priority_files=file_focus,
+                            status_callback=_react_generation_status,
+                            llm_timeout=self.llm_attempt_timeout_seconds,
                         ),
                         timeout=90.0  # 90 second timeout for step generation
                     )
                 except asyncio.TimeoutError:
                     logger.error(f"❌ ReAct: Step generation timed out after 90s, stopping workflow")
                     react_state.goal_achieved = True
+                    react_state.paused = True
+                    react_state.paused_at_step = current_step_number
+                    react_state.current_step_number = current_step_number
+                    self._paused_sequences.add(sequence_id)
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_generation_timeout",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "message": "Planning timed out. Please retry to resume from this step.",
+                                },
+                            ),
+                            "react_generation_timeout event",
+                        )
+                    except (WebSocketDisconnect, Exception):
+                        logger.debug("⚠️ Unable to send generation timeout event", exc_info=True)
                     break
                 except Exception as e:
                     logger.error(f"❌ ReAct: Step generation failed: {e}, stopping workflow")
                     react_state.goal_achieved = True
+                    react_state.paused = True
+                    react_state.paused_at_step = current_step_number
+                    react_state.current_step_number = current_step_number
+                    self._paused_sequences.add(sequence_id)
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_generation_failed",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "message": "Planning encountered an error. Please retry to continue from this step.",
+                                },
+                            ),
+                            "react_generation_failed event",
+                        )
+                    except (WebSocketDisconnect, Exception):
+                        logger.debug("⚠️ Unable to send generation failure event", exc_info=True)
                     break
             
                 if next_step is None:
@@ -2874,7 +3063,41 @@ WORKFLOW PLANNING:
                 # ACTION: Execute the step
                 # ============================================================
                 logger.info(f"⚡ ReAct: ACTION - Executing step {current_step_number} ({next_step.atom_id})...")
-                
+
+                # Validate that the previous step produced sensible outputs before chaining
+                validation_passed, validation_reason = self._validate_chain_for_next_step(
+                    sequence_id=sequence_id,
+                    execution_history=execution_history,
+                    next_step=next_step,
+                )
+                if not validation_passed:
+                    logger.warning(
+                        "⚠️ ReAct: Blocking step %s due to failed dependency validation: %s",
+                        next_step.atom_id,
+                        validation_reason,
+                    )
+                    try:
+                        await self._send_event(
+                            websocket,
+                            WebSocketEvent(
+                                "react_validation_blocked",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": current_step_number,
+                                    "atom_id": next_step.atom_id,
+                                    "message": validation_reason,
+                                },
+                            ),
+                            "react_validation_blocked event",
+                        )
+                    except (WebSocketDisconnect, Exception) as e:
+                        logger.warning(f"⚠️ Failed to send validation_blocked event: {e}")
+
+                    # Re-plan without advancing the step counter
+                    current_step_number = max(0, current_step_number - 1)
+                    react_state.retry_count = 0
+                    continue
+
                 # Send action event (with error handling)
                 try:
                     await self._send_event(
@@ -3034,6 +3257,7 @@ WORKFLOW PLANNING:
                     "atom_id": next_step.atom_id,
                     "files_used": next_step.files_used or [],  # Track files for loop detection
                     "description": next_step.description,  # Track description for context
+                    "output_alias": next_step.output_alias,
                     "result": execution_result,
                     "evaluation": evaluation.__dict__
                 })
@@ -3048,6 +3272,7 @@ WORKFLOW PLANNING:
                     description=next_step.description,
                     files_used=next_step.files_used or []
                 )
+                react_state.current_step_number = current_step_number
                 
                 # ============================================================
                 # DECISION: Handle evaluation decision
@@ -3155,13 +3380,27 @@ WORKFLOW PLANNING:
                                 # Don't force it, but log the warning
             
             # ================================================================
+            # ============================================================
             # WORKFLOW COMPLETE
-            # ================================================================
-            if react_state.goal_achieved:
+            # ============================================================
+            if abort_due_complexity:
+                logger.warning(
+                    f"⚠️ ReAct: Workflow stopped early after {current_step_number} steps due to complexity guard",
+                )
+                final_status = "aborted"
+                final_message = "Workflow stopped: too many operations; please simplify or ask for a smaller plan."
+            elif react_state.goal_achieved:
                 logger.info(f"✅ ReAct: Workflow completed successfully after {current_step_number} steps")
+                final_status = "completed"
+                final_message = "ReAct workflow completed!"
             elif current_step_number >= max_steps:
                 logger.warning(f"⚠️ ReAct: Reached max steps ({max_steps}), stopping workflow")
-            
+                final_status = "stopped"
+                final_message = "Reached maximum step limit; consider simplifying the request."
+            else:
+                final_status = "stopped"
+                final_message = "Workflow stopped."
+
             # Send final progress update
             try:
                 await self._send_event(
@@ -3173,16 +3412,16 @@ WORKFLOW PLANNING:
                             "current_step": current_step_number,
                             "total_steps": current_step_number,
                             "progress_percent": 100,
-                            "status": "completed",
+                            "status": final_status,
                             "loading": False,  # Turn off loading
-                            "message": "Workflow completed!"
+                            "message": final_message,
                         }
                     ),
-                    "workflow_progress event (final)"
+                    "workflow_progress event (final)",
                 )
             except (WebSocketDisconnect, Exception) as e:
                 logger.warning(f"⚠️ Failed to send final progress event: {e}")
-            
+
             await self._send_event(
                 websocket,
                 WebSocketEvent(
@@ -3191,11 +3430,11 @@ WORKFLOW PLANNING:
                         "sequence_id": sequence_id,
                         "total_steps": current_step_number,
                         "goal_achieved": react_state.goal_achieved,
-                        "message": "ReAct workflow completed!",
+                        "message": final_message,
                         "loading": False  # Turn off loading
                     }
                 ),
-                "workflow_completed event (ReAct)"
+                "workflow_completed event (ReAct)",
             )
             
             # Emit workflow insight if websocket is still connected
@@ -3266,7 +3505,16 @@ WORKFLOW PLANNING:
             except WebSocketDisconnect:
                 logger.info("🔌 WebSocket disconnected before error event could be delivered")
         finally:
-            self._cleanup_sequence_state(sequence_id)
+            react_state_final = self._sequence_react_state.get(sequence_id)
+            if react_state_final and react_state_final.paused:
+                logger.info(
+                    "⏸️ Preserving state for sequence %s to allow resume at step %s",
+                    sequence_id,
+                    react_state_final.paused_at_step or react_state_final.current_step_number,
+                )
+            else:
+                self._cleanup_sequence_state(sequence_id)
+                self._paused_sequences.discard(sequence_id)
             self._cancelled_sequences.discard(sequence_id)
     async def _execute_step_with_events(
         self,
@@ -3446,14 +3694,21 @@ WORKFLOW PLANNING:
                 execution_result=execution_result,
                 execution_success=execution_success
             )
-            
+
+            atom_insights = await self._generate_atom_insights(
+                goal=original_prompt,
+                step=step,
+                execution_result=execution_result,
+            )
+
             logger.info(f"✅ Atom executed: {json.dumps(execution_result, indent=2)[:150]}...")
             self._record_step_execution_result(
                 sequence_id=sequence_id,
                 step_number=step_number,
                 atom_id=atom_id,
                 execution_result=execution_result,
-                insight=insight_text
+                insight=insight_text,
+                atom_insights=atom_insights,
             )
             # ================================================================
             # EVENT 3: AGENT_EXECUTED (Frontend will call atom handler)
@@ -3472,7 +3727,8 @@ WORKFLOW PLANNING:
                         "sequence_id": sequence_id,
                         "output_alias": step.output_alias,
                         "summary": f"Executed {atom_id}",
-                        "insight": insight_text
+                        "insight": insight_text,
+                        "atom_insights": atom_insights,
                     }
                 ),
                 f"agent_executed event (step {step_number})"
@@ -3492,7 +3748,8 @@ WORKFLOW PLANNING:
                         "card_id": card_id,
                         "summary": f"Step {step_number} completed",
                         "sequence_id": sequence_id,
-                        "insight": insight_text
+                        "insight": insight_text,
+                        "atom_insights": atom_insights,
                     }
                 ),
                 f"step_completed event (step {step_number})"
@@ -3579,6 +3836,95 @@ WORKFLOW PLANNING:
         normalized = self._normalize_alias_token(stripped)
         return alias_map.get(stripped) or alias_map.get(normalized) or token
 
+    def _extract_output_file_from_history(
+        self,
+        sequence_id: str,
+        history_entry: Dict[str, Any],
+    ) -> Optional[str]:
+        """Infer the materialized output file path from a previous execution entry."""
+        step_number = history_entry.get("step_number")
+        saved_outputs = self._step_output_files.get(sequence_id, {})
+        if step_number in saved_outputs:
+            return saved_outputs[step_number]
+
+        atom_id = history_entry.get("atom_id", "")
+        result = history_entry.get("result", {}) or {}
+
+        if atom_id == "merge" and isinstance(result.get("merge_json"), dict):
+            return result.get("merge_json", {}).get("result_file") or result.get("saved_path")
+        if atom_id == "concat" and isinstance(result.get("concat_json"), dict):
+            return result.get("concat_json", {}).get("result_file") or result.get("saved_path")
+        if atom_id in {"create-column", "create-transform", "groupby-wtg-avg", "dataframe-operations"}:
+            return result.get("output_file") or result.get("saved_path")
+
+        return result.get("output_file") or result.get("saved_path")
+
+    def _extract_row_count(self, result: Dict[str, Any]) -> Optional[float]:
+        """Return a simple row-count metric from flat or nested result payloads."""
+        row_keys = ("row_count", "rowcount", "rows", "count", "record_count")
+        for key in row_keys:
+            value = result.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+
+        nested_keys = ("merge_json", "concat_json", "groupby_json", "dataframe_result", "result")
+        for nested_key in nested_keys:
+            nested = result.get(nested_key)
+            if isinstance(nested, dict):
+                for key in row_keys:
+                    value = nested.get(key)
+                    if isinstance(value, (int, float)):
+                        return float(value)
+        return None
+
+    def _validate_chain_for_next_step(
+        self,
+        sequence_id: str,
+        execution_history: List[Dict[str, Any]],
+        next_step: WorkflowStepPlan,
+    ) -> Tuple[bool, str]:
+        """
+        Run sanity checks on the previous step before chaining into the next atom.
+
+        Ensures we don't cascade failures or empty datasets into follow-up operations.
+        """
+        if not execution_history:
+            return True, ""
+
+        last_entry = execution_history[-1]
+        last_result = last_entry.get("result", {}) or {}
+        if not bool(last_result.get("success", True)):
+            return False, "Previous atom failed; re-plan before continuing."
+
+        produced_file = self._extract_output_file_from_history(sequence_id, last_entry)
+        available_files = set(self._sequence_available_files.get(sequence_id, []) or [])
+
+        requires_previous_output = False
+        dependency_tokens: List[str] = []
+        if next_step.files_used:
+            dependency_tokens.extend(next_step.files_used)
+        if next_step.inputs:
+            dependency_tokens.extend(next_step.inputs)
+
+        for value in dependency_tokens:
+            normalized = self._resolve_alias_value(sequence_id, value)
+            if normalized in {produced_file, last_entry.get("output_alias"), "auto_from_previous"}:
+                requires_previous_output = True
+            if normalized in available_files:
+                requires_previous_output = True
+
+        if requires_previous_output and not produced_file:
+            return False, "No materialized output from prior step; cannot chain safely."
+
+        if produced_file and requires_previous_output and produced_file not in available_files:
+            return False, f"Expected previous output {produced_file} to be available but it is not registered."
+
+        row_count = self._extract_row_count(last_result)
+        if requires_previous_output and row_count is not None and row_count <= 0:
+            return False, "Previous atom produced an empty dataset; review before continuing."
+
+        return True, ""
+
     def _normalize_alias_token(self, alias: str) -> str:
         """Normalize alias references (strip braces, spaces, lowercase)."""
         return re.sub(r"\s+", "", alias.strip("{} ").lower())
@@ -3616,6 +3962,130 @@ WORKFLOW PLANNING:
             logger.warning(f"⚠️ Step insight generation failed: {insight_error}")
             return None
 
+    async def _generate_atom_insights(
+        self,
+        goal: str,
+        step: WorkflowStepPlan,
+        execution_result: Dict[str, Any],
+    ) -> List[Dict[str, str]]:
+        """Generate structured business-first insights for an atom output."""
+
+        goal_text = goal or ""
+        facts = self._build_atom_facts(step, execution_result)
+        data_hash = self._compute_data_hash(facts)
+
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                lambda: generate_insights(
+                    goal=goal_text,
+                    facts=facts,
+                    data_hash=data_hash,
+                    atom_id=step.atom_id,
+                ),
+            )
+        except Exception as atom_insight_error:  # noqa: BLE001
+            logger.debug(
+                "🔇 Atom insight generation failed for %s: %s",
+                step.atom_id,
+                atom_insight_error,
+                exc_info=True,
+            )
+            return [
+                {
+                    "insight": "No actionable insight",
+                    "impact": "Insufficient context from this step.",
+                    "risk": "LLM or parsing error encountered.",
+                    "next_action": "Review the atom output manually and retry later.",
+                }
+            ]
+
+    def _build_atom_facts(
+        self, step: WorkflowStepPlan, execution_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Summarize execution payload into facts for business insight prompts."""
+
+        execution_result = execution_result or {}
+        facts: Dict[str, Any] = {
+            "atom_id": step.atom_id,
+            "description": step.description,
+            "result_keys": list(execution_result.keys()),
+            "result_preview": self._extract_result_preview(execution_result, max_chars=600),
+        }
+
+        for meta_key in ("schema", "columns", "chart_json", "metadata", "summary", "stats"):
+            if meta_key in execution_result:
+                facts[meta_key] = execution_result.get(meta_key)
+
+        tabular_rows = self._extract_tabular_rows(execution_result)
+        if tabular_rows:
+            facts["rows"] = tabular_rows[:50]
+            facts["row_count"] = len(tabular_rows)
+
+        return facts
+
+    def _extract_tabular_rows(self, execution_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Find tabular payloads from known atom result shapes."""
+
+        for candidate in (
+            "table_json",
+            "merge_json",
+            "groupby_json",
+            "concat_json",
+            "rows",
+            "data",
+            "preview",
+        ):
+            value = execution_result.get(candidate)
+            if isinstance(value, list):
+                return value
+            if isinstance(value, dict):
+                if isinstance(value.get("data"), list):
+                    return value.get("data")  # type: ignore
+                if isinstance(value.get("rows"), list):
+                    return value.get("rows")  # type: ignore
+
+        return []
+
+    def _compute_data_hash(self, facts: Dict[str, Any]) -> str:
+        """Create a stable hash for caching atom-level insights."""
+
+        serialized = self._safe_json_dumps(facts, fallback="")
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    def _compose_business_context(
+        self,
+        step: WorkflowStepPlan,
+        atom_prompt: str,
+        execution_result: Dict[str, Any],
+    ) -> str:
+        """Create a business-focused context block for the insight prompt."""
+
+        if not self.laboratory_retriever:
+            return ""
+
+        execution_result = execution_result or {}
+
+        query_parts = [
+            step.description,
+            atom_prompt,
+            getattr(step, "atom_prompt", ""),
+            getattr(step, "prompt", ""),
+        ]
+        query = " ".join([part for part in query_parts if part]) or step.atom_id
+
+        try:
+            return self.laboratory_retriever.generate_business_insights(
+                atom_id=step.atom_id,
+                query=query,
+                execution_result=execution_result,
+                top_n=3,
+            )
+        except Exception as business_exc:
+            logger.debug("🔇 Business context skipped: %s", business_exc)
+            return ""
+
     def _build_step_insight_prompt(
         self,
         step: WorkflowStepPlan,
@@ -3632,6 +4102,7 @@ WORKFLOW PLANNING:
 
         params_str = self._safe_json_dumps(parameters or {}, fallback="{}")
         result_preview = self._extract_result_preview(execution_result)
+        business_context = self._compose_business_context(step, base_prompt, execution_result)
 
         status_text = "SUCCESS" if execution_success else "FAILED"
         output_alias = step.output_alias or "not_specified"
@@ -3656,6 +4127,7 @@ WORKFLOW PLANNING:
             f"{params_str}\n\n"
             "RESULT SNAPSHOT\n"
             f"{result_preview}\n\n"
+            f"BUSINESS CONTEXT\n{business_context}\n\n" if business_context else ""
             "RESPONSE REQUIREMENTS\n"
             "- Keep total response under 120 words.\n"
             "- Use Markdown with three sections in this order:\n"
@@ -4299,7 +4771,8 @@ WORKFLOW PLANNING:
         step_number: int,
         atom_id: str,
         execution_result: Dict[str, Any],
-        insight: Optional[str] = None
+        insight: Optional[str] = None,
+        atom_insights: Optional[List[Dict[str, str]]] = None,
     ) -> None:
         """Cache step execution results and generated insights for later use."""
         cache = self._step_execution_cache.setdefault(sequence_id, {})
@@ -4307,7 +4780,8 @@ WORKFLOW PLANNING:
             "atom_id": atom_id,
             "execution_result": execution_result,
             "recorded_at": datetime.utcnow().isoformat(),
-            "insight": insight
+            "insight": insight,
+            "atom_insights": atom_insights or [],
         }
 
     def _collect_workflow_step_records(
@@ -4334,6 +4808,7 @@ WORKFLOW PLANNING:
                 "agent": step.atom_id,
                 "description": step.description,
                 "insight": step_cache.get("insight"),
+                "atom_insights": step_cache.get("atom_insights") or [],
                 "result_preview": self._extract_result_preview(execution_result),
                 "output_files": [],
             }

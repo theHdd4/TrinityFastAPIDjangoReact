@@ -215,11 +215,11 @@ def gather_json_catalogs(rag_root: Path) -> Iterator[DocumentRecord]:
 
 def collect_documents(source_root: Path) -> List[DocumentRecord]:
     """Gather all documents from the Trinity atom knowledge base."""
-    trinity_ai_root = source_root / "TrinityAI" if (source_root / "TrinityAI").exists() else source_root
-    workflow_rag_root = trinity_ai_root / "workflow_mode" / "rag"
+    trinity_root = source_root / "TrinityAgent" if (source_root / "TrinityAgent").exists() else source_root
+    workflow_rag_root = trinity_root / "workflow_mode" / "rag"
 
     documents: List[DocumentRecord] = []
-    documents.extend(gather_agent_readmes(trinity_ai_root))
+    documents.extend(gather_agent_readmes(trinity_root))
     documents.extend(gather_atom_knowledge(workflow_rag_root))
     documents.extend(gather_json_catalogs(workflow_rag_root))
 
@@ -276,7 +276,7 @@ def parse_args(args: Sequence[str] | None = None) -> argparse.Namespace:
         "--source-root",
         type=Path,
         default=Path(__file__).resolve().parents[3],
-        help="Repository root containing the TrinityAI assets.",
+        help="Repository root containing the TrinityAgent assets.",
     )
     parser.add_argument(
         "--clean",
