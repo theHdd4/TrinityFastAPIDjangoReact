@@ -474,7 +474,7 @@ class StreamOrchestrator:
         # Refresh file context so subsequent atoms see newly generated files/columns
         # Use same context as sequence execution (stored in instance or passed)
         # If context not available, use empty strings (will use default prefix)
-        self._refresh_file_context("", "", "")
+        self._refresh_file_context(client_name, app_name, project_name)
         
         duration = time.time() - start_time
         
@@ -835,6 +835,14 @@ class StreamOrchestrator:
         """
         if not self.file_loader or not self.file_context_resolver:
             return
+
+        # Prefer existing sequence context when no explicit context is passed so we don't
+        # accidentally drop back to the root prefix between atom executions.
+        if not (client_name or app_name or project_name):
+            ctx = getattr(self, "_current_context", {}) or {}
+            client_name = ctx.get("client_name", "")
+            app_name = ctx.get("app_name", "")
+            project_name = ctx.get("project_name", "")
         try:
             # Set context if provided (FileLoader supports this)
             if client_name or app_name or project_name:
