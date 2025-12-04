@@ -1566,11 +1566,18 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       const buildWebSocketUrl = () => {
         const baseUrlString = (FASTAPI_BASE_URL || '').replace(/\/$/, '');
 
+        const appendExecutePath = (pathname: string) => {
+          // When served behind the /trinityai reverse proxy on a domain, ensure the
+          // WebSocket also goes through that prefix instead of hitting the root.
+          const trimmedPath = pathname.replace(/\/$/, '') || (isDomainName(window.location.hostname) ? '/trinityai' : '');
+          return `${trimmedPath}/streamai/execute-ws`;
+        };
+
         if (baseUrlString) {
           try {
             const baseUrl = new URL(baseUrlString);
-            baseUrl.protocol = baseUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-            baseUrl.pathname = `${baseUrl.pathname.replace(/\/$/, '')}/streamai/execute-ws`;
+            baseUrl.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            baseUrl.pathname = appendExecutePath(baseUrl.pathname);
             return baseUrl.toString();
           } catch (err) {
             console.warn('⚠️ Failed to build WebSocket URL from FASTAPI_BASE_URL, falling back to window location', err);
@@ -1580,7 +1587,8 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsHost = window.location.hostname;
         const wsPort = window.location.port ? `:${window.location.port}` : '';
-        return `${wsProtocol}//${wsHost}${wsPort}/streamai/execute-ws`;
+        const defaultPath = appendExecutePath('');
+        return `${wsProtocol}//${wsHost}${wsPort}${defaultPath}`;
       };
 
       const wsUrl = buildWebSocketUrl();
