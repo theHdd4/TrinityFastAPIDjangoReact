@@ -8,8 +8,8 @@ import Header from '@/components/Header';
 import GreenGlyphRain from '@/components/animations/GreenGlyphRain';
 import { REGISTRY_API } from '@/lib/api';
 import { LOGIN_ANIMATION_TOTAL_DURATION } from '@/constants/loginAnimation';
-import { clearProjectState, saveCurrentProject } from '@/utils/projectStorage';
-import { startProjectTransition, cleanupProjectTransition } from '@/utils/projectTransition';
+import { openProjectAndNavigate } from '@/utils/openProject';
+import { cleanupProjectTransition } from '@/utils/projectTransition';
 import {
   Plus,
   FolderOpen,
@@ -303,53 +303,32 @@ const Projects = () => {
   const openProject = async (project: Project) => {
     if (isTransitioning) return;
 
-    setIsTransitioning(true);
-    startProjectTransition(navigate);
-
-    clearProjectState();
-    saveCurrentProject(project);
-
-    // Construct an initial environment using any existing client identifiers
-    // and the currently selected app/project. This ensures env-dependent
-    // components (session state, MinIO prefixing, etc.) immediately reflect
-    // the user's context even before the backend responds with its
-    // canonical environment payload.
-    let env: Record<string, string> = {
-      APP_NAME: selectedApp || '',
-      APP_ID: appId?.toString() || '',
-      PROJECT_NAME: project.name,
-      PROJECT_ID: project.id?.toString() || '',
-    };
-    try {
-      const envStr = localStorage.getItem('env');
-      const baseEnv = envStr ? JSON.parse(envStr) : {};
-      if (baseEnv.CLIENT_NAME) env.CLIENT_NAME = baseEnv.CLIENT_NAME;
-      if (baseEnv.CLIENT_ID) env.CLIENT_ID = baseEnv.CLIENT_ID;
-    } catch {
-      /* ignore parse errors */
+    if (!appId) {
+      console.error('❌ App ID not found, cannot open project');
+      return;
     }
-    localStorage.setItem('env', JSON.stringify(env));
 
-    try {
-      const res = await fetch(`${REGISTRY_API}/projects/${project.id}/`, { credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.environment) {
-          // Persist the full environment returned by the backend, but ensure
-          // current app/project identifiers remain accurate.
-          env = {
-            ...env,
-            ...data.environment,
-            APP_NAME: selectedApp || env.APP_NAME,
-            APP_ID: appId?.toString() || env.APP_ID,
-            PROJECT_NAME: project.name,
-            PROJECT_ID: project.id?.toString() || env.PROJECT_ID,
-          };
-          localStorage.setItem('env', JSON.stringify(env));
-        }
+    setIsTransitioning(true);
+
+    // Use shared utility function to open project and navigate
+    const success = await openProjectAndNavigate(
+      {
+        id: project.id,
+        name: project.name,
+        appId: selectedApp || project.appTemplate,
+      },
+      appId,
+      navigate,
+      {
+        onError: (error) => {
+          console.error('Failed to open project:', error);
+          setIsTransitioning(false);
+        },
       }
-    } catch (err) {
-      console.log('Project env fetch error', err);
+    );
+
+    if (!success) {
+      setIsTransitioning(false);
     }
   };
 
