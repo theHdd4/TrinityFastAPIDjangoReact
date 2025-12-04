@@ -197,6 +197,15 @@ class ConnectionManager:
                     ):
                         session.status = "stale"
                         session.closed_reason = session.closed_reason or "idle timeout"
+        except asyncio.CancelledError:
+            # Task was cancelled because the server is shutting down
+            pass
+        except Exception:
+            # Keep the sweeper alive even if an unexpected error occurs
+            logger.exception("Session sweeper failed; restarting")
+            asyncio.create_task(self._session_sweeper())
+        finally:
+            self._sweeper_task = None
 
     def detach_session(self, websocket: WebSocket) -> None:
         """Detach a websocket from its session without closing the session."""
