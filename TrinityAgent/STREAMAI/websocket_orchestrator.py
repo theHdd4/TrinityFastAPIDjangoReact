@@ -3592,7 +3592,7 @@ WORKFLOW PLANNING:
             logger.error(f"❌ Workflow execution failed: {e}")
             import traceback
             traceback.print_exc()
-            
+
             # Send error event
             try:
                 await self._send_event(
@@ -3609,6 +3609,12 @@ WORKFLOW PLANNING:
                 )
             except WebSocketDisconnect:
                 logger.info("🔌 WebSocket disconnected before error event could be delivered")
+            # Ensure we send a close frame with an explicit error code/reason to avoid client-side 1005 closures
+            await self._safe_close_websocket(
+                websocket,
+                code=1011,
+                reason=str(e)[:120] or "workflow_failed",
+            )
         finally:
             react_state_final = self._sequence_react_state.get(sequence_id)
             if react_state_final and react_state_final.paused:
@@ -5266,6 +5272,15 @@ WORKFLOW PLANNING:
             return True
         except Exception:
             return True  # Assume connected if check fails
+
+    async def _safe_close_websocket(self, websocket, code: int = 1000, reason: str = "") -> None:
+        """Close websocket with a status code while swallowing close errors."""
+        try:
+            if hasattr(websocket, "close_code") and websocket.close_code:
+                return  # Already closing or closed
+            await websocket.close(code=code, reason=reason)
+        except Exception as close_error:  # pragma: no cover - defensive
+            logger.debug(f"WebSocket close failed (code={code}, reason={reason}): {close_error}")
 
     async def _send_event(
         self,
