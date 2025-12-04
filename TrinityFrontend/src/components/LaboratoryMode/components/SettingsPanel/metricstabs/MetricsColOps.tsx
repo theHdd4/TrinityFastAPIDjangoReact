@@ -61,7 +61,7 @@ const allOperations: OperationType[] = [
   // { type: 'between_flag', name: 'Between Flag', icon: Filter, description: 'Check if value is between two values' },
   
   // Grouped metrics (placeholders)
-  { type: 'compute_metrics_within_group', name: 'Compute Metrics Within Group', icon: Users, description: 'Compute metrics within groups (sum, mean, median, max, min, count, nunique, rank_pct)' },
+  { type: 'compute_metrics_within_group', name: 'Compute Metrics Within Group', icon: Users, description: 'Compute metrics within groups (sum, mean, median, max, min, count, nunique, rank, rank_pct)' },
   // { type: 'group_sum', name: 'Group Sum', icon: Users, description: 'Sum within groups' },
   // { type: 'group_mean', name: 'Group Mean', icon: Users, description: 'Mean within groups' },
   // { type: 'group_median', name: 'Group Median', icon: Users, description: 'Median within groups' },
@@ -244,7 +244,7 @@ const operationFormulas: Record<string, string> = {
   'rolling_max': 'Rolling maximum over window',
   'cumulative_sum': 'Running cumulative sum',
   'growth_rate': 'Percentage growth rate: ((x(t) - x(t-n)) / x(t-n)) × 100',
-  'compute_metrics_within_group': 'Group aggregation: sum, mean, median, max, min, count, nunique, rank_pct',
+  'compute_metrics_within_group': 'Group aggregation: sum, mean, median, max, min, count, nunique, rank, rank_pct',
   'group_share_of_total': 'Column / Group Sum(Column)',
   'group_contribution': '(Group Sum / Overall Sum) × 100',
   'filter_rows_condition': 'Filter rows based on conditions (>, <, =, !=, >=, <=)',
@@ -524,12 +524,19 @@ const MetricsColOps: React.FC = () => {
     ['object', 'string', 'category', 'bool'].some(type => c.data_type.toLowerCase().includes(type))
   ).map((c: any) => c.column);
 
+  const dateColumns: string[] = allColumns.filter((c: any) =>
+    c && typeof c.data_type === 'string' &&
+    ['date', 'datetime', 'timestamp'].some(type => c.data_type.toLowerCase().includes(type))
+  ).map((c: any) => c.column);
+
   const allAvailableColumns: string[] = allColumns.map((c: any) => c.column).filter(Boolean);
 
   const handleOperationClick = (opType: OperationType) => {
     let defaultCols: string[];
     if (["add", "subtract", "multiply", "divide", "pct_change"].includes(opType.type)) {
       defaultCols = ['', ''];
+    } else if (opType.type === 'date_builder') {
+      defaultCols = ['', '', '']; // Year, Month/Week, Day/DayOfWeek
     } else if (opType.type === 'select_columns' || opType.type === 'drop_columns' || opType.type === 'reorder' || opType.type === 'deduplicate' || opType.type === 'sort_rows' || opType.type === 'filter_rows_condition' || opType.type === 'filter_top_n_per_group' || opType.type === 'filter_percentile' || opType.type === 'compute_metrics_within_group' || opType.type === 'group_share_of_total' || opType.type === 'group_contribution' || opType.type === 'lower' || opType.type === 'upper' || opType.type === 'strip') {
       defaultCols = []; // Multi-select starts with empty array
     } else if (opType.type === 'rename') {
@@ -543,7 +550,7 @@ const MetricsColOps: React.FC = () => {
       name: opType.name,
       columns: defaultCols,
       rename: opType.type === 'rename' ? {} : '',
-      param: opType.type === 'replace' ? { oldValue: '', newValue: '' } : (opType.type === 'fill_na' ? { strategy: '', customValue: '' } : (opType.type === 'power' || opType.type === 'lag' || opType.type === 'lead' || opType.type === 'diff' || opType.type === 'rolling_mean' || opType.type === 'rolling_sum' || opType.type === 'rolling_min' || opType.type === 'rolling_max' ? '' : (opType.type === 'growth_rate' ? { period: '1', frequency: 'none', comparison_type: 'period' } : (opType.type === 'filter_rows_condition' ? {} : (opType.type === 'filter_top_n_per_group' ? { n: '1', metric_col: '', ascending: false } : (opType.type === 'filter_percentile' ? { percentile: '10', metric_col: '', direction: 'top' } : (opType.type === 'compute_metrics_within_group' ? { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] } : (opType.type === 'group_share_of_total' ? { metric_cols: [{ metric_col: '', rename: '' }] } : (opType.type === 'group_contribution' ? { metric_cols: [{ metric_col: '', rename: '' }] } : undefined))))))))),
+      param: opType.type === 'replace' ? { oldValue: '', newValue: '' } : (opType.type === 'fill_na' ? { strategy: '', customValue: '' } : (opType.type === 'date_builder' ? 'from_year_month_day' : (opType.type === 'power' || opType.type === 'lag' || opType.type === 'lead' || opType.type === 'diff' || opType.type === 'rolling_mean' || opType.type === 'rolling_sum' || opType.type === 'rolling_min' || opType.type === 'rolling_max' ? '' : (opType.type === 'growth_rate' ? { period: '1', frequency: 'none', comparison_type: 'period' } : (opType.type === 'filter_rows_condition' ? {} : (opType.type === 'filter_top_n_per_group' ? { n: '1', metric_col: '', ascending: false } : (opType.type === 'filter_percentile' ? { percentile: '10', metric_col: '', direction: 'top' } : (opType.type === 'compute_metrics_within_group' ? { metric_cols: [{ metric_col: '', method: 'sum', rename: '' }] } : (opType.type === 'group_share_of_total' ? { metric_cols: [{ metric_col: '', rename: '' }] } : (opType.type === 'group_contribution' ? { metric_cols: [{ metric_col: '', rename: '' }] } : undefined)))))))))),
     };
     addMetricsOperation(newOperation);
   };
@@ -635,7 +642,12 @@ const MetricsColOps: React.FC = () => {
 
   const getAvailableColumns = (opType: string) => {
     if (opType === 'dummy') return categoricalColumns;
-    if (opType === 'datetime') return allAvailableColumns;
+    if (opType === 'datetime') return dateColumns;
+    if (opType === 'fiscal_mapping') return dateColumns;
+    if (opType === 'is_weekend') return dateColumns;
+    if (opType === 'is_month_end') return dateColumns;
+    if (opType === 'is_qtr_end') return dateColumns;
+    if (opType === 'date_builder') return numericalColumns;
     if (opType === 'replace') return allAvailableColumns;
     if (opType === 'lower' || opType === 'upper' || opType === 'strip') return allAvailableColumns;
     if (opType === 'select_columns') return allAvailableColumns;
@@ -855,6 +867,53 @@ const MetricsColOps: React.FC = () => {
             }
             formData.append(key, colString);
             operationsAdded++;
+          } else if (op.type === 'fiscal_mapping') {
+            if (op.param) {
+              formData.append(`${key}_param`, op.param as string);
+            }
+            // Add fiscal start month parameter
+            const fiscalStartMonth = (op as any).fiscalStartMonth || '1';
+            formData.append(`${key}_fiscal_start_month`, fiscalStartMonth);
+            if (rename) {
+              formData.append(`${key}_rename`, rename);
+            }
+            formData.append(key, colString);
+            operationsAdded++;
+          } else if (op.type === 'is_weekend') {
+            if (op.columns.filter(Boolean).length >= 1) {
+              if (rename) {
+                formData.append(`${key}_rename`, rename);
+              }
+              formData.append(key, colString);
+              operationsAdded++;
+            }
+          } else if (op.type === 'is_month_end') {
+            if (op.columns.filter(Boolean).length >= 1) {
+              if (rename) {
+                formData.append(`${key}_rename`, rename);
+              }
+              formData.append(key, colString);
+              operationsAdded++;
+            }
+          } else if (op.type === 'is_qtr_end') {
+            if (op.columns.filter(Boolean).length >= 1) {
+              if (rename) {
+                formData.append(`${key}_rename`, rename);
+              }
+              formData.append(key, colString);
+              operationsAdded++;
+            }
+          } else if (op.type === 'date_builder') {
+            if (op.columns.filter(Boolean).length >= 1) {
+              // Add mode parameter (from_year_month_day or from_year_week_dayofweek)
+              const mode = (op.param as string) || 'from_year_month_day';
+              formData.append(`${key}_param`, mode);
+              if (rename) {
+                formData.append(`${key}_rename`, rename);
+              }
+              formData.append(key, colString);
+              operationsAdded++;
+            }
           } else if (op.type === 'replace') {
             if (op.columns.filter(Boolean).length >= 1) {
               if (op.param && typeof op.param === 'object') {
@@ -1518,6 +1577,8 @@ const MetricsColOps: React.FC = () => {
             const showPowerParam = opType === 'power';
             const showLogisticParam = opType === 'logistic';
             const showDatetimeParam = opType === 'datetime';
+            const showFiscalMappingParam = opType === 'fiscal_mapping';
+            const showDateBuilderParam = opType === 'date_builder';
             const showFillNaParam = opType === 'fill_na';
             const showLagParam = opType === 'lag';
             const showLeadParam = opType === 'lead';
@@ -1741,6 +1802,11 @@ const MetricsColOps: React.FC = () => {
                               )}
                             </>
                           )}
+                        </>
+                      ) : selectedOperation.type === 'date_builder' ? (
+                        <>
+                          {/* Date builder has its own custom UI below in the showDateBuilderParam section */}
+                          {/* No default column selector needed here */}
                         </>
                       ) : selectedOperation.type === 'rename' ? (
                         <>
@@ -2139,6 +2205,7 @@ const MetricsColOps: React.FC = () => {
                                           <SelectItem value="min" className="text-[10px]">Min</SelectItem>
                                           <SelectItem value="count" className="text-[10px]">Count</SelectItem>
                                           <SelectItem value="nunique" className="text-[10px]">Nunique</SelectItem>
+                                          <SelectItem value="rank" className="text-[10px]">Rank</SelectItem>
                                           <SelectItem value="rank_pct" className="text-[10px]">Rank Percentile</SelectItem>
                                         </SelectContent>
                                       </Select>
@@ -2785,6 +2852,162 @@ const MetricsColOps: React.FC = () => {
                           </SelectContent>
                         </Select>
                       </div>
+                    )}
+
+                    {showFiscalMappingParam && (
+                      <>
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-gray-600">Fiscal Period Type</label>
+                          <Select
+                            value={(selectedOperation.param as string) || ''}
+                            onValueChange={(value) => {
+                              updateMetricsOperation(selectedOperation.id, { param: value });
+                            }}
+                          >
+                            <SelectTrigger className="w-full h-6 text-[10px] bg-white">
+                              <SelectValue placeholder="Select fiscal period" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="fiscal_year">Fiscal Year (FY23)</SelectItem>
+                              <SelectItem value="fiscal_year_full">Fiscal Year Full (FY2023)</SelectItem>
+                              <SelectItem value="fiscal_quarter">Fiscal Quarter (FY23-Q1)</SelectItem>
+                              <SelectItem value="fiscal_month">Fiscal Month (FY23-M01)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-gray-600">Fiscal Start Month</label>
+                          <Select
+                            value={String((selectedOperation as any).fiscalStartMonth || '1')}
+                            onValueChange={(value) => {
+                              updateMetricsOperation(selectedOperation.id, { fiscalStartMonth: value });
+                            }}
+                          >
+                            <SelectTrigger className="w-full h-6 text-[10px] bg-white">
+                              <SelectValue placeholder="Select month" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="1">January</SelectItem>
+                              <SelectItem value="2">February</SelectItem>
+                              <SelectItem value="3">March</SelectItem>
+                              <SelectItem value="4">April</SelectItem>
+                              <SelectItem value="5">May</SelectItem>
+                              <SelectItem value="6">June</SelectItem>
+                              <SelectItem value="7">July</SelectItem>
+                              <SelectItem value="8">August</SelectItem>
+                              <SelectItem value="9">September</SelectItem>
+                              <SelectItem value="10">October</SelectItem>
+                              <SelectItem value="11">November</SelectItem>
+                              <SelectItem value="12">December</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    )}
+
+                    {showDateBuilderParam && (
+                      <>
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-gray-600">Build Mode</label>
+                          <Select
+                            value={(selectedOperation.param as string) || 'from_year_month_day'}
+                            onValueChange={(value) => {
+                              updateMetricsOperation(selectedOperation.id, { param: value });
+                            }}
+                          >
+                            <SelectTrigger className="w-full h-6 text-[10px] bg-white">
+                              <SelectValue placeholder="Select mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="from_year_month_day">From Year/Month/Day</SelectItem>
+                              <SelectItem value="from_year_week">From Year/Week</SelectItem>
+                              <SelectItem value="from_year_week_dayofweek">From Year/Week/DayOfWeek</SelectItem>
+                              <SelectItem value="from_year_month_week">From Year/Month/Week</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] text-gray-600 mb-0.5 block">Columns (up to 3)</label>
+                          <div className="space-y-1">
+                            {/* Year Column (Column 1) */}
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] text-gray-500 w-12 flex-shrink-0">
+                                {(selectedOperation.param as string) === 'from_year_week_dayofweek' ? 'Year:' : 'Year:'}
+                              </span>
+                              <div className="flex-1 [&_button]:h-6 [&_button]:text-[10px]">
+                                <SingleSelectDropdown
+                                  label=""
+                                  placeholder="Year column"
+                                  value={opColumns[0] || ''}
+                                  onValueChange={value => updateColumnSelector(selectedOperation.id, 0, value)}
+                                  options={getAvailableColumns(opType).map(option => ({
+                                    value: option,
+                                    label: option
+                                  }))}
+                                  className="w-full space-y-0"
+                                />
+                              </div>
+                            </div>
+                            {/* Second Column (Month or Week) */}
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] text-gray-500 w-12 flex-shrink-0">
+                                {((selectedOperation.param as string) === 'from_year_week' || 
+                                  (selectedOperation.param as string) === 'from_year_week_dayofweek') ? 'Week:' : 'Month:'}
+                              </span>
+                              <div className="flex-1 [&_button]:h-6 [&_button]:text-[10px]">
+                                <SingleSelectDropdown
+                                  label=""
+                                  placeholder={((selectedOperation.param as string) === 'from_year_week' || 
+                                              (selectedOperation.param as string) === 'from_year_week_dayofweek') ? 'Week column' : 'Month column'}
+                                  value={opColumns[1] || ''}
+                                  onValueChange={value => updateColumnSelector(selectedOperation.id, 1, value === '(none)' ? '' : value)}
+                                  options={[
+                                    { value: '(none)', label: '(None - Optional)' },
+                                    ...getAvailableColumns(opType).map(option => ({
+                                      value: option,
+                                      label: option
+                                    }))
+                                  ]}
+                                  className="w-full space-y-0"
+                                />
+                              </div>
+                            </div>
+                            {/* Third Column (Day, Week, or DayOfWeek) */}
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] text-gray-500 w-12 flex-shrink-0">
+                                {(selectedOperation.param as string) === 'from_year_week_dayofweek' ? 'DayOfWk:' : 
+                                 (selectedOperation.param as string) === 'from_year_month_week' ? 'Week:' : 'Day:'}
+                              </span>
+                              <div className="flex-1 [&_button]:h-6 [&_button]:text-[10px]">
+                                <SingleSelectDropdown
+                                  label=""
+                                  placeholder={(selectedOperation.param as string) === 'from_year_week_dayofweek' ? 'Day of week' : 
+                                              (selectedOperation.param as string) === 'from_year_month_week' ? 'Week column' : 'Day column'}
+                                  value={opColumns[2] || ''}
+                                  onValueChange={value => updateColumnSelector(selectedOperation.id, 2, value === '(none)' ? '' : value)}
+                                  options={[
+                                    { value: '(none)', label: '(None - Optional)' },
+                                    ...getAvailableColumns(opType).map(option => ({
+                                      value: option,
+                                      label: option
+                                    }))
+                                  ]}
+                                  className="w-full space-y-0"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-[9px] text-gray-500 mt-1 italic">
+                            {(selectedOperation.param as string) === 'from_year_week' 
+                              ? 'Creates date for Monday of the specified week'
+                              : (selectedOperation.param as string) === 'from_year_week_dayofweek' 
+                              ? 'DayOfWeek: 1=Mon, 7=Sun (ISO) | Optional 3rd column'
+                              : (selectedOperation.param as string) === 'from_year_month_week'
+                              ? 'Week: 1-5 (week number within the month)'
+                              : 'Optional: Select "(None)" to use only Year or Year+Month'}
+                          </div>
+                        </div>
+                      </>
                     )}
 
                     {allowRename && (

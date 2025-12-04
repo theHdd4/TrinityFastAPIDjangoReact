@@ -8,6 +8,8 @@ Follows the Trinity AI streaming pattern for proper card and result handling.
 
 import logging
 import json
+import uuid
+from dataclasses import asdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger("trinity.trinityai.api")
@@ -18,6 +20,15 @@ router = APIRouter(prefix="/streamai", tags=["TrinityAI"])
 # Initialize components (will be set by main_api.py)
 rag_engine = None
 parameter_generator = None
+
+# Intent routing service (laboratory mode)
+try:
+    from STREAMAI.intent_service import intent_service
+except ImportError:
+    try:
+        from .intent_service import intent_service
+    except Exception:
+        intent_service = None  # type: ignore
 
 
 @router.get("/health")
@@ -103,13 +114,89 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 # Fallback: define simple functions
                 async def _detect_intent_simple(prompt):
                     return {"intent": "workflow", "confidence": 0.5}
+
                 async def _generate_text_reply_direct(prompt):
                     return "I apologize, but I couldn't process your request."
-        
+
         # Extract session_id early for intent caching
         session_id = message.get("session_id", None)  # Frontend chat session ID
         chat_id = message.get("chat_id", None)  # Frontend chat ID
-        
+        if not session_id:
+            session_id = f"ws_{uuid.uuid4().hex[:8]}"
+        available_files = message.get("available_files", [])
+
+        # Laboratory intent routing
+        intent_record = None
+        decision = None
+        policy_flip = False
+        routing_payload = None
+        if intent_service:
+            previous_record = intent_service._intent_cache.get(session_id)
+            intent_record = intent_service.infer_intent(
+                user_prompt,
+                session_id=session_id,
+                available_files=available_files,
+                mode="laboratory",
+            )
+            decision = intent_service.build_atom_binding(
+                session_id,
+                intent_record,
+                available_files=available_files,
+            )
+            policy_flip = intent_service.detect_policy_flip(
+                session_id, decision, previous_record=previous_record, available_files=available_files
+            )
+
+            routing_snapshot = {
+                "path": decision.path,
+                "rationale": decision.rationale,
+                "goal_type": intent_record.goal_type,
+                "required_tools": sorted(intent_record.required_tools),
+                "output_format": intent_record.output_format,
+            }
+            logger.info("🧭 Intent routing snapshot: %s", routing_snapshot)
+
+            routing_payload = asdict(decision)
+            routing_payload["intent_record"] = intent_record.to_dict()
+            routing_payload["session_id"] = session_id
+            routing_payload["routing_snapshot"] = routing_snapshot
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "intent_debug",
+                        "path": decision.path,
+                        "intent_record": intent_record.to_dict(),
+                        "rationale": decision.rationale,
+                    }
+                )
+            )
+
+            if decision.clarifications:
+                await websocket.send_text(json.dumps({
+                    "type": "clarification_required",
+                    "message": "Please confirm: " + "; ".join(decision.clarifications),
+                    "intent_record": intent_record.to_dict(),
+                }))
+                await websocket.close()
+                return
+
+            if policy_flip:
+                await websocket.send_text(json.dumps({
+                    "type": "policy_shift",
+                    "message": "Detected a change in execution path; please confirm before continuing.",
+                }))
+                await websocket.close()
+                return
+
+            if decision.requires_files and not available_files:
+                await websocket.send_text(json.dumps({
+                    "type": "clarification_required",
+                    "message": "I need a dataset or file to run Atom Agents. Upload a file and try again.",
+                    "intent_record": intent_record.to_dict(),
+                }))
+                await websocket.close()
+                return
+
         # Step 2: Intent Detection (ONCE at the start - like 28_NOV)
         # This is the ONLY place intent detection should happen for this WebSocket request
         # Use session_id for caching to prevent repeated detection
@@ -118,16 +205,25 @@ async def execute_workflow_websocket(websocket: WebSocket):
         logger.info(f"   User prompt: {user_prompt}")
         logger.info(f"   Session ID: {session_id} (for caching)")
         logger.info("=" * 80)
-        
+
         intent_result = await _detect_intent_simple(user_prompt, session_id=session_id, use_cache=True)
         intent = intent_result.get("intent", "workflow")
-        
+        if decision:
+            intent = "text_reply" if decision.path == "llm_only" else "workflow"
+
+        if intent_service and decision:
+            intent_service.update_scratchpad(session_id, f"Routing via {decision.path}: {decision.rationale}")
+
         logger.info("=" * 80)
         logger.info(f"✅ INTENT DETECTION RESULT (will NOT be called again):")
         logger.info(f"   Intent: {intent}")
         logger.info(f"   Confidence: {intent_result.get('confidence', 0.5):.2f}")
         logger.info(f"   Reasoning: {intent_result.get('reasoning', 'N/A')}")
         logger.info(f"🔒 Intent detection CACHED for session {session_id} - will NOT be called again")
+        if intent_record:
+            logger.info(
+                "📘 Intent record: goal=%s tools=%s output=%s", intent_record.goal_type, intent_record.required_tools, intent_record.output_format
+            )
         logger.info("=" * 80)
         
         # Step 3: Route based on intent
@@ -146,6 +242,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
             # Generate text reply
             text_response = await _generate_text_reply_direct(user_prompt)
             logger.info(f"✅ Generated text reply: {text_response[:100]}...")
+
+            if intent_service:
+                intent_service.update_scratchpad(session_id, "Answered via LLM-only path (websocket)")
             
             # Send the answer
             await websocket.send_text(json.dumps({
@@ -275,6 +374,9 @@ async def execute_workflow_websocket(websocket: WebSocket):
         else:
             mentioned_files = []
         
+        if routing_payload is not None:
+            project_context["intent_routing"] = routing_payload
+
         logger.info(f"🔑 Session ID: {session_id}, Chat ID: {chat_id}")
         
         # Execute workflow with real-time events (intent detection already done above - NOT called again)
@@ -289,6 +391,7 @@ async def execute_workflow_websocket(websocket: WebSocket):
                 frontend_chat_id=chat_id,
                 history_override=history_summary,
                 chat_file_names=mentioned_files,
+                intent_route=routing_payload,
             )
         except Exception as workflow_error:
             error_msg = str(workflow_error)

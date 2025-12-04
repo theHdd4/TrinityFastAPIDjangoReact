@@ -142,9 +142,10 @@ class ReActWorkflowOrchestrator:
                 self.atom_executor = StreamOrchestrator()
             except Exception as e:
                 logger.warning(f"⚠️ Could not initialize atom executor: {e}")
-        
+
         # Configuration
         self.max_retries_per_step = 3
+        self.max_atom_recovery_attempts = 7
         self.min_quality_score = 0.7  # Minimum quality score to proceed
         
         logger.info("✅ ReActWorkflowOrchestrator initialized")
@@ -154,7 +155,8 @@ class ReActWorkflowOrchestrator:
         user_prompt: str,
         session_id: Optional[str] = None,
         file_context: Optional[Dict[str, Any]] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        intent_route: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Execute complete ReAct workflow.
@@ -173,6 +175,8 @@ class ReActWorkflowOrchestrator:
         
         logger.info(f"🚀 Starting ReAct workflow for session: {session_id}")
         logger.info(f"📝 User prompt: {user_prompt[:100]}...")
+        if intent_route:
+            logger.info("🧭 Intent routing metadata received: path=%s | expected_artifacts=%s", intent_route.get("path"), intent_route.get("expected_artifacts"))
         
         try:
             # Note: Intent detection is handled ONCE at the entry point (main_app.py chat endpoint)
@@ -669,74 +673,89 @@ Now select atoms for each subtask:"""
             subtask_num = atom.get("subtask_number", atom_index)
             subtask = next((s for s in subtasks if s["subtask_number"] == subtask_num), None)
             subtask_goal = subtask["goal"] if subtask else atom.get("purpose", "")
-            
-            atom_id = atom.get("atom_id", "unknown")
-            
-            if progress_callback:
-                progress_callback({
-                    "type": "atom_start",
-                    "atom_index": atom_index,
-                    "total_atoms": len(selected_atoms),
-                    "atom_id": atom_id,
-                    "subtask": subtask_goal
-                })
-            
-            # Start step monitoring
-            self.workflow_monitor.start_step(
-                session_id=session_id,
-                step_number=atom_index,
-                subtask=subtask_goal,
-                atom_id=atom_id
-            )
-            
-            # Initial prompt
-            original_prompt = atom.get("prompt", subtask_goal)
-            current_prompt = original_prompt
-            
-            # Execute with retry loop
+
+            current_atom = atom
             step_success = False
             final_result = None
             final_extracted = None
-            
-            for retry in range(self.max_retries_per_step):
-                if retry > 0:
-                    logger.info(f"🔄 Retry {retry}/{self.max_retries_per_step - 1} for atom {atom_id}")
-                
-                # Record prompt
-                self.workflow_monitor.record_prompt(session_id, atom_index, current_prompt)
-                
-                # Execute atom
-                execution_result = await self._execute_single_atom(
-                    atom=atom,
-                    prompt=current_prompt,
-                    session_id=session_id
-                )
-                
-                # Record execution
-                self.workflow_monitor.record_execution(session_id, atom_index, execution_result)
-                
-                # Extract result fields
-                extracted = self.result_extractor.extract(execution_result)
-                final_extracted = extracted
-                
-                # Analyze result
-                analysis = await self.result_analyzer.analyze_result(
-                    atom_result=execution_result,
-                    original_intent=user_prompt,
-                    subtask_goal=subtask_goal,
+            analysis = None
+            recovery_attempt = 0
+            recovery_note = None
+
+            while recovery_attempt < self.max_atom_recovery_attempts:
+                recovery_attempt += 1
+                atom_id = current_atom.get("atom_id", "unknown")
+
+                if progress_callback:
+                    progress_callback({
+                        "type": "atom_start",
+                        "atom_index": atom_index,
+                        "total_atoms": len(selected_atoms),
+                        "atom_id": atom_id,
+                        "subtask": subtask_goal,
+                        "attempt": recovery_attempt
+                    })
+
+                # Start step monitoring
+                self.workflow_monitor.start_step(
+                    session_id=session_id,
+                    step_number=atom_index,
+                    subtask=subtask_goal,
                     atom_id=atom_id
                 )
-                
-                # Record analysis
-                self.workflow_monitor.record_analysis(session_id, atom_index, analysis)
-                
-                # Check if sufficient
-                if analysis.get("sufficient", False) and analysis.get("quality_score", 0) >= self.min_quality_score:
-                    step_success = True
-                    final_result = execution_result
-                    logger.info(f"✅ Step {atom_index} completed successfully")
-                    break
-                else:
+
+                # Initial prompt
+                original_prompt = current_atom.get("prompt", subtask_goal)
+                current_prompt = original_prompt
+                failure_reason: Dict[str, Any] = {}
+
+                # Execute with retry loop
+                for retry in range(self.max_retries_per_step):
+                    if retry > 0:
+                        logger.info(
+                            f"🔄 Retry {retry}/{self.max_retries_per_step - 1} for atom {atom_id} (attempt {recovery_attempt})"
+                        )
+
+                    # Record prompt
+                    self.workflow_monitor.record_prompt(session_id, atom_index, current_prompt)
+
+                    # Execute atom
+                    execution_result = await self._execute_single_atom(
+                        atom=current_atom,
+                        prompt=current_prompt,
+                        session_id=session_id
+                    )
+
+                    # Record execution
+                    self.workflow_monitor.record_execution(session_id, atom_index, execution_result)
+
+                    # Extract result fields
+                    extracted = self.result_extractor.extract(execution_result)
+                    final_extracted = extracted
+
+                    # Analyze result
+                    analysis = await self.result_analyzer.analyze_result(
+                        atom_result=execution_result,
+                        original_intent=user_prompt,
+                        subtask_goal=subtask_goal,
+                        atom_id=atom_id
+                    )
+
+                    # Record analysis
+                    self.workflow_monitor.record_analysis(session_id, atom_index, analysis)
+
+                    # Check if sufficient
+                    if analysis.get("sufficient", False) and analysis.get("quality_score", 0) >= self.min_quality_score:
+                        step_success = True
+                        final_result = execution_result
+                        logger.info(f"✅ Step {atom_index} completed successfully on attempt {recovery_attempt}")
+                        break
+
+                    failure_reason = {
+                        "analysis": analysis,
+                        "execution": execution_result
+                    }
+
                     # Refine prompt for retry
                     if retry < self.max_retries_per_step - 1:
                         current_prompt = self.prompt_refiner.refine_prompt(
@@ -746,11 +765,71 @@ Now select atoms for each subtask:"""
                             previous_result={"extracted": extracted},
                             user_intent=user_prompt
                         )
-                        logger.info(f"🔧 Refined prompt for retry")
+                        logger.info("🔧 Refined prompt for retry")
                     else:
-                        logger.warning(f"⚠️ Step {atom_index} failed after {self.max_retries_per_step} attempts")
+                        logger.warning(
+                            f"⚠️ Step {atom_index} failed after {self.max_retries_per_step} prompt refinements on attempt {recovery_attempt}"
+                        )
                         final_result = execution_result
-            
+
+                if step_success:
+                    break
+
+                if recovery_attempt >= self.max_atom_recovery_attempts:
+                    recovery_note = (
+                        "Reached the maximum recovery attempts for this atom. "
+                        "Please retry the request or adjust the configuration."
+                    )
+                    logger.warning(f"⚠️ {recovery_note}")
+                    if progress_callback:
+                        progress_callback({
+                            "type": "atom_recovery_failed",
+                            "atom_index": atom_index,
+                            "atom_id": atom_id,
+                            "message": recovery_note
+                        })
+                    break
+
+                # Attempt to regenerate atom logic before next attempt
+                regenerated_atom = await self._regenerate_atom_logic(
+                    user_prompt=user_prompt,
+                    subtask=subtask,
+                    file_context=file_context,
+                    failure_reason=failure_reason,
+                    recovery_attempt=recovery_attempt,
+                    previous_atom=current_atom
+                )
+
+                if not regenerated_atom:
+                    recovery_note = (
+                        "Unable to regenerate a replacement atom after failure. "
+                        "Please retry the request."
+                    )
+                    logger.warning(f"⚠️ {recovery_note}")
+                    if progress_callback:
+                        progress_callback({
+                            "type": "atom_recovery_failed",
+                            "atom_index": atom_index,
+                            "atom_id": atom_id,
+                            "message": recovery_note
+                        })
+                    break
+
+                logger.info(
+                    f"♻️ Replacing atom {atom_id} with regenerated plan {regenerated_atom.get('atom_id', 'unknown')}"
+                )
+                if progress_callback:
+                    progress_callback({
+                        "type": "atom_regenerated",
+                        "atom_index": atom_index,
+                        "previous_atom": atom_id,
+                        "new_atom": regenerated_atom.get("atom_id", "unknown"),
+                        "attempt": recovery_attempt + 1
+                    })
+
+                current_atom = regenerated_atom
+                # Loop continues with regenerated atom logic
+
             # Complete step
             self.workflow_monitor.complete_step(
                 session_id=session_id,
@@ -759,37 +838,94 @@ Now select atoms for each subtask:"""
                 extracted=final_extracted or {},
                 success=step_success
             )
-            
+
             # Generate step summary
             step_summary = await self.insights_generator.generate_step_summary(
                 step_number=atom_index,
-                atom_id=atom_id,
+                atom_id=current_atom.get("atom_id", "unknown"),
                 subtask=subtask_goal,
                 extracted_result=final_extracted or {},
                 analysis_result=analysis if 'analysis' in locals() else None
             )
-            
+
+            if recovery_note:
+                step_summary = f"{step_summary} | {recovery_note}" if step_summary else recovery_note
+
             execution_results.append({
                 "step_number": atom_index,
-                "atom_id": atom_id,
+                "atom_id": current_atom.get("atom_id", "unknown"),
                 "subtask": subtask_goal,
                 "success": step_success,
                 "result": final_result,
                 "extracted": final_extracted,
                 "analysis": analysis if 'analysis' in locals() else None,
-                "summary": step_summary
+                "summary": step_summary,
+                "recovery_attempts": recovery_attempt
             })
-            
+
             if progress_callback:
                 progress_callback({
                     "type": "atom_complete",
                     "atom_index": atom_index,
                     "total_atoms": len(selected_atoms),
                     "success": step_success,
-                    "summary": step_summary
+                    "summary": step_summary,
+                    "attempts": recovery_attempt
                 })
-        
+
         return execution_results
+
+    async def _regenerate_atom_logic(
+        self,
+        user_prompt: str,
+        subtask: Optional[Dict[str, Any]],
+        file_context: Optional[Dict[str, Any]],
+        failure_reason: Optional[Dict[str, Any]],
+        recovery_attempt: int,
+        previous_atom: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Regenerate atom logic after a failed attempt.
+
+        Args:
+            user_prompt: Original user prompt
+            subtask: Subtask being executed
+            file_context: File context for execution
+            failure_reason: Details of why the previous attempt failed
+            recovery_attempt: Current recovery attempt number
+            previous_atom: The atom that just failed
+
+        Returns:
+            A regenerated atom configuration or None if regeneration fails
+        """
+        try:
+            logger.info(
+                f"🔁 Regenerating atom logic for attempt {recovery_attempt + 1} after failure in {previous_atom.get('atom_id', 'unknown')}"
+            )
+            target_subtask = subtask or {
+                "subtask_number": previous_atom.get("subtask_number", 1),
+                "goal": previous_atom.get("purpose") or user_prompt
+            }
+            regenerated_atoms = await self._select_atoms(
+                user_prompt=user_prompt,
+                subtasks=[target_subtask],
+                file_context=file_context
+            )
+            if not regenerated_atoms or not isinstance(regenerated_atoms, list):
+                return None
+
+            regenerated_atom = regenerated_atoms[0]
+            if failure_reason:
+                regenerated_atom["previous_failure_reason"] = failure_reason
+
+            # Preserve output target when possible
+            if previous_atom.get("output_name") and "output_name" not in regenerated_atom:
+                regenerated_atom["output_name"] = previous_atom["output_name"]
+
+            return regenerated_atom
+        except Exception as e:
+            logger.error(f"❌ Error regenerating atom logic: {e}")
+            return None
     
     async def _execute_single_atom(
         self,

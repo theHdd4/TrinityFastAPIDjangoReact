@@ -8,6 +8,7 @@ Implements the Trinity AI streaming pattern for card and result handling.
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import logging
@@ -300,7 +301,10 @@ class StreamWebSocketOrchestrator:
         self._output_alias_registry: Dict[str, Dict[str, str]] = {}
         self._chat_file_mentions: Dict[str, List[str]] = {}
         self._sequence_project_context: Dict[str, Dict[str, Any]] = {}  # Store project_context per sequence
+        self._sequence_intent_routing: Dict[str, Dict[str, Any]] = {}
         self._sequence_react_state: Dict[str, ReActState] = {}  # ReAct state per sequence
+        self._sequence_step_plans: Dict[str, Dict[int, WorkflowStepPlan]] = {}  # Track executed step plans per sequence
+        self._sequence_replay_counts: Dict[str, int] = {}
         self._paused_sequences: Set[str] = set()
 
         # Safety guards
@@ -345,6 +349,8 @@ class StreamWebSocketOrchestrator:
             self.atom_retry_attempts,
             self.atom_retry_delay,
         )
+
+        self.max_replay_attempts = 7
 
         self._memory_storage = memory_storage_module
         self._memory_summarizer = summarize_chat_messages
@@ -426,7 +432,8 @@ class StreamWebSocketOrchestrator:
                 user_prompt=user_prompt,
                 session_id=session_id,
                 file_context=file_context,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                intent_route=self._sequence_intent_routing.get(session_id),
             )
             
             # Send final result event
@@ -2617,6 +2624,7 @@ WORKFLOW PLANNING:
         frontend_chat_id: Optional[str] = None,
         history_override: Optional[str] = None,
         chat_file_names: Optional[List[str]] = None,
+        intent_route: Optional[Dict[str, Any]] = None,
     ):
         """
         Execute complete workflow with WebSocket events.
@@ -2642,6 +2650,8 @@ WORKFLOW PLANNING:
         self._sequence_available_files[sequence_id] = available_files
         # Store project_context for this sequence (needed for dataframe-operations and other agents)
         self._sequence_project_context[sequence_id] = project_context or {}
+        if intent_route:
+            self._sequence_intent_routing[sequence_id] = intent_route
         logger.info(f"🔧 Stored project context for sequence {sequence_id}: client={project_context.get('client_name', 'N/A')}, app={project_context.get('app_name', 'N/A')}, project={project_context.get('project_name', 'N/A')}")
 
         resume_mode = False
@@ -3002,6 +3012,9 @@ WORKFLOW PLANNING:
                 
                 # Update step number from generated step
                 next_step.step_number = current_step_number
+
+                # Cache the generated plan for potential replays/recovery
+                self._sequence_step_plans.setdefault(sequence_id, {})[current_step_number] = copy.deepcopy(next_step)
                 
                 # ENHANCED LOOP DETECTION: Check if we're repeating the same atom with same files
                 if execution_history:
@@ -3092,6 +3105,29 @@ WORKFLOW PLANNING:
                         )
                     except (WebSocketDisconnect, Exception) as e:
                         logger.warning(f"⚠️ Failed to send validation_blocked event: {e}")
+
+                    # Attempt to replay the previous step to materialize the needed output when missing
+                    replayed_previous = False
+                    dependency_tokens: List[str] = []
+                    if next_step.files_used:
+                        dependency_tokens.extend(next_step.files_used)
+                    if next_step.inputs:
+                        dependency_tokens.extend(next_step.inputs)
+                    if "No materialized output from prior step" in validation_reason:
+                        replayed_previous = await self._replay_previous_step_for_output(
+                            websocket=websocket,
+                            sequence_id=sequence_id,
+                            execution_history=execution_history,
+                            project_context=project_context,
+                            user_id=user_id,
+                            original_prompt=effective_user_prompt,
+                            available_files=available_files,
+                            frontend_chat_id=frontend_chat_id,
+                            react_state=react_state,
+                            dependency_tokens=dependency_tokens,
+                        )
+                        if replayed_previous:
+                            logger.info("🔄 ReAct: Previous step re-executed to produce materialized output; retrying current step plan")
 
                     # Re-plan without advancing the step counter
                     current_step_number = max(0, current_step_number - 1)
@@ -3816,9 +3852,11 @@ WORKFLOW PLANNING:
         if not step.files_used and step.inputs:
             step.files_used = step.inputs.copy()
 
-    def _register_output_alias(self, sequence_id: str, alias: Optional[str], file_path: Optional[str]) -> None:
+    def _register_output_alias(
+        self, sequence_id: str, alias: Optional[str], file_path: Optional[str]
+    ) -> None:
         """Track which file path was produced for a given output alias."""
-        if not alias or not file_path:
+        if not alias or not file_path or not isinstance(alias, str):
             return
         alias_map = self._output_alias_registry.setdefault(sequence_id, {})
         normalized = self._normalize_alias_token(alias)
@@ -3827,7 +3865,7 @@ WORKFLOW PLANNING:
 
     def _resolve_alias_value(self, sequence_id: str, token: Optional[str]) -> Optional[str]:
         """Resolve an alias token to the stored file path if available."""
-        if not token:
+        if not token or not isinstance(token, str):
             return token
         alias_map = self._output_alias_registry.get(sequence_id)
         if not alias_map:
@@ -3924,6 +3962,205 @@ WORKFLOW PLANNING:
             return False, "Previous atom produced an empty dataset; review before continuing."
 
         return True, ""
+
+    async def _replay_previous_step_for_output(
+        self,
+        websocket,
+        sequence_id: str,
+        execution_history: List[Dict[str, Any]],
+        project_context: Dict[str, Any],
+        user_id: str,
+        original_prompt: str,
+        available_files: List[str],
+        frontend_chat_id: Optional[str],
+        react_state: Optional[ReActState],
+        dependency_tokens: Optional[List[str]] = None,
+    ) -> bool:
+        """Re-execute the prior step when chaining fails due to missing materialized output."""
+
+        replay_count = self._sequence_replay_counts.get(sequence_id, 0)
+        if replay_count >= self.max_replay_attempts:
+            logger.warning(
+                "⚠️ ReAct: Replay budget exhausted (%s attempts); prompting user to retry",
+                self.max_replay_attempts,
+            )
+            try:
+                await self._send_event(
+                    websocket,
+                    WebSocketEvent(
+                        "workflow_progress",
+                        {
+                            "sequence_id": sequence_id,
+                            "current_step": None,
+                            "total_steps": "?",
+                            "progress_percent": 100,
+                            "status": "retry_required",
+                            "loading": False,
+                            "message": (
+                                "Unable to recover missing output automatically. "
+                                "Please retry the workflow or adjust the configuration."
+                            ),
+                        },
+                    ),
+                    "workflow_progress replay exhausted",
+                )
+            except (WebSocketDisconnect, Exception):
+                logger.debug("⚠️ Failed to send replay exhaustion notice", exc_info=True)
+            return False
+
+        self._sequence_replay_counts[sequence_id] = replay_count + 1
+
+        if not execution_history:
+            logger.warning("⚠️ ReAct: Cannot replay previous step because there is no execution history")
+            return False
+
+        last_entry = execution_history[-1]
+        step_number = last_entry.get("step_number")
+        if step_number is None:
+            logger.warning("⚠️ ReAct: Cannot replay previous step because the last entry has no step number")
+            return False
+
+        plan_lookup = self._sequence_step_plans.get(sequence_id, {})
+        step_plan = plan_lookup.get(step_number)
+        if not step_plan:
+            logger.warning(
+                "⚠️ ReAct: Cannot replay previous step %s because no cached plan exists for sequence %s",
+                step_number,
+                sequence_id,
+            )
+            return False
+
+        logger.info("🔁 ReAct: Replaying step %s (%s) to materialize output", step_number, step_plan.atom_id)
+
+        try:
+            await self._send_event(
+                websocket,
+                WebSocketEvent(
+                    "workflow_progress",
+                    {
+                        "sequence_id": sequence_id,
+                        "current_step": step_number,
+                        "total_steps": "?",
+                        "progress_percent": 0,
+                        "status": "retrying",
+                        "loading": True,
+                        "message": f"Replaying step {step_number} to obtain materialized output...",
+                    },
+                ),
+                "workflow_progress replay notice",
+            )
+        except (WebSocketDisconnect, Exception) as e:
+            logger.debug(f"⚠️ Failed to send replay progress event: {e}")
+
+        current_available_files = self._sequence_available_files.get(sequence_id, available_files.copy())
+        bound_plan = self._bind_operands_for_replay(
+            sequence_id=sequence_id,
+            step_plan=step_plan,
+            dependency_tokens=dependency_tokens or [],
+            available_files=current_available_files,
+        )
+        plan = WorkflowPlan(workflow_steps=[bound_plan], total_steps=1)
+
+        try:
+            execution_result = await self._execute_step_with_events(
+                websocket=websocket,
+                step=bound_plan,
+                plan=plan,
+                sequence_id=sequence_id,
+                original_prompt=original_prompt,
+                project_context=project_context,
+                user_id=user_id,
+                available_files=current_available_files,
+                frontend_chat_id=frontend_chat_id,
+            )
+        except Exception as exec_exc:
+            logger.error(f"❌ ReAct: Replay of step {step_number} failed: {exec_exc}")
+            return False
+
+        if not execution_result.get("success", True):
+            logger.warning(
+                "⚠️ ReAct: Replay of step %s did not succeed; cannot materialize output automatically", step_number
+            )
+            return False
+
+        try:
+            await self._auto_save_step(
+                sequence_id=sequence_id,
+                step_number=step_number,
+                workflow_step=bound_plan,
+                available_files=current_available_files,
+                frontend_chat_id=frontend_chat_id,
+            )
+
+            saved_path = self._step_output_files.get(sequence_id, {}).get(step_number)
+            if saved_path:
+                await self._send_event(
+                    websocket,
+                            WebSocketEvent(
+                                "file_created",
+                                {
+                                    "sequence_id": sequence_id,
+                                    "step_number": step_number,
+                                    "file_path": saved_path,
+                                    "output_alias": bound_plan.output_alias,
+                                    "message": f"Replayed output available: {saved_path}",
+                                    "available_for_next_steps": True,
+                                },
+                            ),
+                            "file_created replay event",
+                )
+        except Exception as save_exc:
+            logger.warning(f"⚠️ ReAct: Failed to auto-save replayed output for step {step_number}: {save_exc}")
+
+        last_entry["result"] = execution_result
+        last_entry["output_alias"] = bound_plan.output_alias
+        last_entry["files_used"] = bound_plan.files_used or []
+
+        if react_state:
+            react_state.execution_history = execution_history
+
+        return True
+
+    def _bind_operands_for_replay(
+        self,
+        sequence_id: str,
+        step_plan: WorkflowStepPlan,
+        dependency_tokens: List[str],
+        available_files: List[str],
+    ) -> WorkflowStepPlan:
+        """Rebind a cached step plan to the latest operands before replaying."""
+
+        bound_plan = copy.deepcopy(step_plan)
+        resolved_operands: List[str] = []
+
+        def _append_if_available(token: str) -> None:
+            normalized = self._resolve_alias_value(sequence_id, token)
+            if normalized in available_files and normalized not in resolved_operands:
+                resolved_operands.append(normalized)
+
+        for token in dependency_tokens:
+            _append_if_available(token)
+
+        if not resolved_operands:
+            for token in bound_plan.files_used or []:
+                _append_if_available(token)
+            for token in bound_plan.inputs or []:
+                _append_if_available(token)
+
+        if not resolved_operands and available_files:
+            resolved_operands.append(available_files[-1])
+
+        if resolved_operands:
+            if bound_plan.files_used != resolved_operands:
+                logger.info(
+                    "🔧 ReAct: Rebinding replay operands for step %s -> %s",
+                    bound_plan.step_number,
+                    resolved_operands,
+                )
+            bound_plan.files_used = resolved_operands
+            bound_plan.inputs = resolved_operands
+
+        return bound_plan
 
     def _normalize_alias_token(self, alias: str) -> str:
         """Normalize alias references (strip braces, spaces, lowercase)."""
@@ -4993,6 +5230,8 @@ WORKFLOW PLANNING:
         self._output_alias_registry.pop(sequence_id, None)
         self._chat_file_mentions.pop(sequence_id, None)
         self._sequence_react_state.pop(sequence_id, None)  # Cleanup ReAct state
+        self._sequence_step_plans.pop(sequence_id, None)
+        self._sequence_replay_counts.pop(sequence_id, None)
 
     def _load_persisted_chat_summary(
         self,
@@ -6500,15 +6739,50 @@ WORKFLOW PLANNING:
             return ""
         return " ".join(text.split())
     
-    def _get_file_metadata(self, file_paths: List[str]) -> Dict[str, Dict[str, Any]]:
+    def _resolve_project_context_for_files(self, file_paths: List[str]) -> Dict[str, Any]:
+        """Resolve the most relevant project context for the given files.
+
+        Prefers the sequence context that lists the files so FileReader can
+        refresh its prefix to the correct tenant/app/project location.
+        """
+        if not file_paths:
+            return {}
+
+        # Try to find a sequence that contains any of the provided files
+        for sequence_id, files in self._sequence_available_files.items():
+            if any(path in files for path in file_paths):
+                context = self._sequence_project_context.get(sequence_id) or {}
+                if context:
+                    return context
+
+        # Fallback to any known project context
+        for context in self._sequence_project_context.values():
+            if context:
+                return context
+
+        return {}
+
+    def _get_file_metadata(
+        self,
+        file_paths: List[str],
+        sequence_id: Optional[str] = None,
+        project_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Retrieve file metadata (including column names) for given file paths.
         Returns a dictionary mapping file paths to their metadata.
         """
         metadata_dict: Dict[str, Dict[str, Any]] = {}
-        
+
         if not file_paths:
             return metadata_dict
+
+        # Resolve project context so FileReader targets the correct folder
+        resolved_context = project_context or {}
+        if not resolved_context and sequence_id:
+            resolved_context = self._sequence_project_context.get(sequence_id, {})
+        if not resolved_context:
+            resolved_context = self._resolve_project_context_for_files(file_paths)
         
         try:
             # Use BaseAgent.FileReader (standardized file handler for all agents)
@@ -6520,8 +6794,18 @@ WORKFLOW PLANNING:
                 except ImportError:
                     logger.error("❌ BaseAgent.FileReader not available - cannot retrieve file metadata")
                     return metadata_dict
+<<<<<<< HEAD
             
             # Extract filenames from paths for display purposes
+=======
+
+            client_name = resolved_context.get("client_name", "") if resolved_context else ""
+            app_name = resolved_context.get("app_name", "") if resolved_context else ""
+            project_name = resolved_context.get("project_name", "") if resolved_context else ""
+
+            # Extract filenames from paths
+            file_names = []
+>>>>>>> c61233acbd08683d61651d5fe69289b1774498dd
             path_to_filename = {}
             for file_path in file_paths:
                 # Extract filename from path
@@ -6535,6 +6819,7 @@ WORKFLOW PLANNING:
                 file_details_dict = {}
                 try:
                     file_reader = FileReader()
+<<<<<<< HEAD
                     for file_path in file_paths:
                         try:
                             # Use full file_path for S3 access, not just filename
@@ -6553,17 +6838,64 @@ WORKFLOW PLANNING:
                             file_details_dict[file_path] = {
                                 "object_name": file_path,
                                 "display_name": filename,
+=======
+
+                    # Update prefix using the resolved project context to avoid
+                    # falling back to the MinIO root between atoms/steps
+                    if client_name and app_name and project_name:
+                        try:
+                            file_reader._maybe_update_prefix(client_name, app_name, project_name)
+                            logger.info(
+                                "📁 File metadata lookup using context: %s/%s/%s",
+                                client_name,
+                                app_name,
+                                project_name,
+                            )
+                        except Exception as ctx_exc:
+                            logger.warning("⚠️ Could not set FileReader context: %s", ctx_exc)
+
+                    for file_path in file_paths:
+                        filename = path_to_filename[file_path]
+                        # Try full path first (keeps folder context), then fallback to filename
+                        for candidate in [file_path, filename]:
+                            try:
+                                columns = file_reader.get_file_columns(candidate)
+                                file_details_dict[file_path] = {
+                                    "object_name": candidate,
+                                    "columns": columns,
+                                    "column_count": len(columns) if columns else 0,
+                                }
+                                break
+                            except Exception as e:
+                                logger.debug(
+                                    "⚠️ Could not get columns for %s (candidate=%s): %s",
+                                    file_path,
+                                    candidate,
+                                    e,
+                                )
+                        if file_path not in file_details_dict:
+                            file_details_dict[file_path] = {
+                                "object_name": filename,
+>>>>>>> c61233acbd08683d61651d5fe69289b1774498dd
                                 "columns": [],
-                                "column_count": 0
+                                "column_count": 0,
                             }
+
                     if file_details_dict:
-                        logger.debug(f"✅ Retrieved file metadata for {len(file_details_dict)} files using BaseAgent.FileReader")
+                        logger.debug(
+                            "✅ Retrieved file metadata for %s files using BaseAgent.FileReader",
+                            len(file_details_dict),
+                        )
                 except Exception as e:
                     logger.debug(f"⚠️ Failed to get file metadata using FileReader: {e}")
                     file_details_dict = {}
-                
+
                 if file_details_dict:
+<<<<<<< HEAD
                     # Direct mapping since we're using file_path as key
+=======
+                    # Map back to original file paths
+>>>>>>> c61233acbd08683d61651d5fe69289b1774498dd
                     for file_path, metadata in file_details_dict.items():
                         metadata_dict[file_path] = metadata
                     

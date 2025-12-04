@@ -10,7 +10,7 @@ import Home from "./pages/Home";
 import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Projects from "./pages/Projects";
-import Apps from "./pages/Apps";
+import Apps from "./pages/Apps/Apps";
 import Workflow from "./pages/Workflow";
 import Laboratory from "./pages/Laboratory";
 import Exhibition from "./pages/Exhibition";
