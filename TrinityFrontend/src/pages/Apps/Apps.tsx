@@ -336,6 +336,8 @@ const Apps = () => {
   const [userName, setUserName] = useState<string | null>(null);
   const [tenantName, setTenantName] = useState<string | null>(null);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [loadingMyProjects, setLoadingMyProjects] = useState(false);
+  const [loadingRecentProjects, setLoadingRecentProjects] = useState(false);
 
   const { isAuthenticated, user } = useAuth();
 
@@ -498,6 +500,7 @@ const Apps = () => {
         return;
       }
 
+      setLoadingRecentProjects(true);
       console.log('🔍 Fetching recent projects from registry API...');
       // Fetch recent projects with backend sorting (no limit - fetch all)
       const apiUrl = `${REGISTRY_API}/projects/?ordering=-updated_at`;
@@ -573,6 +576,8 @@ const Apps = () => {
           console.error('❌ Error message:', err?.message);
         }
         // Don't set empty state on error, keep previous data or fallback
+      } finally {
+        setLoadingRecentProjects(false);
       }
     };
 
@@ -601,6 +606,7 @@ const Apps = () => {
         return;
       }
 
+      setLoadingMyProjects(true);
       console.log('🔍 Fetching user-specific projects from registry API...');
       // Fetch user-specific projects with scope=user parameter (no limit - fetch all)
       const apiUrl = `${REGISTRY_API}/projects/?scope=user&ordering=-updated_at`;
@@ -676,6 +682,8 @@ const Apps = () => {
           console.error('❌ Error message:', err?.message);
         }
         // Don't set empty state on error, keep previous data or fallback
+      } finally {
+        setLoadingMyProjects(false);
       }
     };
 
@@ -1181,8 +1189,15 @@ const Apps = () => {
                       </Button>
                     </div>
                     
-                    {/* Show projects if available, otherwise show empty state */}
-                    {filteredMyProjects.length > 0 ? (
+                    {/* Loading State */}
+                    {loadingMyProjects ? (
+                      <div className="flex items-center justify-center py-12 animate-fade-in">
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                          <p className="text-muted-foreground text-sm">Loading your recent project data...</p>
+                        </div>
+                      </div>
+                    ) : filteredMyProjects.length > 0 ? (
                       <HorizontalScrollContainer
                         aria-label="Your Workspace projects"
                       >
@@ -1298,8 +1313,15 @@ const Apps = () => {
                       </Button>
                     </div>
                     
-                    {/* Show projects if available, otherwise show empty state */}
-                    {filteredRecentProjects.length > 0 ? (
+                    {/* Loading State */}
+                    {loadingRecentProjects ? (
+                      <div className="flex items-center justify-center py-12 animate-fade-in">
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                          <p className="text-muted-foreground text-sm">Loading {tenantName || 'Companies'} recent project data...</p>
+                        </div>
+                      </div>
+                    ) : filteredRecentProjects.length > 0 ? (
                       <HorizontalScrollContainer
                         aria-label={`${tenantName || 'Companies'} Workspace projects`}
                       >

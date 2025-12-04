@@ -31,7 +31,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     <div
       className="fixed left-0 z-40 flex overflow-hidden"
       style={{
-        top: '80px',
+        top: '52px',
         height: 'calc(100vh - 80px)',
       }}
     >
