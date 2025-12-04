@@ -485,7 +485,6 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     setMessages([initialMessage]);
     setCurrentSessionId(newSessionId);
 
-    closeActiveConnection(1000, 'new_chat_started');
     setCurrentWorkflowMessageId(null);
 
     try {
