@@ -226,9 +226,34 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
   const resizeRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const backgroundStatusRef = useRef<TrinityAIBackgroundStatus | null>(null);
-  
+
   // WebSocket connection
   const [wsConnection, setWsConnection] = useState<WebSocket | null>(null);
+  const closeSocketSafely = useCallback(
+    (socket: WebSocket | null, code: number = 1000, reason = 'client_closed') => {
+      if (!socket) return;
+      try {
+        if (socket.readyState === WebSocket.CONNECTING) {
+          socket.addEventListener('open', () => socket.close(code, reason), { once: true });
+        } else if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CLOSING) {
+          socket.close(code, reason);
+        }
+      } catch (err) {
+        console.error('Failed to close WebSocket cleanly', err);
+      }
+    },
+    []
+  );
+
+  const closeActiveConnection = useCallback(
+    (code: number = 1000, reason = 'client_closed') => {
+      setWsConnection(prev => {
+        closeSocketSafely(prev, code, reason);
+        return null;
+      });
+    },
+    [closeSocketSafely]
+  );
   const [availableFiles, setAvailableFiles] = useState<any[]>([]);
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -460,10 +485,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     setMessages([initialMessage]);
     setCurrentSessionId(newSessionId);
 
-    if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-      wsConnection.close();
-      setWsConnection(null);
-    }
+    closeActiveConnection(1000, 'new_chat_started');
     setCurrentWorkflowMessageId(null);
 
     try {
@@ -759,10 +781,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       }
 
       // Close existing WebSocket and reset workflow state when switching chats
-      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
-        wsConnection.close();
-        setWsConnection(null);
-      }
+      closeActiveConnection(1000, 'chat_switched');
       setCurrentWorkflowMessageId(null);
       setIsLoading(false);
     }
@@ -1123,8 +1142,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
       }));
       
       // Close WebSocket after rejection
-      wsConnection.close();
-      setWsConnection(null);
+      closeActiveConnection(1000, 'workflow_rejected_by_user');
     }
     
     setShowWorkflowPreview(false);
@@ -1171,8 +1189,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
         chat_id: currentChatId
       }));
       
-      wsConnection.close();
-      setWsConnection(null);
+      closeActiveConnection(1000, 'workflow_step_rejected');
     }
     
     setShowStepApproval(false);
@@ -1437,8 +1454,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
     // CRITICAL: Close any existing WebSocket before creating new one
     if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
       console.log('🔌 Closing existing WebSocket before new prompt');
-      wsConnection.close();
-      setWsConnection(null);
+      closeActiveConnection(1000, 'new_prompt_started');
     }
     
     // Reset workflow tracking for new prompt
@@ -2238,9 +2254,6 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
             // The loading icon will be hidden when ws.onclose fires
             // Now close the connection after insight is received
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.close();
-            }
             break;
             
           case 'workflow_insight_failed':
@@ -2249,9 +2262,6 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             // 🔧 CRITICAL FIX: Don't set loading to false here - wait for WebSocket to close
             // The loading icon will be hidden when ws.onclose fires
             // Close connection even if insight failed
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.close();
-            }
             break;
 
           case 'workflow_rejected':
@@ -2262,10 +2272,6 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
             }
-            // Close the connection
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.close();
-            }
             break;
             
           case 'error':
@@ -2275,9 +2281,6 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             stopAutoRun();
             if (agentModeEnabledRef.current) {
               autoRunRef.current = true;
-            }
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.close();
             }
             break;
             
@@ -2626,11 +2629,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               setIsLoading(false);
               stopAutoRun();
             }
-            
-            // Close WebSocket connection
-            if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.close();
-            }
+
             break;
             
           default:
@@ -2772,7 +2771,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           onSettings={() => setShowSettings(!showSettings)}
           onClose={() => {
             if (wsConnection) {
-              wsConnection.close();
+              closeActiveConnection(1000, 'panel_closed');
             }
             setIsLoading(false);
             if (onClose) {
@@ -2825,8 +2824,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           stopAutoRun();
           if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
             wsConnection.send(JSON.stringify({ type: 'reject_plan' }));
-            wsConnection.close();
-            setWsConnection(null);
+            closeActiveConnection(1000, 'workflow_rejected_from_panel');
           }
           setIsLoading(false);
         }}
@@ -2871,8 +2869,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               type: 'reject_workflow',
               step_number: stepNumber
             }));
-            wsConnection.close();
-            setWsConnection(null);
+            closeActiveConnection(1000, 'workflow_step_rejected_from_panel');
           }
           // Find and remove the step approval message
           setMessages(prev => {
@@ -2917,7 +2914,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
           canvasAreaLeft={canvasAreaLeft}
           onStop={() => {
             if (wsConnection) {
-              wsConnection.close();
+              closeActiveConnection(1000, 'user_stopped_session');
             }
             setIsLoading(false);
             stopAutoRun();
@@ -3822,7 +3819,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
               onClick={() => {
                 // Cancel any ongoing requests
                 if (wsConnection) {
-                  wsConnection.close();
+                  closeActiveConnection(1000, 'panel_closed');
                 }
                 setIsLoading(false);
                 onToggle();
@@ -3926,8 +3923,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                         stopAutoRun();
                         if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
                           wsConnection.send(JSON.stringify({ type: 'reject_plan' }));
-                          wsConnection.close();
-                          setWsConnection(null);
+                          closeActiveConnection(1000, 'workflow_rejected_from_preview');
                         }
                         setIsLoading(false);
                       }}
@@ -4003,8 +3999,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
                             type: 'reject_workflow',
                             step_number: msg.data.stepNumber
                           }));
-                          wsConnection.close();
-                          setWsConnection(null);
+                          closeActiveConnection(1000, 'workflow_step_rejected_from_preview');
                         }
                         // Remove this approval message
                         setMessages(prev => prev.filter(m => m.id !== msg.id));
@@ -4272,7 +4267,7 @@ const TrinityAIPanelInner: React.FC<TrinityAIPanelProps> = ({ isCollapsed, onTog
             <Button
               onClick={() => {
                 if (wsConnection) {
-                  wsConnection.close();
+                  closeActiveConnection(1000, 'user_stopped_session');
                 }
                 setIsLoading(false);
               }}
